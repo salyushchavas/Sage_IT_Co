@@ -1,12 +1,19 @@
 "use client";
 
-import dynamic from "next/dynamic";
-
-const LoadingScreen = dynamic(() => import("./LoadingScreen"), { ssr: false });
-const ScrollProgress = dynamic(() => import("./ScrollProgress"), { ssr: false });
-const AnimatedCursor = dynamic(() => import("./AnimatedCursor"), { ssr: false });
+import { useEffect, useState } from "react";
+import LoadingScreen from "./LoadingScreen";
+import ScrollProgress from "./ScrollProgress";
+import AnimatedCursor from "./AnimatedCursor";
 
 export default function ClientProviders() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  if (!mounted) return null;
+
   return (
     <>
       <LoadingScreen />
