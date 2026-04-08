@@ -14,7 +14,18 @@
       "Bash(rm -rf \"a:/Websites/sageit-temp\")",
       "Bash(cp package.json package-lock.json postcss.config.mjs tailwind.config.ts tsconfig.json \"a:/Websites/SageIT/\")",
       "Bash(cp -r src \"a:/Websites/SageIT/\")",
-      "Bash(npm -v)"
+      "Bash(npm -v)",
+      "Bash(curl -s http://localhost:3099)",
+      "Bash(taskkill //f //im node.exe)",
+      "Read(//mnt/a/Websites/Spire-Compet/frontend/src/**)",
+      "Bash(cp \"A:/Websites/Spire-Compet/frontend/src/lib/api.ts\" \"a:/Websites/SageIT/src/lib/api.ts\")",
+      "Bash(cp \"A:/Websites/Spire-Compet/frontend/src/lib/auth-context.tsx\" \"a:/Websites/SageIT/src/lib/auth-context.tsx\")",
+      "Bash(cp \"A:/Websites/Spire-Compet/frontend/src/lib/types.ts\" \"a:/Websites/SageIT/src/lib/types.ts\")",
+      "Bash(cp \"A:/Websites/Spire-Compet/frontend/src/middleware.ts\" \"a:/Websites/SageIT/src/middleware.ts\")",
+      "Bash([ -f \"A:/Websites/SageIT/$f\" ])"
+    ],
+    "additionalDirectories": [
+      "A:\\Websites\\SageIT\\src\\app\\courses"
     ]
   }
 }

@@ -2,16 +2,26 @@
 
 import { navLinks } from "@/lib/data";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth-context";
 import { AnimatePresence, motion } from "framer-motion";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import GlowButton from "../ui/GlowButton";
+
+const lmsLinks = [
+  { label: "Courses", href: "/courses" },
+  { label: "Categories", href: "/categories" },
+  { label: "Pricing", href: "/pricing" },
+];
 
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
   const pathname = usePathname();
+  const { user, isAuthenticated, isLoading, logout } = useAuth();
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -21,7 +31,21 @@ export default function Navbar() {
 
   useEffect(() => {
     setMobileOpen(false);
+    setUserMenuOpen(false);
   }, [pathname]);
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const allLinks = [...navLinks, ...lmsLinks];
+  const isAdmin = user?.role?.toUpperCase() === "ADMIN";
 
   return (
     <motion.nav
@@ -48,7 +72,7 @@ export default function Navbar() {
 
         {/* Desktop links */}
         <div className="hidden lg:flex items-center gap-1">
-          {navLinks.map((link) => (
+          {allLinks.map((link) => (
             <Link
               key={link.href}
               href={link.href}
@@ -62,11 +86,82 @@ export default function Navbar() {
               {link.label}
             </Link>
           ))}
+          {isAuthenticated && (
+            <Link
+              href="/dashboard"
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
+                pathname === "/dashboard"
+                  ? "text-neon-blue bg-neon-blue/10"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              )}
+            >
+              Dashboard
+            </Link>
+          )}
+          {isAdmin && (
+            <Link
+              href="/admin"
+              className={cn(
+                "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
+                pathname === "/admin"
+                  ? "text-neon-violet bg-neon-violet/10"
+                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+              )}
+            >
+              Admin
+            </Link>
+          )}
         </div>
 
-        {/* Desktop CTA */}
-        <div className="hidden lg:block">
-          <GlowButton href="/contact">Get Started</GlowButton>
+        {/* Desktop CTA / Auth */}
+        <div className="hidden lg:flex items-center gap-3">
+          {isLoading ? null : isAuthenticated ? (
+            <div className="relative" ref={menuRef}>
+              <button
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5 transition-colors"
+              >
+                <div className="w-8 h-8 rounded-full bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center text-white text-xs font-bold">
+                  {user?.fullName?.charAt(0)?.toUpperCase() || "U"}
+                </div>
+                <span className="text-sm text-zinc-300 max-w-[120px] truncate">{user?.fullName}</span>
+              </button>
+              <AnimatePresence>
+                {userMenuOpen && (
+                  <motion.div
+                    className="absolute right-0 top-full mt-2 w-48 glass rounded-xl p-2 shadow-lg"
+                    initial={{ opacity: 0, y: -8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                  >
+                    <Link href="/dashboard" className="block px-3 py-2 rounded-lg text-sm text-zinc-300 hover:text-white hover:bg-white/10 transition-colors">
+                      Dashboard
+                    </Link>
+                    {isAdmin && (
+                      <Link href="/admin" className="block px-3 py-2 rounded-lg text-sm text-zinc-300 hover:text-white hover:bg-white/10 transition-colors">
+                        Admin Panel
+                      </Link>
+                    )}
+                    <hr className="my-1 border-white/10" />
+                    <button
+                      onClick={logout}
+                      className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-white/10 transition-colors"
+                    >
+                      Sign Out
+                    </button>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
+          ) : (
+            <>
+              <Link href="/login" className="text-sm text-zinc-400 hover:text-white transition-colors px-4 py-2">
+                Sign In
+              </Link>
+              <GlowButton href="/signup">Get Started</GlowButton>
+            </>
+          )}
         </div>
 
         {/* Mobile hamburger */}
@@ -94,7 +189,7 @@ export default function Navbar() {
             transition={{ duration: 0.3 }}
           >
             <div className="px-6 py-4 space-y-2">
-              {navLinks.map((link) => (
+              {allLinks.map((link) => (
                 <Link
                   key={link.href}
                   href={link.href}
@@ -108,10 +203,31 @@ export default function Navbar() {
                   {link.label}
                 </Link>
               ))}
-              <div className="pt-4">
-                <GlowButton href="/contact" className="w-full">
-                  Get Started
-                </GlowButton>
+              {isAuthenticated && (
+                <Link href="/dashboard" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5">
+                  Dashboard
+                </Link>
+              )}
+              {isAdmin && (
+                <Link href="/admin" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5">
+                  Admin
+                </Link>
+              )}
+              <div className="pt-4 space-y-2">
+                {isAuthenticated ? (
+                  <button onClick={logout} className="w-full px-4 py-3 rounded-lg text-sm font-medium text-red-400 hover:bg-white/5 text-left">
+                    Sign Out ({user?.fullName})
+                  </button>
+                ) : (
+                  <>
+                    <Link href="/login" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5">
+                      Sign In
+                    </Link>
+                    <GlowButton href="/signup" className="w-full">
+                      Get Started
+                    </GlowButton>
+                  </>
+                )}
               </div>
             </div>
           </motion.div>
