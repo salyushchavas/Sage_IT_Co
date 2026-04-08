@@ -3,9 +3,7 @@ import localFont from "next/font/local";
 import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
-import ScrollProgress from "@/components/layout/ScrollProgress";
-import AnimatedCursor from "@/components/layout/AnimatedCursor";
-import LoadingScreen from "@/components/layout/LoadingScreen";
+import ClientProviders from "@/components/layout/ClientProviders";
 
 const geistSans = localFont({
   src: "./fonts/GeistVF.woff",
@@ -35,9 +33,7 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
-        <LoadingScreen />
-        <ScrollProgress />
-        <AnimatedCursor />
+        <ClientProviders />
         <Navbar />
         <main className="min-h-screen">{children}</main>
         <Footer />
