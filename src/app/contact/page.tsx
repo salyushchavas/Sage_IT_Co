@@ -9,10 +9,40 @@ import { useState } from "react";
 
 export default function ContactPage() {
   const [submitted, setSubmitted] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setSubmitted(true);
+    setSending(true);
+    setError("");
+
+    const form = e.currentTarget;
+    const formData = new FormData(form);
+    const data = {
+      firstName: formData.get("firstName") as string,
+      lastName: formData.get("lastName") as string,
+      email: formData.get("email") as string,
+      company: formData.get("company") as string,
+      service: formData.get("service") as string,
+      message: formData.get("message") as string,
+    };
+
+    try {
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error || "Failed to send");
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -63,12 +93,14 @@ export default function ContactPage() {
                     <h3 className="text-2xl font-bold text-white mb-6">Send Us a Message</h3>
                     <div className="grid md:grid-cols-2 gap-4">
                       <input
+                        name="firstName"
                         type="text"
                         placeholder="First Name"
                         required
                         className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                       <input
+                        name="lastName"
                         type="text"
                         placeholder="Last Name"
                         required
@@ -76,33 +108,39 @@ export default function ContactPage() {
                       />
                     </div>
                     <input
+                      name="email"
                       type="email"
                       placeholder="Email Address"
                       required
                       className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
                     />
                     <input
+                      name="company"
                       type="text"
                       placeholder="Company (optional)"
                       className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
                     />
-                    <select className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors">
+                    <select name="service" className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors">
                       <option value="">Select a Service</option>
-                      <option value="cloud">Cloud Solutions</option>
-                      <option value="security">Cybersecurity</option>
-                      <option value="web">Web Development</option>
-                      <option value="ai">AI Solutions</option>
-                      <option value="marketing">Digital Marketing</option>
-                      <option value="data">Data & Analytics</option>
+                      <option value="Cloud Solutions">Cloud Solutions</option>
+                      <option value="Cybersecurity">Cybersecurity</option>
+                      <option value="Web Development">Web Development</option>
+                      <option value="AI Solutions">AI Solutions</option>
+                      <option value="Digital Marketing">Digital Marketing</option>
+                      <option value="Data & Analytics">Data & Analytics</option>
                     </select>
                     <textarea
+                      name="message"
                       placeholder="Tell us about your project..."
                       rows={5}
                       required
                       className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors resize-none"
                     />
+                    {error && (
+                      <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-xl px-4 py-3">{error}</p>
+                    )}
                     <GlowButton type="submit" className="w-full">
-                      Send Message
+                      {sending ? "Sending..." : "Send Message"}
                     </GlowButton>
                   </form>
                 )}
@@ -120,7 +158,7 @@ export default function ContactPage() {
                     </div>
                     <div>
                       <p className="text-white font-medium">Email</p>
-                      <p className="text-zinc-400 text-sm">hello@sageit.com</p>
+                      <p className="text-zinc-400 text-sm">info@sageitco.com</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-4">

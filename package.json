@@ -17,6 +17,7 @@
     "framer-motion": "^12.38.0",
     "lucide-react": "^1.7.0",
     "next": "14.2.35",
+    "nodemailer": "^8.0.5",
     "react": "^18",
     "react-dom": "^18",
     "react-hook-form": "^7.72.1",
@@ -26,6 +27,7 @@
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/nodemailer": "^8.0.0",
     "@types/react": "^18",
     "@types/react-dom": "^18",
     "eslint": "^8",
