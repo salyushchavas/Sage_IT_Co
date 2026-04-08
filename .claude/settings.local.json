@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.spireitco.com)",
+      "Bash(curl -s https://www.spireitco.com/)",
+      "Read(//a/Websites/Spire-Compet/frontend//**)",
+      "Read(//a/Websites/Spire-Compet/frontend/**)",
+      "Bash(ls -1 /a/Websites/Spire-Compet/frontend/src/components/*/)",
+      "Bash(npx create-next-app@14 . --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm)",
+      "Read(//a/Websites/**)",
+      "Bash(npx create-next-app@14 sageit-temp --typescript --tailwind --eslint --app --src-dir --import-alias \"@/*\" --use-npm)",
+      "Bash(cp -r \"a:/Websites/sageit-temp/\"* \"a:/Websites/SageIT/\")",
+      "Bash(cp -r \"a:/Websites/sageit-temp/\".* \"a:/Websites/SageIT/\")",
+      "Bash(rm -rf \"a:/Websites/sageit-temp\")",
+      "Bash(cp package.json package-lock.json postcss.config.mjs tailwind.config.ts tsconfig.json \"a:/Websites/SageIT/\")",
+      "Bash(cp -r src \"a:/Websites/SageIT/\")",
+      "Bash(npm -v)"
+    ]
+  }
+}
