@@ -54,7 +54,7 @@ export default function GlowButton({
         className="absolute inset-0 pointer-events-none transition-opacity duration-300 ease-out"
         style={{
           opacity: hovered ? 1 : 0,
-          background: `radial-gradient(circle 70px at ${pos.x}% ${pos.y}%, #FFD700 0%, #FFD700 40%, rgba(255,215,0,0.55) 70%, transparent 100%)`,
+          background: `radial-gradient(circle 40px at ${pos.x}% ${pos.y}%, rgba(255,215,0,0.55) 0%, rgba(255,215,0,0.30) 50%, transparent 100%)`,
           filter: "blur(2px)",
         }}
       />
