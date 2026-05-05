@@ -92,10 +92,10 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
         className="w-full flex items-center justify-between p-5 text-left hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex items-center gap-2">
-          <BrainCircuit className="w-5 h-5 text-[#E5B62E]" />
+          <BrainCircuit className="w-5 h-5 text-[#D4A017]" />
           <span className="text-zinc-900 font-semibold">Quiz Builder</span>
           {questionsAdded > 0 && (
-            <span className="text-xs bg-[#E5B62E]/20 text-[#E5B62E] px-2 py-0.5 rounded-full">
+            <span className="text-xs bg-[#D4A017]/20 text-[#D4A017] px-2 py-0.5 rounded-full">
               {questionsAdded} question{questionsAdded !== 1 ? "s" : ""}
             </span>
           )}
@@ -124,12 +124,12 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                   <input
                     value={quizTitle}
                     onChange={(e) => setQuizTitle(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors"
                   />
                   <button
                     onClick={handleCreateQuiz}
                     disabled={!quizTitle.trim() || creating}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#D4A017] to-[#0F5132] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
                   >
                     {creating ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -155,7 +155,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                         setQuestion((q) => ({ ...q, questionText: e.target.value }))
                       }
                       rows={2}
-                      className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors resize-none"
+                      className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors resize-none"
                       placeholder="Enter the question..."
                     />
 
@@ -171,7 +171,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                             }))
                           }
                           placeholder={`Option ${opt}${opt === "C" || opt === "D" ? " (optional)" : ""}`}
-                          className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors"
+                          className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors"
                         />
                       ))}
                     </div>
@@ -189,7 +189,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                             }
                             className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
                               question.correctAnswer === opt
-                                ? "bg-[#22C55E]/20 border-[#22C55E]/50 text-[#22C55E]"
+                                ? "bg-[#0F5132]/20 border-[#0F5132]/50 text-[#0F5132]"
                                 : "bg-white/60 border-zinc-200 text-zinc-600 hover:text-zinc-900"
                             }`}
                           >
@@ -202,7 +202,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                     <button
                       onClick={handleAddQuestion}
                       disabled={!canAddQuestion || adding}
-                      className="px-5 py-2.5 rounded-xl bg-[#E5B62E]/20 border border-[#E5B62E]/30 text-[#E5B62E] font-medium text-sm hover:bg-[#E5B62E]/30 transition-colors disabled:opacity-40 flex items-center gap-2"
+                      className="px-5 py-2.5 rounded-xl bg-[#D4A017]/20 border border-[#D4A017]/30 text-[#D4A017] font-medium text-sm hover:bg-[#D4A017]/30 transition-colors disabled:opacity-40 flex items-center gap-2"
                     >
                       {adding ? (
                         <Loader2 className="w-4 h-4 animate-spin" />

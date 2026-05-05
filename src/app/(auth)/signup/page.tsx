@@ -58,7 +58,7 @@ export default function SignupPage() {
       "w-full px-4 py-3 rounded-xl bg-white/60 border text-zinc-900 placeholder-zinc-400 text-sm outline-none transition-all",
       hasError
         ? "border-red-500/50 focus:border-red-500"
-        : "border-zinc-200 focus:border-[#22C55E]/50 focus:shadow-[0_0_12px_rgba(0,212,255,0.1)]"
+        : "border-zinc-200 focus:border-[#0F5132]/50 focus:shadow-[0_0_12px_rgba(15,81,50,0.1)]"
     );
 
   return (
@@ -72,7 +72,7 @@ export default function SignupPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block mb-4">
-            <span className="text-2xl font-bold bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">
+            <span className="text-2xl font-bold bg-gradient-to-r from-[#0F5132] to-[#D4A017] bg-clip-text text-transparent">
               {APP_NAME}
             </span>
           </Link>
@@ -158,8 +158,8 @@ export default function SignupPage() {
             disabled={loading}
             className={cn(
               "w-full py-3 rounded-full font-medium text-sm text-zinc-900 transition-all duration-300 flex items-center justify-center gap-2",
-              "bg-gradient-to-r from-[#22C55E] to-[#E5B62E]",
-              "hover:shadow-[0_0_30px_rgba(0,212,255,0.3)] hover:scale-[1.02]",
+              "bg-gradient-to-r from-[#0F5132] to-[#D4A017]",
+              "hover:shadow-[0_0_30px_rgba(15,81,50,0.3)] hover:scale-[1.02]",
               "disabled:opacity-50 disabled:cursor-not-allowed"
             )}
           >
@@ -174,7 +174,7 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-zinc-500 mt-6">
           Already have an account?{" "}
-          <Link href="/login" className="text-[#22C55E] hover:underline">
+          <Link href="/login" className="text-[#0F5132] hover:underline">
             Sign in
           </Link>
         </p>

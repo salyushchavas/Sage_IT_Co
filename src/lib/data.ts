@@ -32,7 +32,7 @@ export const services: Service[] = [
       "DevOps & CI/CD Pipelines",
       "Serverless Computing",
     ],
-    color: "#22C55E",
+    color: "#0F5132",
   },
   {
     id: "cybersecurity",
@@ -46,7 +46,7 @@ export const services: Service[] = [
       "Zero Trust Architecture",
       "Penetration Testing",
     ],
-    color: "#E5B62E",
+    color: "#D4A017",
   },
   {
     id: "webdev",
@@ -60,7 +60,7 @@ export const services: Service[] = [
       "E-Commerce Platforms",
       "API Development",
     ],
-    color: "#14653F",
+    color: "#0A3D26",
   },
   {
     id: "ai",
@@ -74,7 +74,7 @@ export const services: Service[] = [
       "Computer Vision",
       "AI-Powered Automation",
     ],
-    color: "#FBBF24",
+    color: "#E8B82E",
   },
   {
     id: "marketing",
@@ -88,7 +88,7 @@ export const services: Service[] = [
       "PPC & Performance Ads",
       "Marketing Automation",
     ],
-    color: "#22C55E",
+    color: "#0F5132",
   },
   {
     id: "data",
@@ -102,7 +102,7 @@ export const services: Service[] = [
       "Real-Time Analytics",
       "Predictive Modeling",
     ],
-    color: "#E5B62E",
+    color: "#D4A017",
   },
 ];
 

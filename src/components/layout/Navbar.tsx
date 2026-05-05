@@ -69,7 +69,7 @@ export default function Navbar() {
               alt="Sage IT Co"
               fill
               priority
-              className="object-contain drop-shadow-[0_0_15px_rgba(34,197,94,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(229,182,46,0.4)]"
+              className="object-contain drop-shadow-[0_0_15px_rgba(15,81,50,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(212,160,23,0.4)]"
             />
           </div>
         </Link>

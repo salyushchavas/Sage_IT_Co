@@ -11,7 +11,7 @@ interface JobCardProps {
 
 export default function JobCard({ job, onApply }: JobCardProps) {
   return (
-    <GlassCard className="p-8" glowColor="#22C55E">
+    <GlassCard className="p-8" glowColor="#0F5132">
       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
         <div className="flex-1">
           <h3 className="text-xl font-bold text-zinc-900">{job.title}</h3>

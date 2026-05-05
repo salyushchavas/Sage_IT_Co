@@ -64,9 +64,9 @@ export default function AssignmentItem({
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/20 to-[#14653F]/20 border border-zinc-200 flex items-center justify-center">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-[#D4A017]/20 to-[#0A3D26]/20 border border-zinc-200 flex items-center justify-center">
             {unlocked ? (
-              <FileText className="w-5 h-5 text-[#14653F]" />
+              <FileText className="w-5 h-5 text-[#0A3D26]" />
             ) : (
               <Lock className="w-5 h-5 text-zinc-600" />
             )}
@@ -96,7 +96,7 @@ export default function AssignmentItem({
           {!showForm ? (
             <button
               onClick={() => setShowForm(true)}
-              className="px-4 py-2 rounded-xl bg-[#22C55E]/10 border border-[#22C55E]/20 text-[#22C55E] text-sm font-medium hover:bg-[#22C55E]/20 transition-colors flex items-center gap-2"
+              className="px-4 py-2 rounded-xl bg-[#0F5132]/10 border border-[#0F5132]/20 text-[#0F5132] text-sm font-medium hover:bg-[#0F5132]/20 transition-colors flex items-center gap-2"
             >
               <Send className="w-4 h-4" />
               Submit Assignment
@@ -108,14 +108,14 @@ export default function AssignmentItem({
                 onChange={(e) => setContent(e.target.value)}
                 rows={5}
                 placeholder="Write your submission here..."
-                className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors resize-none placeholder-zinc-400"
+                className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors resize-none placeholder-zinc-400"
               />
               {error && <p className="text-red-400 text-sm">{error}</p>}
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSubmit}
                   disabled={!content.trim() || submitting}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#D4A017] to-[#0F5132] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
                 >
                   {submitting ? (
                     <>

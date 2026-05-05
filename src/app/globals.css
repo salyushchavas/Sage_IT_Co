@@ -32,14 +32,14 @@ body {
   background: #f4f4f0;
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #22C55E, #E5B62E);
+  background: linear-gradient(180deg, #0F5132, #D4A017);
   border-radius: 3px;
 }
 
 /* Selection — warm gold */
 ::selection {
-  background: rgba(229, 182, 46, 0.35);
-  color: #14653F;
+  background: rgba(212, 160, 23, 0.30);
+  color: #0F5132;
 }
 
 @layer components {
@@ -61,8 +61,8 @@ body {
 
   .bg-grid {
     background-image:
-      linear-gradient(rgba(20, 101, 63, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(20, 101, 63, 0.05) 1px, transparent 1px);
+      linear-gradient(rgba(15, 81, 50, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(15, 81, 50, 0.05) 1px, transparent 1px);
     background-size: 60px 60px;
   }
 }

@@ -81,7 +81,7 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8">
-        <Loader2 className="w-6 h-6 text-[#22C55E] animate-spin" />
+        <Loader2 className="w-6 h-6 text-[#0F5132] animate-spin" />
       </div>
     );
   }
@@ -94,7 +94,7 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
       className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 space-y-4"
     >
       <div className="flex items-center gap-2">
-        <ListTodo className="w-5 h-5 text-[#14653F]" />
+        <ListTodo className="w-5 h-5 text-[#0A3D26]" />
         <h3 className="text-zinc-900 font-semibold">Tasks</h3>
         <span className="text-xs text-zinc-500">
           {tasks.filter((t) => t.completed).length}/{tasks.length} completed
@@ -153,7 +153,7 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
                   <button
                     onClick={() => handleComplete(task.id)}
                     disabled={completingId === task.id}
-                    className="px-3 py-1.5 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/20 text-[#22C55E] text-xs font-medium hover:bg-[#22C55E]/20 transition-colors disabled:opacity-50"
+                    className="px-3 py-1.5 rounded-lg bg-[#0F5132]/10 border border-[#0F5132]/20 text-[#0F5132] text-xs font-medium hover:bg-[#0F5132]/20 transition-colors disabled:opacity-50"
                   >
                     {completingId === task.id ? (
                       <Loader2 className="w-3.5 h-3.5 animate-spin" />

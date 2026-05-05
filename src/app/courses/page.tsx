@@ -46,7 +46,7 @@ export default function CoursesPage() {
         >
           <h1 className="text-4xl font-bold text-zinc-900 mb-2">
             Explore{" "}
-            <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#0F5132] to-[#D4A017] bg-clip-text text-transparent">
               Courses
             </span>
           </h1>
@@ -68,7 +68,7 @@ export default function CoursesPage() {
         {/* Loading */}
         {loading && (
           <div className="flex items-center justify-center py-20">
-            <Loader2 className="w-8 h-8 animate-spin text-[#22C55E]" />
+            <Loader2 className="w-8 h-8 animate-spin text-[#0F5132]" />
           </div>
         )}
 

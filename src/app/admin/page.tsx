@@ -104,7 +104,7 @@ export default function AdminPage() {
   };
 
   if (authLoading || loading) {
-    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#22C55E]" /></div>;
+    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#0F5132]" /></div>;
   }
 
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
@@ -129,13 +129,13 @@ export default function AdminPage() {
                   className={cn(
                     "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
                     tab === t.key
-                      ? "bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20"
+                      ? "bg-[#0F5132]/10 text-[#0F5132] border border-[#0F5132]/20"
                       : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
                   )}
                 >
                   {t.icon} {t.label}
                   {t.key === "requests" && requests.length > 0 && (
-                    <span className="ml-auto text-xs bg-[#E5B62E] text-zinc-900 px-1.5 py-0.5 rounded-full">{requests.length}</span>
+                    <span className="ml-auto text-xs bg-[#D4A017] text-zinc-900 px-1.5 py-0.5 rounded-full">{requests.length}</span>
                   )}
                 </button>
               ))}
@@ -147,7 +147,7 @@ export default function AdminPage() {
         <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#050510]/90 backdrop-blur-xl border-t border-zinc-200 px-4 py-2 flex gap-2">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={cn("flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs", tab === t.key ? "text-[#22C55E]" : "text-zinc-500")}>
+              className={cn("flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs", tab === t.key ? "text-[#0F5132]" : "text-zinc-500")}>
               {t.icon}<span>{t.label}</span>
             </button>
           ))}
@@ -162,9 +162,9 @@ export default function AdminPage() {
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-10">
                 {[
-                  { label: "Total Users", value: analytics.totalUsers, icon: <Users className="w-5 h-5" />, color: "#22C55E" },
-                  { label: "Total Courses", value: analytics.totalCourses, icon: <BookOpen className="w-5 h-5" />, color: "#E5B62E" },
-                  { label: "Enrollments", value: analytics.totalEnrollments, icon: <GraduationCap className="w-5 h-5" />, color: "#14653F" },
+                  { label: "Total Users", value: analytics.totalUsers, icon: <Users className="w-5 h-5" />, color: "#0F5132" },
+                  { label: "Total Courses", value: analytics.totalCourses, icon: <BookOpen className="w-5 h-5" />, color: "#D4A017" },
+                  { label: "Enrollments", value: analytics.totalEnrollments, icon: <GraduationCap className="w-5 h-5" />, color: "#0A3D26" },
                   { label: "Revenue", value: `₹${analytics.totalRevenue}`, icon: <DollarSign className="w-5 h-5" />, color: "#10b981" },
                 ].map((card) => (
                   <div key={card.label} className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-5">
@@ -195,8 +195,8 @@ export default function AdminPage() {
                             <td className="px-4 py-3 text-zinc-900">{u.fullName}</td>
                             <td className="px-4 py-3 text-zinc-600">{u.email}</td>
                             <td className="px-4 py-3"><span className={cn("text-xs px-2 py-0.5 rounded-full",
-                              u.role === "ADMIN" ? "bg-[#E5B62E]/20 text-[#E5B62E]" :
-                              u.role === "INSTRUCTOR" ? "bg-[#22C55E]/20 text-[#22C55E]" :
+                              u.role === "ADMIN" ? "bg-[#D4A017]/20 text-[#D4A017]" :
+                              u.role === "INSTRUCTOR" ? "bg-[#0F5132]/20 text-[#0F5132]" :
                               "bg-white/80 text-zinc-600"
                             )}>{u.role}</span></td>
                             <td className="px-4 py-3 text-zinc-500">{new Date(u.createdAt).toLocaleDateString()}</td>
@@ -231,8 +231,8 @@ export default function AdminPage() {
                           <td className="px-4 py-3 text-zinc-900">{u.fullName}</td>
                           <td className="px-4 py-3 text-zinc-600">{u.email}</td>
                           <td className="px-4 py-3"><span className={cn("text-xs px-2 py-0.5 rounded-full",
-                            u.role === "ADMIN" ? "bg-[#E5B62E]/20 text-[#E5B62E]" :
-                            u.role === "INSTRUCTOR" ? "bg-[#22C55E]/20 text-[#22C55E]" :
+                            u.role === "ADMIN" ? "bg-[#D4A017]/20 text-[#D4A017]" :
+                            u.role === "INSTRUCTOR" ? "bg-[#0F5132]/20 text-[#0F5132]" :
                             "bg-white/80 text-zinc-600"
                           )}>{u.role}</span></td>
                           <td className="px-4 py-3 text-zinc-500">{new Date(u.createdAt).toLocaleDateString()}</td>
@@ -252,7 +252,7 @@ export default function AdminPage() {
               <div className="space-y-3">
                 {courses.map((course) => (
                   <div key={course.id} className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#D4A017]/30 to-[#0F5132]/20 flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
                       {course.title.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -296,7 +296,7 @@ export default function AdminPage() {
                 <div className="space-y-3">
                   {requests.map((req) => (
                     <div key={req.id} className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#E5B62E] to-[#22C55E] flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#D4A017] to-[#0F5132] flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
                         {req.fullName.charAt(0)}
                       </div>
                       <div className="flex-1">

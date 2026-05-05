@@ -15,7 +15,7 @@ export default function Footer() {
                   src="/sage_logo.png"
                   alt="Sage IT Co"
                   fill
-                  className="object-contain drop-shadow-[0_0_20px_rgba(34,197,94,0.25)]"
+                  className="object-contain drop-shadow-[0_0_20px_rgba(15,81,50,0.25)]"
                 />
               </div>
             </Link>
