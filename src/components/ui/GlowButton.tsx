@@ -27,7 +27,7 @@ export default function GlowButton({
 
   const variants = {
     primary:
-      "bg-gradient-to-r from-neon-blue via-neon-violet to-neon-cyan text-white shadow-glow-blue hover:shadow-glow-violet hover:scale-105",
+      "bg-gradient-to-r from-sage-green to-sage-gold text-white shadow-glow-blue hover:shadow-glow-violet hover:scale-105",
     secondary:
       "glass border-zinc-300 text-zinc-900 hover:border-neon-blue/50 hover:shadow-glow-blue hover:scale-105",
   };
@@ -39,7 +39,7 @@ export default function GlowButton({
       <span className="relative z-10">{children}</span>
       {variant === "primary" && (
         <motion.div
-          className="absolute inset-0 bg-gradient-to-r from-neon-cyan via-neon-violet to-neon-blue opacity-0 hover:opacity-100 transition-opacity duration-500"
+          className="absolute inset-0 bg-gradient-to-r from-sage-gold to-sage-green opacity-0 hover:opacity-100 transition-opacity duration-500"
           whileHover={{ opacity: 1 }}
         />
       )}

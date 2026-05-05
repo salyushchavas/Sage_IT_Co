@@ -137,7 +137,7 @@ export default function PricingPage() {
                 className={cn(
                   "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
                   tier.highlighted
-                    ? "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-zinc-900 hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:scale-[1.02]"
+                    ? "bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-zinc-900 hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:scale-[1.02]"
                     : "bg-white/60 border border-zinc-200 text-zinc-900 hover:border-[#22C55E]/30 hover:bg-white/80",
                   "disabled:opacity-50"
                 )}

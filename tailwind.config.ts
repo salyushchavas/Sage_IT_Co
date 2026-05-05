@@ -35,8 +35,8 @@ const config: Config = {
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
-        "gradient-neon": "linear-gradient(135deg, #22C55E, #E5B62E, #14653F)",
-        "gradient-sage": "linear-gradient(135deg, #22C55E, #E5B62E, #14653F)",
+        "gradient-neon": "linear-gradient(135deg, #22C55E, #E5B62E)",
+        "gradient-sage": "linear-gradient(135deg, #22C55E, #E5B62E)",
       },
       animation: {
         "pulse-glow": "pulse-glow 2s ease-in-out infinite",

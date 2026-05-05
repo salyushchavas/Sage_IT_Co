@@ -56,7 +56,7 @@ body {
   }
 
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-sage-green via-sage-gold to-sage-green-deep;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-sage-green to-sage-gold;
   }
 
   .bg-grid {

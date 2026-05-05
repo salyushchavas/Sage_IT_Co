@@ -146,7 +146,7 @@ export default function CreateCoursePage() {
             <button type="submit" disabled={loading || !form.title.trim()}
               className={cn(
                 "w-full py-3.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
-                "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-zinc-900",
+                "bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-zinc-900",
                 "hover:shadow-[0_0_30px_rgba(0,212,255,0.3)] hover:scale-[1.01]",
                 "disabled:opacity-50 disabled:cursor-not-allowed"
               )}>
