@@ -81,10 +81,9 @@ body {
     rgba(212,160,23,0.0) 335deg,
     transparent 360deg
   );
-  filter: drop-shadow(0 0 5px rgba(212,160,23,0.85))
-          drop-shadow(0 0 12px rgba(255,224,102,0.5));
   animation: logo-glow-wave 4.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite,
-             logo-glow-breathe 3s ease-in-out infinite;
+             logo-glow-breathe 3s ease-in-out infinite,
+             logo-glow-swap-gold 25.2s ease-in-out infinite;
 }
 /* Emerald ribbon — opposite direction, gentler breathing, slightly inside */
 .logo-glow::after {
@@ -102,10 +101,9 @@ body {
     rgba(15,81,50,0.0) 340deg,
     transparent 360deg
   );
-  filter: drop-shadow(0 0 4px rgba(52,199,123,0.75))
-          drop-shadow(0 0 10px rgba(180,245,201,0.45));
   animation: logo-glow-wave-reverse 5.6s cubic-bezier(0.65, 0.05, 0.35, 0.95) infinite,
-             logo-glow-breathe 4s ease-in-out infinite reverse;
+             logo-glow-breathe 4s ease-in-out infinite reverse,
+             logo-glow-swap-emerald 25.2s ease-in-out infinite;
 }
 /* Wavey rotation — speeds up and slows down within each loop so the
    light "swims" instead of marching */
@@ -127,6 +125,46 @@ body {
 @keyframes logo-glow-breathe {
   0%, 100% { opacity: 0.85; }
   50%      { opacity: 1; }
+}
+/* MAGIC — every ~3 rounds the two ribbons trade colors with a soft fade.
+   25.2s = roughly 6 gold-rounds (4.2s) and ~4.5 emerald-rounds, so each
+   ribbon spends about 3 full revolutions in each color before swapping.
+   Gold ribbon hue-rotates +95deg → becomes emerald.
+   Emerald ribbon hue-rotates -95deg → becomes gold.
+   Both swap-fades are aligned so the moment of swap feels intentional. */
+@keyframes logo-glow-swap-gold {
+  0%, 38% {
+    filter: drop-shadow(0 0 5px rgba(212,160,23,0.85))
+            drop-shadow(0 0 12px rgba(255,224,102,0.5))
+            hue-rotate(0deg);
+  }
+  50%, 88% {
+    filter: drop-shadow(0 0 5px rgba(52,199,123,0.85))
+            drop-shadow(0 0 12px rgba(180,245,201,0.5))
+            hue-rotate(95deg);
+  }
+  100% {
+    filter: drop-shadow(0 0 5px rgba(212,160,23,0.85))
+            drop-shadow(0 0 12px rgba(255,224,102,0.5))
+            hue-rotate(0deg);
+  }
+}
+@keyframes logo-glow-swap-emerald {
+  0%, 38% {
+    filter: drop-shadow(0 0 4px rgba(52,199,123,0.75))
+            drop-shadow(0 0 10px rgba(180,245,201,0.45))
+            hue-rotate(0deg);
+  }
+  50%, 88% {
+    filter: drop-shadow(0 0 4px rgba(212,160,23,0.75))
+            drop-shadow(0 0 10px rgba(255,224,102,0.45))
+            hue-rotate(-95deg);
+  }
+  100% {
+    filter: drop-shadow(0 0 4px rgba(52,199,123,0.75))
+            drop-shadow(0 0 10px rgba(180,245,201,0.45))
+            hue-rotate(0deg);
+  }
 }
 
 @layer components {
