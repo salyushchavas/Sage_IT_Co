@@ -2,361 +2,301 @@
 
 import { motion } from "framer-motion";
 
-const outerServices = [
-  { label: "Cloud Infrastructure", icon: "☁",  angle: 0,   radius: 60, color: "#0F5132", delay: 0 },
-  { label: "AI / Machine Learning", icon: "◈", angle: 60,  radius: 64, color: "#D4A017", delay: 0.15 },
-  { label: "Cybersecurity",        icon: "✦",  angle: 120, radius: 58, color: "#0A3D26", delay: 0.3 },
-  { label: "Data Engineering",     icon: "▦",  angle: 180, radius: 62, color: "#0F5132", delay: 0.45 },
-  { label: "DevOps / Automation",  icon: "⟳",  angle: 240, radius: 60, color: "#D4A017", delay: 0.6 },
-  { label: "Analytics & BI",       icon: "▲",  angle: 300, radius: 64, color: "#0A3D26", delay: 0.75 },
+// Service "cities" placed around the periphery — center stays clean for hero text
+const cities = [
+  { label: "Cloud",         code: "CLD", x: 8,  y: 18, color: "#0F5132", delay: 0.2 },
+  { label: "Intelligence",  code: "AI",  x: 88, y: 14, color: "#D4A017", delay: 0.4 },
+  { label: "Security",      code: "SEC", x: 6,  y: 78, color: "#0A3D26", delay: 0.6 },
+  { label: "Data",          code: "DAT", x: 92, y: 82, color: "#D4A017", delay: 0.8 },
+  { label: "DevOps",        code: "OPS", x: 14, y: 48, color: "#0F5132", delay: 1.0 },
+  { label: "Analytics",     code: "ANL", x: 86, y: 50, color: "#0A3D26", delay: 1.2 },
 ];
 
-const innerTags = [
-  { label: "Kubernetes", angle: 30,  radius: 28 },
-  { label: "PyTorch",    angle: 90,  radius: 26 },
-  { label: "Zero Trust", angle: 150, radius: 28 },
-  { label: "Snowflake",  angle: 210, radius: 26 },
-  { label: "Terraform",  angle: 270, radius: 28 },
-  { label: "GraphQL",    angle: 330, radius: 26 },
+// Trade routes — curved bezier flight paths between cities
+const routes: { from: number; to: number; curve: number }[] = [
+  { from: 0, to: 1, curve: -15 },
+  { from: 0, to: 4, curve: 10 },
+  { from: 1, to: 5, curve: -10 },
+  { from: 2, to: 4, curve: -10 },
+  { from: 3, to: 5, curve: 10 },
+  { from: 2, to: 3, curve: 18 },
+  { from: 4, to: 5, curve: -8 },
+  { from: 0, to: 5, curve: 25 },
+  { from: 1, to: 4, curve: -25 },
 ];
 
-const floatingKeywords = [
-  { text: "scalable", x: 12, y: 22 },
-  { text: "intelligent", x: 82, y: 18 },
-  { text: "resilient", x: 8, y: 78 },
-  { text: "autonomous", x: 86, y: 82 },
-  { text: "real-time", x: 50, y: 8 },
-  { text: "secure", x: 50, y: 92 },
-];
-
-function polar(angleDeg: number, radius: number, squash = 0.55) {
-  const rad = (angleDeg * Math.PI) / 180;
-  return {
-    left: `${50 + radius * Math.cos(rad)}%`,
-    top: `${50 + radius * Math.sin(rad) * squash}%`,
-  };
+function bezierPath(x1: number, y1: number, x2: number, y2: number, curve: number) {
+  const mx = (x1 + x2) / 2;
+  const my = (y1 + y2) / 2;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  const nx = -dy;
+  const ny = dx;
+  const len = Math.hypot(nx, ny) || 1;
+  const cx = mx + (nx / len) * curve;
+  const cy = my + (ny / len) * curve;
+  return `M ${x1} ${y1} Q ${cx} ${cy} ${x2} ${y2}`;
 }
 
-function DataPulse({ x1, y1, x2, y2, delay, color = "#D4A017" }: { x1: string; y1: string; x2: string; y2: string; delay: number; color?: string }) {
+// Animated flowing contour lines — generative topography
+function ContourField({ side }: { side: "left" | "right" }) {
+  const lines = Array.from({ length: 7 });
   return (
-    <motion.circle
-      r="3"
-      fill={color}
-      initial={{ opacity: 0 }}
-      animate={{
-        cx: [x1, x2],
-        cy: [y1, y2],
-        opacity: [0, 1, 1, 0],
-      }}
-      transition={{
-        duration: 3.5,
-        repeat: Infinity,
-        delay,
-        ease: "easeInOut",
-      }}
-    />
+    <svg
+      className={`absolute top-0 ${side === "left" ? "left-0" : "right-0"} h-full w-[55%] hidden md:block`}
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      style={{ opacity: 0.18 }}
+    >
+      <defs>
+        <linearGradient id={`contourGrad-${side}`} x1="0%" y1="0%" x2="100%" y2="0%">
+          {side === "left" ? (
+            <>
+              <stop offset="0%" stopColor="#0F5132" stopOpacity="0.7" />
+              <stop offset="100%" stopColor="#0F5132" stopOpacity="0" />
+            </>
+          ) : (
+            <>
+              <stop offset="0%" stopColor="#D4A017" stopOpacity="0" />
+              <stop offset="100%" stopColor="#D4A017" stopOpacity="0.7" />
+            </>
+          )}
+        </linearGradient>
+      </defs>
+      {lines.map((_, i) => {
+        const baseY = 10 + i * 12;
+        const path = side === "left"
+          ? `M 0 ${baseY} Q 25 ${baseY - 8} 50 ${baseY + 4} T 100 ${baseY}`
+          : `M 0 ${baseY} Q 25 ${baseY + 6} 50 ${baseY - 5} T 100 ${baseY + 2}`;
+        return (
+          <motion.path
+            key={i}
+            d={path}
+            fill="none"
+            stroke={`url(#contourGrad-${side})`}
+            strokeWidth="0.25"
+            initial={{ pathLength: 0 }}
+            animate={{
+              pathLength: 1,
+              y: [0, side === "left" ? -2 : 2, 0],
+            }}
+            transition={{
+              pathLength: { duration: 2, delay: i * 0.15 },
+              y: { duration: 8 + i * 0.5, repeat: Infinity, ease: "easeInOut" },
+            }}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+// Vintage compass rose — bottom-left corner
+function CompassRose() {
+  return (
+    <motion.svg
+      className="absolute bottom-8 left-8 hidden lg:block"
+      width="90"
+      height="90"
+      viewBox="0 0 100 100"
+      initial={{ opacity: 0, scale: 0.7 }}
+      animate={{ opacity: 0.35, scale: 1 }}
+      transition={{ duration: 1.5, delay: 0.5 }}
+    >
+      <motion.g
+        animate={{ rotate: 360 }}
+        transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
+        style={{ transformOrigin: "50px 50px" }}
+      >
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#0F5132" strokeWidth="0.6" />
+        <circle cx="50" cy="50" r="32" fill="none" stroke="#0F5132" strokeWidth="0.4" strokeDasharray="2 2" />
+        {/* 4-point star */}
+        <polygon points="50,8 54,46 92,50 54,54 50,92 46,54 8,50 46,46" fill="#D4A017" fillOpacity="0.4" stroke="#0F5132" strokeWidth="0.5" />
+        {/* Cardinal letters */}
+        <text x="50" y="6" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">N</text>
+        <text x="96" y="52" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">E</text>
+        <text x="50" y="98" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">S</text>
+        <text x="4" y="52" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">W</text>
+      </motion.g>
+    </motion.svg>
+  );
+}
+
+// Coordinate annotation — top-right corner
+function CoordinateBadge() {
+  return (
+    <motion.div
+      className="absolute top-8 right-8 hidden lg:flex flex-col items-end gap-1 font-mono text-[10px] text-emerald-900/40"
+      initial={{ opacity: 0, x: 20 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 1, delay: 0.8 }}
+    >
+      <span className="tracking-[0.3em]">SAGE • ATLAS</span>
+      <motion.span
+        animate={{ opacity: [0.4, 1, 0.4] }}
+        transition={{ duration: 2.5, repeat: Infinity }}
+      >
+        ◉ 40.7128°N · 74.0060°W
+      </motion.span>
+      <span>v.2026.05 · live</span>
+    </motion.div>
   );
 }
 
 export default function MorphingCode() {
-  const center = { x: "50%", y: "50%" };
-
   return (
     <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-      {/* Ambient glow blobs */}
-      <div className="absolute top-1/4 left-1/4 w-[700px] h-[700px] bg-emerald-900/10 rounded-full blur-[140px] animate-pulse-glow" />
-      <div className="absolute bottom-1/4 right-1/4 w-[600px] h-[600px] bg-yellow-600/10 rounded-full blur-[120px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[900px] h-[900px] bg-emerald-700/5 rounded-full blur-[180px]" />
+      {/* Soft edge vignettes — no central glow */}
+      <div className="absolute -top-40 -left-40 w-[600px] h-[600px] bg-emerald-900/[0.04] rounded-full blur-[120px]" />
+      <div className="absolute -bottom-40 -right-40 w-[600px] h-[600px] bg-yellow-700/[0.04] rounded-full blur-[120px]" />
 
-      {/* SVG layer — orbits, lines, pulses */}
-      <svg className="absolute inset-0 w-full h-full hidden md:block" preserveAspectRatio="none">
+      {/* Subtle parchment grain via radial dots — drawn with SVG so it breathes */}
+      <svg className="absolute inset-0 w-full h-full opacity-[0.12]" preserveAspectRatio="none">
         <defs>
-          <linearGradient id="netGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#0F5132" stopOpacity="0.4" />
-            <stop offset="100%" stopColor="#D4A017" stopOpacity="0.4" />
-          </linearGradient>
-          <linearGradient id="netGrad2" x1="100%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%" stopColor="#D4A017" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#0A3D26" stopOpacity="0.3" />
-          </linearGradient>
-          <radialGradient id="coreGrad">
-            <stop offset="0%" stopColor="#D4A017" stopOpacity="0.7" />
-            <stop offset="60%" stopColor="#0F5132" stopOpacity="0.2" />
-            <stop offset="100%" stopColor="#0F5132" stopOpacity="0" />
-          </radialGradient>
+          <pattern id="dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
+            <circle cx="2" cy="2" r="0.6" fill="#0F5132" />
+          </pattern>
         </defs>
-
-        {/* Concentric orbital rings — bigger, counter-rotating */}
-        {[22, 32, 45, 58, 70].map((r, i) => (
-          <motion.ellipse
-            key={r}
-            cx="50%"
-            cy="50%"
-            rx={`${r}%`}
-            ry={`${r * 0.55}%`}
-            fill="none"
-            stroke={i % 2 === 0 ? "url(#netGrad)" : "url(#netGrad2)"}
-            strokeWidth={i === 2 || i === 3 ? "0.8" : "0.5"}
-            strokeDasharray={i % 2 === 0 ? "4 6" : "2 8"}
-            initial={{ opacity: 0, rotate: 0 }}
-            animate={{ opacity: 0.4, rotate: i % 2 === 0 ? 360 : -360 }}
-            transition={{
-              opacity: { duration: 1.5, delay: i * 0.2 },
-              rotate: { duration: 50 + i * 25, repeat: Infinity, ease: "linear" },
-            }}
-            style={{ transformOrigin: "50% 50%" }}
-          />
-        ))}
-
-        {/* Massive central core glow */}
-        <circle cx="50%" cy="50%" r="180" fill="url(#coreGrad)" />
-
-        {/* Connection lines: center → outer services */}
-        {outerServices.map((s, i) => {
-          const p = polar(s.angle, s.radius);
-          return (
-            <motion.line
-              key={`line-out-${i}`}
-              x1={center.x}
-              y1={center.y}
-              x2={p.left}
-              y2={p.top}
-              stroke="url(#netGrad)"
-              strokeWidth="1"
-              strokeDasharray="5 5"
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.55 }}
-              transition={{ duration: 1.4, delay: 0.3 + s.delay }}
-            />
-          );
-        })}
-
-        {/* Inter-service connections (outer ring polygon) */}
-        {outerServices.map((s, i) => {
-          const next = outerServices[(i + 1) % outerServices.length];
-          const p1 = polar(s.angle, s.radius);
-          const p2 = polar(next.angle, next.radius);
-          return (
-            <motion.line
-              key={`ring-${i}`}
-              x1={p1.left}
-              y1={p1.top}
-              x2={p2.left}
-              y2={p2.top}
-              stroke="url(#netGrad2)"
-              strokeWidth="0.8"
-              strokeDasharray="3 5"
-              initial={{ pathLength: 0, opacity: 0 }}
-              animate={{ pathLength: 1, opacity: 0.3 }}
-              transition={{ duration: 1.6, delay: 1.2 + i * 0.1 }}
-            />
-          );
-        })}
-
-        {/* Data pulses — outward */}
-        {outerServices.map((s, i) => {
-          const p = polar(s.angle, s.radius);
-          return (
-            <DataPulse
-              key={`pulse-out-${i}`}
-              x1={center.x}
-              y1={center.y}
-              x2={p.left}
-              y2={p.top}
-              delay={i * 0.4}
-            />
-          );
-        })}
-
-        {/* Data pulses — inward (reverse flow) */}
-        {outerServices.map((s, i) => {
-          const p = polar(s.angle, s.radius);
-          return (
-            <DataPulse
-              key={`pulse-in-${i}`}
-              x1={p.left}
-              y1={p.top}
-              x2={center.x}
-              y2={center.y}
-              delay={i * 0.4 + 1.7}
-              color="#0F5132"
-            />
-          );
-        })}
+        <rect width="100%" height="100%" fill="url(#dots)" />
       </svg>
 
-      {/* Hexagonal pulsing core */}
-      <motion.div
-        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block"
-        animate={{ scale: [1, 1.12, 1] }}
-        transition={{ duration: 3.5, repeat: Infinity, ease: "easeInOut" }}
-      >
-        <div className="relative w-32 h-32 flex items-center justify-center">
-          {/* Hexagon outline */}
-          <motion.svg
-            viewBox="0 0 100 100"
-            className="absolute inset-0 w-full h-full"
-            animate={{ rotate: 360 }}
-            transition={{ duration: 30, repeat: Infinity, ease: "linear" }}
-          >
-            <polygon
-              points="50,5 90,27 90,73 50,95 10,73 10,27"
-              fill="none"
-              stroke="#D4A017"
-              strokeWidth="1.2"
-              strokeOpacity="0.6"
-              strokeDasharray="4 3"
-            />
-          </motion.svg>
-          {/* Inner hexagon counter-rotating */}
-          <motion.svg
-            viewBox="0 0 100 100"
-            className="absolute inset-3 w-[88%] h-[88%]"
-            animate={{ rotate: -360 }}
-            transition={{ duration: 22, repeat: Infinity, ease: "linear" }}
-          >
-            <polygon
-              points="50,5 90,27 90,73 50,95 10,73 10,27"
-              fill="none"
-              stroke="#0F5132"
-              strokeWidth="1"
-              strokeOpacity="0.5"
-            />
-          </motion.svg>
-          {/* Glass core */}
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-br from-emerald-900/25 via-yellow-600/15 to-emerald-900/25 backdrop-blur-md border border-yellow-600/30 flex items-center justify-center shadow-xl">
-            <span className="text-2xl font-bold text-gradient">S</span>
-          </div>
-          {/* Expanding rings */}
-          <motion.div
-            className="absolute inset-0 rounded-full border border-yellow-600/40"
-            animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeOut" }}
-          />
-          <motion.div
-            className="absolute inset-0 rounded-full border border-emerald-900/40"
-            animate={{ scale: [1, 2.2], opacity: [0.6, 0] }}
-            transition={{ duration: 3, repeat: Infinity, ease: "easeOut", delay: 1.5 }}
-          />
-        </div>
-      </motion.div>
+      {/* Generative topographic contour fields on the edges */}
+      <ContourField side="left" />
+      <ContourField side="right" />
 
-      {/* Inner tech tags — small orbit */}
-      {innerTags.map((t, i) => {
-        const p = polar(t.angle, t.radius);
-        return (
-          <motion.div
-            key={t.label}
-            className="absolute hidden lg:block px-2.5 py-1 rounded-md bg-white/40 backdrop-blur-sm border border-emerald-900/10"
-            style={{ left: p.left, top: p.top, transform: "translate(-50%, -50%)" }}
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{
-              opacity: 0.7,
-              scale: 1,
-              y: [0, -4, 0],
-            }}
-            transition={{
-              opacity: { duration: 0.6, delay: 1 + i * 0.1 },
-              scale: { duration: 0.6, delay: 1 + i * 0.1 },
-              y: { duration: 3 + i * 0.3, repeat: Infinity, ease: "easeInOut", delay: i * 0.2 },
-            }}
-          >
-            <span className="text-[9px] font-mono font-medium text-emerald-900/70 tracking-wider uppercase">
-              {t.label}
-            </span>
-          </motion.div>
-        );
-      })}
+      {/* Trade routes & data vessels */}
+      <svg className="absolute inset-0 w-full h-full hidden md:block" viewBox="0 0 100 100" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#0F5132" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#D4A017" stopOpacity="0.5" />
+          </linearGradient>
+        </defs>
 
-      {/* Outer service nodes — bigger, more prominent */}
-      {outerServices.map((s, i) => {
-        const p = polar(s.angle, s.radius);
-        return (
-          <motion.div
-            key={s.label}
-            className="absolute hidden md:flex items-center gap-2.5 px-4 py-2.5 rounded-2xl glass border border-emerald-900/20 shadow-lg"
-            style={{
-              left: p.left,
-              top: p.top,
-              transform: "translate(-50%, -50%)",
-            }}
-            initial={{ opacity: 0, scale: 0.5 }}
-            animate={{
-              opacity: 0.95,
-              scale: 1,
-              y: [0, -8, 0],
-            }}
-            transition={{
-              opacity: { duration: 0.9, delay: 0.6 + s.delay },
-              scale: { duration: 0.9, delay: 0.6 + s.delay },
-              y: { duration: 4 + i * 0.4, repeat: Infinity, ease: "easeInOut", delay: s.delay },
-            }}
-          >
-            <span className="text-xl leading-none" style={{ color: s.color }}>{s.icon}</span>
-            <span className="text-[13px] font-mono font-semibold tracking-wide whitespace-nowrap" style={{ color: s.color }}>
-              {s.label}
-            </span>
-            <motion.span
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: s.color }}
-              animate={{ opacity: [0.3, 1, 0.3], scale: [1, 1.3, 1] }}
-              transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.3 }}
+        {routes.map((r, i) => {
+          const a = cities[r.from];
+          const b = cities[r.to];
+          const d = bezierPath(a.x, a.y, b.x, b.y, r.curve);
+          return (
+            <g key={`route-${i}`}>
+              <motion.path
+                d={d}
+                fill="none"
+                stroke="url(#routeGrad)"
+                strokeWidth="0.18"
+                strokeDasharray="0.8 0.8"
+                initial={{ pathLength: 0, opacity: 0 }}
+                animate={{ pathLength: 1, opacity: 0.6 }}
+                transition={{ duration: 2, delay: 1 + i * 0.15 }}
+                vectorEffect="non-scaling-stroke"
+              />
+              {/* Data vessel travelling the route */}
+              <motion.circle
+                r="0.4"
+                fill="#D4A017"
+                initial={{ opacity: 0 }}
+                animate={{ opacity: [0, 1, 1, 0], offsetDistance: ["0%", "100%"] }}
+                style={{ offsetPath: `path('${d}')` } as React.CSSProperties}
+                transition={{
+                  duration: 6 + (i % 3),
+                  repeat: Infinity,
+                  delay: 2 + i * 0.4,
+                  ease: "linear",
+                }}
+              />
+            </g>
+          );
+        })}
+
+        {/* Latitude/longitude crosshairs near each city — subtle */}
+        {cities.map((c, i) => (
+          <g key={`xhair-${i}`} opacity="0.25">
+            <motion.line
+              x1={c.x - 4} y1={c.y} x2={c.x + 4} y2={c.y}
+              stroke={c.color} strokeWidth="0.15"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{ duration: 0.8, delay: c.delay }}
+              vectorEffect="non-scaling-stroke"
             />
-          </motion.div>
-        );
-      })}
+            <motion.line
+              x1={c.x} y1={c.y - 3} x2={c.x} y2={c.y + 3}
+              stroke={c.color} strokeWidth="0.15"
+              initial={{ pathLength: 0 }}
+              animate={{ pathLength: 1 }}
+              transition={{ duration: 0.8, delay: c.delay }}
+              vectorEffect="non-scaling-stroke"
+            />
+          </g>
+        ))}
+      </svg>
 
-      {/* Floating brand keywords — large, faint, drifting */}
-      {floatingKeywords.map((k, i) => (
+      {/* Service "city" pins */}
+      {cities.map((c, i) => (
         <motion.div
-          key={k.text}
-          className="absolute hidden lg:block font-mono italic select-none"
-          style={{
-            left: `${k.x}%`,
-            top: `${k.y}%`,
-            transform: "translate(-50%, -50%)",
-            fontSize: "clamp(20px, 2.4vw, 36px)",
-            color: i % 2 === 0 ? "#0F5132" : "#D4A017",
-            opacity: 0.08,
-          }}
-          animate={{
-            x: [0, 12, -8, 0],
-            y: [0, -10, 6, 0],
-          }}
-          transition={{
-            duration: 18 + i * 2,
-            repeat: Infinity,
-            ease: "easeInOut",
-            delay: i * 0.5,
-          }}
+          key={c.label}
+          className="absolute hidden md:block"
+          style={{ left: `${c.x}%`, top: `${c.y}%`, transform: "translate(-50%, -50%)" }}
+          initial={{ opacity: 0, scale: 0.5 }}
+          animate={{ opacity: 1, scale: 1 }}
+          transition={{ duration: 0.8, delay: c.delay }}
         >
-          {k.text}
+          <div className="relative flex flex-col items-center">
+            {/* Pulsing target ring */}
+            <motion.div
+              className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-8 h-8 rounded-full border"
+              style={{ borderColor: c.color }}
+              animate={{ scale: [1, 2.2], opacity: [0.5, 0] }}
+              transition={{ duration: 2.6, repeat: Infinity, delay: i * 0.4, ease: "easeOut" }}
+            />
+            {/* Diamond pin marker */}
+            <div
+              className="w-3 h-3 rotate-45 border-2 bg-white/80 backdrop-blur-sm"
+              style={{ borderColor: c.color, boxShadow: `0 0 12px ${c.color}40` }}
+            />
+            {/* Label card */}
+            <div className="mt-3 px-2.5 py-1 rounded glass border border-emerald-900/15 shadow-sm">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[8px] font-mono font-bold tracking-[0.15em]" style={{ color: c.color }}>
+                  {c.code}
+                </span>
+                <span className="w-px h-2.5 bg-emerald-900/20" />
+                <span className="text-[10px] font-semibold" style={{ color: c.color }}>
+                  {c.label}
+                </span>
+              </div>
+            </div>
+          </div>
         </motion.div>
       ))}
 
-      {/* Floating ambient particles */}
-      {Array.from({ length: 28 }).map((_, i) => (
+      <CompassRose />
+      <CoordinateBadge />
+
+      {/* Drifting glyphs — like dust motes / ash */}
+      {Array.from({ length: 14 }).map((_, i) => (
         <motion.div
           key={i}
-          className="absolute w-1 h-1 rounded-full"
+          className="absolute font-mono text-[10px] select-none"
           style={{
-            left: `${(i * 53) % 100}%`,
-            top: `${(i * 31) % 100}%`,
-            backgroundColor: i % 3 === 0 ? "#D4A017" : "#0F5132",
-            opacity: 0.5,
+            left: `${(i * 47 + 10) % 90}%`,
+            top: `${(i * 29 + 20) % 70}%`,
+            color: i % 2 ? "#D4A017" : "#0F5132",
+            opacity: 0.18,
           }}
           animate={{
-            y: [0, -80, 0],
-            opacity: [0, 0.7, 0],
-            scale: [0, 1.6, 0],
+            y: [0, -40, 0],
+            opacity: [0, 0.25, 0],
           }}
           transition={{
-            duration: 5 + (i % 5),
+            duration: 9 + (i % 4),
             repeat: Infinity,
-            delay: i * 0.25,
+            delay: i * 0.6,
             ease: "easeInOut",
           }}
-        />
+        >
+          {["01", "△", "◇", "·", "+", "✦", "◯"][i % 7]}
+        </motion.div>
       ))}
     </div>
   );
