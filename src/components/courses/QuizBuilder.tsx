@@ -129,7 +129,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                   <button
                     onClick={handleCreateQuiz}
                     disabled={!quizTitle.trim() || creating}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#D4A017] to-[#0F5132] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
+                    className="px-5 py-2.5 rounded-xl btn-fill text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
                   >
                     {creating ? (
                       <Loader2 className="w-4 h-4 animate-spin" />

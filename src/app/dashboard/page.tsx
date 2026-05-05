@@ -154,7 +154,7 @@ export default function DashboardPage() {
             <h3 className="text-lg font-semibold text-zinc-900 mb-2">Become an Instructor</h3>
             <p className="text-sm text-zinc-600 mb-4">Share your knowledge and create courses on Sage IT.</p>
             <button onClick={handleRequestInstructor} disabled={requestingInstructor}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#0F5132] to-[#D4A017] text-zinc-900 text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(15,81,50,0.2)] transition">
+              className="px-5 py-2.5 rounded-xl btn-fill text-white text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(15,81,50,0.2)] transition">
               {requestingInstructor ? "Submitting..." : "Request Instructor Access"}
             </button>
             {instructorMsg && <p className={cn("text-xs mt-3", instructorMsg.includes("submitted") ? "text-green-400" : "text-red-400")}>{instructorMsg}</p>}

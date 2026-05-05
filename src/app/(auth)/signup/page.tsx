@@ -157,9 +157,9 @@ export default function SignupPage() {
             type="submit"
             disabled={loading}
             className={cn(
-              "w-full py-3 rounded-full font-medium text-sm text-zinc-900 transition-all duration-300 flex items-center justify-center gap-2",
-              "bg-gradient-to-r from-[#0F5132] to-[#D4A017]",
-              "hover:shadow-[0_0_30px_rgba(15,81,50,0.3)] hover:scale-[1.02]",
+              "w-full py-3 rounded-full font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2",
+              "btn-fill text-white",
+              "hover:scale-[1.02]",
               "disabled:opacity-50 disabled:cursor-not-allowed"
             )}
           >

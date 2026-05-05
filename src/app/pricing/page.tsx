@@ -107,7 +107,7 @@ export default function PricingPage() {
                   : "border-zinc-200"
               )}>
               {tier.highlighted && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-[#D4A017] to-[#0F5132] text-zinc-900 text-xs font-semibold">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full btn-fill text-white text-xs font-semibold">
                   Most Popular
                 </span>
               )}
@@ -137,7 +137,7 @@ export default function PricingPage() {
                 className={cn(
                   "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
                   tier.highlighted
-                    ? "bg-gradient-to-r from-[#0F5132] to-[#D4A017] text-zinc-900 hover:shadow-[0_0_30px_rgba(212,160,23,0.3)] hover:scale-[1.02]"
+                    ? "btn-fill text-white hover:shadow-[0_0_30px_rgba(212,160,23,0.3)] hover:scale-[1.02]"
                     : "bg-white/60 border border-zinc-200 text-zinc-900 hover:border-[#0F5132]/30 hover:bg-white/80",
                   "disabled:opacity-50"
                 )}

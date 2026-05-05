@@ -196,7 +196,7 @@ export default function QuizSection({
         <button
           onClick={handleSubmit}
           disabled={!allAnswered || submitting}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#D4A017] to-[#0F5132] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-6 py-2.5 rounded-xl btn-fill text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {submitting ? (
             <>

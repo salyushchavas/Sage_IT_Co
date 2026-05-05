@@ -206,7 +206,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               disabled={enrolling}
               className={cn(
                 "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
-                "bg-gradient-to-r from-[#0F5132] to-[#D4A017] text-zinc-900",
+                "btn-fill text-white",
                 "hover:shadow-[0_0_30px_rgba(15,81,50,0.3)] hover:scale-[1.02]",
                 "disabled:opacity-50"
               )}
@@ -267,7 +267,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               </label>
               <div className="flex gap-3">
                 <button type="submit" disabled={addingLesson}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#0F5132] to-[#D4A017] text-zinc-900 text-sm font-semibold disabled:opacity-50">
+                  className="px-6 py-2.5 rounded-xl btn-fill text-white text-sm font-semibold disabled:opacity-50">
                   {addingLesson ? "Adding..." : "Add Lesson"}
                 </button>
                 <button type="button" onClick={() => setShowAddLesson(false)}
@@ -407,7 +407,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                     href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}${certificate.certificateUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#0F5132] to-[#D4A017] text-zinc-900 text-sm font-semibold hover:shadow-[0_0_20px_rgba(15,81,50,0.3)] transition"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl btn-fill text-white text-sm font-semibold hover:shadow-[0_0_20px_rgba(15,81,50,0.3)] transition"
                   >
                     <Download className="w-4 h-4" /> Download Certificate (PDF)
                   </a>
@@ -429,7 +429,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                       } finally { setGeneratingCert(false); }
                     }}
                     disabled={generatingCert}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#D4A017] to-[#0F5132] text-zinc-900 text-sm font-semibold hover:shadow-[0_0_20px_rgba(212,160,23,0.3)] transition disabled:opacity-50"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl btn-fill text-white text-sm font-semibold hover:shadow-[0_0_20px_rgba(212,160,23,0.3)] transition disabled:opacity-50"
                   >
                     {generatingCert ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Award className="w-4 h-4" /> Generate Certificate</>}
                   </button>

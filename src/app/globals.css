@@ -67,6 +67,43 @@ body {
   }
 }
 
+/* Button — starts solid green, gold fills in from left on hover */
+.btn-fill {
+  position: relative;
+  overflow: hidden;
+  background-color: #0F5132;
+  color: #ffffff;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  isolation: isolate;
+}
+.btn-fill::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: #D4A017;
+  transform: scaleX(0);
+  transform-origin: left center;
+  transition: transform 0.5s ease-out;
+  z-index: -1;
+}
+.btn-fill:hover::before {
+  transform: scaleX(1);
+}
+.btn-fill:hover {
+  transform: scale(1.03);
+  box-shadow: 0 0 24px rgba(212, 160, 23, 0.30);
+}
+.btn-fill:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.btn-fill:disabled:hover {
+  transform: none;
+}
+.btn-fill:disabled:hover::before {
+  transform: scaleX(0);
+}
+
 @layer utilities {
   .text-balance {
     text-wrap: balance;

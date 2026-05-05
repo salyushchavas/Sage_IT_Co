@@ -23,26 +23,25 @@ export default function GlowButton({
   type = "button",
 }: GlowButtonProps) {
   const base =
-    "relative inline-flex items-center justify-center gap-2 px-8 py-3 rounded-full font-medium text-sm tracking-wide transition-all duration-300 overflow-hidden";
+    "group relative inline-flex items-center justify-center gap-2 px-8 py-3 rounded-full font-medium text-sm tracking-wide transition-all duration-300 overflow-hidden hover:scale-105";
 
   const variants = {
     primary:
-      "bg-gradient-to-r from-sage-green to-sage-gold text-white shadow-glow-blue hover:shadow-glow-violet hover:scale-105",
+      "bg-sage-green text-white shadow-glow-blue hover:shadow-glow-gold",
     secondary:
-      "glass border-zinc-300 text-zinc-900 hover:border-neon-blue/50 hover:shadow-glow-blue hover:scale-105",
+      "bg-transparent border-2 border-sage-green text-sage-green hover:text-white hover:shadow-glow-gold",
   };
 
   const classes = cn(base, variants[variant], className);
 
   const inner = (
     <>
-      <span className="relative z-10">{children}</span>
-      {variant === "primary" && (
-        <motion.div
-          className="absolute inset-0 bg-gradient-to-r from-sage-gold to-sage-green opacity-0 hover:opacity-100 transition-opacity duration-500"
-          whileHover={{ opacity: 1 }}
-        />
-      )}
+      {/* Gold fill that slides in from left to right on hover */}
+      <span
+        aria-hidden
+        className="absolute inset-0 bg-sage-gold origin-left scale-x-0 transition-transform duration-500 ease-out group-hover:scale-x-100"
+      />
+      <span className="relative z-10 flex items-center gap-2">{children}</span>
     </>
   );
 
