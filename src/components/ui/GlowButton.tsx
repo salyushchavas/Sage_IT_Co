@@ -39,9 +39,9 @@ export default function GlowButton({
 
   const variants = {
     primary:
-      "bg-sage-green text-white shadow-[0_4px_20px_rgba(15,81,50,0.25)] hover:shadow-[0_0_20px_rgba(212,160,23,0.7),0_0_40px_rgba(212,160,23,0.5),0_0_70px_rgba(212,160,23,0.3)]",
+      "bg-sage-green text-white shadow-[0_4px_20px_rgba(15,81,50,0.25)] hover:shadow-[0_0_20px_rgba(255,215,0,0.85),0_0_40px_rgba(255,215,0,0.6),0_0_70px_rgba(255,215,0,0.35)]",
     secondary:
-      "bg-white border-2 border-sage-green text-sage-green hover:text-white hover:shadow-[0_0_20px_rgba(212,160,23,0.6),0_0_40px_rgba(212,160,23,0.4),0_0_70px_rgba(212,160,23,0.25)]",
+      "bg-white border-2 border-sage-green text-sage-green hover:text-zinc-900 hover:shadow-[0_0_20px_rgba(255,215,0,0.75),0_0_40px_rgba(255,215,0,0.5),0_0_70px_rgba(255,215,0,0.3)]",
   };
 
   const classes = cn(base, variants[variant], className);
@@ -54,7 +54,7 @@ export default function GlowButton({
         className="absolute inset-0 pointer-events-none transition-opacity duration-300 ease-out"
         style={{
           opacity: hovered ? 1 : 0,
-          background: `radial-gradient(circle 70px at ${pos.x}% ${pos.y}%, #D4A017 0%, #D4A017 40%, rgba(212,160,23,0.5) 70%, transparent 100%)`,
+          background: `radial-gradient(circle 70px at ${pos.x}% ${pos.y}%, #FFD700 0%, #FFD700 40%, rgba(255,215,0,0.55) 70%, transparent 100%)`,
           filter: "blur(2px)",
         }}
       />

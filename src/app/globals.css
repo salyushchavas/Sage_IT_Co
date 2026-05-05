@@ -81,7 +81,7 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle 60px at center, #D4A017 0%, #D4A017 50%, rgba(212, 160, 23, 0.4) 80%, transparent 100%);
+  background: radial-gradient(circle 60px at center, #FFD700 0%, #FFD700 50%, rgba(255, 215, 0, 0.45) 80%, transparent 100%);
   opacity: 0;
   filter: blur(2px);
   transition: opacity 0.4s ease-out;
@@ -93,9 +93,9 @@ body {
 .btn-fill:hover {
   transform: scale(1.04);
   box-shadow:
-    0 0 20px rgba(212, 160, 23, 0.7),
-    0 0 40px rgba(212, 160, 23, 0.5),
-    0 0 70px rgba(212, 160, 23, 0.3);
+    0 0 20px rgba(255, 215, 0, 0.85),
+    0 0 40px rgba(255, 215, 0, 0.55),
+    0 0 70px rgba(255, 215, 0, 0.35);
 }
 .btn-fill:disabled {
   opacity: 0.5;
