@@ -95,13 +95,13 @@ body {
   background: conic-gradient(
     from 180deg,
     transparent 0deg 200deg,
-    rgba(15,81,50,0.0) 220deg,
-    rgba(52,199,123,0.5) 245deg,
-    rgba(180,245,201,0.95) 268deg,
-    #FFFFFF 278deg,
-    rgba(52,199,123,0.85) 290deg,
-    rgba(15,81,50,0.4) 315deg,
-    rgba(15,81,50,0.0) 340deg,
+    rgba(10,61,38,0.0) 220deg,
+    rgba(15,81,50,0.55) 245deg,
+    rgba(15,81,50,0.95) 268deg,
+    #1B7A4A 278deg,
+    rgba(15,81,50,0.95) 290deg,
+    rgba(10,61,38,0.45) 315deg,
+    rgba(10,61,38,0.0) 340deg,
     transparent 360deg
   );
   rotate: 0deg;
@@ -164,9 +164,9 @@ body {
             hue-rotate(0deg);
   }
   50%, 88% {
-    filter: drop-shadow(0 0 5px rgba(52,199,123,0.85))
-            drop-shadow(0 0 12px rgba(180,245,201,0.5))
-            hue-rotate(95deg);
+    filter: drop-shadow(0 0 5px rgba(15,81,50,0.85))
+            drop-shadow(0 0 12px rgba(15,81,50,0.45))
+            hue-rotate(120deg) saturate(0.85);
   }
   100% {
     filter: drop-shadow(0 0 5px rgba(212,160,23,0.85))
@@ -176,18 +176,18 @@ body {
 }
 @keyframes logo-glow-swap-emerald {
   0%, 38% {
-    filter: drop-shadow(0 0 4px rgba(52,199,123,0.75))
-            drop-shadow(0 0 10px rgba(180,245,201,0.45))
+    filter: drop-shadow(0 0 4px rgba(15,81,50,0.75))
+            drop-shadow(0 0 10px rgba(15,81,50,0.4))
             hue-rotate(0deg);
   }
   50%, 88% {
     filter: drop-shadow(0 0 4px rgba(212,160,23,0.75))
             drop-shadow(0 0 10px rgba(255,224,102,0.45))
-            hue-rotate(-95deg);
+            hue-rotate(-120deg) saturate(1.4);
   }
   100% {
-    filter: drop-shadow(0 0 4px rgba(52,199,123,0.75))
-            drop-shadow(0 0 10px rgba(180,245,201,0.45))
+    filter: drop-shadow(0 0 4px rgba(15,81,50,0.75))
+            drop-shadow(0 0 10px rgba(15,81,50,0.4))
             hue-rotate(0deg);
   }
 }
