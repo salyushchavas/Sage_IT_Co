@@ -42,38 +42,76 @@ body {
   color: #0F5132;
 }
 
-/* Rotating border-light glow for logo */
+/* Dual counter-rotating comet glow for logo
+   - ::before: fast gold comet with white-hot head, clockwise
+   - ::after: slower emerald comet, counter-clockwise, slightly outside
+   The two trails interweave + a soft halo pulses underneath */
 .logo-glow {
   position: relative;
   border-radius: 14px;
+  isolation: isolate;
 }
-.logo-glow::before {
+/* Soft outer halo that gently breathes */
+.logo-glow > :first-child::before {
+  /* no-op anchor — kept clean to avoid affecting Image element */
+}
+.logo-glow::before,
+.logo-glow::after {
   content: "";
   position: absolute;
-  inset: -2px;
   border-radius: inherit;
-  padding: 2px;
-  background: conic-gradient(
-    from 0deg,
-    transparent 0deg,
-    rgba(212, 160, 23, 0) 40deg,
-    rgba(212, 160, 23, 0.9) 70deg,
-    #FFE066 90deg,
-    rgba(212, 160, 23, 0.9) 110deg,
-    rgba(212, 160, 23, 0) 140deg,
-    transparent 360deg
-  );
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
           mask-composite: exclude;
-  animation: logo-glow-spin 3s linear infinite;
   pointer-events: none;
-  filter: drop-shadow(0 0 4px rgba(212, 160, 23, 0.6));
+}
+/* Gold comet — head bright, white-hot tip, fades to invisible */
+.logo-glow::before {
+  inset: -2px;
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg 200deg,
+    rgba(212, 160, 23, 0.0) 230deg,
+    rgba(212, 160, 23, 0.55) 252deg,
+    #FFD24A 268deg,
+    #FFFFFF 274deg,
+    #FFE066 280deg,
+    rgba(212, 160, 23, 0.55) 296deg,
+    rgba(212, 160, 23, 0.0) 320deg,
+    transparent 360deg
+  );
+  filter: drop-shadow(0 0 5px rgba(212, 160, 23, 0.75))
+          drop-shadow(0 0 10px rgba(255, 224, 102, 0.45));
+  animation: logo-glow-spin 3s linear infinite;
+}
+/* Emerald comet — slower, opposite direction, slightly outside */
+.logo-glow::after {
+  inset: -4px;
+  padding: 1.5px;
+  background: conic-gradient(
+    from 180deg,
+    transparent 0deg 230deg,
+    rgba(15, 81, 50, 0.0) 250deg,
+    rgba(15, 81, 50, 0.5) 268deg,
+    #34C77B 280deg,
+    #B4F5C9 286deg,
+    #34C77B 292deg,
+    rgba(15, 81, 50, 0.5) 308deg,
+    transparent 330deg 360deg
+  );
+  filter: drop-shadow(0 0 4px rgba(52, 199, 123, 0.6))
+          drop-shadow(0 0 8px rgba(15, 81, 50, 0.35));
+  animation: logo-glow-spin-reverse 5s linear infinite;
+  opacity: 0.9;
 }
 @keyframes logo-glow-spin {
   to { transform: rotate(360deg); }
+}
+@keyframes logo-glow-spin-reverse {
+  to { transform: rotate(-360deg); }
 }
 
 @layer components {
