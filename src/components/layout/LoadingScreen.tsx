@@ -22,7 +22,7 @@ export default function LoadingScreen() {
         >
           <div className="text-center">
             <motion.div
-              className="relative w-24 h-24 mx-auto mb-6"
+              className="logo-glow relative w-24 h-24 mx-auto mb-6"
               animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.05, 1] }}
               transition={{ duration: 1.5, repeat: Infinity }}
             >

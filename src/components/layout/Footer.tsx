@@ -10,7 +10,7 @@ export default function Footer() {
           {/* Brand */}
           <div>
             <Link href="/" className="inline-block mb-4">
-              <div className="relative w-32 h-32">
+              <div className="logo-glow relative w-32 h-32">
                 <Image
                   src="/sage_logo.png"
                   alt="Sage IT Co"
