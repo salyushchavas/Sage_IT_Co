@@ -81,8 +81,9 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at center, #D4A017 0%, #D4A017 45%, rgba(212, 160, 23, 0.6) 75%, transparent 100%);
+  background: radial-gradient(circle 60px at center, #D4A017 0%, #D4A017 50%, rgba(212, 160, 23, 0.4) 80%, transparent 100%);
   opacity: 0;
+  filter: blur(2px);
   transition: opacity 0.4s ease-out;
   z-index: -1;
 }
@@ -91,7 +92,10 @@ body {
 }
 .btn-fill:hover {
   transform: scale(1.04);
-  box-shadow: 0 8px 40px rgba(212, 160, 23, 0.55), 0 0 0 1px rgba(212, 160, 23, 0.25);
+  box-shadow:
+    0 0 20px rgba(212, 160, 23, 0.7),
+    0 0 40px rgba(212, 160, 23, 0.5),
+    0 0 70px rgba(212, 160, 23, 0.3);
 }
 .btn-fill:disabled {
   opacity: 0.5;
