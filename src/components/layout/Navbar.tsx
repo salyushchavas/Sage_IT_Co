@@ -63,13 +63,14 @@ export default function Navbar() {
       <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 group">
-          <div className="logo-glow relative w-12 h-12 transition-transform duration-300 group-hover:scale-110">
+          <div className="logo-glow relative w-12 h-12 overflow-hidden transition-transform duration-300 group-hover:scale-110">
             <Image
               src="/sage_logo.png"
               alt="Sage IT Co"
               fill
               priority
-              className="object-contain drop-shadow-[0_0_15px_rgba(15,81,50,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(212,160,23,0.4)]"
+              className="object-cover object-top scale-[1.35] drop-shadow-[0_0_15px_rgba(15,81,50,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(212,160,23,0.4)]"
+              style={{ objectPosition: "center 22%" }}
             />
           </div>
         </Link>
