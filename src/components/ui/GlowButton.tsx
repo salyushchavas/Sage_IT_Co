@@ -27,9 +27,9 @@ export default function GlowButton({
 
   const variants = {
     primary:
-      "bg-sage-green text-white shadow-[0_4px_20px_rgba(15,81,50,0.25)] hover:shadow-[0_0_20px_rgba(255,215,0,0.85),0_0_40px_rgba(255,215,0,0.6),0_0_70px_rgba(255,215,0,0.35)]",
+      "bg-sage-green text-white shadow-[0_4px_20px_rgba(15,81,50,0.25)]",
     secondary:
-      "bg-white border-2 border-sage-green text-sage-green hover:shadow-[0_0_20px_rgba(255,215,0,0.75),0_0_40px_rgba(255,215,0,0.5),0_0_70px_rgba(255,215,0,0.3)]",
+      "bg-white border-2 border-sage-green text-sage-green",
   };
 
   const classes = cn(base, variants[variant], className);
