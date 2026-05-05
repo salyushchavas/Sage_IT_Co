@@ -42,6 +42,40 @@ body {
   color: #0F5132;
 }
 
+/* Rotating border-light glow for logo */
+.logo-glow {
+  position: relative;
+  border-radius: 14px;
+}
+.logo-glow::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  padding: 2px;
+  background: conic-gradient(
+    from 0deg,
+    transparent 0deg,
+    rgba(212, 160, 23, 0) 40deg,
+    rgba(212, 160, 23, 0.9) 70deg,
+    #FFE066 90deg,
+    rgba(212, 160, 23, 0.9) 110deg,
+    rgba(212, 160, 23, 0) 140deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+          mask-composite: exclude;
+  animation: logo-glow-spin 3s linear infinite;
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(212, 160, 23, 0.6));
+}
+@keyframes logo-glow-spin {
+  to { transform: rotate(360deg); }
+}
+
 @layer components {
   .glass {
     @apply bg-white/70 backdrop-blur-xl border border-zinc-200 rounded-2xl shadow-soft;
