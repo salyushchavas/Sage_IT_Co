@@ -1,12 +1,18 @@
 // Navigation links
 export const navLinks = [
   { label: "Home", href: "/" },
-  { label: "About", href: "/about" },
   { label: "Services", href: "/services" },
   { label: "Solutions", href: "/solutions" },
   { label: "Portfolio", href: "/portfolio" },
+  { label: "About", href: "/about" },
   { label: "Careers", href: "/careers" },
   { label: "Contact", href: "/contact" },
+];
+
+export const learnLinks = [
+  { label: "Courses",    href: "/courses",    desc: "Hands-on technology training" },
+  { label: "Categories", href: "/categories", desc: "Browse all learning paths" },
+  { label: "Pricing",    href: "/pricing",    desc: "Plans for individuals & teams" },
 ];
 
 // Services

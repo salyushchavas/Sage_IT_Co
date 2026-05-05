@@ -1,6 +1,6 @@
 "use client";
 
-import { navLinks } from "@/lib/data";
+import { navLinks, learnLinks } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { AnimatePresence, motion } from "framer-motion";
@@ -10,19 +10,15 @@ import { usePathname } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
 import GlowButton from "../ui/GlowButton";
 
-const lmsLinks = [
-  { label: "Courses", href: "/courses" },
-  { label: "Categories", href: "/categories" },
-  { label: "Pricing", href: "/pricing" },
-];
-
 export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [learnOpen, setLearnOpen] = useState(false);
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const menuRef = useRef<HTMLDivElement>(null);
+  const learnRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -40,13 +36,21 @@ export default function Navbar() {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
       }
+      if (learnRef.current && !learnRef.current.contains(e.target as Node)) {
+        setLearnOpen(false);
+      }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const allLinks = [...navLinks, ...lmsLinks];
+  useEffect(() => {
+    setLearnOpen(false);
+  }, [pathname]);
+
+  const allLinks = [...navLinks, ...learnLinks];
   const isAdmin = user?.role?.toUpperCase() === "ADMIN";
+  const learnActive = learnLinks.some((l) => pathname === l.href);
 
   return (
     <motion.nav
@@ -74,46 +78,129 @@ export default function Navbar() {
           </div>
         </Link>
 
-        {/* Desktop links */}
+        {/* Desktop links — sliding active pill + animated underline */}
         <div className="hidden lg:flex items-center gap-1">
-          {allLinks.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={cn(
-                "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
-                pathname === link.href
-                  ? "text-neon-blue bg-neon-blue/10"
-                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
-              )}
+          {navLinks.map((link) => {
+            const active = pathname === link.href;
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className="relative group px-4 py-2 text-sm font-medium transition-colors duration-300"
+              >
+                {active && (
+                  <motion.span
+                    layoutId="nav-pill"
+                    className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                  />
+                )}
+                <span className={cn("relative z-10", active ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+                  {link.label}
+                </span>
+                <span
+                  className={cn(
+                    "absolute left-4 right-4 -bottom-0.5 h-px origin-center scale-x-0 bg-gradient-to-r from-transparent via-yellow-600 to-transparent transition-transform duration-300",
+                    !active && "group-hover:scale-x-100"
+                  )}
+                />
+              </Link>
+            );
+          })}
+
+          {/* Learn dropdown */}
+          <div className="relative" ref={learnRef}>
+            <button
+              onClick={() => setLearnOpen((v) => !v)}
+              className="relative group px-4 py-2 text-sm font-medium transition-colors duration-300 flex items-center gap-1"
             >
-              {link.label}
-            </Link>
-          ))}
+              {learnActive && (
+                <motion.span
+                  layoutId="nav-pill"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className={cn("relative z-10", learnActive ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+                Learn
+              </span>
+              <motion.svg
+                width="10" height="10" viewBox="0 0 10 10"
+                className={cn("relative z-10", learnActive ? "text-emerald-900" : "text-zinc-500")}
+                animate={{ rotate: learnOpen ? 180 : 0 }}
+                transition={{ duration: 0.25 }}
+              >
+                <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </motion.svg>
+            </button>
+            <AnimatePresence>
+              {learnOpen && (
+                <motion.div
+                  className="absolute left-0 top-full mt-2 w-72 glass rounded-2xl p-2 shadow-xl border border-emerald-900/10"
+                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  {learnLinks.map((l, i) => (
+                    <motion.div
+                      key={l.href}
+                      initial={{ opacity: 0, x: -8 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      transition={{ delay: 0.05 + i * 0.05 }}
+                    >
+                      <Link
+                        href={l.href}
+                        onClick={() => setLearnOpen(false)}
+                        className="block px-3 py-2.5 rounded-xl hover:bg-white/70 transition-colors group"
+                      >
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="text-sm font-semibold text-zinc-900 group-hover:text-emerald-900 transition-colors">
+                            {l.label}
+                          </span>
+                          <span className="text-yellow-700 opacity-0 group-hover:opacity-100 transition-opacity text-xs">→</span>
+                        </div>
+                        <p className="text-xs text-zinc-500 mt-0.5">{l.desc}</p>
+                      </Link>
+                    </motion.div>
+                  ))}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
+
           {isAuthenticated && (
             <Link
               href="/dashboard"
-              className={cn(
-                "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
-                pathname === "/dashboard"
-                  ? "text-neon-blue bg-neon-blue/10"
-                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
-              )}
+              className="relative group px-4 py-2 text-sm font-medium transition-colors duration-300"
             >
-              Dashboard
+              {pathname === "/dashboard" && (
+                <motion.span
+                  layoutId="nav-pill"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className={cn("relative z-10", pathname === "/dashboard" ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+                Dashboard
+              </span>
             </Link>
           )}
           {isAdmin && (
             <Link
               href="/admin"
-              className={cn(
-                "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
-                pathname === "/admin"
-                  ? "text-neon-violet bg-neon-violet/10"
-                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
-              )}
+              className="relative group px-4 py-2 text-sm font-medium transition-colors duration-300"
             >
-              Admin
+              {pathname === "/admin" && (
+                <motion.span
+                  layoutId="nav-pill"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                />
+              )}
+              <span className={cn("relative z-10", pathname === "/admin" ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+                Admin
+              </span>
             </Link>
           )}
         </div>

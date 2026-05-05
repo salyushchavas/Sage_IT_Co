@@ -6,18 +6,19 @@ import ClientLogos from "@/components/sections/ClientLogos";
 import Testimonials from "@/components/sections/Testimonials";
 import PortfolioPreview from "@/components/sections/PortfolioPreview";
 import CTA from "@/components/sections/CTA";
+import Reveal from "@/components/ui/Reveal";
 
 export default function Home() {
   return (
     <>
       <Hero />
-      <AboutPreview />
-      <ServicesPreview />
-      <SolutionsPreview />
-      <ClientLogos />
-      <Testimonials />
-      <PortfolioPreview />
-      <CTA />
+      <Reveal direction="up"><AboutPreview /></Reveal>
+      <Reveal direction="up"><ServicesPreview /></Reveal>
+      <Reveal direction="up"><SolutionsPreview /></Reveal>
+      <Reveal direction="fade"><ClientLogos /></Reveal>
+      <Reveal direction="up"><Testimonials /></Reveal>
+      <Reveal direction="up"><PortfolioPreview /></Reveal>
+      <Reveal direction="scale"><CTA /></Reveal>
     </>
   );
 }

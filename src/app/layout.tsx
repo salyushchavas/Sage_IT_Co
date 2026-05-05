@@ -4,6 +4,7 @@ import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
 import Footer from "@/components/layout/Footer";
 import ClientProviders from "@/components/layout/ClientProviders";
+import PageTransition from "@/components/layout/PageTransition";
 import { AuthProvider } from "@/lib/auth-context";
 
 const geistSans = localFont({
@@ -37,7 +38,9 @@ export default function RootLayout({
         <AuthProvider>
           <ClientProviders />
           <Navbar />
-          <main className="min-h-screen">{children}</main>
+          <main className="min-h-screen">
+            <PageTransition>{children}</PageTransition>
+          </main>
           <Footer />
         </AuthProvider>
       </body>
