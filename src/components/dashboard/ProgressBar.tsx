@@ -14,10 +14,10 @@ export default function ProgressBar({ value, label, className }: ProgressBarProp
 
   const gradient =
     clamped < 30
-      ? "from-[#06b6d4] to-[#00d4ff]"
+      ? "from-[#14653F] to-[#22C55E]"
       : clamped < 70
-        ? "from-[#00d4ff] to-[#7c3aed]"
-        : "from-[#7c3aed] to-[#00d4ff]";
+        ? "from-[#22C55E] to-[#E5B62E]"
+        : "from-[#E5B62E] to-[#22C55E]";
 
   const glowColor =
     clamped < 30

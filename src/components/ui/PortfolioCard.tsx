@@ -13,7 +13,7 @@ interface PortfolioCardProps {
 export default function PortfolioCard({ item, index }: PortfolioCardProps) {
   return (
     <motion.div variants={fadeUp} custom={index}>
-      <GlassCard hover3D glowColor="#06b6d4" className="p-0 overflow-hidden h-full">
+      <GlassCard hover3D glowColor="#14653F" className="p-0 overflow-hidden h-full">
         {/* Gradient header */}
         <div className="h-48 relative bg-gradient-to-br from-neon-blue/20 via-neon-violet/20 to-neon-cyan/20 flex items-center justify-center">
           <span className="text-6xl opacity-30">

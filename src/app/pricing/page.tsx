@@ -48,7 +48,7 @@ export default function PricingPage() {
             router.push("/dashboard");
           } catch { alert("Payment verification failed. Contact support."); }
         },
-        theme: { color: "#7c3aed" },
+        theme: { color: "#E5B62E" },
       };
 
       const rzp = new window.Razorpay(options);
@@ -84,12 +84,12 @@ export default function PricingPage() {
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-16">
-          <span className="inline-flex items-center gap-1.5 text-sm text-[#00d4ff] font-medium mb-4">
+          <span className="inline-flex items-center gap-1.5 text-sm text-[#22C55E] font-medium mb-4">
             <Sparkles className="w-4 h-4" /> Pricing
           </span>
           <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4">
             Choose your{" "}
-            <span className="bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] bg-clip-text text-transparent">plan</span>
+            <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">plan</span>
           </h1>
           <p className="text-zinc-400 max-w-lg mx-auto">
             Start for free and upgrade as you grow. Cancel anytime.
@@ -103,11 +103,11 @@ export default function PricingPage() {
               className={cn(
                 "bg-white/5 backdrop-blur-xl border rounded-2xl p-8 relative flex flex-col",
                 tier.highlighted
-                  ? "border-[#7c3aed]/50 shadow-[0_0_40px_rgba(124,58,237,0.15)]"
+                  ? "border-[#E5B62E]/50 shadow-[0_0_40px_rgba(124,58,237,0.15)]"
                   : "border-white/10"
               )}>
               {tier.highlighted && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-[#7c3aed] to-[#00d4ff] text-white text-xs font-semibold">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white text-xs font-semibold">
                   Most Popular
                 </span>
               )}
@@ -126,7 +126,7 @@ export default function PricingPage() {
               <ul className="space-y-3 mb-8 flex-1">
                 {tier.features.map((f) => (
                   <li key={f} className="flex items-center gap-2 text-sm text-zinc-300">
-                    <Check className="w-4 h-4 text-[#00d4ff] shrink-0" /> {f}
+                    <Check className="w-4 h-4 text-[#22C55E] shrink-0" /> {f}
                   </li>
                 ))}
               </ul>
@@ -137,8 +137,8 @@ export default function PricingPage() {
                 className={cn(
                   "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
                   tier.highlighted
-                    ? "bg-gradient-to-r from-[#00d4ff] via-[#7c3aed] to-[#06b6d4] text-white hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:scale-[1.02]"
-                    : "bg-white/5 border border-white/10 text-white hover:border-[#00d4ff]/30 hover:bg-white/10",
+                    ? "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-white hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:scale-[1.02]"
+                    : "bg-white/5 border border-white/10 text-white hover:border-[#22C55E]/30 hover:bg-white/10",
                   "disabled:opacity-50"
                 )}
               >
@@ -170,7 +170,7 @@ export default function PricingPage() {
                       {tierFeatureSet.map((set, i) => (
                         <td key={i} className="px-6 py-3 text-center">
                           {set.has(f)
-                            ? <Check className="w-4 h-4 text-[#00d4ff] mx-auto" />
+                            ? <Check className="w-4 h-4 text-[#22C55E] mx-auto" />
                             : <X className="w-4 h-4 text-zinc-700 mx-auto" />}
                         </td>
                       ))}

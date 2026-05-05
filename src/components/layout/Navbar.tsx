@@ -4,6 +4,7 @@ import { navLinks } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { AnimatePresence, motion } from "framer-motion";
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState, useRef } from "react";
@@ -61,13 +62,16 @@ export default function Navbar() {
     >
       <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
         {/* Logo */}
-        <Link href="/" className="flex items-center gap-3 group">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center font-bold text-white text-lg shadow-glow-blue group-hover:shadow-glow-violet transition-shadow duration-300">
-            S
+        <Link href="/" className="flex items-center gap-2 group">
+          <div className="relative w-12 h-12 transition-transform duration-300 group-hover:scale-110">
+            <Image
+              src="/sage_logo_white.png"
+              alt="Sage IT Co"
+              fill
+              priority
+              className="object-contain drop-shadow-[0_0_15px_rgba(34,197,94,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(229,182,46,0.4)]"
+            />
           </div>
-          <span className="text-xl font-bold text-white">
-            Sage<span className="text-gradient"> IT</span>
-          </span>
         </Link>
 
         {/* Desktop links */}

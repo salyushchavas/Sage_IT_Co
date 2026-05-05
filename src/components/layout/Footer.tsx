@@ -1,4 +1,5 @@
 import { navLinks, socialLinks } from "@/lib/data";
+import Image from "next/image";
 import Link from "next/link";
 
 export default function Footer() {
@@ -8,13 +9,15 @@ export default function Footer() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12">
           {/* Brand */}
           <div>
-            <Link href="/" className="flex items-center gap-3 mb-4">
-              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center font-bold text-white text-lg">
-                S
+            <Link href="/" className="inline-block mb-4">
+              <div className="relative w-32 h-32">
+                <Image
+                  src="/sage_logo_white.png"
+                  alt="Sage IT Co"
+                  fill
+                  className="object-contain drop-shadow-[0_0_20px_rgba(34,197,94,0.25)]"
+                />
               </div>
-              <span className="text-xl font-bold text-white">
-                Sage<span className="text-gradient"> IT</span>
-              </span>
             </Link>
             <p className="text-zinc-400 text-sm leading-relaxed">
               Engineering Intelligence. Empowering Growth. We deliver next-gen technology solutions for enterprises worldwide.

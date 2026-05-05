@@ -29,7 +29,7 @@ export async function POST(req: NextRequest) {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a1a; color: #e4e4e7; padding: 32px; border-radius: 16px;">
           <div style="text-align: center; margin-bottom: 24px;">
-            <h1 style="color: #00d4ff; margin: 0; font-size: 24px;">New Contact Inquiry</h1>
+            <h1 style="color: #22C55E; margin: 0; font-size: 24px;">New Contact Inquiry</h1>
             <p style="color: #71717a; font-size: 14px; margin-top: 4px;">Sage IT Website — Contact Form</p>
           </div>
 
@@ -40,8 +40,8 @@ export async function POST(req: NextRequest) {
             </tr>
             <tr>
               <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; color: #a1a1aa; font-size: 13px;">Email</td>
-              <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; color: #00d4ff; font-size: 14px;">
-                <a href="mailto:${email}" style="color: #00d4ff; text-decoration: none;">${email}</a>
+              <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; color: #22C55E; font-size: 14px;">
+                <a href="mailto:${email}" style="color: #22C55E; text-decoration: none;">${email}</a>
               </td>
             </tr>
             ${company ? `
@@ -53,7 +53,7 @@ export async function POST(req: NextRequest) {
             ${service ? `
             <tr>
               <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; color: #a1a1aa; font-size: 13px;">Service</td>
-              <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; color: #7c3aed; font-size: 14px;">${service}</td>
+              <td style="padding: 12px 16px; border-bottom: 1px solid #27272a; color: #E5B62E; font-size: 14px;">${service}</td>
             </tr>
             ` : ""}
           </table>
@@ -78,7 +78,7 @@ export async function POST(req: NextRequest) {
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; background: #0a0a1a; color: #e4e4e7; padding: 32px; border-radius: 16px;">
           <div style="text-align: center; margin-bottom: 24px;">
-            <h1 style="color: #00d4ff; margin: 0; font-size: 24px;">Thank You, ${firstName}!</h1>
+            <h1 style="color: #22C55E; margin: 0; font-size: 24px;">Thank You, ${firstName}!</h1>
           </div>
 
           <p style="color: #a1a1aa; font-size: 14px; line-height: 1.7;">
@@ -86,12 +86,12 @@ export async function POST(req: NextRequest) {
           </p>
 
           <p style="color: #a1a1aa; font-size: 14px; line-height: 1.7;">
-            In the meantime, feel free to explore our <a href="https://sageitco.com/services" style="color: #00d4ff; text-decoration: none;">services</a>
-            or check out our <a href="https://sageitco.com/portfolio" style="color: #00d4ff; text-decoration: none;">portfolio</a>.
+            In the meantime, feel free to explore our <a href="https://sageitco.com/services" style="color: #22C55E; text-decoration: none;">services</a>
+            or check out our <a href="https://sageitco.com/portfolio" style="color: #22C55E; text-decoration: none;">portfolio</a>.
           </p>
 
           <div style="text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid #27272a;">
-            <p style="color: #7c3aed; font-weight: 600; font-size: 16px; margin: 0;">Sage IT</p>
+            <p style="color: #E5B62E; font-weight: 600; font-size: 16px; margin: 0;">Sage IT</p>
             <p style="color: #52525b; font-size: 12px; margin: 4px 0 0 0;">Engineering Intelligence. Empowering Growth.</p>
           </div>
         </div>

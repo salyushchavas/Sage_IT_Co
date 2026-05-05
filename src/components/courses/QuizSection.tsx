@@ -99,7 +99,7 @@ export default function QuizSection({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 text-[#00d4ff] animate-spin" />
+        <Loader2 className="w-6 h-6 text-[#22C55E] animate-spin" />
       </div>
     );
   }
@@ -115,7 +115,7 @@ export default function QuizSection({
       className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 space-y-6"
     >
       <div className="flex items-center gap-2">
-        <BrainCircuit className="w-5 h-5 text-[#7c3aed]" />
+        <BrainCircuit className="w-5 h-5 text-[#E5B62E]" />
         <h3 className="text-white font-semibold">{quiz.title}</h3>
       </div>
 
@@ -161,7 +161,7 @@ export default function QuizSection({
         {quiz.questions.map((q, qi) => (
           <div key={q.id} className="space-y-3">
             <p className="text-white text-sm font-medium">
-              <span className="text-[#00d4ff] mr-2">{qi + 1}.</span>
+              <span className="text-[#22C55E] mr-2">{qi + 1}.</span>
               {q.questionText}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -176,11 +176,11 @@ export default function QuizSection({
                     disabled={!!result}
                     className={`text-left px-4 py-3 rounded-xl border text-sm transition-all ${
                       selected
-                        ? "bg-[#00d4ff]/15 border-[#00d4ff]/40 text-white"
+                        ? "bg-[#22C55E]/15 border-[#22C55E]/40 text-white"
                         : "bg-white/5 border-white/10 text-zinc-400 hover:border-white/20 hover:text-white"
                     } disabled:cursor-default`}
                   >
-                    <span className="font-semibold mr-2 text-[#00d4ff]">{opt}.</span>
+                    <span className="font-semibold mr-2 text-[#22C55E]">{opt}.</span>
                     {value}
                   </button>
                 );
@@ -196,7 +196,7 @@ export default function QuizSection({
         <button
           onClick={handleSubmit}
           disabled={!allAnswered || submitting}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#00d4ff] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {submitting ? (
             <>

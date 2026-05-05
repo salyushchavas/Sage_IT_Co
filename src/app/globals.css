@@ -24,7 +24,7 @@ body {
   overflow-x: hidden;
 }
 
-/* Custom scrollbar */
+/* Custom scrollbar — sage green to gold */
 ::-webkit-scrollbar {
   width: 6px;
 }
@@ -32,13 +32,13 @@ body {
   background: #050510;
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #00d4ff, #7c3aed);
+  background: linear-gradient(180deg, #22C55E, #E5B62E);
   border-radius: 3px;
 }
 
-/* Selection */
+/* Selection — warm gold */
 ::selection {
-  background: rgba(124, 58, 237, 0.4);
+  background: rgba(229, 182, 46, 0.4);
   color: #fff;
 }
 
@@ -52,17 +52,17 @@ body {
   }
 
   .glow-border {
-    @apply border border-neon-blue/20 hover:border-neon-blue/50 transition-all duration-500;
+    @apply border border-sage-green/20 hover:border-sage-green/50 transition-all duration-500;
   }
 
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-neon-blue via-neon-violet to-neon-cyan;
+    @apply bg-clip-text text-transparent bg-gradient-to-r from-sage-green via-sage-gold to-sage-green-deep;
   }
 
   .bg-grid {
     background-image:
-      linear-gradient(rgba(0, 212, 255, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(0, 212, 255, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(34, 197, 94, 0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(34, 197, 94, 0.03) 1px, transparent 1px);
     background-size: 60px 60px;
   }
 }

@@ -5,7 +5,7 @@ import GlassCard from "./GlassCard";
 
 export default function TestimonialCard({ testimonial }: { testimonial: Testimonial }) {
   return (
-    <GlassCard className="p-8 h-full" glowColor="#7c3aed">
+    <GlassCard className="p-8 h-full" glowColor="#E5B62E">
       <div className="flex items-center gap-4 mb-6">
         <div className="w-12 h-12 rounded-full bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center text-white font-bold text-sm">
           {testimonial.avatar}

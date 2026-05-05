@@ -62,13 +62,15 @@ function Nodes() {
           linePositions[lineIndex * 6 + 4] = positions[j * 3 + 1];
           linePositions[lineIndex * 6 + 5] = positions[j * 3 + 2];
 
-          // Neon blue-violet color
-          lineColors[lineIndex * 6] = 0;
-          lineColors[lineIndex * 6 + 1] = 0.83 * alpha;
-          lineColors[lineIndex * 6 + 2] = 1 * alpha;
-          lineColors[lineIndex * 6 + 3] = 0.49 * alpha;
-          lineColors[lineIndex * 6 + 4] = 0.23 * alpha;
-          lineColors[lineIndex * 6 + 5] = 0.93 * alpha;
+          // Sage green to warm gold gradient
+          // #22C55E = rgb(0.133, 0.773, 0.369)
+          lineColors[lineIndex * 6] = 0.133 * alpha;
+          lineColors[lineIndex * 6 + 1] = 0.773 * alpha;
+          lineColors[lineIndex * 6 + 2] = 0.369 * alpha;
+          // #E5B62E = rgb(0.898, 0.714, 0.180)
+          lineColors[lineIndex * 6 + 3] = 0.898 * alpha;
+          lineColors[lineIndex * 6 + 4] = 0.714 * alpha;
+          lineColors[lineIndex * 6 + 5] = 0.180 * alpha;
 
           lineIndex++;
         }
@@ -97,7 +99,7 @@ function Nodes() {
             args={[positions, 3]}
           />
         </bufferGeometry>
-        <pointsMaterial size={0.06} color="#00d4ff" transparent opacity={0.8} sizeAttenuation />
+        <pointsMaterial size={0.06} color="#22C55E" transparent opacity={0.8} sizeAttenuation />
       </points>
 
       {/* Connections */}

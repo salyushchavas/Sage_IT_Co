@@ -64,10 +64,10 @@ export default function LessonItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
       onClick={() => onClick?.(id)}
-      className="group flex items-center gap-4 p-4 rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 hover:border-[#00d4ff]/20 transition-all cursor-pointer"
+      className="group flex items-center gap-4 p-4 rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 hover:border-[#22C55E]/20 transition-all cursor-pointer"
     >
       {/* Order number */}
-      <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-[#7c3aed]/30 to-[#00d4ff]/20 flex items-center justify-center text-white font-semibold text-sm">
+      <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-white font-semibold text-sm">
         {orderIndex}
       </div>
 
@@ -118,7 +118,7 @@ export default function LessonItem({
               e.stopPropagation();
               onClick(id);
             }}
-            className="p-2 rounded-lg bg-[#00d4ff]/10 border border-[#00d4ff]/20 text-[#00d4ff] hover:bg-[#00d4ff]/20 transition-colors"
+            className="p-2 rounded-lg bg-[#22C55E]/10 border border-[#22C55E]/20 text-[#22C55E] hover:bg-[#22C55E]/20 transition-colors"
             title="Play lesson"
           >
             <Play className="w-4 h-4" />

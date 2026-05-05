@@ -96,7 +96,7 @@ export default function DashboardPage() {
   };
 
   if (authLoading || loading) {
-    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#00d4ff]" /></div>;
+    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#22C55E]" /></div>;
   }
 
   return (
@@ -105,7 +105,7 @@ export default function DashboardPage() {
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
           <h1 className="text-3xl font-bold text-white mb-1">
-            Welcome back, <span className="bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] bg-clip-text text-transparent">{user?.fullName}</span>
+            Welcome back, <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">{user?.fullName}</span>
           </h1>
           <p className="text-zinc-400 text-sm">
             {isAdmin ? "Admin Dashboard" : isInstructor ? "Instructor Dashboard" : "Student Dashboard"}
@@ -118,15 +118,15 @@ export default function DashboardPage() {
           <div className="md:col-span-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
-                <p className="text-2xl font-bold text-[#00d4ff]">{enrollments.length}</p>
+                <p className="text-2xl font-bold text-[#22C55E]">{enrollments.length}</p>
                 <p className="text-xs text-zinc-500 mt-1">Enrolled Courses</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#7c3aed]">{myCourses.length}</p>
+                <p className="text-2xl font-bold text-[#E5B62E]">{myCourses.length}</p>
                 <p className="text-xs text-zinc-500 mt-1">{isInstructor || isAdmin ? "My Courses" : "Completed"}</p>
               </div>
               <div>
-                <p className="text-2xl font-bold text-[#06b6d4]">{students.length}</p>
+                <p className="text-2xl font-bold text-[#14653F]">{students.length}</p>
                 <p className="text-xs text-zinc-500 mt-1">{isInstructor || isAdmin ? "Students" : "Certificates"}</p>
               </div>
             </div>
@@ -135,7 +135,7 @@ export default function DashboardPage() {
 
         {/* Admin link */}
         {isAdmin && (
-          <Link href="/admin" className="inline-flex items-center gap-2 mb-8 px-5 py-2.5 rounded-xl bg-[#7c3aed]/20 border border-[#7c3aed]/30 text-[#7c3aed] text-sm font-medium hover:bg-[#7c3aed]/30 transition-colors">
+          <Link href="/admin" className="inline-flex items-center gap-2 mb-8 px-5 py-2.5 rounded-xl bg-[#E5B62E]/20 border border-[#E5B62E]/30 text-[#E5B62E] text-sm font-medium hover:bg-[#E5B62E]/30 transition-colors">
             <ShieldCheck className="w-4 h-4" /> Go to Admin Panel
           </Link>
         )}
@@ -143,7 +143,7 @@ export default function DashboardPage() {
         {/* Enrolled Courses */}
         <div className="mb-12">
           <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-            <GraduationCap className="w-5 h-5 text-[#00d4ff]" /> Enrolled Courses
+            <GraduationCap className="w-5 h-5 text-[#22C55E]" /> Enrolled Courses
           </h2>
           <EnrolledCourses enrollments={enrollments} />
         </div>
@@ -154,7 +154,7 @@ export default function DashboardPage() {
             <h3 className="text-lg font-semibold text-white mb-2">Become an Instructor</h3>
             <p className="text-sm text-zinc-400 mb-4">Share your knowledge and create courses on Sage IT.</p>
             <button onClick={handleRequestInstructor} disabled={requestingInstructor}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] text-white text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(0,212,255,0.2)] transition">
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-white text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(0,212,255,0.2)] transition">
               {requestingInstructor ? "Submitting..." : "Request Instructor Access"}
             </button>
             {instructorMsg && <p className={cn("text-xs mt-3", instructorMsg.includes("submitted") ? "text-green-400" : "text-red-400")}>{instructorMsg}</p>}
@@ -166,9 +166,9 @@ export default function DashboardPage() {
           <div className="mb-12">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-bold text-white flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-[#7c3aed]" /> My Courses
+                <BookOpen className="w-5 h-5 text-[#E5B62E]" /> My Courses
               </h2>
-              <Link href="/courses/create" className="flex items-center gap-1.5 text-sm font-medium text-[#00d4ff] hover:text-[#06b6d4] transition-colors">
+              <Link href="/courses/create" className="flex items-center gap-1.5 text-sm font-medium text-[#22C55E] hover:text-[#14653F] transition-colors">
                 <Plus className="w-4 h-4" /> Create Course
               </Link>
             </div>
@@ -183,11 +183,11 @@ export default function DashboardPage() {
                 {myCourses.map((course) => (
                   <motion.div key={course.id} variants={fadeUp}
                     className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#7c3aed]/30 to-[#00d4ff]/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
                       {course.title.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <Link href={`/courses/${course.id}`} className="text-sm font-semibold text-white hover:text-[#00d4ff] transition-colors truncate block">
+                      <Link href={`/courses/${course.id}`} className="text-sm font-semibold text-white hover:text-[#22C55E] transition-colors truncate block">
                         {course.title}
                       </Link>
                       <div className="flex items-center gap-3 text-xs text-zinc-500 mt-0.5">
@@ -220,7 +220,7 @@ export default function DashboardPage() {
         {(isInstructor || isAdmin) && students.length > 0 && (
           <div>
             <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
-              <Users className="w-5 h-5 text-[#06b6d4]" /> Your Students
+              <Users className="w-5 h-5 text-[#14653F]" /> Your Students
             </h2>
             <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
               <div className="overflow-x-auto">

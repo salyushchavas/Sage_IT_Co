@@ -40,7 +40,7 @@ const supportOptions = [
     description: "Get help via email within 24 hours",
     action: "support@sageit.com",
     href: "mailto:support@sageit.com",
-    color: "#00d4ff",
+    color: "#22C55E",
   },
   {
     icon: MessageCircle,
@@ -48,7 +48,7 @@ const supportOptions = [
     description: "Chat with us in real-time during business hours",
     action: "Start Chat",
     href: "#",
-    color: "#7c3aed",
+    color: "#E5B62E",
   },
   {
     icon: FileText,
@@ -56,7 +56,7 @@ const supportOptions = [
     description: "Browse our comprehensive knowledge base",
     action: "View Docs",
     href: "#",
-    color: "#06b6d4",
+    color: "#14653F",
   },
 ];
 
@@ -68,12 +68,12 @@ export default function SupportPage() {
       <div className="mx-auto max-w-4xl">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-16">
-          <span className="inline-flex items-center gap-1.5 text-sm text-[#00d4ff] font-medium mb-4">
+          <span className="inline-flex items-center gap-1.5 text-sm text-[#22C55E] font-medium mb-4">
             <HelpCircle className="w-4 h-4" /> Support
           </span>
           <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4">
             How can we{" "}
-            <span className="bg-gradient-to-r from-[#00d4ff] to-[#7c3aed] bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">
               help?
             </span>
           </h1>
@@ -101,7 +101,7 @@ export default function SupportPage() {
                 </div>
                 <h3 className="text-white font-semibold mb-1">{opt.title}</h3>
                 <p className="text-xs text-zinc-400 mb-3">{opt.description}</p>
-                <span className="text-sm font-medium text-[#00d4ff] group-hover:underline">
+                <span className="text-sm font-medium text-[#22C55E] group-hover:underline">
                   {opt.action}
                 </span>
               </motion.a>

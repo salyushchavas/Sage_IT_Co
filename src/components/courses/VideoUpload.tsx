@@ -77,7 +77,7 @@ export default function VideoUpload({
       className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 space-y-4"
     >
       <h3 className="text-white font-semibold flex items-center gap-2">
-        <Film className="w-5 h-5 text-[#00d4ff]" />
+        <Film className="w-5 h-5 text-[#22C55E]" />
         Video Upload
       </h3>
 
@@ -99,7 +99,7 @@ export default function VideoUpload({
       {/* File input area */}
       <div
         onClick={() => inputRef.current?.click()}
-        className="border-2 border-dashed border-white/10 rounded-xl p-8 text-center cursor-pointer hover:border-[#00d4ff]/30 transition-colors"
+        className="border-2 border-dashed border-white/10 rounded-xl p-8 text-center cursor-pointer hover:border-[#22C55E]/30 transition-colors"
       >
         <Upload className="w-8 h-8 text-zinc-500 mx-auto mb-2" />
         <p className="text-zinc-400 text-sm">
@@ -127,7 +127,7 @@ export default function VideoUpload({
         <button
           onClick={handleUpload}
           disabled={!file || uploading}
-          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#7c3aed] to-[#00d4ff] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {uploading ? (
             <>

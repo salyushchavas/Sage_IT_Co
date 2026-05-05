@@ -199,15 +199,15 @@ export default function DRMVideoPlayer({
           step={0.1}
           value={currentTime}
           onChange={handleSeek}
-          className="w-full h-1 mb-3 appearance-none bg-white/20 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#00d4ff]"
+          className="w-full h-1 mb-3 appearance-none bg-white/20 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#22C55E]"
           style={{
-            background: `linear-gradient(to right, #00d4ff ${progress}%, rgba(255,255,255,0.2) ${progress}%)`,
+            background: `linear-gradient(to right, #22C55E ${progress}%, rgba(255,255,255,0.2) ${progress}%)`,
           }}
         />
 
         <div className="flex items-center gap-3">
           {/* Play/Pause */}
-          <button onClick={togglePlay} className="text-white hover:text-[#00d4ff] transition">
+          <button onClick={togglePlay} className="text-white hover:text-[#22C55E] transition">
             {playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
           </button>
 
@@ -219,7 +219,7 @@ export default function DRMVideoPlayer({
           <div className="flex-1" />
 
           {/* Volume */}
-          <button onClick={toggleMute} className="text-white hover:text-[#00d4ff] transition">
+          <button onClick={toggleMute} className="text-white hover:text-[#22C55E] transition">
             {muted || volume === 0 ? (
               <VolumeX className="w-5 h-5" />
             ) : (
@@ -237,7 +237,7 @@ export default function DRMVideoPlayer({
           />
 
           {/* Fullscreen */}
-          <button onClick={toggleFullscreen} className="text-white hover:text-[#00d4ff] transition">
+          <button onClick={toggleFullscreen} className="text-white hover:text-[#22C55E] transition">
             {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
           </button>
         </div>

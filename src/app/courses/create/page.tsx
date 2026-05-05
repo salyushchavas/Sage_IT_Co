@@ -47,7 +47,7 @@ export default function CreateCoursePage() {
   };
 
   if (authLoading) {
-    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#00d4ff]" /></div>;
+    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#22C55E]" /></div>;
   }
 
   if (!isAuthenticated) { router.push("/login?redirect=/courses/create"); return null; }
@@ -75,7 +75,7 @@ export default function CreateCoursePage() {
     );
   }
 
-  const inputClass = "w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-600 outline-none focus:border-[#00d4ff]/40 focus:shadow-[0_0_12px_rgba(0,212,255,0.1)] transition-all";
+  const inputClass = "w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-600 outline-none focus:border-[#22C55E]/40 focus:shadow-[0_0_12px_rgba(0,212,255,0.1)] transition-all";
 
   return (
     <section className="min-h-screen pt-32 pb-20 px-6">
@@ -83,7 +83,7 @@ export default function CreateCoursePage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           {/* Header */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#7c3aed] to-[#00d4ff] flex items-center justify-center">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#E5B62E] to-[#22C55E] flex items-center justify-center">
               <BookPlus className="w-6 h-6 text-white" />
             </div>
             <div>
@@ -146,7 +146,7 @@ export default function CreateCoursePage() {
             <button type="submit" disabled={loading || !form.title.trim()}
               className={cn(
                 "w-full py-3.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
-                "bg-gradient-to-r from-[#00d4ff] via-[#7c3aed] to-[#06b6d4] text-white",
+                "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-white",
                 "hover:shadow-[0_0_30px_rgba(0,212,255,0.3)] hover:scale-[1.01]",
                 "disabled:opacity-50 disabled:cursor-not-allowed"
               )}>

@@ -1,6 +1,7 @@
 "use client";
 
 import { AnimatePresence, motion } from "framer-motion";
+import Image from "next/image";
 import { useEffect, useState } from "react";
 
 export default function LoadingScreen() {
@@ -21,17 +22,23 @@ export default function LoadingScreen() {
         >
           <div className="text-center">
             <motion.div
-              className="w-16 h-16 rounded-2xl bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center text-white font-bold text-2xl mx-auto mb-6"
-              animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.1, 1] }}
+              className="relative w-24 h-24 mx-auto mb-6"
+              animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.05, 1] }}
               transition={{ duration: 1.5, repeat: Infinity }}
             >
-              S
+              <Image
+                src="/sage_logo_white.png"
+                alt="Sage IT Co"
+                fill
+                priority
+                className="object-contain drop-shadow-[0_0_25px_rgba(34,197,94,0.4)]"
+              />
             </motion.div>
             <motion.div
               className="h-1 w-32 mx-auto rounded-full overflow-hidden bg-white/10"
             >
               <motion.div
-                className="h-full bg-gradient-to-r from-neon-blue to-neon-violet rounded-full"
+                className="h-full bg-gradient-to-r from-sage-green to-sage-gold rounded-full"
                 initial={{ width: "0%" }}
                 animate={{ width: "100%" }}
                 transition={{ duration: 1.3, ease: "easeInOut" }}
