@@ -67,45 +67,55 @@ body {
           mask-composite: exclude;
   pointer-events: none;
 }
-/* Gold comet — head bright, white-hot tip, fades to invisible */
+/* Gold marquee — four equally-spaced bright dashes running the border like
+   a runway / chase-light, each with a sharp white-hot core */
 .logo-glow::before {
   inset: -2px;
   padding: 2px;
   background: conic-gradient(
     from 0deg,
-    transparent 0deg 200deg,
-    rgba(212, 160, 23, 0.0) 230deg,
-    rgba(212, 160, 23, 0.55) 252deg,
-    #FFD24A 268deg,
-    #FFFFFF 274deg,
-    #FFE066 280deg,
-    rgba(212, 160, 23, 0.55) 296deg,
-    rgba(212, 160, 23, 0.0) 320deg,
-    transparent 360deg
+    /* dash 1 */
+    transparent 0deg 6deg,
+    rgba(212,160,23,0.6) 10deg,
+    #FFFFFF 14deg,
+    rgba(212,160,23,0.6) 18deg,
+    transparent 22deg 90deg,
+    /* dash 2 */
+    rgba(212,160,23,0.6) 96deg,
+    #FFFFFF 100deg,
+    rgba(212,160,23,0.6) 104deg,
+    transparent 108deg 180deg,
+    /* dash 3 */
+    rgba(212,160,23,0.6) 186deg,
+    #FFFFFF 190deg,
+    rgba(212,160,23,0.6) 194deg,
+    transparent 198deg 270deg,
+    /* dash 4 */
+    rgba(212,160,23,0.6) 276deg,
+    #FFFFFF 280deg,
+    rgba(212,160,23,0.6) 284deg,
+    transparent 288deg 360deg
   );
-  filter: drop-shadow(0 0 5px rgba(212, 160, 23, 0.75))
-          drop-shadow(0 0 10px rgba(255, 224, 102, 0.45));
-  animation: logo-glow-spin 3s linear infinite;
+  filter: drop-shadow(0 0 4px rgba(212,160,23,0.85))
+          drop-shadow(0 0 9px rgba(255,224,102,0.5));
+  animation: logo-glow-spin 4s linear infinite;
 }
-/* Emerald comet — slower, opposite direction, slightly outside */
+/* Emerald scanner blade — a single sharp thin sweep, fast and razor-edged */
 .logo-glow::after {
   inset: -4px;
   padding: 1.5px;
   background: conic-gradient(
     from 180deg,
-    transparent 0deg 230deg,
-    rgba(15, 81, 50, 0.0) 250deg,
-    rgba(15, 81, 50, 0.5) 268deg,
-    #34C77B 280deg,
-    #B4F5C9 286deg,
-    #34C77B 292deg,
-    rgba(15, 81, 50, 0.5) 308deg,
-    transparent 330deg 360deg
+    transparent 0deg 350deg,
+    rgba(52,199,123,0.0) 352deg,
+    #B4F5C9 356deg,
+    #FFFFFF 358deg,
+    #34C77B 359deg,
+    rgba(15,81,50,0.0) 360deg
   );
-  filter: drop-shadow(0 0 4px rgba(52, 199, 123, 0.6))
-          drop-shadow(0 0 8px rgba(15, 81, 50, 0.35));
-  animation: logo-glow-spin-reverse 5s linear infinite;
-  opacity: 0.9;
+  filter: drop-shadow(0 0 6px rgba(52,199,123,0.9))
+          drop-shadow(0 0 12px rgba(180,245,201,0.5));
+  animation: logo-glow-spin-reverse 2.4s linear infinite;
 }
 @keyframes logo-glow-spin {
   to { transform: rotate(360deg); }
