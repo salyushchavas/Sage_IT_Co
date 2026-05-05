@@ -77,18 +77,23 @@ body {
   isolation: isolate;
   box-shadow: 0 4px 20px rgba(15, 81, 50, 0.25);
 }
+.btn-fill {
+  --spot-x: 50%;
+  --spot-y: 50%;
+}
 .btn-fill::before {
   content: "";
   position: absolute;
   inset: 0;
-  background: linear-gradient(
-    110deg,
-    transparent 30%,
-    rgba(255, 215, 0, 0.55) 50%,
-    transparent 70%
+  background: radial-gradient(
+    circle 110px at var(--spot-x) var(--spot-y),
+    rgba(255, 215, 0, 0.65) 0%,
+    rgba(255, 215, 0, 0.35) 35%,
+    rgba(255, 215, 0, 0.15) 60%,
+    transparent 85%
   );
-  transform: translateX(-100%);
-  transition: transform 0.9s ease-out;
+  opacity: 0;
+  transition: opacity 0.2s ease-out;
   pointer-events: none;
   z-index: 0;
 }
@@ -97,10 +102,10 @@ body {
   z-index: 1;
 }
 .btn-fill:hover::before {
-  transform: translateX(100%);
+  opacity: 1;
 }
 .btn-fill:hover {
-  transform: scale(1.04);
+  transform: scale(1.03);
 }
 .btn-fill:disabled {
   opacity: 0.5;
