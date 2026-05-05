@@ -88,7 +88,7 @@ export default function QuizSection({
 
   if (!lessonCompleted) {
     return (
-      <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 flex items-center gap-3 text-zinc-500">
+      <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 flex items-center gap-3 text-zinc-500">
         <Lock className="w-5 h-5" />
         <span className="text-sm">Complete the lesson to unlock the quiz</span>
       </div>
@@ -112,11 +112,11 @@ export default function QuizSection({
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 space-y-6"
+      className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 space-y-6"
     >
       <div className="flex items-center gap-2">
         <BrainCircuit className="w-5 h-5 text-[#E5B62E]" />
-        <h3 className="text-white font-semibold">{quiz.title}</h3>
+        <h3 className="text-zinc-900 font-semibold">{quiz.title}</h3>
       </div>
 
       {/* Result banner */}
@@ -146,7 +146,7 @@ export default function QuizSection({
             {!result.passed && (
               <button
                 onClick={handleRetry}
-                className="flex items-center gap-1 text-sm text-zinc-400 hover:text-white transition-colors"
+                className="flex items-center gap-1 text-sm text-zinc-600 hover:text-zinc-900 transition-colors"
               >
                 <RotateCcw className="w-4 h-4" />
                 Retry
@@ -160,7 +160,7 @@ export default function QuizSection({
       <div className="space-y-5">
         {quiz.questions.map((q, qi) => (
           <div key={q.id} className="space-y-3">
-            <p className="text-white text-sm font-medium">
+            <p className="text-zinc-900 text-sm font-medium">
               <span className="text-[#22C55E] mr-2">{qi + 1}.</span>
               {q.questionText}
             </p>
@@ -176,8 +176,8 @@ export default function QuizSection({
                     disabled={!!result}
                     className={`text-left px-4 py-3 rounded-xl border text-sm transition-all ${
                       selected
-                        ? "bg-[#22C55E]/15 border-[#22C55E]/40 text-white"
-                        : "bg-white/5 border-white/10 text-zinc-400 hover:border-white/20 hover:text-white"
+                        ? "bg-[#22C55E]/15 border-[#22C55E]/40 text-zinc-900"
+                        : "bg-white/60 border-zinc-200 text-zinc-600 hover:border-zinc-300 hover:text-zinc-900"
                     } disabled:cursor-default`}
                   >
                     <span className="font-semibold mr-2 text-[#22C55E]">{opt}.</span>
@@ -196,7 +196,7 @@ export default function QuizSection({
         <button
           onClick={handleSubmit}
           disabled={!allAnswered || submitting}
-          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {submitting ? (
             <>

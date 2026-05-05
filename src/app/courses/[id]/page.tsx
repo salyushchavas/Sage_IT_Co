@@ -150,7 +150,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
     return (
       <div className="flex flex-col items-center justify-center min-h-screen pt-24 px-6">
         <AlertCircle className="w-12 h-12 text-red-400 mb-4" />
-        <p className="text-zinc-300 mb-4">{error || "Course not found"}</p>
+        <p className="text-zinc-500 mb-4">{error || "Course not found"}</p>
         <Link href="/courses" className="text-[#22C55E] hover:underline text-sm">Back to courses</Link>
       </div>
     );
@@ -171,8 +171,8 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
             <span className={cn("text-xs font-semibold px-2.5 py-1 rounded-full border inline-block mb-3", levelStyle[course.level] || levelStyle.BEGINNER)}>
               {course.level}
             </span>
-            <h1 className="text-3xl sm:text-4xl font-bold text-white mb-4">{course.title}</h1>
-            <p className="text-zinc-400 mb-4 leading-relaxed">{course.description || course.shortDescription}</p>
+            <h1 className="text-3xl sm:text-4xl font-bold text-zinc-900 mb-4">{course.title}</h1>
+            <p className="text-zinc-600 mb-4 leading-relaxed">{course.description || course.shortDescription}</p>
 
             <div className="flex flex-wrap items-center gap-4 text-sm text-zinc-500 mb-6">
               <span className="flex items-center gap-1"><Clock className="w-4 h-4" /> {course.durationHours}h</span>
@@ -183,11 +183,11 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
 
             {course.instructor && (
               <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#E5B62E] to-[#22C55E] flex items-center justify-center text-sm font-bold text-white">
+                <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#E5B62E] to-[#22C55E] flex items-center justify-center text-sm font-bold text-zinc-900">
                   {course.instructor.fullName.charAt(0)}
                 </div>
                 <div>
-                  <p className="text-sm font-semibold text-white">{course.instructor.fullName}</p>
+                  <p className="text-sm font-semibold text-zinc-900">{course.instructor.fullName}</p>
                   <p className="text-xs text-zinc-500">Instructor</p>
                 </div>
               </div>
@@ -195,8 +195,8 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           </div>
 
           {/* Sidebar card */}
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
-            <div className="text-3xl font-bold text-white mb-1">
+          <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6">
+            <div className="text-3xl font-bold text-zinc-900 mb-1">
               {course.isFree ? "Free" : `₹${course.price}`}
             </div>
             <p className="text-sm text-zinc-500 mb-6">{course.isFree ? "No payment required" : "One-time payment"}</p>
@@ -206,7 +206,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               disabled={enrolling}
               className={cn(
                 "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
-                "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-white",
+                "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-zinc-900",
                 "hover:shadow-[0_0_30px_rgba(0,212,255,0.3)] hover:scale-[1.02]",
                 "disabled:opacity-50"
               )}
@@ -218,10 +218,10 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               <p className={cn("text-xs mt-3 text-center", enrollMsg.includes("success") ? "text-green-400" : "text-red-400")}>{enrollMsg}</p>
             )}
 
-            <div className="mt-6 space-y-2 text-sm text-zinc-400">
-              <p>Category: <span className="text-white">{course.category}</span></p>
-              <p>Level: <span className="text-white">{course.level}</span></p>
-              <p>Lessons: <span className="text-white">{course.lessonsCount}</span></p>
+            <div className="mt-6 space-y-2 text-sm text-zinc-600">
+              <p>Category: <span className="text-zinc-900">{course.category}</span></p>
+              <p>Level: <span className="text-zinc-900">{course.level}</span></p>
+              <p>Lessons: <span className="text-zinc-900">{course.lessonsCount}</span></p>
             </div>
           </div>
         </motion.div>
@@ -229,7 +229,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
         {/* Lessons */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-2xl font-bold text-white">Course Lessons</h2>
+            <h2 className="text-2xl font-bold text-zinc-900">Course Lessons</h2>
             {canManage && (
               <button onClick={() => setShowAddLesson(!showAddLesson)} className="flex items-center gap-1.5 text-sm font-medium text-[#22C55E] hover:text-[#14653F] transition-colors">
                 <Plus className="w-4 h-4" /> Add Lesson
@@ -243,35 +243,35 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
               onSubmit={handleAddLesson}
-              className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 mb-6 space-y-4"
+              className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 mb-6 space-y-4"
             >
               <input type="text" placeholder="Lesson title *" required value={newLesson.title}
                 onChange={(e) => setNewLesson((p) => ({ ...p, title: e.target.value }))}
-                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-600 outline-none focus:border-[#22C55E]/40" />
+                className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm placeholder-zinc-400 outline-none focus:border-[#22C55E]/40" />
               <input type="text" placeholder="Description (optional)" value={newLesson.description}
                 onChange={(e) => setNewLesson((p) => ({ ...p, description: e.target.value }))}
-                className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-600 outline-none focus:border-[#22C55E]/40" />
+                className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm placeholder-zinc-400 outline-none focus:border-[#22C55E]/40" />
               <div className="grid grid-cols-2 gap-4">
                 <input type="url" placeholder="Video URL (optional)" value={newLesson.videoUrl}
                   onChange={(e) => setNewLesson((p) => ({ ...p, videoUrl: e.target.value }))}
-                  className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-600 outline-none focus:border-[#22C55E]/40" />
+                  className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm placeholder-zinc-400 outline-none focus:border-[#22C55E]/40" />
                 <input type="number" placeholder="Duration (min)" value={newLesson.durationMinutes}
                   onChange={(e) => setNewLesson((p) => ({ ...p, durationMinutes: e.target.value }))}
-                  className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm placeholder-zinc-600 outline-none focus:border-[#22C55E]/40" />
+                  className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm placeholder-zinc-400 outline-none focus:border-[#22C55E]/40" />
               </div>
-              <label className="flex items-center gap-2 text-sm text-zinc-400">
+              <label className="flex items-center gap-2 text-sm text-zinc-600">
                 <input type="checkbox" checked={newLesson.isFree}
                   onChange={(e) => setNewLesson((p) => ({ ...p, isFree: e.target.checked }))}
-                  className="rounded bg-white/10 border-white/20" />
+                  className="rounded bg-white/80 border-zinc-300" />
                 Free preview lesson
               </label>
               <div className="flex gap-3">
                 <button type="submit" disabled={addingLesson}
-                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-white text-sm font-semibold disabled:opacity-50">
+                  className="px-6 py-2.5 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-zinc-900 text-sm font-semibold disabled:opacity-50">
                   {addingLesson ? "Adding..." : "Add Lesson"}
                 </button>
                 <button type="button" onClick={() => setShowAddLesson(false)}
-                  className="px-6 py-2.5 rounded-xl border border-white/10 text-sm text-zinc-400 hover:text-white transition-colors">
+                  className="px-6 py-2.5 rounded-xl border border-zinc-200 text-sm text-zinc-600 hover:text-zinc-900 transition-colors">
                   Cancel
                 </button>
               </div>
@@ -280,7 +280,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
 
           {/* Lesson list */}
           {lessons.length === 0 ? (
-            <div className="text-center py-12 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl">
+            <div className="text-center py-12 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl">
               <BookOpen className="w-8 h-8 mx-auto text-zinc-600 mb-3" />
               <p className="text-zinc-500">No lessons yet</p>
             </div>
@@ -295,7 +295,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.05 }}
                   >
-                    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+                    <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
                       {/* Lesson header */}
                       <button
                         onClick={() => setExpandedLesson(isExpanded ? null : lesson.id)}
@@ -305,7 +305,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                           {idx + 1}
                         </div>
                         <div className="flex-1 min-w-0">
-                          <h3 className="text-sm font-semibold text-white truncate">{lesson.title}</h3>
+                          <h3 className="text-sm font-semibold text-zinc-900 truncate">{lesson.title}</h3>
                           <div className="flex items-center gap-3 text-xs text-zinc-500 mt-0.5">
                             {lesson.durationMinutes && <span>{lesson.durationMinutes} min</span>}
                             {lesson.videoUrl && <span className="flex items-center gap-1"><Video className="w-3 h-3" /> Video</span>}
@@ -325,9 +325,9 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
 
                       {/* Expanded content */}
                       {isExpanded && (
-                        <div className="px-4 pb-4 space-y-3 border-t border-white/5 pt-3">
+                        <div className="px-4 pb-4 space-y-3 border-t border-zinc-200 pt-3">
                           {lesson.description && (
-                            <p className="text-sm text-zinc-400">{lesson.description}</p>
+                            <p className="text-sm text-zinc-600">{lesson.description}</p>
                           )}
                           {lesson.videoUrl && (
                             <div className="rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center">
@@ -362,7 +362,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
         {/* Assignments */}
         {assignments.length > 0 && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mt-12">
-            <h2 className="text-2xl font-bold text-white mb-6">Assignments</h2>
+            <h2 className="text-2xl font-bold text-zinc-900 mb-6">Assignments</h2>
             <div className="space-y-3">
               {assignments.map((a, idx) => (
                 <motion.div
@@ -371,7 +371,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
                   className={cn(
-                    "bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-start gap-4",
+                    "bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-start gap-4",
                     !a.unlocked && "opacity-50"
                   )}
                 >
@@ -379,7 +379,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                     <ClipboardList className="w-4 h-4 text-[#E5B62E]" />
                   </div>
                   <div className="flex-1">
-                    <h3 className="text-sm font-semibold text-white">{a.title}</h3>
+                    <h3 className="text-sm font-semibold text-zinc-900">{a.title}</h3>
                     <p className="text-xs text-zinc-500 mt-0.5">{a.description}</p>
                     <div className="flex items-center gap-3 mt-2 text-xs text-zinc-600">
                       <span className="uppercase">{a.assignmentType}</span>
@@ -396,9 +396,9 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
         {/* Certificate */}
         {enrolled && (
           <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="mt-12">
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8 text-center">
+            <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-8 text-center">
               <Award className="w-10 h-10 text-[#22C55E] mx-auto mb-3" />
-              <h2 className="text-2xl font-bold text-white mb-2">Course Certificate</h2>
+              <h2 className="text-2xl font-bold text-zinc-900 mb-2">Course Certificate</h2>
 
               {certificate?.exists && certificate.certificateUrl ? (
                 <>
@@ -407,14 +407,14 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                     href={`${process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080"}${certificate.certificateUrl}`}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-white text-sm font-semibold hover:shadow-[0_0_20px_rgba(0,212,255,0.3)] transition"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-zinc-900 text-sm font-semibold hover:shadow-[0_0_20px_rgba(0,212,255,0.3)] transition"
                   >
                     <Download className="w-4 h-4" /> Download Certificate (PDF)
                   </a>
                 </>
               ) : (
                 <>
-                  <p className="text-zinc-400 mb-4 text-sm max-w-md mx-auto">
+                  <p className="text-zinc-600 mb-4 text-sm max-w-md mx-auto">
                     Complete all lessons, pass all quizzes, and submit all assignments to earn your certificate.
                   </p>
                   {certError && <p className="text-red-400 text-sm mb-3">{certError}</p>}
@@ -429,7 +429,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                       } finally { setGeneratingCert(false); }
                     }}
                     disabled={generatingCert}
-                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white text-sm font-semibold hover:shadow-[0_0_20px_rgba(124,58,237,0.3)] transition disabled:opacity-50"
+                    className="inline-flex items-center gap-2 px-6 py-3 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 text-sm font-semibold hover:shadow-[0_0_20px_rgba(124,58,237,0.3)] transition disabled:opacity-50"
                   >
                     {generatingCert ? <><Loader2 className="w-4 h-4 animate-spin" /> Generating...</> : <><Award className="w-4 h-4" /> Generate Certificate</>}
                   </button>

@@ -106,7 +106,7 @@ const codeSnippets = [
 function Particle({ delay }: { delay: number }) {
   return (
     <motion.div
-      className="absolute w-1 h-1 rounded-full bg-neon-blue/30"
+      className="absolute w-1 h-1 rounded-full bg-neon-blue/50"
       style={{
         left: `${Math.random() * 100}%`,
         top: `${Math.random() * 100}%`,
@@ -181,7 +181,7 @@ export default function MorphingCode() {
       >
         <div className="glass rounded-xl overflow-hidden shadow-glow-blue/20">
           {/* Tab bar */}
-          <div className="flex items-center gap-2 px-4 py-3 border-b border-white/10 bg-white/[0.02]">
+          <div className="flex items-center gap-2 px-4 py-3 border-b border-zinc-200 bg-white/[0.02]">
             <div className="flex gap-1.5">
               <div className="w-3 h-3 rounded-full bg-red-500/60" />
               <div className="w-3 h-3 rounded-full bg-yellow-500/60" />
@@ -210,7 +210,7 @@ export default function MorphingCode() {
                     intervalRef.current = setInterval(cycleNext, 4500);
                   }}
                   className={`w-2 h-2 rounded-full transition-all duration-300 ${
-                    i === activeIndex ? "bg-neon-blue scale-125" : "bg-white/20 hover:bg-white/40"
+                    i === activeIndex ? "bg-neon-blue scale-125" : "bg-zinc-300 hover:bg-zinc-400"
                   }`}
                 />
               ))}
@@ -238,7 +238,7 @@ export default function MorphingCode() {
                     }}
                     transition={{ duration: 0.15 }}
                   >
-                    <span className="text-zinc-700 w-8 text-right mr-4 select-none shrink-0">
+                    <span className="text-zinc-500 w-8 text-right mr-4 select-none shrink-0">
                       {i + 1}
                     </span>
                     <span style={{ color: line.color }}>
@@ -259,7 +259,7 @@ export default function MorphingCode() {
           </div>
 
           {/* Status bar */}
-          <div className="flex items-center justify-between px-4 py-2 border-t border-white/10 bg-white/[0.02]">
+          <div className="flex items-center justify-between px-4 py-2 border-t border-zinc-200 bg-white/[0.02]">
             <span className="text-[10px] text-zinc-600 font-mono">{currentSnippet.lang}</span>
             <div className="flex items-center gap-3">
               <span className="text-[10px] text-zinc-600">UTF-8</span>
@@ -283,7 +283,7 @@ export default function MorphingCode() {
         transition={{ delay: 1, duration: 1 }}
       >
         <div className="glass rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-white/10 bg-white/[0.02]">
+          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-200 bg-white/[0.02]">
             <div className="flex gap-1.5">
               <div className="w-2.5 h-2.5 rounded-full bg-red-500/40" />
               <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/40" />
@@ -297,11 +297,11 @@ export default function MorphingCode() {
               transition={{ duration: 3, repeat: Infinity }}
             >
               <p><span className="text-neon-cyan">$</span> sage deploy --env production</p>
-              <p className="text-zinc-700">Building containers... <span className="text-green-500/70">done</span></p>
-              <p className="text-zinc-700">Running security scan... <span className="text-green-500/70">passed</span></p>
-              <p className="text-zinc-700">Deploying to 12 regions... <span className="text-neon-blue/70">in progress</span></p>
-              <p className="text-zinc-700">Model accuracy: <span className="text-neon-violet/70">97.3%</span></p>
-              <p className="text-zinc-700">Latency p99: <span className="text-neon-cyan/70">12ms</span></p>
+              <p className="text-zinc-500">Building containers... <span className="text-green-500/70">done</span></p>
+              <p className="text-zinc-500">Running security scan... <span className="text-green-500/70">passed</span></p>
+              <p className="text-zinc-500">Deploying to 12 regions... <span className="text-neon-blue/70">in progress</span></p>
+              <p className="text-zinc-500">Model accuracy: <span className="text-neon-violet/70">97.3%</span></p>
+              <p className="text-zinc-500">Latency p99: <span className="text-neon-cyan/70">12ms</span></p>
               <p><span className="text-neon-cyan">$</span> <motion.span className="inline-block w-[6px] h-3 bg-neon-cyan/50" animate={{ opacity: [1, 0] }} transition={{ duration: 0.6, repeat: Infinity }} /></p>
             </motion.div>
           </div>

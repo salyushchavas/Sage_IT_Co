@@ -19,14 +19,14 @@ export default function SolutionsPage() {
       <section className="pt-32 pb-20 px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-white mb-6"
+            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
           >
             Our <span className="text-gradient">Solutions</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-400 text-lg"
+            className="text-zinc-600 text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -47,7 +47,7 @@ export default function SolutionsPage() {
                 className={`px-5 py-2 rounded-full text-sm font-medium transition-all duration-300 ${
                   active === cat
                     ? "bg-neon-blue/20 text-neon-blue border border-neon-blue/30"
-                    : "bg-white/5 text-zinc-400 border border-white/10 hover:text-white"
+                    : "bg-white/60 text-zinc-600 border border-zinc-200 hover:text-zinc-900"
                 }`}
               >
                 {cat}
@@ -69,11 +69,11 @@ export default function SolutionsPage() {
                   <span className="text-xs px-3 py-1 rounded-full bg-neon-violet/10 text-neon-violet border border-neon-violet/20 mb-4 inline-block">
                     {sol.category}
                   </span>
-                  <h3 className="text-xl font-bold text-white mb-3">{sol.title}</h3>
-                  <p className="text-zinc-400 text-sm leading-relaxed mb-6">{sol.description}</p>
+                  <h3 className="text-xl font-bold text-zinc-900 mb-3">{sol.title}</h3>
+                  <p className="text-zinc-600 text-sm leading-relaxed mb-6">{sol.description}</p>
                   <ul className="space-y-2">
                     {sol.features.map((f) => (
-                      <li key={f} className="flex items-center gap-2 text-sm text-zinc-300">
+                      <li key={f} className="flex items-center gap-2 text-sm text-zinc-500">
                         <span className="w-1.5 h-1.5 rounded-full bg-neon-cyan" />
                         {f}
                       </li>

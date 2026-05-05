@@ -91,11 +91,11 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 space-y-4"
+      className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 space-y-4"
     >
       <div className="flex items-center gap-2">
         <ListTodo className="w-5 h-5 text-[#14653F]" />
-        <h3 className="text-white font-semibold">Tasks</h3>
+        <h3 className="text-zinc-900 font-semibold">Tasks</h3>
         <span className="text-xs text-zinc-500">
           {tasks.filter((t) => t.completed).length}/{tasks.length} completed
         </span>
@@ -116,8 +116,8 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
                 task.completed
                   ? "bg-emerald-500/5 border-emerald-500/10"
                   : task.unlocked
-                  ? "bg-white/[0.03] border-white/10 hover:border-white/15"
-                  : "bg-white/[0.02] border-white/5 opacity-60"
+                  ? "bg-white/[0.03] border-zinc-200 hover:border-zinc-200"
+                  : "bg-white/[0.02] border-zinc-200 opacity-60"
               }`}
             >
               {/* Type icon */}
@@ -130,7 +130,7 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
               {/* Content */}
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2">
-                  <h4 className="text-white text-sm font-medium">{task.title}</h4>
+                  <h4 className="text-zinc-900 text-sm font-medium">{task.title}</h4>
                   <span
                     className={`text-[10px] uppercase tracking-wider font-semibold px-2 py-0.5 rounded-full border ${cfg.bg} ${cfg.color}`}
                   >
@@ -139,7 +139,7 @@ export default function TaskSection({ lessonId, isAuthenticated }: TaskSectionPr
                 </div>
                 <p className="text-zinc-500 text-sm mt-1">{task.description}</p>
                 {task.instruction && task.unlocked && (
-                  <p className="text-zinc-400 text-xs mt-2 italic">{task.instruction}</p>
+                  <p className="text-zinc-600 text-xs mt-2 italic">{task.instruction}</p>
                 )}
               </div>
 

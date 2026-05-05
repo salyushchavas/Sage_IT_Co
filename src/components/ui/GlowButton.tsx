@@ -29,7 +29,7 @@ export default function GlowButton({
     primary:
       "bg-gradient-to-r from-neon-blue via-neon-violet to-neon-cyan text-white shadow-glow-blue hover:shadow-glow-violet hover:scale-105",
     secondary:
-      "glass border-white/20 text-white hover:border-neon-blue/50 hover:shadow-glow-blue hover:scale-105",
+      "glass border-zinc-300 text-zinc-900 hover:border-neon-blue/50 hover:shadow-glow-blue hover:scale-105",
   };
 
   const classes = cn(base, variants[variant], className);

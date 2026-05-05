@@ -17,9 +17,9 @@ export default function CourseGrid({ courses, progressMap }: CourseGridProps) {
         animate={{ opacity: 1 }}
         className="flex flex-col items-center justify-center py-24 text-center"
       >
-        <BookOpen className="w-16 h-16 text-zinc-700 mb-4" />
-        <h3 className="text-white text-xl font-semibold mb-2">No courses found</h3>
-        <p className="text-zinc-400 max-w-md">
+        <BookOpen className="w-16 h-16 text-zinc-500 mb-4" />
+        <h3 className="text-zinc-900 text-xl font-semibold mb-2">No courses found</h3>
+        <p className="text-zinc-600 max-w-md">
           Try adjusting your filters or search terms to find what you&apos;re looking for.
         </p>
       </motion.div>

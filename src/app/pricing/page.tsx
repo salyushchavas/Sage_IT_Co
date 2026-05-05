@@ -87,11 +87,11 @@ export default function PricingPage() {
           <span className="inline-flex items-center gap-1.5 text-sm text-[#22C55E] font-medium mb-4">
             <Sparkles className="w-4 h-4" /> Pricing
           </span>
-          <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4">
+          <h1 className="text-4xl sm:text-5xl font-bold text-zinc-900 mb-4">
             Choose your{" "}
             <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">plan</span>
           </h1>
-          <p className="text-zinc-400 max-w-lg mx-auto">
+          <p className="text-zinc-600 max-w-lg mx-auto">
             Start for free and upgrade as you grow. Cancel anytime.
           </p>
         </motion.div>
@@ -101,22 +101,22 @@ export default function PricingPage() {
           {PRICING_TIERS.map((tier) => (
             <motion.div key={tier.name} variants={fadeUp}
               className={cn(
-                "bg-white/5 backdrop-blur-xl border rounded-2xl p-8 relative flex flex-col",
+                "bg-white/60 backdrop-blur-xl border rounded-2xl p-8 relative flex flex-col",
                 tier.highlighted
                   ? "border-[#E5B62E]/50 shadow-[0_0_40px_rgba(124,58,237,0.15)]"
-                  : "border-white/10"
+                  : "border-zinc-200"
               )}>
               {tier.highlighted && (
-                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white text-xs font-semibold">
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 px-4 py-1 rounded-full bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 text-xs font-semibold">
                   Most Popular
                 </span>
               )}
 
-              <h3 className="text-lg font-bold text-white mb-1">{tier.name}</h3>
-              <p className="text-sm text-zinc-400 mb-6">{tier.description}</p>
+              <h3 className="text-lg font-bold text-zinc-900 mb-1">{tier.name}</h3>
+              <p className="text-sm text-zinc-600 mb-6">{tier.description}</p>
 
               <div className="mb-6">
-                <span className="text-4xl font-bold text-white">
+                <span className="text-4xl font-bold text-zinc-900">
                   {tier.price === 0 ? "Free" : `₹${tier.price}`}
                 </span>
                 {tier.price > 0 && <span className="text-zinc-500 text-sm">/{tier.interval}</span>}
@@ -125,7 +125,7 @@ export default function PricingPage() {
               {/* Features */}
               <ul className="space-y-3 mb-8 flex-1">
                 {tier.features.map((f) => (
-                  <li key={f} className="flex items-center gap-2 text-sm text-zinc-300">
+                  <li key={f} className="flex items-center gap-2 text-sm text-zinc-500">
                     <Check className="w-4 h-4 text-[#22C55E] shrink-0" /> {f}
                   </li>
                 ))}
@@ -137,8 +137,8 @@ export default function PricingPage() {
                 className={cn(
                   "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
                   tier.highlighted
-                    ? "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-white hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:scale-[1.02]"
-                    : "bg-white/5 border border-white/10 text-white hover:border-[#22C55E]/30 hover:bg-white/10",
+                    ? "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F] text-zinc-900 hover:shadow-[0_0_30px_rgba(124,58,237,0.3)] hover:scale-[1.02]"
+                    : "bg-white/60 border border-zinc-200 text-zinc-900 hover:border-[#22C55E]/30 hover:bg-white/80",
                   "disabled:opacity-50"
                 )}
               >
@@ -151,27 +151,27 @@ export default function PricingPage() {
 
         {/* Feature comparison table */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="mt-20">
-          <h2 className="text-2xl font-bold text-white text-center mb-10">Feature Comparison</h2>
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+          <h2 className="text-2xl font-bold text-zinc-900 text-center mb-10">Feature Comparison</h2>
+          <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-white/10">
-                    <th className="text-left px-6 py-4 text-zinc-400 font-medium">Feature</th>
+                  <tr className="border-b border-zinc-200">
+                    <th className="text-left px-6 py-4 text-zinc-600 font-medium">Feature</th>
                     {PRICING_TIERS.map((t) => (
-                      <th key={t.name} className="px-6 py-4 text-center text-white font-medium">{t.name}</th>
+                      <th key={t.name} className="px-6 py-4 text-center text-zinc-900 font-medium">{t.name}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {allFeatures.map((f) => (
-                    <tr key={f} className="border-b border-white/5">
-                      <td className="px-6 py-3 text-zinc-300">{f}</td>
+                    <tr key={f} className="border-b border-zinc-200">
+                      <td className="px-6 py-3 text-zinc-500">{f}</td>
                       {tierFeatureSet.map((set, i) => (
                         <td key={i} className="px-6 py-3 text-center">
                           {set.has(f)
                             ? <Check className="w-4 h-4 text-[#22C55E] mx-auto" />
-                            : <X className="w-4 h-4 text-zinc-700 mx-auto" />}
+                            : <X className="w-4 h-4 text-zinc-500 mx-auto" />}
                         </td>
                       ))}
                     </tr>

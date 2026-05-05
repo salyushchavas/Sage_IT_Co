@@ -32,11 +32,11 @@ export default function SolutionsPreview() {
                 <span className="text-xs px-3 py-1 rounded-full bg-neon-violet/10 text-neon-violet border border-neon-violet/20 mb-4 inline-block">
                   {sol.category}
                 </span>
-                <h3 className="text-xl font-bold text-white mb-3">{sol.title}</h3>
-                <p className="text-zinc-400 text-sm leading-relaxed mb-6">{sol.description}</p>
+                <h3 className="text-xl font-bold text-zinc-900 mb-3">{sol.title}</h3>
+                <p className="text-zinc-600 text-sm leading-relaxed mb-6">{sol.description}</p>
                 <ul className="space-y-2">
                   {sol.features.map((f) => (
-                    <li key={f} className="flex items-center gap-2 text-sm text-zinc-300">
+                    <li key={f} className="flex items-center gap-2 text-sm text-zinc-500">
                       <span className="w-1.5 h-1.5 rounded-full bg-neon-cyan" />
                       {f}
                     </li>

@@ -35,7 +35,7 @@ export default function ProtectedOverlay({ email, className }: ProtectedOverlayP
         {Array.from({ length: 20 }).map((_, i) => (
           <span
             key={i}
-            className="text-white/[0.04] text-sm font-mono whitespace-nowrap"
+            className="text-zinc-900/[0.04] text-sm font-mono whitespace-nowrap"
             style={{ letterSpacing: "0.05em" }}
           >
             {email}

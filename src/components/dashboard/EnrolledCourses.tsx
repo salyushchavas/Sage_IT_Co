@@ -31,7 +31,7 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
     return (
       <div className="text-center py-16">
         <BookOpen className="w-12 h-12 text-zinc-600 mx-auto mb-4" />
-        <p className="text-zinc-400 text-sm">You haven&apos;t enrolled in any courses yet.</p>
+        <p className="text-zinc-600 text-sm">You haven&apos;t enrolled in any courses yet.</p>
         <Link
           href="/courses"
           className="inline-block mt-4 text-sm text-[#22C55E] hover:underline"
@@ -54,7 +54,7 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
           <Link href={`/courses/${enrollment.courseId}`} className="block group">
             <div
               className={cn(
-                "bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden",
+                "bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden",
                 "transition-all duration-300 hover:border-[#22C55E]/30 hover:shadow-[0_0_30px_rgba(0,212,255,0.08)]"
               )}
             >
@@ -65,13 +65,13 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
                   colors[i % colors.length]
                 )}
               >
-                <span className="text-3xl font-bold text-white/60">
+                <span className="text-3xl font-bold text-zinc-900/60">
                   {enrollment.courseTitle.charAt(0)}
                 </span>
               </div>
 
               <div className="p-4 space-y-2">
-                <h3 className="text-white font-semibold text-sm line-clamp-1 group-hover:text-[#22C55E] transition-colors">
+                <h3 className="text-zinc-900 font-semibold text-sm line-clamp-1 group-hover:text-[#22C55E] transition-colors">
                   {enrollment.courseTitle}
                 </h3>
                 {enrollment.courseCategory && (
@@ -87,7 +87,7 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
                       <span>Progress</span>
                       <span>{enrollment.progress}%</span>
                     </div>
-                    <div className="h-1.5 rounded-full bg-white/10 overflow-hidden">
+                    <div className="h-1.5 rounded-full bg-white/80 overflow-hidden">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-[#22C55E] to-[#E5B62E] transition-all duration-500"
                         style={{ width: `${enrollment.progress}%` }}

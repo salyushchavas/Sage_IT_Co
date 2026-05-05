@@ -64,17 +64,17 @@ export default function LessonItem({
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 0.3, delay: index * 0.05 }}
       onClick={() => onClick?.(id)}
-      className="group flex items-center gap-4 p-4 rounded-xl bg-white/5 backdrop-blur-xl border border-white/10 hover:border-[#22C55E]/20 transition-all cursor-pointer"
+      className="group flex items-center gap-4 p-4 rounded-xl bg-white/60 backdrop-blur-xl border border-zinc-200 hover:border-[#22C55E]/20 transition-all cursor-pointer"
     >
       {/* Order number */}
-      <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-white font-semibold text-sm">
+      <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-zinc-900 font-semibold text-sm">
         {orderIndex}
       </div>
 
       {/* Content */}
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
-          <h4 className="text-white font-medium truncate">{title}</h4>
+          <h4 className="text-zinc-900 font-medium truncate">{title}</h4>
           {isFree && (
             <span className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-500/15 border border-emerald-500/20 px-2 py-0.5 rounded-full">
               <Gift className="w-3 h-3" />

@@ -44,13 +44,13 @@ export default function CoursesPage() {
           animate={{ opacity: 1, y: 0 }}
           className="mb-10"
         >
-          <h1 className="text-4xl font-bold text-white mb-2">
+          <h1 className="text-4xl font-bold text-zinc-900 mb-2">
             Explore{" "}
             <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">
               Courses
             </span>
           </h1>
-          <p className="text-zinc-400">
+          <p className="text-zinc-600">
             Find the perfect course to advance your skills.
           </p>
         </motion.div>
@@ -85,7 +85,7 @@ export default function CoursesPage() {
         {/* Empty */}
         {!loading && !error && courses.length === 0 && (
           <div className="text-center py-20">
-            <BookOpen className="w-12 h-12 text-zinc-700 mx-auto mb-4" />
+            <BookOpen className="w-12 h-12 text-zinc-500 mx-auto mb-4" />
             <p className="text-zinc-500">
               No courses found. Try adjusting your filters.
             </p>

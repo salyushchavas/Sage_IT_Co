@@ -29,8 +29,8 @@ export default function TimelineItem({ event, index }: TimelineItemProps) {
       {/* Content */}
       <div className={`w-5/12 ${isLeft ? "pr-12 text-right" : "pl-12 ml-auto text-left"}`}>
         <span className="text-neon-blue font-bold text-lg">{event.year}</span>
-        <h3 className="text-white font-bold text-xl mt-1">{event.title}</h3>
-        <p className="text-zinc-400 mt-2 leading-relaxed">{event.description}</p>
+        <h3 className="text-zinc-900 font-bold text-xl mt-1">{event.title}</h3>
+        <p className="text-zinc-600 mt-2 leading-relaxed">{event.description}</p>
       </div>
     </motion.div>
   );

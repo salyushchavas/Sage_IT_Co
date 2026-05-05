@@ -22,7 +22,7 @@ export default function AboutPage() {
             About Sage IT
           </motion.span>
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-white mb-6"
+            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.6 }}
@@ -31,7 +31,7 @@ export default function AboutPage() {
             <span className="text-gradient">Intelligent Technology</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-400 text-lg leading-relaxed"
+            className="text-zinc-600 text-lg leading-relaxed"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.5, duration: 0.6 }}
@@ -54,15 +54,15 @@ export default function AboutPage() {
             viewport={{ once: true }}
           >
             <motion.div variants={fadeUp} className="glass p-10">
-              <h3 className="text-2xl font-bold text-white mb-4">Our Vision</h3>
-              <p className="text-zinc-400 leading-relaxed">
+              <h3 className="text-2xl font-bold text-zinc-900 mb-4">Our Vision</h3>
+              <p className="text-zinc-600 leading-relaxed">
                 To be the most trusted technology partner for enterprises navigating the AI revolution — enabling them
                 to innovate fearlessly, scale confidently, and lead their industries.
               </p>
             </motion.div>
             <motion.div variants={fadeUp} className="glass p-10">
-              <h3 className="text-2xl font-bold text-white mb-4">Our Mission</h3>
-              <p className="text-zinc-400 leading-relaxed">
+              <h3 className="text-2xl font-bold text-zinc-900 mb-4">Our Mission</h3>
+              <p className="text-zinc-600 leading-relaxed">
                 To deliver intelligent, scalable, and secure technology solutions that empower businesses to achieve
                 measurable outcomes. We combine deep engineering expertise with AI-first thinking to solve complex
                 challenges.
@@ -88,7 +88,7 @@ export default function AboutPage() {
               className="glass p-8 text-center"
             >
               <div className="text-3xl md:text-4xl font-bold text-gradient mb-2">{stat.value}</div>
-              <div className="text-zinc-400 text-sm">{stat.label}</div>
+              <div className="text-zinc-600 text-sm">{stat.label}</div>
             </motion.div>
           ))}
         </motion.div>

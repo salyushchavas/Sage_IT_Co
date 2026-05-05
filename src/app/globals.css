@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --background: #050510;
-  --foreground: #e4e4e7;
+  --background: #FAFAF7;
+  --foreground: #0a0a0a;
 }
 
 * {
@@ -24,12 +24,12 @@ body {
   overflow-x: hidden;
 }
 
-/* Custom scrollbar — sage green to gold */
+/* Custom scrollbar — sage green to gold on light track */
 ::-webkit-scrollbar {
   width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #050510;
+  background: #f4f4f0;
 }
 ::-webkit-scrollbar-thumb {
   background: linear-gradient(180deg, #22C55E, #E5B62E);
@@ -38,21 +38,21 @@ body {
 
 /* Selection — warm gold */
 ::selection {
-  background: rgba(229, 182, 46, 0.4);
-  color: #fff;
+  background: rgba(229, 182, 46, 0.35);
+  color: #14653F;
 }
 
 @layer components {
   .glass {
-    @apply bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl;
+    @apply bg-white/70 backdrop-blur-xl border border-zinc-200 rounded-2xl shadow-soft;
   }
 
   .glass-strong {
-    @apply bg-white/10 backdrop-blur-2xl border border-white/15 rounded-2xl;
+    @apply bg-white backdrop-blur-2xl border border-zinc-200 rounded-2xl shadow-glass;
   }
 
   .glow-border {
-    @apply border border-sage-green/20 hover:border-sage-green/50 transition-all duration-500;
+    @apply border border-sage-green/30 hover:border-sage-green/60 transition-all duration-500;
   }
 
   .text-gradient {
@@ -61,8 +61,8 @@ body {
 
   .bg-grid {
     background-image:
-      linear-gradient(rgba(34, 197, 94, 0.03) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(34, 197, 94, 0.03) 1px, transparent 1px);
+      linear-gradient(rgba(20, 101, 63, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(20, 101, 63, 0.05) 1px, transparent 1px);
     background-size: 60px 60px;
   }
 }

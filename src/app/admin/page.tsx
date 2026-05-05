@@ -119,8 +119,8 @@ export default function AdminPage() {
       <div className="mx-auto max-w-7xl flex gap-8">
         {/* Sidebar */}
         <div className="hidden md:block w-56 shrink-0">
-          <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 sticky top-28">
-            <h2 className="text-sm font-bold text-white mb-4 px-2">Admin Panel</h2>
+          <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 sticky top-28">
+            <h2 className="text-sm font-bold text-zinc-900 mb-4 px-2">Admin Panel</h2>
             <nav className="space-y-1">
               {tabs.map((t) => (
                 <button
@@ -130,12 +130,12 @@ export default function AdminPage() {
                     "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
                     tab === t.key
                       ? "bg-[#22C55E]/10 text-[#22C55E] border border-[#22C55E]/20"
-                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                      : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
                   )}
                 >
                   {t.icon} {t.label}
                   {t.key === "requests" && requests.length > 0 && (
-                    <span className="ml-auto text-xs bg-[#E5B62E] text-white px-1.5 py-0.5 rounded-full">{requests.length}</span>
+                    <span className="ml-auto text-xs bg-[#E5B62E] text-zinc-900 px-1.5 py-0.5 rounded-full">{requests.length}</span>
                   )}
                 </button>
               ))}
@@ -144,7 +144,7 @@ export default function AdminPage() {
         </div>
 
         {/* Mobile tab bar */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#050510]/90 backdrop-blur-xl border-t border-white/10 px-4 py-2 flex gap-2">
+        <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#050510]/90 backdrop-blur-xl border-t border-zinc-200 px-4 py-2 flex gap-2">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
               className={cn("flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs", tab === t.key ? "text-[#22C55E]" : "text-zinc-500")}>
@@ -158,7 +158,7 @@ export default function AdminPage() {
           {/* OVERVIEW */}
           {tab === "overview" && analytics && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <h1 className="text-2xl font-bold text-white mb-8">Overview</h1>
+              <h1 className="text-2xl font-bold text-zinc-900 mb-8">Overview</h1>
 
               <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 mb-10">
                 {[
@@ -167,12 +167,12 @@ export default function AdminPage() {
                   { label: "Enrollments", value: analytics.totalEnrollments, icon: <GraduationCap className="w-5 h-5" />, color: "#14653F" },
                   { label: "Revenue", value: `₹${analytics.totalRevenue}`, icon: <DollarSign className="w-5 h-5" />, color: "#10b981" },
                 ].map((card) => (
-                  <div key={card.label} className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-5">
+                  <div key={card.label} className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-5">
                     <div className="flex items-center gap-3 mb-3">
                       <div className="p-2 rounded-lg" style={{ backgroundColor: `${card.color}15`, color: card.color }}>{card.icon}</div>
-                      <span className="text-xs text-zinc-400">{card.label}</span>
+                      <span className="text-xs text-zinc-600">{card.label}</span>
                     </div>
-                    <p className="text-2xl font-bold text-white">{card.value}</p>
+                    <p className="text-2xl font-bold text-zinc-900">{card.value}</p>
                   </div>
                 ))}
               </div>
@@ -180,10 +180,10 @@ export default function AdminPage() {
               {/* Recent users */}
               {analytics.recentUsers && analytics.recentUsers.length > 0 && (
                 <div>
-                  <h3 className="text-lg font-semibold text-white mb-4">Recent Users</h3>
-                  <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+                  <h3 className="text-lg font-semibold text-zinc-900 mb-4">Recent Users</h3>
+                  <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
                     <table className="w-full text-sm">
-                      <thead><tr className="border-b border-white/10 text-zinc-400">
+                      <thead><tr className="border-b border-zinc-200 text-zinc-600">
                         <th className="text-left px-4 py-3 font-medium">Name</th>
                         <th className="text-left px-4 py-3 font-medium">Email</th>
                         <th className="text-left px-4 py-3 font-medium">Role</th>
@@ -191,13 +191,13 @@ export default function AdminPage() {
                       </tr></thead>
                       <tbody>
                         {analytics.recentUsers.map((u) => (
-                          <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
-                            <td className="px-4 py-3 text-white">{u.fullName}</td>
-                            <td className="px-4 py-3 text-zinc-400">{u.email}</td>
+                          <tr key={u.id} className="border-b border-zinc-200 hover:bg-white/[0.02]">
+                            <td className="px-4 py-3 text-zinc-900">{u.fullName}</td>
+                            <td className="px-4 py-3 text-zinc-600">{u.email}</td>
                             <td className="px-4 py-3"><span className={cn("text-xs px-2 py-0.5 rounded-full",
                               u.role === "ADMIN" ? "bg-[#E5B62E]/20 text-[#E5B62E]" :
                               u.role === "INSTRUCTOR" ? "bg-[#22C55E]/20 text-[#22C55E]" :
-                              "bg-white/10 text-zinc-400"
+                              "bg-white/80 text-zinc-600"
                             )}>{u.role}</span></td>
                             <td className="px-4 py-3 text-zinc-500">{new Date(u.createdAt).toLocaleDateString()}</td>
                           </tr>
@@ -213,11 +213,11 @@ export default function AdminPage() {
           {/* USERS */}
           {tab === "users" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <h1 className="text-2xl font-bold text-white mb-8">All Users ({users.length})</h1>
-              <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+              <h1 className="text-2xl font-bold text-zinc-900 mb-8">All Users ({users.length})</h1>
+              <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
-                    <thead><tr className="border-b border-white/10 text-zinc-400">
+                    <thead><tr className="border-b border-zinc-200 text-zinc-600">
                       <th className="text-left px-4 py-3 font-medium">ID</th>
                       <th className="text-left px-4 py-3 font-medium">Name</th>
                       <th className="text-left px-4 py-3 font-medium">Email</th>
@@ -226,14 +226,14 @@ export default function AdminPage() {
                     </tr></thead>
                     <tbody>
                       {users.map((u) => (
-                        <tr key={u.id} className="border-b border-white/5 hover:bg-white/[0.02]">
+                        <tr key={u.id} className="border-b border-zinc-200 hover:bg-white/[0.02]">
                           <td className="px-4 py-3 text-zinc-500">#{u.id}</td>
-                          <td className="px-4 py-3 text-white">{u.fullName}</td>
-                          <td className="px-4 py-3 text-zinc-400">{u.email}</td>
+                          <td className="px-4 py-3 text-zinc-900">{u.fullName}</td>
+                          <td className="px-4 py-3 text-zinc-600">{u.email}</td>
                           <td className="px-4 py-3"><span className={cn("text-xs px-2 py-0.5 rounded-full",
                             u.role === "ADMIN" ? "bg-[#E5B62E]/20 text-[#E5B62E]" :
                             u.role === "INSTRUCTOR" ? "bg-[#22C55E]/20 text-[#22C55E]" :
-                            "bg-white/10 text-zinc-400"
+                            "bg-white/80 text-zinc-600"
                           )}>{u.role}</span></td>
                           <td className="px-4 py-3 text-zinc-500">{new Date(u.createdAt).toLocaleDateString()}</td>
                         </tr>
@@ -248,15 +248,15 @@ export default function AdminPage() {
           {/* COURSES */}
           {tab === "courses" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <h1 className="text-2xl font-bold text-white mb-8">All Courses ({courses.length})</h1>
+              <h1 className="text-2xl font-bold text-zinc-900 mb-8">All Courses ({courses.length})</h1>
               <div className="space-y-3">
                 {courses.map((course) => (
-                  <div key={course.id} className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                  <div key={course.id} className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
                       {course.title.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-semibold text-white truncate">{course.title}</p>
+                      <p className="text-sm font-semibold text-zinc-900 truncate">{course.title}</p>
                       <div className="flex items-center gap-3 text-xs text-zinc-500 mt-0.5">
                         <span>{course.level}</span>
                         <span>{course.enrolledCount} enrolled</span>
@@ -268,11 +268,11 @@ export default function AdminPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button onClick={() => handlePublish(course.id, !course.isPublished)}
-                        className="p-2 rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white transition-colors">
+                        className="p-2 rounded-lg hover:bg-white/60 text-zinc-600 hover:text-zinc-900 transition-colors">
                         {course.isPublished ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                       <button onClick={() => handleDeleteCourse(course.id)}
-                        className="p-2 rounded-lg hover:bg-red-500/10 text-zinc-400 hover:text-red-400 transition-colors">
+                        className="p-2 rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -286,21 +286,21 @@ export default function AdminPage() {
           {/* INSTRUCTOR REQUESTS */}
           {tab === "requests" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <h1 className="text-2xl font-bold text-white mb-8">Instructor Requests ({requests.length})</h1>
+              <h1 className="text-2xl font-bold text-zinc-900 mb-8">Instructor Requests ({requests.length})</h1>
               {requests.length === 0 ? (
-                <div className="text-center py-16 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl">
+                <div className="text-center py-16 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl">
                   <UserCheck className="w-8 h-8 text-zinc-600 mx-auto mb-3" />
                   <p className="text-zinc-500 text-sm">No pending requests.</p>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {requests.map((req) => (
-                    <div key={req.id} className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-center gap-4">
-                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#E5B62E] to-[#22C55E] flex items-center justify-center text-white font-bold text-sm shrink-0">
+                    <div key={req.id} className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-center gap-4">
+                      <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#E5B62E] to-[#22C55E] flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
                         {req.fullName.charAt(0)}
                       </div>
                       <div className="flex-1">
-                        <p className="text-sm font-semibold text-white">{req.fullName}</p>
+                        <p className="text-sm font-semibold text-zinc-900">{req.fullName}</p>
                         <p className="text-xs text-zinc-500">{req.email}</p>
                         <p className="text-xs text-zinc-600 mt-0.5">Requested: {new Date(req.createdAt).toLocaleDateString()}</p>
                       </div>

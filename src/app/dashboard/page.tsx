@@ -104,10 +104,10 @@ export default function DashboardPage() {
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
-          <h1 className="text-3xl font-bold text-white mb-1">
+          <h1 className="text-3xl font-bold text-zinc-900 mb-1">
             Welcome back, <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">{user?.fullName}</span>
           </h1>
-          <p className="text-zinc-400 text-sm">
+          <p className="text-zinc-600 text-sm">
             {isAdmin ? "Admin Dashboard" : isInstructor ? "Instructor Dashboard" : "Student Dashboard"}
           </p>
         </motion.div>
@@ -115,7 +115,7 @@ export default function DashboardPage() {
         {/* Gamification */}
         <div className="grid gap-6 md:grid-cols-3 mb-10">
           <StreakCard streak={7} xp={1250} level="Developer" className="md:col-span-1" />
-          <div className="md:col-span-2 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
+          <div className="md:col-span-2 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6">
             <div className="grid grid-cols-3 gap-4 text-center">
               <div>
                 <p className="text-2xl font-bold text-[#22C55E]">{enrollments.length}</p>
@@ -142,7 +142,7 @@ export default function DashboardPage() {
 
         {/* Enrolled Courses */}
         <div className="mb-12">
-          <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+          <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
             <GraduationCap className="w-5 h-5 text-[#22C55E]" /> Enrolled Courses
           </h2>
           <EnrolledCourses enrollments={enrollments} />
@@ -150,11 +150,11 @@ export default function DashboardPage() {
 
         {/* Become Instructor (students only) */}
         {!isInstructor && !isAdmin && (
-          <div className="mb-12 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-white mb-2">Become an Instructor</h3>
-            <p className="text-sm text-zinc-400 mb-4">Share your knowledge and create courses on Sage IT.</p>
+          <div className="mb-12 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6">
+            <h3 className="text-lg font-semibold text-zinc-900 mb-2">Become an Instructor</h3>
+            <p className="text-sm text-zinc-600 mb-4">Share your knowledge and create courses on Sage IT.</p>
             <button onClick={handleRequestInstructor} disabled={requestingInstructor}
-              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-white text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(0,212,255,0.2)] transition">
+              className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#22C55E] to-[#E5B62E] text-zinc-900 text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(0,212,255,0.2)] transition">
               {requestingInstructor ? "Submitting..." : "Request Instructor Access"}
             </button>
             {instructorMsg && <p className={cn("text-xs mt-3", instructorMsg.includes("submitted") ? "text-green-400" : "text-red-400")}>{instructorMsg}</p>}
@@ -165,7 +165,7 @@ export default function DashboardPage() {
         {(isInstructor || isAdmin) && (
           <div className="mb-12">
             <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-white flex items-center gap-2">
+              <h2 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
                 <BookOpen className="w-5 h-5 text-[#E5B62E]" /> My Courses
               </h2>
               <Link href="/courses/create" className="flex items-center gap-1.5 text-sm font-medium text-[#22C55E] hover:text-[#14653F] transition-colors">
@@ -174,7 +174,7 @@ export default function DashboardPage() {
             </div>
 
             {myCourses.length === 0 ? (
-              <div className="text-center py-12 bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl">
+              <div className="text-center py-12 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl">
                 <BookOpen className="w-8 h-8 mx-auto text-zinc-600 mb-3" />
                 <p className="text-zinc-500 text-sm">No courses yet. Create your first course!</p>
               </div>
@@ -182,12 +182,12 @@ export default function DashboardPage() {
               <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-3">
                 {myCourses.map((course) => (
                   <motion.div key={course.id} variants={fadeUp}
-                    className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-white font-bold text-sm shrink-0">
+                    className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-center gap-4">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
                       {course.title.charAt(0)}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <Link href={`/courses/${course.id}`} className="text-sm font-semibold text-white hover:text-[#22C55E] transition-colors truncate block">
+                      <Link href={`/courses/${course.id}`} className="text-sm font-semibold text-zinc-900 hover:text-[#22C55E] transition-colors truncate block">
                         {course.title}
                       </Link>
                       <div className="flex items-center gap-3 text-xs text-zinc-500 mt-0.5">
@@ -201,11 +201,11 @@ export default function DashboardPage() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button onClick={() => handlePublish(course.id, !course.isPublished)}
-                        className="p-2 rounded-lg hover:bg-white/5 text-zinc-400 hover:text-white transition-colors" title={course.isPublished ? "Unpublish" : "Publish"}>
+                        className="p-2 rounded-lg hover:bg-white/60 text-zinc-600 hover:text-zinc-900 transition-colors" title={course.isPublished ? "Unpublish" : "Publish"}>
                         {course.isPublished ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                       </button>
                       <button onClick={() => handleDelete(course.id)}
-                        className="p-2 rounded-lg hover:bg-red-500/10 text-zinc-400 hover:text-red-400 transition-colors" title="Delete">
+                        className="p-2 rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors" title="Delete">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
@@ -219,14 +219,14 @@ export default function DashboardPage() {
         {/* Instructor: Students Table */}
         {(isInstructor || isAdmin) && students.length > 0 && (
           <div>
-            <h2 className="text-xl font-bold text-white mb-6 flex items-center gap-2">
+            <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
               <Users className="w-5 h-5 text-[#14653F]" /> Your Students
             </h2>
-            <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+            <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="border-b border-white/10 text-zinc-400">
+                    <tr className="border-b border-zinc-200 text-zinc-600">
                       <th className="text-left px-4 py-3 font-medium">Student</th>
                       <th className="text-left px-4 py-3 font-medium">Email</th>
                       <th className="text-left px-4 py-3 font-medium">Course</th>
@@ -235,10 +235,10 @@ export default function DashboardPage() {
                   </thead>
                   <tbody>
                     {students.map((s, i) => (
-                      <tr key={i} className="border-b border-white/5 hover:bg-white/[0.02] transition-colors">
-                        <td className="px-4 py-3 text-white">{s.studentName}</td>
-                        <td className="px-4 py-3 text-zinc-400">{s.email}</td>
-                        <td className="px-4 py-3 text-zinc-300">{s.courseTitle}</td>
+                      <tr key={i} className="border-b border-zinc-200 hover:bg-white/[0.02] transition-colors">
+                        <td className="px-4 py-3 text-zinc-900">{s.studentName}</td>
+                        <td className="px-4 py-3 text-zinc-600">{s.email}</td>
+                        <td className="px-4 py-3 text-zinc-500">{s.courseTitle}</td>
                         <td className="px-4 py-3 text-zinc-500">{new Date(s.enrolledAt).toLocaleDateString()}</td>
                       </tr>
                     ))}

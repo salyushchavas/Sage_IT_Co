@@ -30,11 +30,11 @@ export default function ProgressBar({ value, label, className }: ProgressBarProp
     <div className={cn("w-full", className)}>
       {label && (
         <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs text-zinc-400">{label}</span>
-          <span className="text-xs font-semibold text-white">{clamped}%</span>
+          <span className="text-xs text-zinc-600">{label}</span>
+          <span className="text-xs font-semibold text-zinc-900">{clamped}%</span>
         </div>
       )}
-      <div className="h-2 rounded-full bg-white/10 overflow-hidden">
+      <div className="h-2 rounded-full bg-white/80 overflow-hidden">
         <motion.div
           className={cn("h-full rounded-full bg-gradient-to-r", gradient)}
           initial={{ width: 0 }}

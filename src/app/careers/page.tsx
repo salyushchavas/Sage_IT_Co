@@ -28,14 +28,14 @@ export default function CareersPage() {
       <section className="pt-32 pb-20 px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-white mb-6"
+            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
           >
             Join <span className="text-gradient">Sage IT</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-400 text-lg"
+            className="text-zinc-600 text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -64,8 +64,8 @@ export default function CareersPage() {
             ].map((perk) => (
               <motion.div key={perk.title} variants={fadeUp} className="glass p-6 text-center">
                 <div className="text-3xl mb-3">{perk.icon}</div>
-                <h3 className="text-white font-semibold mb-2">{perk.title}</h3>
-                <p className="text-zinc-400 text-sm">{perk.desc}</p>
+                <h3 className="text-zinc-900 font-semibold mb-2">{perk.title}</h3>
+                <p className="text-zinc-600 text-sm">{perk.desc}</p>
               </motion.div>
             ))}
           </motion.div>
@@ -113,43 +113,43 @@ export default function CareersPage() {
                 {submitted ? (
                   <div className="text-center py-8">
                     <div className="text-4xl mb-4">✅</div>
-                    <h3 className="text-xl font-bold text-white mb-2">Application Submitted!</h3>
-                    <p className="text-zinc-400 mb-6">
+                    <h3 className="text-xl font-bold text-zinc-900 mb-2">Application Submitted!</h3>
+                    <p className="text-zinc-600 mb-6">
                       Thanks for applying for {selectedJob.title}. We&apos;ll review your application and get back to you.
                     </p>
                     <GlowButton onClick={() => setSelectedJob(null)}>Close</GlowButton>
                   </div>
                 ) : (
                   <>
-                    <h3 className="text-xl font-bold text-white mb-2">
+                    <h3 className="text-xl font-bold text-zinc-900 mb-2">
                       Apply for {selectedJob.title}
                     </h3>
-                    <p className="text-zinc-400 text-sm mb-6">{selectedJob.department} &middot; {selectedJob.location}</p>
+                    <p className="text-zinc-600 text-sm mb-6">{selectedJob.department} &middot; {selectedJob.location}</p>
                     <form onSubmit={handleSubmit} className="space-y-4">
                       <input
                         type="text"
                         placeholder="Full Name"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
+                        className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                       <input
                         type="email"
                         placeholder="Email Address"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
+                        className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                       <div>
-                        <label className="block text-sm text-zinc-400 mb-2">Resume (PDF)</label>
+                        <label className="block text-sm text-zinc-600 mb-2">Resume (PDF)</label>
                         <input
                           type="file"
                           accept=".pdf,.doc,.docx"
-                          className="w-full text-sm text-zinc-400 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-neon-blue/10 file:text-neon-blue hover:file:bg-neon-blue/20 cursor-pointer"
+                          className="w-full text-sm text-zinc-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-neon-blue/10 file:text-neon-blue hover:file:bg-neon-blue/20 cursor-pointer"
                         />
                       </div>
                       <textarea
                         placeholder="Why are you interested in this role?"
                         rows={3}
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors resize-none"
+                        className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors resize-none"
                       />
                       <div className="flex gap-3 pt-2">
                         <GlowButton type="submit">Submit Application</GlowButton>

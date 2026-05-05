@@ -71,13 +71,13 @@ export default function SupportPage() {
           <span className="inline-flex items-center gap-1.5 text-sm text-[#22C55E] font-medium mb-4">
             <HelpCircle className="w-4 h-4" /> Support
           </span>
-          <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4">
+          <h1 className="text-4xl sm:text-5xl font-bold text-zinc-900 mb-4">
             How can we{" "}
             <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">
               help?
             </span>
           </h1>
-          <p className="text-zinc-400 max-w-lg mx-auto">
+          <p className="text-zinc-600 max-w-lg mx-auto">
             Find answers to common questions or reach out to our support team.
           </p>
         </motion.div>
@@ -91,7 +91,7 @@ export default function SupportPage() {
                 key={opt.title}
                 href={opt.href}
                 variants={fadeUp}
-                className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 text-center hover:border-white/20 transition-all group"
+                className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 text-center hover:border-zinc-300 transition-all group"
               >
                 <div
                   className="w-12 h-12 rounded-xl flex items-center justify-center mx-auto mb-4"
@@ -99,8 +99,8 @@ export default function SupportPage() {
                 >
                   <Icon className="w-5 h-5" style={{ color: opt.color }} />
                 </div>
-                <h3 className="text-white font-semibold mb-1">{opt.title}</h3>
-                <p className="text-xs text-zinc-400 mb-3">{opt.description}</p>
+                <h3 className="text-zinc-900 font-semibold mb-1">{opt.title}</h3>
+                <p className="text-xs text-zinc-600 mb-3">{opt.description}</p>
                 <span className="text-sm font-medium text-[#22C55E] group-hover:underline">
                   {opt.action}
                 </span>
@@ -111,7 +111,7 @@ export default function SupportPage() {
 
         {/* FAQ */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.2 }}>
-          <h2 className="text-2xl font-bold text-white text-center mb-8">
+          <h2 className="text-2xl font-bold text-zinc-900 text-center mb-8">
             Frequently Asked Questions
           </h2>
           <div className="space-y-3">
@@ -120,18 +120,18 @@ export default function SupportPage() {
               return (
                 <div
                   key={i}
-                  className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden"
+                  className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden"
                 >
                   <button
                     onClick={() => setOpenFaq(isOpen ? null : i)}
                     className="w-full flex items-center justify-between p-5 text-left"
                   >
-                    <span className="text-sm font-semibold text-white pr-4">
+                    <span className="text-sm font-semibold text-zinc-900 pr-4">
                       {faq.question}
                     </span>
                     <ChevronDown
                       className={cn(
-                        "w-4 h-4 text-zinc-400 shrink-0 transition-transform duration-200",
+                        "w-4 h-4 text-zinc-600 shrink-0 transition-transform duration-200",
                         isOpen && "rotate-180"
                       )}
                     />
@@ -144,7 +144,7 @@ export default function SupportPage() {
                         exit={{ height: 0, opacity: 0 }}
                         transition={{ duration: 0.2 }}
                       >
-                        <div className="px-5 pb-5 text-sm text-zinc-400 leading-relaxed border-t border-white/5 pt-3">
+                        <div className="px-5 pb-5 text-sm text-zinc-600 leading-relaxed border-t border-zinc-200 pt-3">
                           {faq.answer}
                         </div>
                       </motion.div>

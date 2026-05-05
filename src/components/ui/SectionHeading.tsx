@@ -24,11 +24,11 @@ export default function SectionHeading({ label, title, description, align = "cen
           {label}
         </span>
       )}
-      <h2 className="text-3xl md:text-5xl font-bold text-white mb-4">
+      <h2 className="text-3xl md:text-5xl font-bold text-zinc-900 mb-4">
         {title}
       </h2>
       {description && (
-        <p className="text-zinc-400 max-w-2xl mx-auto text-lg leading-relaxed">
+        <p className="text-zinc-600 max-w-2xl mx-auto text-lg leading-relaxed">
           {description}
         </p>
       )}

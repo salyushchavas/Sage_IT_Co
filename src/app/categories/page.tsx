@@ -56,13 +56,13 @@ export default function CategoriesPage() {
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-16">
-          <h1 className="text-4xl sm:text-5xl font-bold text-white mb-4">
+          <h1 className="text-4xl sm:text-5xl font-bold text-zinc-900 mb-4">
             Course{" "}
             <span className="bg-gradient-to-r from-[#22C55E] to-[#E5B62E] bg-clip-text text-transparent">
               Categories
             </span>
           </h1>
-          <p className="text-zinc-400 max-w-lg mx-auto">
+          <p className="text-zinc-600 max-w-lg mx-auto">
             Explore our curated collection of courses across popular technology domains.
           </p>
         </motion.div>
@@ -79,8 +79,8 @@ export default function CategoriesPage() {
                 >
                   <div
                     className={cn(
-                      "bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8",
-                      "transition-all duration-300 hover:border-white/20",
+                      "bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-8",
+                      "transition-all duration-300 hover:border-zinc-300",
                       "hover:shadow-[0_0_40px_rgba(0,0,0,0.2)]"
                     )}
                     style={{
@@ -98,10 +98,10 @@ export default function CategoriesPage() {
                       <Icon className="w-6 h-6" style={{ color: cat.color }} />
                     </div>
 
-                    <h3 className="text-lg font-bold text-white mb-2 group-hover:text-[#22C55E] transition-colors">
+                    <h3 className="text-lg font-bold text-zinc-900 mb-2 group-hover:text-[#22C55E] transition-colors">
                       {cat.name}
                     </h3>
-                    <p className="text-sm text-zinc-400 mb-4">{cat.description}</p>
+                    <p className="text-sm text-zinc-600 mb-4">{cat.description}</p>
 
                     <div className="flex items-center justify-between">
                       <span className="text-xs text-zinc-500">

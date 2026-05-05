@@ -27,7 +27,7 @@ export default function LoadingScreen() {
               transition={{ duration: 1.5, repeat: Infinity }}
             >
               <Image
-                src="/sage_logo_white.png"
+                src="/sage_logo.png"
                 alt="Sage IT Co"
                 fill
                 priority
@@ -35,7 +35,7 @@ export default function LoadingScreen() {
               />
             </motion.div>
             <motion.div
-              className="h-1 w-32 mx-auto rounded-full overflow-hidden bg-white/10"
+              className="h-1 w-32 mx-auto rounded-full overflow-hidden bg-zinc-200"
             >
               <motion.div
                 className="h-full bg-gradient-to-r from-sage-green to-sage-gold rounded-full"

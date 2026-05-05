@@ -18,14 +18,14 @@ export default function PortfolioPage() {
       <section className="pt-32 pb-20 px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-white mb-6"
+            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
           >
             Our <span className="text-gradient">Portfolio</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-400 text-lg"
+            className="text-zinc-600 text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -45,7 +45,7 @@ export default function PortfolioPage() {
                 className={`px-5 py-2 rounded-full text-sm font-medium transition-all duration-300 ${
                   active === cat
                     ? "bg-neon-cyan/20 text-neon-cyan border border-neon-cyan/30"
-                    : "bg-white/5 text-zinc-400 border border-white/10 hover:text-white"
+                    : "bg-white/60 text-zinc-600 border border-zinc-200 hover:text-zinc-900"
                 }`}
               >
                 {cat}

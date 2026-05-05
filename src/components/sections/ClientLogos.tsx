@@ -8,7 +8,7 @@ export default function ClientLogos() {
   const doubled = [...clients, ...clients];
 
   return (
-    <section className="py-20 px-6 border-y border-white/5">
+    <section className="py-20 px-6 border-y border-zinc-200">
       <motion.div
         className="max-w-7xl mx-auto"
         variants={fadeUp}
@@ -28,7 +28,7 @@ export default function ClientLogos() {
             {doubled.map((client, i) => (
               <div
                 key={`${client}-${i}`}
-                className="flex-shrink-0 mx-8 px-8 py-4 glass rounded-xl text-zinc-500 font-medium text-sm whitespace-nowrap hover:text-white hover:border-neon-blue/30 transition-all duration-300"
+                className="flex-shrink-0 mx-8 px-8 py-4 glass rounded-xl text-zinc-500 font-medium text-sm whitespace-nowrap hover:text-zinc-900 hover:border-neon-blue/30 transition-all duration-300"
               >
                 {client}
               </div>

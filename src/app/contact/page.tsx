@@ -50,14 +50,14 @@ export default function ContactPage() {
       <section className="pt-32 pb-20 px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-white mb-6"
+            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
           >
             Get in <span className="text-gradient">Touch</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-400 text-lg"
+            className="text-zinc-600 text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -82,29 +82,29 @@ export default function ContactPage() {
                 {submitted ? (
                   <div className="text-center py-12">
                     <div className="text-5xl mb-4">🚀</div>
-                    <h3 className="text-2xl font-bold text-white mb-3">Message Sent!</h3>
-                    <p className="text-zinc-400 mb-6">
+                    <h3 className="text-2xl font-bold text-zinc-900 mb-3">Message Sent!</h3>
+                    <p className="text-zinc-600 mb-6">
                       Thank you for reaching out. Our team will get back to you within 24 hours.
                     </p>
                     <GlowButton onClick={() => setSubmitted(false)}>Send Another</GlowButton>
                   </div>
                 ) : (
                   <form onSubmit={handleSubmit} className="space-y-5">
-                    <h3 className="text-2xl font-bold text-white mb-6">Send Us a Message</h3>
+                    <h3 className="text-2xl font-bold text-zinc-900 mb-6">Send Us a Message</h3>
                     <div className="grid md:grid-cols-2 gap-4">
                       <input
                         name="firstName"
                         type="text"
                         placeholder="First Name"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
+                        className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                       <input
                         name="lastName"
                         type="text"
                         placeholder="Last Name"
                         required
-                        className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
+                        className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                     </div>
                     <input
@@ -112,15 +112,15 @@ export default function ContactPage() {
                       type="email"
                       placeholder="Email Address"
                       required
-                      className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
+                      className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                     />
                     <input
                       name="company"
                       type="text"
                       placeholder="Company (optional)"
-                      className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors"
+                      className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                     />
-                    <select name="service" className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors">
+                    <select name="service" className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 focus:outline-none focus:border-neon-blue/50 transition-colors">
                       <option value="">Select a Service</option>
                       <option value="Cloud Solutions">Cloud Solutions</option>
                       <option value="Cybersecurity">Cybersecurity</option>
@@ -134,7 +134,7 @@ export default function ContactPage() {
                       placeholder="Tell us about your project..."
                       rows={5}
                       required
-                      className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white placeholder:text-zinc-500 focus:outline-none focus:border-neon-blue/50 transition-colors resize-none"
+                      className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors resize-none"
                     />
                     {error && (
                       <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-xl px-4 py-3">{error}</p>
@@ -150,15 +150,15 @@ export default function ContactPage() {
             {/* Contact info */}
             <motion.div variants={slideInRight} className="space-y-8">
               <GlassCard className="p-8">
-                <h3 className="text-xl font-bold text-white mb-6">Contact Information</h3>
+                <h3 className="text-xl font-bold text-zinc-900 mb-6">Contact Information</h3>
                 <div className="space-y-6">
                   <div className="flex items-start gap-4">
                     <div className="w-10 h-10 rounded-xl bg-neon-blue/10 flex items-center justify-center text-neon-blue shrink-0">
                       📧
                     </div>
                     <div>
-                      <p className="text-white font-medium">Email</p>
-                      <p className="text-zinc-400 text-sm">info@sageitco.com</p>
+                      <p className="text-zinc-900 font-medium">Email</p>
+                      <p className="text-zinc-600 text-sm">info@sageitco.com</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-4">
@@ -166,8 +166,8 @@ export default function ContactPage() {
                       📱
                     </div>
                     <div>
-                      <p className="text-white font-medium">Phone</p>
-                      <p className="text-zinc-400 text-sm">+1 (555) 123-4567</p>
+                      <p className="text-zinc-900 font-medium">Phone</p>
+                      <p className="text-zinc-600 text-sm">+1 (555) 123-4567</p>
                     </div>
                   </div>
                   <div className="flex items-start gap-4">
@@ -175,8 +175,8 @@ export default function ContactPage() {
                       📍
                     </div>
                     <div>
-                      <p className="text-white font-medium">Office</p>
-                      <p className="text-zinc-400 text-sm">
+                      <p className="text-zinc-900 font-medium">Office</p>
+                      <p className="text-zinc-600 text-sm">
                         HITEC City, Hyderabad<br />
                         Telangana, India 500081
                       </p>
@@ -201,13 +201,13 @@ export default function ContactPage() {
 
               {/* Social links */}
               <GlassCard className="p-8">
-                <h3 className="text-lg font-bold text-white mb-4">Follow Us</h3>
+                <h3 className="text-lg font-bold text-zinc-900 mb-4">Follow Us</h3>
                 <div className="flex gap-3">
                   {socialLinks.map((s) => (
                     <a
                       key={s.label}
                       href={s.href}
-                      className="w-12 h-12 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-zinc-400 hover:text-neon-blue hover:border-neon-blue/30 transition-all duration-300 hover:shadow-glow-blue"
+                      className="w-12 h-12 rounded-xl bg-white/60 border border-zinc-200 flex items-center justify-center text-zinc-600 hover:text-neon-blue hover:border-neon-blue/30 transition-all duration-300 hover:shadow-glow-blue"
                       aria-label={s.label}
                     >
                       {s.icon[0].toUpperCase()}

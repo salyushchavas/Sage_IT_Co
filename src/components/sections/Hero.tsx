@@ -37,7 +37,7 @@ export default function Hero() {
         </motion.div>
 
         <motion.h1
-          className="text-4xl sm:text-5xl md:text-7xl font-bold text-white leading-tight mb-6"
+          className="text-4xl sm:text-5xl md:text-7xl font-bold text-zinc-900 leading-tight mb-6"
           initial={{ opacity: 0, y: 40 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.6 }}
@@ -48,7 +48,7 @@ export default function Hero() {
         </motion.h1>
 
         <motion.p
-          className="text-lg md:text-xl text-zinc-400 max-w-2xl mx-auto mb-10 leading-relaxed"
+          className="text-lg md:text-xl text-zinc-600 max-w-2xl mx-auto mb-10 leading-relaxed"
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.8 }}
@@ -78,7 +78,7 @@ export default function Hero() {
         transition={{ delay: 2 }}
       >
         <motion.div
-          className="w-6 h-10 rounded-full border-2 border-white/20 flex justify-center pt-2"
+          className="w-6 h-10 rounded-full border-2 border-zinc-300 flex justify-center pt-2"
           animate={{ y: [0, 8, 0] }}
           transition={{ duration: 1.5, repeat: Infinity }}
         >

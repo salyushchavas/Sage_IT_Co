@@ -43,7 +43,7 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
       transition={{ duration: 0.4, delay: index * 0.08 }}
     >
       <Link href={`/courses/${course.id}`} className="block group">
-        <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden transition-all duration-300 hover:border-[#22C55E]/30 hover:shadow-[0_0_30px_rgba(0,212,255,0.08)]">
+        <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-[#22C55E]/30 hover:shadow-[0_0_30px_rgba(0,212,255,0.08)]">
           {/* Header / Thumbnail */}
           <div className="relative h-44 bg-gradient-to-br from-[#E5B62E]/30 to-[#22C55E]/20 overflow-hidden">
             {course.thumbnailUrl ? (
@@ -55,7 +55,7 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
               />
             ) : (
               <div className="absolute inset-0 flex items-center justify-center">
-                <BookOpen className="w-12 h-12 text-white/20" />
+                <BookOpen className="w-12 h-12 text-zinc-900/20" />
               </div>
             )}
             {/* Level badge */}
@@ -65,7 +65,7 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
               {course.level}
             </span>
             {/* Price */}
-            <span className="absolute top-3 right-3 text-sm font-bold px-3 py-1 rounded-full bg-black/60 backdrop-blur text-white">
+            <span className="absolute top-3 right-3 text-sm font-bold px-3 py-1 rounded-full bg-black/60 backdrop-blur text-zinc-900">
               {course.isFree ? "Free" : `$${course.price}`}
             </span>
           </div>
@@ -75,10 +75,10 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
             <p className="text-xs font-medium text-[#22C55E] uppercase tracking-wider">
               {course.category}
             </p>
-            <h3 className="text-white font-semibold text-lg leading-snug line-clamp-2 group-hover:text-[#22C55E] transition-colors">
+            <h3 className="text-zinc-900 font-semibold text-lg leading-snug line-clamp-2 group-hover:text-[#22C55E] transition-colors">
               {course.title}
             </h3>
-            <p className="text-zinc-400 text-sm line-clamp-2">
+            <p className="text-zinc-600 text-sm line-clamp-2">
               {course.shortDescription}
             </p>
 
@@ -99,8 +99,8 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between pt-3 border-t border-white/5">
-              <span className="text-zinc-400 text-sm">
+            <div className="flex items-center justify-between pt-3 border-t border-zinc-200">
+              <span className="text-zinc-600 text-sm">
                 {course.instructor.fullName}
               </span>
               <span className="flex items-center gap-1 text-amber-400 text-sm font-medium">

@@ -74,16 +74,16 @@ export default function VideoUpload({
     <motion.div
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
-      className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-6 space-y-4"
+      className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 space-y-4"
     >
-      <h3 className="text-white font-semibold flex items-center gap-2">
+      <h3 className="text-zinc-900 font-semibold flex items-center gap-2">
         <Film className="w-5 h-5 text-[#22C55E]" />
         Video Upload
       </h3>
 
       {/* Preview */}
       {preview && (
-        <div className="relative aspect-video rounded-xl overflow-hidden bg-black border border-white/10">
+        <div className="relative aspect-video rounded-xl overflow-hidden bg-black border border-zinc-200">
           <video
             src={preview}
             controls
@@ -99,10 +99,10 @@ export default function VideoUpload({
       {/* File input area */}
       <div
         onClick={() => inputRef.current?.click()}
-        className="border-2 border-dashed border-white/10 rounded-xl p-8 text-center cursor-pointer hover:border-[#22C55E]/30 transition-colors"
+        className="border-2 border-dashed border-zinc-200 rounded-xl p-8 text-center cursor-pointer hover:border-[#22C55E]/30 transition-colors"
       >
         <Upload className="w-8 h-8 text-zinc-500 mx-auto mb-2" />
-        <p className="text-zinc-400 text-sm">
+        <p className="text-zinc-600 text-sm">
           {file ? file.name : "Click to select a video file"}
         </p>
         <p className="text-zinc-600 text-xs mt-1">Max {MAX_SIZE_MB}MB</p>
@@ -127,7 +127,7 @@ export default function VideoUpload({
         <button
           onClick={handleUpload}
           disabled={!file || uploading}
-          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
+          className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-2"
         >
           {uploading ? (
             <>
@@ -144,7 +144,7 @@ export default function VideoUpload({
         {file && (
           <button
             onClick={clearFile}
-            className="p-2.5 rounded-xl bg-white/5 border border-white/10 text-zinc-400 hover:text-white transition-colors"
+            className="p-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 hover:text-zinc-900 transition-colors"
           >
             <X className="w-4 h-4" />
           </button>

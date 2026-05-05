@@ -4,7 +4,7 @@ import { AuthProvider } from "@/lib/auth-context";
 export default function AuthLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" className="dark">
-      <body className="antialiased bg-[#050510] text-white min-h-screen relative overflow-hidden">
+      <body className="antialiased bg-[#050510] text-zinc-900 min-h-screen relative overflow-hidden">
         {/* Background grid pattern */}
         <div
           className="fixed inset-0 pointer-events-none z-0"

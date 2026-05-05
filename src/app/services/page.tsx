@@ -13,7 +13,7 @@ export default function ServicesPage() {
       <section className="pt-32 pb-20 px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-white mb-6"
+            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
@@ -21,7 +21,7 @@ export default function ServicesPage() {
             Our <span className="text-gradient">Services</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-400 text-lg leading-relaxed"
+            className="text-zinc-600 text-lg leading-relaxed"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2, duration: 0.6 }}

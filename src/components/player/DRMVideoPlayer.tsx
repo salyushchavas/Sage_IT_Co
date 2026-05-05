@@ -178,8 +178,8 @@ export default function DRMVideoPlayer({
           onClick={togglePlay}
           className="absolute inset-0 flex items-center justify-center z-10"
         >
-          <div className="w-16 h-16 rounded-full bg-white/10 backdrop-blur-xl border border-white/20 flex items-center justify-center">
-            <Play className="w-7 h-7 text-white ml-1" />
+          <div className="w-16 h-16 rounded-full bg-white/80 backdrop-blur-xl border border-zinc-300 flex items-center justify-center">
+            <Play className="w-7 h-7 text-zinc-900 ml-1" />
           </div>
         </button>
       )}
@@ -199,7 +199,7 @@ export default function DRMVideoPlayer({
           step={0.1}
           value={currentTime}
           onChange={handleSeek}
-          className="w-full h-1 mb-3 appearance-none bg-white/20 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#22C55E]"
+          className="w-full h-1 mb-3 appearance-none bg-white/80 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-3 [&::-webkit-slider-thumb]:h-3 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-[#22C55E]"
           style={{
             background: `linear-gradient(to right, #22C55E ${progress}%, rgba(255,255,255,0.2) ${progress}%)`,
           }}
@@ -207,19 +207,19 @@ export default function DRMVideoPlayer({
 
         <div className="flex items-center gap-3">
           {/* Play/Pause */}
-          <button onClick={togglePlay} className="text-white hover:text-[#22C55E] transition">
+          <button onClick={togglePlay} className="text-zinc-900 hover:text-[#22C55E] transition">
             {playing ? <Pause className="w-5 h-5" /> : <Play className="w-5 h-5" />}
           </button>
 
           {/* Time */}
-          <span className="text-xs text-zinc-300 font-mono min-w-[80px]">
+          <span className="text-xs text-zinc-500 font-mono min-w-[80px]">
             {formatTime(currentTime)} / {formatTime(duration)}
           </span>
 
           <div className="flex-1" />
 
           {/* Volume */}
-          <button onClick={toggleMute} className="text-white hover:text-[#22C55E] transition">
+          <button onClick={toggleMute} className="text-zinc-900 hover:text-[#22C55E] transition">
             {muted || volume === 0 ? (
               <VolumeX className="w-5 h-5" />
             ) : (
@@ -233,11 +233,11 @@ export default function DRMVideoPlayer({
             step={0.05}
             value={muted ? 0 : volume}
             onChange={handleVolumeChange}
-            className="w-20 h-1 appearance-none bg-white/20 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
+            className="w-20 h-1 appearance-none bg-white/80 rounded-full cursor-pointer [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:w-2.5 [&::-webkit-slider-thumb]:h-2.5 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-white"
           />
 
           {/* Fullscreen */}
-          <button onClick={toggleFullscreen} className="text-white hover:text-[#22C55E] transition">
+          <button onClick={toggleFullscreen} className="text-zinc-900 hover:text-[#22C55E] transition">
             {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
           </button>
         </div>

@@ -53,7 +53,7 @@ export default function Navbar() {
       className={cn(
         "fixed top-0 left-0 right-0 z-50 transition-all duration-300",
         scrolled
-          ? "bg-background/80 backdrop-blur-xl border-b border-white/10 shadow-glass"
+          ? "bg-white/80 backdrop-blur-xl border-b border-zinc-200 shadow-glass"
           : "bg-transparent"
       )}
       initial={{ y: -100 }}
@@ -65,7 +65,7 @@ export default function Navbar() {
         <Link href="/" className="flex items-center gap-2 group">
           <div className="relative w-12 h-12 transition-transform duration-300 group-hover:scale-110">
             <Image
-              src="/sage_logo_white.png"
+              src="/sage_logo.png"
               alt="Sage IT Co"
               fill
               priority
@@ -84,7 +84,7 @@ export default function Navbar() {
                 "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
                 pathname === link.href
                   ? "text-neon-blue bg-neon-blue/10"
-                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
               )}
             >
               {link.label}
@@ -97,7 +97,7 @@ export default function Navbar() {
                 "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
                 pathname === "/dashboard"
                   ? "text-neon-blue bg-neon-blue/10"
-                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
               )}
             >
               Dashboard
@@ -110,7 +110,7 @@ export default function Navbar() {
                 "px-4 py-2 rounded-lg text-sm font-medium transition-all duration-300",
                 pathname === "/admin"
                   ? "text-neon-violet bg-neon-violet/10"
-                  : "text-zinc-400 hover:text-white hover:bg-white/5"
+                  : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
               )}
             >
               Admin
@@ -124,12 +124,12 @@ export default function Navbar() {
             <div className="relative" ref={menuRef}>
               <button
                 onClick={() => setUserMenuOpen(!userMenuOpen)}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5 transition-colors"
+                className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/60 transition-colors"
               >
                 <div className="w-8 h-8 rounded-full bg-gradient-to-br from-neon-blue to-neon-violet flex items-center justify-center text-white text-xs font-bold">
                   {user?.fullName?.charAt(0)?.toUpperCase() || "U"}
                 </div>
-                <span className="text-sm text-zinc-300 max-w-[120px] truncate">{user?.fullName}</span>
+                <span className="text-sm text-zinc-500 max-w-[120px] truncate">{user?.fullName}</span>
               </button>
               <AnimatePresence>
                 {userMenuOpen && (
@@ -139,18 +139,18 @@ export default function Navbar() {
                     animate={{ opacity: 1, y: 0 }}
                     exit={{ opacity: 0, y: -8 }}
                   >
-                    <Link href="/dashboard" className="block px-3 py-2 rounded-lg text-sm text-zinc-300 hover:text-white hover:bg-white/10 transition-colors">
+                    <Link href="/dashboard" className="block px-3 py-2 rounded-lg text-sm text-zinc-500 hover:text-zinc-900 hover:bg-white/80 transition-colors">
                       Dashboard
                     </Link>
                     {isAdmin && (
-                      <Link href="/admin" className="block px-3 py-2 rounded-lg text-sm text-zinc-300 hover:text-white hover:bg-white/10 transition-colors">
+                      <Link href="/admin" className="block px-3 py-2 rounded-lg text-sm text-zinc-500 hover:text-zinc-900 hover:bg-white/80 transition-colors">
                         Admin Panel
                       </Link>
                     )}
-                    <hr className="my-1 border-white/10" />
+                    <hr className="my-1 border-zinc-200" />
                     <button
                       onClick={logout}
-                      className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-white/10 transition-colors"
+                      className="w-full text-left px-3 py-2 rounded-lg text-sm text-red-400 hover:text-red-300 hover:bg-white/80 transition-colors"
                     >
                       Sign Out
                     </button>
@@ -160,7 +160,7 @@ export default function Navbar() {
             </div>
           ) : (
             <>
-              <Link href="/login" className="text-sm text-zinc-400 hover:text-white transition-colors px-4 py-2">
+              <Link href="/login" className="text-sm text-zinc-600 hover:text-zinc-900 transition-colors px-4 py-2">
                 Sign In
               </Link>
               <GlowButton href="/signup">Get Started</GlowButton>
@@ -175,9 +175,9 @@ export default function Navbar() {
           aria-label="Toggle menu"
         >
           <div className="space-y-1.5">
-            <span className={cn("block w-6 h-0.5 bg-white transition-all duration-300", mobileOpen && "rotate-45 translate-y-2")} />
-            <span className={cn("block w-6 h-0.5 bg-white transition-all duration-300", mobileOpen && "opacity-0")} />
-            <span className={cn("block w-6 h-0.5 bg-white transition-all duration-300", mobileOpen && "-rotate-45 -translate-y-2")} />
+            <span className={cn("block w-6 h-0.5 bg-zinc-900 transition-all duration-300", mobileOpen && "rotate-45 translate-y-2")} />
+            <span className={cn("block w-6 h-0.5 bg-zinc-900 transition-all duration-300", mobileOpen && "opacity-0")} />
+            <span className={cn("block w-6 h-0.5 bg-zinc-900 transition-all duration-300", mobileOpen && "-rotate-45 -translate-y-2")} />
           </div>
         </button>
       </div>
@@ -186,7 +186,7 @@ export default function Navbar() {
       <AnimatePresence>
         {mobileOpen && (
           <motion.div
-            className="lg:hidden bg-background/95 backdrop-blur-xl border-b border-white/10"
+            className="lg:hidden bg-white/95 backdrop-blur-xl border-b border-zinc-200"
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
@@ -201,30 +201,30 @@ export default function Navbar() {
                     "block px-4 py-3 rounded-lg text-sm font-medium transition-colors",
                     pathname === link.href
                       ? "text-neon-blue bg-neon-blue/10"
-                      : "text-zinc-400 hover:text-white hover:bg-white/5"
+                      : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
                   )}
                 >
                   {link.label}
                 </Link>
               ))}
               {isAuthenticated && (
-                <Link href="/dashboard" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5">
+                <Link href="/dashboard" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">
                   Dashboard
                 </Link>
               )}
               {isAdmin && (
-                <Link href="/admin" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5">
+                <Link href="/admin" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">
                   Admin
                 </Link>
               )}
               <div className="pt-4 space-y-2">
                 {isAuthenticated ? (
-                  <button onClick={logout} className="w-full px-4 py-3 rounded-lg text-sm font-medium text-red-400 hover:bg-white/5 text-left">
+                  <button onClick={logout} className="w-full px-4 py-3 rounded-lg text-sm font-medium text-red-400 hover:bg-white/60 text-left">
                     Sign Out ({user?.fullName})
                   </button>
                 ) : (
                   <>
-                    <Link href="/login" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-400 hover:text-white hover:bg-white/5">
+                    <Link href="/login" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">
                       Sign In
                     </Link>
                     <GlowButton href="/signup" className="w-full">

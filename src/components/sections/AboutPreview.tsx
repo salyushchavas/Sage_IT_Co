@@ -25,12 +25,12 @@ export default function AboutPreview() {
                 align="left"
               />
             </motion.div>
-            <motion.p variants={fadeUp} className="text-zinc-400 text-lg leading-relaxed mb-6">
+            <motion.p variants={fadeUp} className="text-zinc-600 text-lg leading-relaxed mb-6">
               Sage IT is a technology-first company that combines deep engineering expertise with
               AI-driven innovation. We partner with enterprises to modernize infrastructure, secure
               digital assets, and unlock the power of data.
             </motion.p>
-            <motion.p variants={fadeUp} className="text-zinc-400 leading-relaxed mb-8">
+            <motion.p variants={fadeUp} className="text-zinc-600 leading-relaxed mb-8">
               Founded in 2018, we have grown from a cloud consulting startup to a full-spectrum
               technology partner serving Fortune 500 companies across 3 continents.
             </motion.p>
@@ -56,7 +56,7 @@ export default function AboutPreview() {
                 <div className="text-3xl md:text-4xl font-bold text-gradient mb-2">
                   {stat.value}
                 </div>
-                <div className="text-zinc-400 text-sm">{stat.label}</div>
+                <div className="text-zinc-600 text-sm">{stat.label}</div>
               </motion.div>
             ))}
           </motion.div>

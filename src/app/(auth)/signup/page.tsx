@@ -55,10 +55,10 @@ export default function SignupPage() {
 
   const inputClass = (hasError: boolean) =>
     cn(
-      "w-full px-4 py-3 rounded-xl bg-white/5 border text-white placeholder-zinc-600 text-sm outline-none transition-all",
+      "w-full px-4 py-3 rounded-xl bg-white/60 border text-zinc-900 placeholder-zinc-400 text-sm outline-none transition-all",
       hasError
         ? "border-red-500/50 focus:border-red-500"
-        : "border-white/10 focus:border-[#22C55E]/50 focus:shadow-[0_0_12px_rgba(0,212,255,0.1)]"
+        : "border-zinc-200 focus:border-[#22C55E]/50 focus:shadow-[0_0_12px_rgba(0,212,255,0.1)]"
     );
 
   return (
@@ -68,7 +68,7 @@ export default function SignupPage() {
       transition={{ duration: 0.5 }}
       className="w-full max-w-md"
     >
-      <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl p-8">
+      <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-8">
         {/* Header */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block mb-4">
@@ -76,8 +76,8 @@ export default function SignupPage() {
               {APP_NAME}
             </span>
           </Link>
-          <h1 className="text-xl font-semibold text-white">Create an account</h1>
-          <p className="text-sm text-zinc-400 mt-1">Start your learning journey</p>
+          <h1 className="text-xl font-semibold text-zinc-900">Create an account</h1>
+          <p className="text-sm text-zinc-600 mt-1">Start your learning journey</p>
         </div>
 
         {apiError && (
@@ -89,7 +89,7 @@ export default function SignupPage() {
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
           {/* Full Name */}
           <div>
-            <label className="block text-sm text-zinc-400 mb-1.5">Full Name</label>
+            <label className="block text-sm text-zinc-600 mb-1.5">Full Name</label>
             <input
               type="text"
               {...register("fullName")}
@@ -103,7 +103,7 @@ export default function SignupPage() {
 
           {/* Email */}
           <div>
-            <label className="block text-sm text-zinc-400 mb-1.5">Email</label>
+            <label className="block text-sm text-zinc-600 mb-1.5">Email</label>
             <input
               type="email"
               {...register("email")}
@@ -117,7 +117,7 @@ export default function SignupPage() {
 
           {/* Password */}
           <div>
-            <label className="block text-sm text-zinc-400 mb-1.5">Password</label>
+            <label className="block text-sm text-zinc-600 mb-1.5">Password</label>
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
@@ -128,7 +128,7 @@ export default function SignupPage() {
               <button
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-300"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-500"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -140,7 +140,7 @@ export default function SignupPage() {
 
           {/* Confirm Password */}
           <div>
-            <label className="block text-sm text-zinc-400 mb-1.5">Confirm Password</label>
+            <label className="block text-sm text-zinc-600 mb-1.5">Confirm Password</label>
             <input
               type="password"
               {...register("confirmPassword")}
@@ -157,7 +157,7 @@ export default function SignupPage() {
             type="submit"
             disabled={loading}
             className={cn(
-              "w-full py-3 rounded-full font-medium text-sm text-white transition-all duration-300 flex items-center justify-center gap-2",
+              "w-full py-3 rounded-full font-medium text-sm text-zinc-900 transition-all duration-300 flex items-center justify-center gap-2",
               "bg-gradient-to-r from-[#22C55E] via-[#E5B62E] to-[#14653F]",
               "hover:shadow-[0_0_30px_rgba(0,212,255,0.3)] hover:scale-[1.02]",
               "disabled:opacity-50 disabled:cursor-not-allowed"

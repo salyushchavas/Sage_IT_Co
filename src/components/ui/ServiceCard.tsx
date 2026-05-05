@@ -21,12 +21,12 @@ export default function ServiceCard({ service, index, detailed = false }: Servic
         >
           {service.icon}
         </div>
-        <h3 className="text-xl font-bold text-white mb-3">{service.title}</h3>
-        <p className="text-zinc-400 leading-relaxed mb-4">{service.description}</p>
+        <h3 className="text-xl font-bold text-zinc-900 mb-3">{service.title}</h3>
+        <p className="text-zinc-600 leading-relaxed mb-4">{service.description}</p>
         {detailed && (
           <ul className="space-y-2">
             {service.features.map((f) => (
-              <li key={f} className="flex items-center gap-2 text-sm text-zinc-300">
+              <li key={f} className="flex items-center gap-2 text-sm text-zinc-500">
                 <span className="w-1.5 h-1.5 rounded-full" style={{ background: service.color }} />
                 {f}
               </li>
@@ -36,7 +36,7 @@ export default function ServiceCard({ service, index, detailed = false }: Servic
         {!detailed && (
           <div className="flex flex-wrap gap-2 mt-4">
             {service.features.slice(0, 2).map((f) => (
-              <span key={f} className="text-xs px-3 py-1 rounded-full bg-white/5 text-zinc-300 border border-white/10">
+              <span key={f} className="text-xs px-3 py-1 rounded-full bg-white/60 text-zinc-500 border border-zinc-200">
                 {f}
               </span>
             ))}

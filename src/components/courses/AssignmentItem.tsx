@@ -57,14 +57,14 @@ export default function AssignmentItem({
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, delay: index * 0.06 }}
-      className={`bg-white/5 backdrop-blur-xl border rounded-2xl p-5 space-y-3 transition-all ${
-        unlocked ? "border-white/10" : "border-white/5 opacity-60"
+      className={`bg-white/60 backdrop-blur-xl border rounded-2xl p-5 space-y-3 transition-all ${
+        unlocked ? "border-zinc-200" : "border-zinc-200 opacity-60"
       }`}
     >
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/20 to-[#14653F]/20 border border-white/10 flex items-center justify-center">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-[#E5B62E]/20 to-[#14653F]/20 border border-zinc-200 flex items-center justify-center">
             {unlocked ? (
               <FileText className="w-5 h-5 text-[#14653F]" />
             ) : (
@@ -72,7 +72,7 @@ export default function AssignmentItem({
             )}
           </div>
           <div>
-            <h4 className="text-white font-medium">{title}</h4>
+            <h4 className="text-zinc-900 font-medium">{title}</h4>
             <span className="text-xs text-zinc-500 uppercase tracking-wider">
               {assignmentType}
             </span>
@@ -81,7 +81,7 @@ export default function AssignmentItem({
         {submitted && <CheckCircle2 className="w-5 h-5 text-emerald-400 flex-shrink-0" />}
       </div>
 
-      <p className="text-zinc-400 text-sm">{description}</p>
+      <p className="text-zinc-600 text-sm">{description}</p>
 
       {dueDate && (
         <p className="flex items-center gap-1.5 text-xs text-zinc-500">
@@ -108,14 +108,14 @@ export default function AssignmentItem({
                 onChange={(e) => setContent(e.target.value)}
                 rows={5}
                 placeholder="Write your submission here..."
-                className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#22C55E]/40 transition-colors resize-none placeholder-zinc-600"
+                className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors resize-none placeholder-zinc-400"
               />
               {error && <p className="text-red-400 text-sm">{error}</p>}
               <div className="flex items-center gap-3">
                 <button
                   onClick={handleSubmit}
                   disabled={!content.trim() || submitting}
-                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
+                  className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
                 >
                   {submitting ? (
                     <>
@@ -131,7 +131,7 @@ export default function AssignmentItem({
                 </button>
                 <button
                   onClick={() => setShowForm(false)}
-                  className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-zinc-400 text-sm hover:text-white transition-colors"
+                  className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 text-sm hover:text-zinc-900 transition-colors"
                 >
                   Cancel
                 </button>

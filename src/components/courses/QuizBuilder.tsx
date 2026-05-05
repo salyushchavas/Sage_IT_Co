@@ -85,7 +85,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
     question.correctAnswer;
 
   return (
-    <div className="bg-white/5 backdrop-blur-xl border border-white/10 rounded-2xl overflow-hidden">
+    <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
       {/* Toggle header */}
       <button
         onClick={() => setOpen(!open)}
@@ -93,7 +93,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
       >
         <div className="flex items-center gap-2">
           <BrainCircuit className="w-5 h-5 text-[#E5B62E]" />
-          <span className="text-white font-semibold">Quiz Builder</span>
+          <span className="text-zinc-900 font-semibold">Quiz Builder</span>
           {questionsAdded > 0 && (
             <span className="text-xs bg-[#E5B62E]/20 text-[#E5B62E] px-2 py-0.5 rounded-full">
               {questionsAdded} question{questionsAdded !== 1 ? "s" : ""}
@@ -101,9 +101,9 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
           )}
         </div>
         {open ? (
-          <ChevronUp className="w-5 h-5 text-zinc-400" />
+          <ChevronUp className="w-5 h-5 text-zinc-600" />
         ) : (
-          <ChevronDown className="w-5 h-5 text-zinc-400" />
+          <ChevronDown className="w-5 h-5 text-zinc-600" />
         )}
       </button>
 
@@ -116,20 +116,20 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
             transition={{ duration: 0.25 }}
             className="overflow-hidden"
           >
-            <div className="p-5 pt-0 space-y-5 border-t border-white/5">
+            <div className="p-5 pt-0 space-y-5 border-t border-zinc-200">
               {!quiz ? (
                 /* Step 1: Create quiz */
                 <div className="space-y-3">
-                  <label className="block text-zinc-400 text-sm">Quiz Title</label>
+                  <label className="block text-zinc-600 text-sm">Quiz Title</label>
                   <input
                     value={quizTitle}
                     onChange={(e) => setQuizTitle(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#22C55E]/40 transition-colors"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors"
                   />
                   <button
                     onClick={handleCreateQuiz}
                     disabled={!quizTitle.trim() || creating}
-                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-white font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
+                    className="px-5 py-2.5 rounded-xl bg-gradient-to-r from-[#E5B62E] to-[#22C55E] text-zinc-900 font-medium text-sm hover:opacity-90 transition-opacity disabled:opacity-40 flex items-center gap-2"
                   >
                     {creating ? (
                       <Loader2 className="w-4 h-4 animate-spin" />
@@ -148,14 +148,14 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                   </div>
 
                   <div className="space-y-3">
-                    <label className="block text-zinc-400 text-sm">Question</label>
+                    <label className="block text-zinc-600 text-sm">Question</label>
                     <textarea
                       value={question.questionText}
                       onChange={(e) =>
                         setQuestion((q) => ({ ...q, questionText: e.target.value }))
                       }
                       rows={2}
-                      className="w-full px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#22C55E]/40 transition-colors resize-none"
+                      className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors resize-none"
                       placeholder="Enter the question..."
                     />
 
@@ -171,13 +171,13 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                             }))
                           }
                           placeholder={`Option ${opt}${opt === "C" || opt === "D" ? " (optional)" : ""}`}
-                          className="px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm outline-none focus:border-[#22C55E]/40 transition-colors"
+                          className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#22C55E]/40 transition-colors"
                         />
                       ))}
                     </div>
 
                     <div>
-                      <label className="block text-zinc-400 text-sm mb-2">
+                      <label className="block text-zinc-600 text-sm mb-2">
                         Correct Answer
                       </label>
                       <div className="flex gap-2">
@@ -190,7 +190,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                             className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
                               question.correctAnswer === opt
                                 ? "bg-[#22C55E]/20 border-[#22C55E]/50 text-[#22C55E]"
-                                : "bg-white/5 border-white/10 text-zinc-400 hover:text-white"
+                                : "bg-white/60 border-zinc-200 text-zinc-600 hover:text-zinc-900"
                             }`}
                           >
                             {opt}

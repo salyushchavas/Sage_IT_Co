@@ -9,8 +9,8 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        background: "#050510",
-        foreground: "#e4e4e7",
+        background: "#FAFAF7",
+        foreground: "#0a0a0a",
         // Brand palette (sage green + warm gold from logo)
         "sage-green": "#22C55E",
         "sage-green-deep": "#14653F",
@@ -18,19 +18,20 @@ const config: Config = {
         "sage-gold-light": "#FBBF24",
         // Legacy "neon-*" tokens remapped to brand palette so existing
         // references throughout the codebase keep working without edits.
-        "neon-blue": "#22C55E",     // was cyan blue → now sage green
-        "neon-violet": "#E5B62E",   // was violet → now warm gold
-        "neon-cyan": "#14653F",     // was cyan → now deep forest green
-        "neon-purple": "#FBBF24",   // was purple → now light gold
-        "dark-card": "#0a1a0f",
+        "neon-blue": "#22C55E",
+        "neon-violet": "#E5B62E",
+        "neon-cyan": "#14653F",
+        "neon-purple": "#FBBF24",
+        "dark-card": "#FFFFFF",
       },
       boxShadow: {
-        "glow-blue": "0 0 20px rgba(34, 197, 94, 0.35), 0 0 60px rgba(34, 197, 94, 0.12)",
-        "glow-violet": "0 0 20px rgba(229, 182, 46, 0.35), 0 0 60px rgba(229, 182, 46, 0.12)",
-        "glow-cyan": "0 0 20px rgba(20, 101, 63, 0.35), 0 0 60px rgba(20, 101, 63, 0.12)",
-        "glow-green": "0 0 20px rgba(34, 197, 94, 0.35), 0 0 60px rgba(34, 197, 94, 0.12)",
-        "glow-gold": "0 0 20px rgba(229, 182, 46, 0.35), 0 0 60px rgba(229, 182, 46, 0.12)",
-        glass: "0 8px 32px rgba(0, 0, 0, 0.3)",
+        "glow-blue": "0 0 24px rgba(34, 197, 94, 0.18), 0 0 60px rgba(34, 197, 94, 0.08)",
+        "glow-violet": "0 0 24px rgba(229, 182, 46, 0.18), 0 0 60px rgba(229, 182, 46, 0.08)",
+        "glow-cyan": "0 0 24px rgba(20, 101, 63, 0.18), 0 0 60px rgba(20, 101, 63, 0.08)",
+        "glow-green": "0 0 24px rgba(34, 197, 94, 0.18), 0 0 60px rgba(34, 197, 94, 0.08)",
+        "glow-gold": "0 0 24px rgba(229, 182, 46, 0.18), 0 0 60px rgba(229, 182, 46, 0.08)",
+        glass: "0 8px 32px rgba(20, 101, 63, 0.08)",
+        soft: "0 4px 24px rgba(0, 0, 0, 0.06)",
       },
       backgroundImage: {
         "gradient-radial": "radial-gradient(var(--tw-gradient-stops))",
