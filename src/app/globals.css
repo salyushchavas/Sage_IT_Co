@@ -67,41 +67,43 @@ body {
   }
 }
 
-/* Button — starts solid green, gold fills in from left on hover */
+/* Button — solid green base with strong gold glow on hover */
 .btn-fill {
   position: relative;
   overflow: hidden;
   background-color: #0F5132;
   color: #ffffff;
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.4s ease;
   isolation: isolate;
+  box-shadow: 0 4px 20px rgba(15, 81, 50, 0.25);
 }
 .btn-fill::before {
   content: "";
   position: absolute;
   inset: 0;
-  background-color: #D4A017;
-  transform: scaleX(0);
-  transform-origin: left center;
-  transition: transform 0.5s ease-out;
+  background: radial-gradient(circle at center, #D4A017 0%, #D4A017 45%, rgba(212, 160, 23, 0.6) 75%, transparent 100%);
+  opacity: 0;
+  transition: opacity 0.4s ease-out;
   z-index: -1;
 }
 .btn-fill:hover::before {
-  transform: scaleX(1);
+  opacity: 1;
 }
 .btn-fill:hover {
-  transform: scale(1.03);
-  box-shadow: 0 0 24px rgba(212, 160, 23, 0.30);
+  transform: scale(1.04);
+  box-shadow: 0 8px 40px rgba(212, 160, 23, 0.55), 0 0 0 1px rgba(212, 160, 23, 0.25);
 }
 .btn-fill:disabled {
   opacity: 0.5;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .btn-fill:disabled:hover {
   transform: none;
+  box-shadow: none;
 }
 .btn-fill:disabled:hover::before {
-  transform: scaleX(0);
+  opacity: 0;
 }
 
 @layer utilities {
