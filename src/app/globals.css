@@ -81,7 +81,10 @@ body {
     rgba(212,160,23,0.0) 335deg,
     transparent 360deg
   );
-  animation: logo-glow-wave 4.2s cubic-bezier(0.45, 0.05, 0.55, 0.95) infinite,
+  rotate: 0deg;
+  scale: 1;
+  animation: logo-glow-rotate 4.2s linear infinite,
+             logo-glow-wobble 3.5s ease-in-out infinite,
              logo-glow-breathe 3s ease-in-out infinite,
              logo-glow-swap-gold 25.2s ease-in-out infinite;
 }
@@ -101,25 +104,47 @@ body {
     rgba(15,81,50,0.0) 340deg,
     transparent 360deg
   );
-  animation: logo-glow-wave-reverse 5.6s cubic-bezier(0.65, 0.05, 0.35, 0.95) infinite,
+  rotate: 0deg;
+  scale: 1;
+  animation: logo-glow-rotate-reverse 5.6s linear infinite,
+             logo-glow-wobble-alt 4.2s ease-in-out infinite,
              logo-glow-breathe 4s ease-in-out infinite reverse,
              logo-glow-swap-emerald 25.2s ease-in-out infinite;
 }
-/* Wavey rotation — speeds up and slows down within each loop so the
-   light "swims" instead of marching */
-@keyframes logo-glow-wave {
-  0%   { transform: rotate(0deg)   scale(1); }
-  25%  { transform: rotate(80deg)  scale(1.04); }
-  50%  { transform: rotate(180deg) scale(0.98); }
-  75%  { transform: rotate(280deg) scale(1.04); }
-  100% { transform: rotate(360deg) scale(1); }
+/* Pure linear rotation — never speeds up or jolts at loop boundaries,
+   so the orbit feels like silk. The "wavey" character comes from the
+   layered scale-wobble below, eased by a smooth sine. */
+@keyframes logo-glow-rotate {
+  from { rotate: 0deg; }
+  to   { rotate: 360deg; }
 }
-@keyframes logo-glow-wave-reverse {
-  0%   { transform: rotate(0deg)    scale(1); }
-  25%  { transform: rotate(-100deg) scale(0.97); }
-  50%  { transform: rotate(-180deg) scale(1.05); }
-  75%  { transform: rotate(-260deg) scale(0.97); }
-  100% { transform: rotate(-360deg) scale(1); }
+@keyframes logo-glow-rotate-reverse {
+  from { rotate: 0deg; }
+  to   { rotate: -360deg; }
+}
+/* Sine-style scale wobble using many keyframes so easing between them
+   stays buttery smooth (no visible inflection at any keyframe) */
+@keyframes logo-glow-wobble {
+  0%   { scale: 1.000; }
+  12%  { scale: 1.012; }
+  25%  { scale: 1.030; }
+  37%  { scale: 1.038; }
+  50%  { scale: 1.000; }
+  62%  { scale: 0.974; }
+  75%  { scale: 0.966; }
+  87%  { scale: 0.984; }
+  100% { scale: 1.000; }
+}
+@keyframes logo-glow-wobble-alt {
+  0%   { scale: 1.000; }
+  12%  { scale: 0.978; }
+  25%  { scale: 0.962; }
+  37%  { scale: 0.978; }
+  50%  { scale: 1.000; }
+  62%  { scale: 1.024; }
+  75%  { scale: 1.040; }
+  87%  { scale: 1.022; }
+  100% { scale: 1.000; }
 }
 /* Subtle radial breathing layered on top of the rotation */
 @keyframes logo-glow-breathe {
