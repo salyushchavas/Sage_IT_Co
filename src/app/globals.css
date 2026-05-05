@@ -81,14 +81,23 @@ body {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle 35px at center, rgba(255, 215, 0, 0.5) 0%, rgba(255, 215, 0, 0.25) 50%, transparent 100%);
-  opacity: 0;
-  filter: blur(2px);
-  transition: opacity 0.4s ease-out;
-  z-index: -1;
+  background: linear-gradient(
+    110deg,
+    transparent 30%,
+    rgba(255, 215, 0, 0.55) 50%,
+    transparent 70%
+  );
+  transform: translateX(-100%);
+  transition: transform 0.9s ease-out;
+  pointer-events: none;
+  z-index: 0;
+}
+.btn-fill > * {
+  position: relative;
+  z-index: 1;
 }
 .btn-fill:hover::before {
-  opacity: 1;
+  transform: translateX(100%);
 }
 .btn-fill:hover {
   transform: scale(1.04);
@@ -107,7 +116,7 @@ body {
   box-shadow: none;
 }
 .btn-fill:disabled:hover::before {
-  opacity: 0;
+  transform: translateX(-100%);
 }
 
 @layer utilities {
