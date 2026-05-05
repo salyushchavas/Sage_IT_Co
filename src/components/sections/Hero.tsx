@@ -1,11 +1,26 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import GlowButton from "../ui/GlowButton";
+
+function MorphingCodeWrapper() {
+  const [Component, setComponent] = useState<React.ComponentType | null>(null);
+
+  useEffect(() => {
+    import("./MorphingCode").then((mod) => setComponent(() => mod.default));
+  }, []);
+
+  if (!Component) return null;
+  return <Component />;
+}
 
 export default function Hero() {
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden bg-grid">
+      {/* Morphing code background */}
+      <MorphingCodeWrapper />
+
       {/* Radial gradient overlay */}
       <div className="absolute inset-0 bg-gradient-radial from-transparent via-background/30 to-background z-[1]" />
 
