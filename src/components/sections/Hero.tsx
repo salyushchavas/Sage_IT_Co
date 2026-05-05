@@ -32,7 +32,7 @@ export default function Hero() {
           transition={{ duration: 0.8, delay: 0.4 }}
         >
           <span className="inline-block text-neon-blue text-sm font-semibold tracking-widest uppercase mb-6 px-4 py-2 rounded-full border border-neon-blue/20 bg-neon-blue/5">
-            Next-Gen IT Solutions
+            Enterprise Technology · Engineered for Tomorrow
           </span>
         </motion.div>
 
