@@ -1,124 +1,37 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 
-// Real code snippets representing different tech domains
-const codeSnippets = [
-  {
-    label: "cloud.tf",
-    lang: "terraform",
-    lines: [
-      { text: 'resource "aws_lambda_function" "ai_engine" {', color: "#D4A017" },
-      { text: '  function_name = "sage-inference"', color: "#0A3D26" },
-      { text: '  runtime       = "python3.12"', color: "#0A3D26" },
-      { text: '  memory_size   = 2048', color: "#0F5132" },
-      { text: '  timeout       = 30', color: "#0F5132" },
-      { text: "", color: "#555" },
-      { text: "  environment {", color: "#D4A017" },
-      { text: "    variables = {", color: "#E8B82E" },
-      { text: '      MODEL_ENDPOINT = var.sagemaker_ep', color: "#0A3D26" },
-      { text: '      CACHE_TTL      = "3600"', color: "#0A3D26" },
-      { text: "    }", color: "#E8B82E" },
-      { text: "  }", color: "#D4A017" },
-      { text: "}", color: "#D4A017" },
-    ],
-  },
-  {
-    label: "model.py",
-    lang: "python",
-    lines: [
-      { text: "import torch", color: "#0F5132" },
-      { text: "from transformers import AutoModel", color: "#0F5132" },
-      { text: "", color: "#555" },
-      { text: "class SagePredictor(nn.Module):", color: "#D4A017" },
-      { text: "    def __init__(self, config):", color: "#E8B82E" },
-      { text: "        super().__init__()", color: "#0A3D26" },
-      { text: '        self.encoder = AutoModel.from_pretrained("sage-xl")', color: "#0A3D26" },
-      { text: "        self.head = nn.Linear(768, config.num_classes)", color: "#0A3D26" },
-      { text: "", color: "#555" },
-      { text: "    def forward(self, x):", color: "#E8B82E" },
-      { text: "        embeddings = self.encoder(x).last_hidden_state", color: "#0A3D26" },
-      { text: "        return self.head(embeddings[:, 0])", color: "#0A3D26" },
-      { text: '        # accuracy: 97.3% | latency: 12ms', color: "#555" },
-    ],
-  },
-  {
-    label: "deploy.yaml",
-    lang: "kubernetes",
-    lines: [
-      { text: "apiVersion: apps/v1", color: "#0F5132" },
-      { text: "kind: Deployment", color: "#D4A017" },
-      { text: "metadata:", color: "#E8B82E" },
-      { text: "  name: sage-api-gateway", color: "#0A3D26" },
-      { text: "  namespace: production", color: "#0A3D26" },
-      { text: "spec:", color: "#E8B82E" },
-      { text: "  replicas: 12", color: "#0F5132" },
-      { text: "  strategy:", color: "#E8B82E" },
-      { text: "    type: RollingUpdate", color: "#0A3D26" },
-      { text: "    maxSurge: 25%", color: "#0A3D26" },
-      { text: "  template:", color: "#E8B82E" },
-      { text: "    spec:", color: "#E8B82E" },
-      { text: "      containers:", color: "#D4A017" },
-    ],
-  },
-  {
-    label: "security.rs",
-    lang: "rust",
-    lines: [
-      { text: "use sage_crypto::shield;", color: "#0F5132" },
-      { text: "use zero_trust::verify;", color: "#0F5132" },
-      { text: "", color: "#555" },
-      { text: "#[derive(Shield)]", color: "#E8B82E" },
-      { text: "pub struct ThreatEngine {", color: "#D4A017" },
-      { text: "    model: NeuralDetector,", color: "#0A3D26" },
-      { text: "    policy: ZeroTrustPolicy,", color: "#0A3D26" },
-      { text: "}", color: "#D4A017" },
-      { text: "", color: "#555" },
-      { text: "impl ThreatEngine {", color: "#D4A017" },
-      { text: "    pub async fn scan(&self, req: &Request)", color: "#E8B82E" },
-      { text: "        -> Result<Verdict, SecurityError> {", color: "#E8B82E" },
-      { text: "        let score = self.model.analyze(req).await?;", color: "#0A3D26" },
-    ],
-  },
-  {
-    label: "analytics.tsx",
-    lang: "typescript",
-    lines: [
-      { text: 'import { Pipeline } from "@sage/data-nexus";', color: "#0F5132" },
-      { text: 'import { useRealtime } from "@sage/hooks";', color: "#0F5132" },
-      { text: "", color: "#555" },
-      { text: "export function InsightDashboard() {", color: "#D4A017" },
-      { text: "  const { stream, metrics } = useRealtime({", color: "#E8B82E" },
-      { text: '    source: "kafka://events",', color: "#0A3D26" },
-      { text: "    window: '5m',", color: "#0A3D26" },
-      { text: "    aggregate: ['count', 'p99_latency'],", color: "#0A3D26" },
-      { text: "  });", color: "#E8B82E" },
-      { text: "", color: "#555" },
-      { text: "  return (", color: "#D4A017" },
-      { text: "    <Pipeline.Visualize data={stream} />", color: "#0A3D26" },
-      { text: "  );", color: "#D4A017" },
-    ],
-  },
+const services = [
+  { label: "Cloud",     icon: "☁",  angle: 0,   radius: 38, color: "#0F5132", delay: 0 },
+  { label: "AI / ML",   icon: "◈",  angle: 60,  radius: 42, color: "#D4A017", delay: 0.2 },
+  { label: "Security",  icon: "✦",  angle: 120, radius: 36, color: "#0A3D26", delay: 0.4 },
+  { label: "Data",      icon: "▦",  angle: 180, radius: 40, color: "#0F5132", delay: 0.6 },
+  { label: "DevOps",    icon: "⟳",  angle: 240, radius: 38, color: "#D4A017", delay: 0.8 },
+  { label: "Analytics", icon: "▲",  angle: 300, radius: 42, color: "#0A3D26", delay: 1.0 },
 ];
 
-// Floating particle component
-function Particle({ delay }: { delay: number }) {
+function polar(angleDeg: number, radius: number) {
+  const rad = (angleDeg * Math.PI) / 180;
+  return {
+    left: `${50 + radius * Math.cos(rad)}%`,
+    top: `${50 + radius * Math.sin(rad) * 0.55}%`,
+  };
+}
+
+function DataPulse({ x1, y1, x2, y2, delay }: { x1: string; y1: string; x2: string; y2: string; delay: number }) {
   return (
-    <motion.div
-      className="absolute w-1 h-1 rounded-full bg-neon-blue/50"
-      style={{
-        left: `${Math.random() * 100}%`,
-        top: `${Math.random() * 100}%`,
-      }}
+    <motion.circle
+      r="2.5"
+      fill="#D4A017"
+      initial={{ opacity: 0 }}
       animate={{
-        y: [0, -80, 0],
-        x: [0, (Math.random() - 0.5) * 40, 0],
-        opacity: [0, 0.6, 0],
-        scale: [0, 1.5, 0],
+        cx: [x1, x2],
+        cy: [y1, y2],
+        opacity: [0, 1, 1, 0],
       }}
       transition={{
-        duration: 4 + Math.random() * 3,
+        duration: 3,
         repeat: Infinity,
         delay,
         ease: "easeInOut",
@@ -128,110 +41,165 @@ function Particle({ delay }: { delay: number }) {
 }
 
 export default function MorphingCode() {
-  const [activeIndex, setActiveIndex] = useState(0);
-  const [typedLines, setTypedLines] = useState<number>(0);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  const currentSnippet = codeSnippets[activeIndex];
-
-  // Typing effect - reveal lines one by one
-  useEffect(() => {
-    setTypedLines(0);
-    let line = 0;
-    const timer = setInterval(() => {
-      line++;
-      setTypedLines(line);
-      if (line >= currentSnippet.lines.length) {
-        clearInterval(timer);
-      }
-    }, 120);
-    return () => clearInterval(timer);
-  }, [activeIndex, currentSnippet.lines.length]);
-
-  // Auto-cycle snippets
-  const cycleNext = useCallback(() => {
-    setActiveIndex((prev) => (prev + 1) % codeSnippets.length);
-  }, []);
-
-  useEffect(() => {
-    intervalRef.current = setInterval(cycleNext, 4500);
-    return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
-    };
-  }, [cycleNext]);
+  const center = { x: "50%", y: "50%" };
 
   return (
-    <div className="absolute inset-0 z-0 overflow-hidden">
+    <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
       {/* Ambient glow blobs */}
-      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-neon-violet/8 rounded-full blur-[120px] animate-pulse-glow" />
-      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-neon-blue/8 rounded-full blur-[100px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
-      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-neon-cyan/5 rounded-full blur-[150px]" />
+      <div className="absolute top-1/4 left-1/4 w-[500px] h-[500px] bg-emerald-900/10 rounded-full blur-[120px] animate-pulse-glow" />
+      <div className="absolute bottom-1/4 right-1/4 w-[400px] h-[400px] bg-yellow-600/10 rounded-full blur-[100px] animate-pulse-glow" style={{ animationDelay: "1s" }} />
+      <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-emerald-700/5 rounded-full blur-[150px]" />
 
-      {/* Floating particles */}
-      {Array.from({ length: 20 }).map((_, i) => (
-        <Particle key={i} delay={i * 0.3} />
-      ))}
+      {/* SVG network — connection lines + data pulses */}
+      <svg className="absolute inset-0 w-full h-full hidden md:block" preserveAspectRatio="none">
+        <defs>
+          <linearGradient id="netGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#0F5132" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#D4A017" stopOpacity="0.35" />
+          </linearGradient>
+          <radialGradient id="coreGrad">
+            <stop offset="0%" stopColor="#D4A017" stopOpacity="0.6" />
+            <stop offset="100%" stopColor="#0F5132" stopOpacity="0" />
+          </radialGradient>
+        </defs>
 
-      {/* Code blocks - right side (secondary, offset) */}
+        {/* Concentric orbital rings */}
+        {[18, 28, 40].map((r, i) => (
+          <motion.ellipse
+            key={r}
+            cx="50%"
+            cy="50%"
+            rx={`${r}%`}
+            ry={`${r * 0.55}%`}
+            fill="none"
+            stroke="url(#netGrad)"
+            strokeWidth="0.6"
+            strokeDasharray="3 6"
+            initial={{ opacity: 0, rotate: 0 }}
+            animate={{ opacity: 0.35, rotate: i % 2 === 0 ? 360 : -360 }}
+            transition={{
+              opacity: { duration: 1.5, delay: i * 0.3 },
+              rotate: { duration: 60 + i * 20, repeat: Infinity, ease: "linear" },
+            }}
+            style={{ transformOrigin: "50% 50%" }}
+          />
+        ))}
+
+        {/* Central core glow */}
+        <circle cx="50%" cy="50%" r="80" fill="url(#coreGrad)" />
+
+        {/* Connection lines from center to each service node */}
+        {services.map((s, i) => {
+          const p = polar(s.angle, s.radius);
+          return (
+            <motion.line
+              key={`line-${i}`}
+              x1={center.x}
+              y1={center.y}
+              x2={p.left}
+              y2={p.top}
+              stroke="url(#netGrad)"
+              strokeWidth="1"
+              strokeDasharray="4 4"
+              initial={{ pathLength: 0, opacity: 0 }}
+              animate={{ pathLength: 1, opacity: 0.5 }}
+              transition={{ duration: 1.2, delay: 0.3 + s.delay }}
+            />
+          );
+        })}
+
+        {/* Data pulses traveling outward */}
+        {services.map((s, i) => {
+          const p = polar(s.angle, s.radius);
+          return (
+            <DataPulse
+              key={`pulse-${i}`}
+              x1={center.x}
+              y1={center.y}
+              x2={p.left}
+              y2={p.top}
+              delay={i * 0.5}
+            />
+          );
+        })}
+      </svg>
+
+      {/* Pulsing core node */}
       <motion.div
-        className="absolute right-[5%] bottom-[12%] w-[35%] max-w-[420px] hidden lg:block"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 0.4 }}
-        transition={{ delay: 1, duration: 1 }}
+        className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 hidden md:block"
+        animate={{ scale: [1, 1.15, 1] }}
+        transition={{ duration: 3, repeat: Infinity, ease: "easeInOut" }}
       >
-        <div className="glass rounded-xl overflow-hidden">
-          <div className="flex items-center gap-2 px-4 py-2.5 border-b border-zinc-200 bg-white/[0.02]">
-            <div className="flex gap-1.5">
-              <div className="w-2.5 h-2.5 rounded-full bg-red-500/40" />
-              <div className="w-2.5 h-2.5 rounded-full bg-yellow-500/40" />
-              <div className="w-2.5 h-2.5 rounded-full bg-green-500/40" />
-            </div>
-            <span className="text-[10px] text-zinc-600 ml-2 font-mono">terminal</span>
-          </div>
-          <div className="p-4 font-mono text-[11px] leading-5 text-zinc-600">
-            <motion.div
-              animate={{ opacity: [0.3, 0.7, 0.3] }}
-              transition={{ duration: 3, repeat: Infinity }}
-            >
-              <p><span className="text-neon-cyan">$</span> sage deploy --env production</p>
-              <p className="text-zinc-500">Building containers... <span className="text-green-500/70">done</span></p>
-              <p className="text-zinc-500">Running security scan... <span className="text-green-500/70">passed</span></p>
-              <p className="text-zinc-500">Deploying to 12 regions... <span className="text-neon-blue/70">in progress</span></p>
-              <p className="text-zinc-500">Model accuracy: <span className="text-neon-violet/70">97.3%</span></p>
-              <p className="text-zinc-500">Latency p99: <span className="text-neon-cyan/70">12ms</span></p>
-              <p><span className="text-neon-cyan">$</span> <motion.span className="inline-block w-[6px] h-3 bg-neon-cyan/50" animate={{ opacity: [1, 0] }} transition={{ duration: 0.6, repeat: Infinity }} /></p>
-            </motion.div>
-          </div>
+        <div className="relative">
+          <div className="w-20 h-20 rounded-full bg-gradient-to-br from-emerald-900/20 to-yellow-600/20 backdrop-blur-sm border border-emerald-900/20" />
+          <motion.div
+            className="absolute inset-0 rounded-full border border-yellow-600/40"
+            animate={{ scale: [1, 1.8], opacity: [0.6, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: "easeOut" }}
+          />
         </div>
       </motion.div>
 
-      {/* Connecting lines (decorative) */}
-      <svg className="absolute inset-0 w-full h-full pointer-events-none hidden lg:block" style={{ zIndex: 0 }}>
-        <motion.line
-          x1="40%" y1="50%" x2="50%" y2="50%"
-          stroke="url(#lineGrad)"
-          strokeWidth="1"
-          strokeDasharray="6 4"
-          initial={{ pathLength: 0, opacity: 0 }}
-          animate={{ pathLength: 1, opacity: 0.3 }}
-          transition={{ delay: 2, duration: 1.5 }}
+      {/* Orbiting service nodes */}
+      {services.map((s, i) => {
+        const p = polar(s.angle, s.radius);
+        return (
+          <motion.div
+            key={s.label}
+            className="absolute hidden md:flex items-center gap-2 px-3 py-1.5 rounded-full glass border border-emerald-900/15 shadow-sm"
+            style={{
+              left: p.left,
+              top: p.top,
+              transform: "translate(-50%, -50%)",
+            }}
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{
+              opacity: 0.85,
+              scale: 1,
+              y: [0, -6, 0],
+            }}
+            transition={{
+              opacity: { duration: 0.8, delay: 0.6 + s.delay },
+              scale: { duration: 0.8, delay: 0.6 + s.delay },
+              y: { duration: 4 + i * 0.4, repeat: Infinity, ease: "easeInOut", delay: s.delay },
+            }}
+          >
+            <span className="text-base leading-none" style={{ color: s.color }}>{s.icon}</span>
+            <span className="text-[11px] font-mono font-semibold tracking-wide" style={{ color: s.color }}>
+              {s.label}
+            </span>
+            <motion.span
+              className="w-1.5 h-1.5 rounded-full"
+              style={{ backgroundColor: s.color }}
+              animate={{ opacity: [0.3, 1, 0.3] }}
+              transition={{ duration: 1.8, repeat: Infinity, delay: i * 0.3 }}
+            />
+          </motion.div>
+        );
+      })}
+
+      {/* Floating ambient particles */}
+      {Array.from({ length: 18 }).map((_, i) => (
+        <motion.div
+          key={i}
+          className="absolute w-1 h-1 rounded-full bg-yellow-600/40"
+          style={{
+            left: `${(i * 53) % 100}%`,
+            top: `${(i * 31) % 100}%`,
+          }}
+          animate={{
+            y: [0, -60, 0],
+            opacity: [0, 0.7, 0],
+            scale: [0, 1.4, 0],
+          }}
+          transition={{
+            duration: 5 + (i % 4),
+            repeat: Infinity,
+            delay: i * 0.3,
+            ease: "easeInOut",
+          }}
         />
-        <motion.line
-          x1="50%" y1="50%" x2="65%" y2="70%"
-          stroke="url(#lineGrad)"
-          strokeWidth="1"
-          strokeDasharray="6 4"
-          initial={{ pathLength: 0, opacity: 0 }}
-          animate={{ pathLength: 1, opacity: 0.2 }}
-          transition={{ delay: 2.5, duration: 1.5 }}
-        />
-        <defs>
-          <linearGradient id="lineGrad" x1="0%" y1="0%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#0F5132" stopOpacity="0.5" />
-            <stop offset="100%" stopColor="#D4A017" stopOpacity="0.5" />
-          </linearGradient>
-        </defs>
-      </svg>
+      ))}
     </div>
   );
 }
