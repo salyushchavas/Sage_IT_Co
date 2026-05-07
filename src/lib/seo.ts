@@ -24,3 +24,43 @@ function resolveSiteUrl(): string {
 }
 
 export const SITE_URL = resolveSiteUrl();
+
+import type { Metadata } from "next";
+
+interface PageMetaInput {
+  title: string;
+  description: string;
+  /** Path relative to site root, e.g. "/services". Used for canonical + OG URL. */
+  path: string;
+  /** Optional override for the social-card image. Defaults to the brand logo. */
+  image?: string;
+}
+
+/**
+ * Build a Metadata object for an individual page.
+ *
+ * The root layout already sets defaults (siteName, twitter card type,
+ * locale, robots, etc.). This helper only fills in fields that should
+ * differ per page — title, description, canonical, and per-page social
+ * preview text. Anything not specified inherits from the root.
+ */
+export function pageMeta({ title, description, path, image }: PageMetaInput): Metadata {
+  const url = path.startsWith("/") ? path : `/${path}`;
+  return {
+    title,
+    description,
+    alternates: { canonical: url },
+    openGraph: {
+      title,
+      description,
+      url,
+      type: "website",
+      images: image ? [image] : undefined,
+    },
+    twitter: {
+      title,
+      description,
+      images: image ? [image] : undefined,
+    },
+  };
+}
