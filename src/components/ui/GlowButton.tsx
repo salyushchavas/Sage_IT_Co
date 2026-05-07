@@ -80,13 +80,21 @@ export default function GlowButton({
 
   const inner = (
     <>
-      {/* Spotlight — bright focused light at cursor */}
+      {/* Spotlight — shiny gold metallic highlight at cursor.
+          Multi-stop gradient (cream → gold → copper). Primary uses
+          `screen` blend on the dark navy fill so the highlight reads
+          as polished metal. Secondary keeps normal blend so the warm
+          gold remains visible against the white surface. */}
       <span
         aria-hidden
         className="absolute inset-0 pointer-events-none transition-opacity duration-200 ease-out z-[2]"
         style={{
           opacity: hovered ? 1 : 0,
-          background: `radial-gradient(circle 110px at ${pos.x}% ${pos.y}%, rgba(255, 215, 0, 0.65) 0%, rgba(255, 215, 0, 0.35) 35%, rgba(255, 215, 0, 0.15) 60%, transparent 85%)`,
+          mixBlendMode: variant === "primary" ? "screen" : "normal",
+          background:
+            variant === "primary"
+              ? `radial-gradient(circle 120px at ${pos.x}% ${pos.y}%, rgba(255, 248, 220, 0.9) 0%, rgba(255, 215, 130, 0.75) 18%, rgba(232, 167, 141, 0.6) 38%, rgba(200, 125, 92, 0.4) 58%, rgba(165, 94, 64, 0.2) 75%, transparent 90%)`
+              : `radial-gradient(circle 120px at ${pos.x}% ${pos.y}%, rgba(255, 215, 130, 0.55) 0%, rgba(232, 167, 141, 0.45) 28%, rgba(200, 125, 92, 0.3) 55%, rgba(165, 94, 64, 0.15) 75%, transparent 90%)`,
         }}
       />
       <motion.span

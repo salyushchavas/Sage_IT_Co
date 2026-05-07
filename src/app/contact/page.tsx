@@ -3,6 +3,7 @@
 import { socialLinks } from "@/lib/data";
 import { fadeUp, staggerContainer, slideInLeft, slideInRight } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { Mail, Phone, MapPin } from "lucide-react";
 import GlassCard from "@/components/ui/GlassCard";
 import GlowButton from "@/components/ui/GlowButton";
 import { useState } from "react";
@@ -151,38 +152,53 @@ export default function ContactPage() {
             <motion.div variants={slideInRight} className="space-y-6 sm:space-y-8">
               <GlassCard className="p-6 sm:p-8">
                 <h3 className="text-lg sm:text-xl font-bold text-zinc-900 mb-4 sm:mb-6">Contact Information</h3>
-                <div className="space-y-6">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-neon-blue/10 flex items-center justify-center text-neon-blue shrink-0">
-                      📧
-                    </div>
-                    <div>
-                      <p className="text-zinc-900 font-medium">Email</p>
-                      <p className="text-zinc-600 text-sm">info@sageitco.com</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-neon-violet/10 flex items-center justify-center text-neon-violet shrink-0">
-                      📱
-                    </div>
-                    <div>
-                      <p className="text-zinc-900 font-medium">Phone</p>
-                      <p className="text-zinc-600 text-sm">+1 (555) 123-4567</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-neon-cyan/10 flex items-center justify-center text-neon-cyan shrink-0">
-                      📍
-                    </div>
-                    <div>
-                      <p className="text-zinc-900 font-medium">Office</p>
-                      <p className="text-zinc-900 text-sm font-semibold mt-1">SAGEITCO LLC</p>
-                      <p className="text-zinc-600 text-sm">
+                <div className="space-y-5">
+                  <a
+                    href="mailto:info@sageitco.com"
+                    className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
+                  >
+                    <span className="contact-badge contact-badge--navy shrink-0">
+                      <Mail className="w-5 h-5 sm:w-[22px] sm:h-[22px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="block">
+                      <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Email</span>
+                      <span className="block text-zinc-900 text-sm sm:text-base mt-0.5 group-hover/badge:text-sage-navy transition-colors">
+                        info@sageitco.com
+                      </span>
+                    </span>
+                  </a>
+                  <a
+                    href="tel:+15551234567"
+                    className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
+                  >
+                    <span className="contact-badge contact-badge--copper shrink-0">
+                      <Phone className="w-5 h-5 sm:w-[22px] sm:h-[22px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="block">
+                      <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Phone</span>
+                      <span className="block text-zinc-900 text-sm sm:text-base mt-0.5 group-hover/badge:text-sage-copper transition-colors">
+                        +1 (555) 123-4567
+                      </span>
+                    </span>
+                  </a>
+                  <a
+                    href="https://www.google.com/maps?q=4400+State+Hwy+121+Suite+324+Lewisville+TX+75056"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
+                  >
+                    <span className="contact-badge contact-badge--navy-deep shrink-0">
+                      <MapPin className="w-5 h-5 sm:w-[22px] sm:h-[22px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="block">
+                      <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Office</span>
+                      <span className="block text-zinc-900 text-sm sm:text-base font-semibold mt-0.5">SAGEITCO LLC</span>
+                      <span className="block text-zinc-600 text-xs sm:text-sm leading-relaxed mt-0.5">
                         4400 State Hwy 121, Suite #324<br />
                         Lewisville, TX 75056
-                      </p>
-                    </div>
-                  </div>
+                      </span>
+                    </span>
+                  </a>
                 </div>
               </GlassCard>
 
