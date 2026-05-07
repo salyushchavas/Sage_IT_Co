@@ -1,10 +1,11 @@
 "use client";
 
 import { timeline, stats } from "@/lib/data";
-import { fadeUp, staggerContainer } from "@/lib/utils";
+import { fadeUp, popIn, staggerContainer } from "@/lib/utils";
 import { motion } from "framer-motion";
 import SectionHeading from "@/components/ui/SectionHeading";
 import TimelineItem from "@/components/ui/TimelineItem";
+import CountUp from "@/components/ui/CountUp";
 import CTA from "@/components/sections/CTA";
 
 export default function AboutPage() {
@@ -84,10 +85,12 @@ export default function AboutPage() {
           {stats.map((stat) => (
             <motion.div
               key={stat.label}
-              variants={fadeUp}
-              className="glass p-4 sm:p-6 lg:p-8 text-center"
+              variants={popIn}
+              className="glass p-4 sm:p-6 lg:p-8 text-center hover:-translate-y-1 hover:border-neon-blue/30 transition-all duration-500"
             >
-              <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-1 sm:mb-2">{stat.value}</div>
+              <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-1 sm:mb-2 tabular-nums">
+                <CountUp value={stat.value} />
+              </div>
               <div className="text-zinc-600 text-xs sm:text-sm">{stat.label}</div>
             </motion.div>
           ))}

@@ -1,10 +1,11 @@
 "use client";
 
 import { stats } from "@/lib/data";
-import { fadeUp, staggerContainer } from "@/lib/utils";
+import { popIn, fadeUp, staggerContainer } from "@/lib/utils";
 import { motion } from "framer-motion";
 import SectionHeading from "../ui/SectionHeading";
 import GlowButton from "../ui/GlowButton";
+import CountUp from "../ui/CountUp";
 
 export default function AboutPreview() {
   return (
@@ -50,11 +51,11 @@ export default function AboutPreview() {
             {stats.map((stat) => (
               <motion.div
                 key={stat.label}
-                variants={fadeUp}
-                className="glass p-4 sm:p-6 lg:p-8 text-center group hover:border-neon-blue/30 transition-all duration-500"
+                variants={popIn}
+                className="glass p-4 sm:p-6 lg:p-8 text-center group hover:border-neon-blue/30 hover:-translate-y-1 transition-all duration-500"
               >
-                <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-1 sm:mb-2">
-                  {stat.value}
+                <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-1 sm:mb-2 tabular-nums">
+                  <CountUp value={stat.value} />
                 </div>
                 <div className="text-zinc-600 text-xs sm:text-sm">{stat.label}</div>
               </motion.div>

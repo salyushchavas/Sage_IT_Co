@@ -222,8 +222,12 @@ video {
     @apply border border-sage-green/30 hover:border-sage-green/60 transition-all duration-500;
   }
 
+  /* Animated gradient text — slow color drift across navy → copper */
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-sage-green to-sage-gold;
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(110deg, #1B2A5C 0%, #2D4480 25%, #C87D5C 55%, #E8A78D 75%, #C87D5C 100%);
+    background-size: 220% 220%;
+    animation: gradient-shift 8s ease-in-out infinite;
   }
 
   .bg-grid {
@@ -231,6 +235,68 @@ video {
       linear-gradient(rgba(27, 42, 92, 0.05) 1px, transparent 1px),
       linear-gradient(90deg, rgba(27, 42, 92, 0.05) 1px, transparent 1px);
     background-size: 60px 60px;
+  }
+
+  /* Aurora mesh background — three soft blobs drifting on a frosted plane */
+  .aurora-bg {
+    position: relative;
+    isolation: isolate;
+  }
+  .aurora-bg::before,
+  .aurora-bg::after {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    pointer-events: none;
+    filter: blur(60px);
+    opacity: 0.65;
+  }
+  .aurora-bg::before {
+    background: radial-gradient(ellipse at 30% 30%, rgba(27, 42, 92, 0.45), transparent 60%),
+      radial-gradient(ellipse at 70% 60%, rgba(200, 125, 92, 0.45), transparent 60%);
+    animation: aurora 18s ease-in-out infinite;
+  }
+  .aurora-bg::after {
+    background: radial-gradient(ellipse at 60% 30%, rgba(232, 167, 141, 0.35), transparent 60%),
+      radial-gradient(ellipse at 30% 70%, rgba(45, 68, 128, 0.35), transparent 60%);
+    animation: aurora 22s ease-in-out infinite reverse;
+  }
+
+  /* Sheen overlay — diagonal light sweep on hover (added to .group via .sheen-on-hover) */
+  .sheen-on-hover {
+    position: relative;
+    overflow: hidden;
+  }
+  .sheen-on-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 38%,
+      rgba(255, 255, 255, 0.55) 50%,
+      transparent 62%
+    );
+    transform: translateX(-120%) skewX(-20deg);
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .group:hover .sheen-on-hover::after,
+  .sheen-on-hover:hover::after {
+    transform: translateX(220%) skewX(-20deg);
+  }
+
+  /* Animated underline that draws in when its parent enters .reveal-in state */
+  .underline-draw {
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .reveal-in .underline-draw,
+  .underline-draw[data-revealed="true"] {
+    transform: scaleX(1);
   }
 }
 
@@ -290,5 +356,39 @@ video {
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Conic shimmer — for borders / decorative outlines */
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      rgba(27, 42, 92, 0.4) 0%,
+      rgba(200, 125, 92, 1) 25%,
+      rgba(27, 42, 92, 0.4) 50%,
+      rgba(200, 125, 92, 1) 75%,
+      rgba(27, 42, 92, 0.4) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 2.4s linear infinite;
+  }
+
+  /* Will-change hint for elements about to animate on scroll */
+  .will-animate {
+    will-change: transform, opacity, filter;
+  }
+}
+
+/* Honor user's reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

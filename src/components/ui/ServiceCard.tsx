@@ -1,6 +1,6 @@
 "use client";
 
-import { fadeUp } from "@/lib/utils";
+import { popIn } from "@/lib/utils";
 import { Service } from "@/lib/data";
 import { motion } from "framer-motion";
 import GlassCard from "./GlassCard";
@@ -13,16 +13,18 @@ interface ServiceCardProps {
 
 export default function ServiceCard({ service, index, detailed = false }: ServiceCardProps) {
   return (
-    <motion.div variants={fadeUp} custom={index}>
-      <GlassCard hover3D glowColor={service.color} className="p-8 h-full glow-border">
-        <div
-          className="text-4xl mb-4 w-16 h-16 rounded-2xl flex items-center justify-center"
+    <motion.div variants={popIn} custom={index} className="h-full">
+      <GlassCard hover3D glowColor={service.color} className="p-6 sm:p-8 h-full glow-border transition-all duration-500 hover:-translate-y-1 hover:shadow-glow-blue">
+        <motion.div
+          className="text-3xl sm:text-4xl mb-3 sm:mb-4 w-14 h-14 sm:w-16 sm:h-16 rounded-2xl flex items-center justify-center"
           style={{ background: `${service.color}15` }}
+          whileHover={{ rotate: [0, -8, 8, -4, 0], scale: 1.08 }}
+          transition={{ duration: 0.6, ease: "easeInOut" }}
         >
           {service.icon}
-        </div>
-        <h3 className="text-xl font-bold text-zinc-900 mb-3">{service.title}</h3>
-        <p className="text-zinc-600 leading-relaxed mb-4">{service.description}</p>
+        </motion.div>
+        <h3 className="text-lg sm:text-xl font-bold text-zinc-900 mb-2 sm:mb-3">{service.title}</h3>
+        <p className="text-zinc-600 text-sm sm:text-base leading-relaxed mb-4">{service.description}</p>
         {detailed && (
           <ul className="space-y-2">
             {service.features.map((f) => (
