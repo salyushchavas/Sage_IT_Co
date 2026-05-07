@@ -14,17 +14,17 @@ export default function ProgressBar({ value, label, className }: ProgressBarProp
 
   const gradient =
     clamped < 30
-      ? "from-[#0A3D26] to-[#0F5132]"
+      ? "from-[#0F1F44] to-[#1B2A5C]"
       : clamped < 70
-        ? "from-[#0F5132] to-[#D4A017]"
-        : "from-[#D4A017] to-[#0F5132]";
+        ? "from-[#1B2A5C] to-[#C87D5C]"
+        : "from-[#C87D5C] to-[#1B2A5C]";
 
   const glowColor =
     clamped < 30
       ? "rgba(6,182,212,0.4)"
       : clamped < 70
-        ? "rgba(15,81,50,0.4)"
-        : "rgba(212,160,23,0.4)";
+        ? "rgba(27,42,92,0.4)"
+        : "rgba(200,125,92,0.4)";
 
   return (
     <div className={cn("w-full", className)}>

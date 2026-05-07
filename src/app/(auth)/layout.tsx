@@ -15,7 +15,7 @@ export default function AuthLayout({ children }: { children: ReactNode }) {
           }}
         />
         {/* Ambient glow */}
-        <div className="fixed top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-[#D4A017]/10 rounded-full blur-[150px] pointer-events-none z-0" />
+        <div className="fixed top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-[#C87D5C]/10 rounded-full blur-[150px] pointer-events-none z-0" />
 
         <AuthProvider>
           <div className="relative z-10 flex items-center justify-center min-h-screen px-4 py-12">

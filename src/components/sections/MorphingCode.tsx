@@ -4,12 +4,12 @@ import { motion } from "framer-motion";
 
 // Service "cities" placed around the periphery — center stays clean for hero text
 const cities = [
-  { label: "Cloud",         code: "CLD", x: 8,  y: 18, color: "#0F5132", delay: 0.2 },
-  { label: "Intelligence",  code: "AI",  x: 88, y: 14, color: "#D4A017", delay: 0.4 },
-  { label: "Security",      code: "SEC", x: 6,  y: 78, color: "#0A3D26", delay: 0.6 },
-  { label: "Data",          code: "DAT", x: 92, y: 82, color: "#D4A017", delay: 0.8 },
-  { label: "DevOps",        code: "OPS", x: 14, y: 48, color: "#0F5132", delay: 1.0 },
-  { label: "Analytics",     code: "ANL", x: 86, y: 50, color: "#0A3D26", delay: 1.2 },
+  { label: "Cloud",         code: "CLD", x: 8,  y: 18, color: "#1B2A5C", delay: 0.2 },
+  { label: "Intelligence",  code: "AI",  x: 88, y: 14, color: "#C87D5C", delay: 0.4 },
+  { label: "Security",      code: "SEC", x: 6,  y: 78, color: "#0F1F44", delay: 0.6 },
+  { label: "Data",          code: "DAT", x: 92, y: 82, color: "#C87D5C", delay: 0.8 },
+  { label: "DevOps",        code: "OPS", x: 14, y: 48, color: "#1B2A5C", delay: 1.0 },
+  { label: "Analytics",     code: "ANL", x: 86, y: 50, color: "#0F1F44", delay: 1.2 },
 ];
 
 // Trade routes — curved bezier flight paths between cities
@@ -52,13 +52,13 @@ function ContourField({ side }: { side: "left" | "right" }) {
         <linearGradient id={`contourGrad-${side}`} x1="0%" y1="0%" x2="100%" y2="0%">
           {side === "left" ? (
             <>
-              <stop offset="0%" stopColor="#0F5132" stopOpacity="0.7" />
-              <stop offset="100%" stopColor="#0F5132" stopOpacity="0" />
+              <stop offset="0%" stopColor="#1B2A5C" stopOpacity="0.7" />
+              <stop offset="100%" stopColor="#1B2A5C" stopOpacity="0" />
             </>
           ) : (
             <>
-              <stop offset="0%" stopColor="#D4A017" stopOpacity="0" />
-              <stop offset="100%" stopColor="#D4A017" stopOpacity="0.7" />
+              <stop offset="0%" stopColor="#C87D5C" stopOpacity="0" />
+              <stop offset="100%" stopColor="#C87D5C" stopOpacity="0.7" />
             </>
           )}
         </linearGradient>
@@ -108,15 +108,15 @@ function CompassRose() {
         transition={{ duration: 80, repeat: Infinity, ease: "linear" }}
         style={{ transformOrigin: "50px 50px" }}
       >
-        <circle cx="50" cy="50" r="40" fill="none" stroke="#0F5132" strokeWidth="0.6" />
-        <circle cx="50" cy="50" r="32" fill="none" stroke="#0F5132" strokeWidth="0.4" strokeDasharray="2 2" />
+        <circle cx="50" cy="50" r="40" fill="none" stroke="#1B2A5C" strokeWidth="0.6" />
+        <circle cx="50" cy="50" r="32" fill="none" stroke="#1B2A5C" strokeWidth="0.4" strokeDasharray="2 2" />
         {/* 4-point star */}
-        <polygon points="50,8 54,46 92,50 54,54 50,92 46,54 8,50 46,46" fill="#D4A017" fillOpacity="0.4" stroke="#0F5132" strokeWidth="0.5" />
+        <polygon points="50,8 54,46 92,50 54,54 50,92 46,54 8,50 46,46" fill="#C87D5C" fillOpacity="0.4" stroke="#1B2A5C" strokeWidth="0.5" />
         {/* Cardinal letters */}
-        <text x="50" y="6" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">N</text>
-        <text x="96" y="52" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">E</text>
-        <text x="50" y="98" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">S</text>
-        <text x="4" y="52" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#0F5132" fillOpacity="0.7">W</text>
+        <text x="50" y="6" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#1B2A5C" fillOpacity="0.7">N</text>
+        <text x="96" y="52" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#1B2A5C" fillOpacity="0.7">E</text>
+        <text x="50" y="98" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#1B2A5C" fillOpacity="0.7">S</text>
+        <text x="4" y="52" fontSize="6" fontFamily="monospace" textAnchor="middle" fill="#1B2A5C" fillOpacity="0.7">W</text>
       </motion.g>
     </motion.svg>
   );
@@ -126,7 +126,7 @@ function CompassRose() {
 function CoordinateBadge() {
   return (
     <motion.div
-      className="absolute top-8 right-8 hidden lg:flex flex-col items-end gap-1 font-mono text-[10px] text-emerald-900/40"
+      className="absolute top-8 right-8 hidden lg:flex flex-col items-end gap-1 font-mono text-[10px] text-slate-900/40"
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       transition={{ duration: 1, delay: 0.8 }}
@@ -154,7 +154,7 @@ export default function MorphingCode() {
       <svg className="absolute inset-0 w-full h-full opacity-[0.12]" preserveAspectRatio="none">
         <defs>
           <pattern id="dots" x="0" y="0" width="32" height="32" patternUnits="userSpaceOnUse">
-            <circle cx="2" cy="2" r="0.6" fill="#0F5132" />
+            <circle cx="2" cy="2" r="0.6" fill="#1B2A5C" />
           </pattern>
         </defs>
         <rect width="100%" height="100%" fill="url(#dots)" />
@@ -168,8 +168,8 @@ export default function MorphingCode() {
       <svg className="absolute inset-0 w-full h-full hidden md:block" viewBox="0 0 100 100" preserveAspectRatio="none">
         <defs>
           <linearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%" stopColor="#0F5132" stopOpacity="0.5" />
-            <stop offset="100%" stopColor="#D4A017" stopOpacity="0.5" />
+            <stop offset="0%" stopColor="#1B2A5C" stopOpacity="0.5" />
+            <stop offset="100%" stopColor="#C87D5C" stopOpacity="0.5" />
           </linearGradient>
         </defs>
 
@@ -193,7 +193,7 @@ export default function MorphingCode() {
               {/* Data vessel travelling the route */}
               <motion.circle
                 r="0.4"
-                fill="#D4A017"
+                fill="#C87D5C"
                 initial={{ opacity: 0 }}
                 animate={{ opacity: [0, 1, 1, 0], offsetDistance: ["0%", "100%"] }}
                 style={{ offsetPath: `path('${d}')` } as React.CSSProperties}
@@ -255,12 +255,12 @@ export default function MorphingCode() {
               style={{ borderColor: c.color, boxShadow: `0 0 12px ${c.color}40` }}
             />
             {/* Label card */}
-            <div className="mt-3 px-2.5 py-1 rounded glass border border-emerald-900/15 shadow-sm">
+            <div className="mt-3 px-2.5 py-1 rounded glass border border-slate-900/15 shadow-sm">
               <div className="flex items-center gap-1.5">
                 <span className="text-[8px] font-mono font-bold tracking-[0.15em]" style={{ color: c.color }}>
                   {c.code}
                 </span>
-                <span className="w-px h-2.5 bg-emerald-900/20" />
+                <span className="w-px h-2.5 bg-slate-900/20" />
                 <span className="text-[10px] font-semibold" style={{ color: c.color }}>
                   {c.label}
                 </span>
@@ -281,7 +281,7 @@ export default function MorphingCode() {
           style={{
             left: `${(i * 47 + 10) % 90}%`,
             top: `${(i * 29 + 20) % 70}%`,
-            color: i % 2 ? "#D4A017" : "#0F5132",
+            color: i % 2 ? "#C87D5C" : "#1B2A5C",
             opacity: 0.18,
           }}
           animate={{

@@ -20,10 +20,10 @@ interface EnrolledCoursesProps {
 }
 
 const colors = [
-  "from-[#0F5132]/40 to-[#D4A017]/30",
-  "from-[#D4A017]/40 to-[#0A3D26]/30",
-  "from-[#0A3D26]/40 to-[#0F5132]/30",
-  "from-[#D4A017]/30 to-[#0F5132]/40",
+  "from-[#1B2A5C]/40 to-[#C87D5C]/30",
+  "from-[#C87D5C]/40 to-[#0F1F44]/30",
+  "from-[#0F1F44]/40 to-[#1B2A5C]/30",
+  "from-[#C87D5C]/30 to-[#1B2A5C]/40",
 ];
 
 export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
@@ -34,7 +34,7 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
         <p className="text-zinc-600 text-sm">You haven&apos;t enrolled in any courses yet.</p>
         <Link
           href="/courses"
-          className="inline-block mt-4 text-sm text-[#0F5132] hover:underline"
+          className="inline-block mt-4 text-sm text-[#1B2A5C] hover:underline"
         >
           Browse courses
         </Link>
@@ -55,7 +55,7 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
             <div
               className={cn(
                 "bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden",
-                "transition-all duration-300 hover:border-[#0F5132]/30 hover:shadow-[0_0_30px_rgba(15,81,50,0.08)]"
+                "transition-all duration-300 hover:border-[#1B2A5C]/30 hover:shadow-[0_0_30px_rgba(27,42,92,0.08)]"
               )}
             >
               {/* Mini thumbnail */}
@@ -71,11 +71,11 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
               </div>
 
               <div className="p-4 space-y-2">
-                <h3 className="text-zinc-900 font-semibold text-sm line-clamp-1 group-hover:text-[#0F5132] transition-colors">
+                <h3 className="text-zinc-900 font-semibold text-sm line-clamp-1 group-hover:text-[#1B2A5C] transition-colors">
                   {enrollment.courseTitle}
                 </h3>
                 {enrollment.courseCategory && (
-                  <p className="text-xs text-[#0F5132]/70 uppercase tracking-wider">
+                  <p className="text-xs text-[#1B2A5C]/70 uppercase tracking-wider">
                     {enrollment.courseCategory}
                   </p>
                 )}
@@ -89,7 +89,7 @@ export default function EnrolledCourses({ enrollments }: EnrolledCoursesProps) {
                     </div>
                     <div className="h-1.5 rounded-full bg-white/80 overflow-hidden">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-[#0F5132] to-[#D4A017] transition-all duration-500"
+                        className="h-full rounded-full bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] transition-all duration-500"
                         style={{ width: `${enrollment.progress}%` }}
                       />
                     </div>

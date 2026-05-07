@@ -43,9 +43,9 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
       transition={{ duration: 0.4, delay: index * 0.08 }}
     >
       <Link href={`/courses/${course.id}`} className="block group">
-        <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-[#0F5132]/30 hover:shadow-[0_0_30px_rgba(15,81,50,0.08)]">
+        <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden transition-all duration-300 hover:border-[#1B2A5C]/30 hover:shadow-[0_0_30px_rgba(27,42,92,0.08)]">
           {/* Header / Thumbnail */}
-          <div className="relative h-44 bg-gradient-to-br from-[#D4A017]/30 to-[#0F5132]/20 overflow-hidden">
+          <div className="relative h-44 bg-gradient-to-br from-[#C87D5C]/30 to-[#1B2A5C]/20 overflow-hidden">
             {course.thumbnailUrl ? (
               <Image
                 src={course.thumbnailUrl}
@@ -72,10 +72,10 @@ export default function CourseCard({ course, index = 0 }: CourseCardProps) {
 
           {/* Body */}
           <div className="p-5 space-y-3">
-            <p className="text-xs font-medium text-[#0F5132] uppercase tracking-wider">
+            <p className="text-xs font-medium text-[#1B2A5C] uppercase tracking-wider">
               {course.category}
             </p>
-            <h3 className="text-zinc-900 font-semibold text-lg leading-snug line-clamp-2 group-hover:text-[#0F5132] transition-colors">
+            <h3 className="text-zinc-900 font-semibold text-lg leading-snug line-clamp-2 group-hover:text-[#1B2A5C] transition-colors">
               {course.title}
             </h3>
             <p className="text-zinc-600 text-sm line-clamp-2">

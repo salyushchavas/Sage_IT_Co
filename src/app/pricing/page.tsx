@@ -48,7 +48,7 @@ export default function PricingPage() {
             router.push("/dashboard");
           } catch { alert("Payment verification failed. Contact support."); }
         },
-        theme: { color: "#D4A017" },
+        theme: { color: "#C87D5C" },
       };
 
       const rzp = new window.Razorpay(options);
@@ -84,12 +84,12 @@ export default function PricingPage() {
       <div className="mx-auto max-w-6xl">
         {/* Header */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-16">
-          <span className="inline-flex items-center gap-1.5 text-sm text-[#0F5132] font-medium mb-4">
+          <span className="inline-flex items-center gap-1.5 text-sm text-[#1B2A5C] font-medium mb-4">
             <Sparkles className="w-4 h-4" /> Pricing
           </span>
           <h1 className="text-4xl sm:text-5xl font-bold text-zinc-900 mb-4">
             Choose your{" "}
-            <span className="bg-gradient-to-r from-[#0F5132] to-[#D4A017] bg-clip-text text-transparent">plan</span>
+            <span className="bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] bg-clip-text text-transparent">plan</span>
           </h1>
           <p className="text-zinc-600 max-w-lg mx-auto">
             Start for free and upgrade as you grow. Cancel anytime.
@@ -103,7 +103,7 @@ export default function PricingPage() {
               className={cn(
                 "bg-white/60 backdrop-blur-xl border rounded-2xl p-8 relative flex flex-col",
                 tier.highlighted
-                  ? "border-[#D4A017]/50 shadow-[0_0_40px_rgba(212,160,23,0.15)]"
+                  ? "border-[#C87D5C]/50 shadow-[0_0_40px_rgba(200,125,92,0.15)]"
                   : "border-zinc-200"
               )}>
               {tier.highlighted && (
@@ -126,7 +126,7 @@ export default function PricingPage() {
               <ul className="space-y-3 mb-8 flex-1">
                 {tier.features.map((f) => (
                   <li key={f} className="flex items-center gap-2 text-sm text-zinc-500">
-                    <Check className="w-4 h-4 text-[#0F5132] shrink-0" /> {f}
+                    <Check className="w-4 h-4 text-[#1B2A5C] shrink-0" /> {f}
                   </li>
                 ))}
               </ul>
@@ -137,8 +137,8 @@ export default function PricingPage() {
                 className={cn(
                   "w-full py-3 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
                   tier.highlighted
-                    ? "btn-fill text-white hover:shadow-[0_0_30px_rgba(212,160,23,0.3)] hover:scale-[1.02]"
-                    : "bg-white/60 border border-zinc-200 text-zinc-900 hover:border-[#0F5132]/30 hover:bg-white/80",
+                    ? "btn-fill text-white hover:shadow-[0_0_30px_rgba(200,125,92,0.3)] hover:scale-[1.02]"
+                    : "bg-white/60 border border-zinc-200 text-zinc-900 hover:border-[#1B2A5C]/30 hover:bg-white/80",
                   "disabled:opacity-50"
                 )}
               >
@@ -170,7 +170,7 @@ export default function PricingPage() {
                       {tierFeatureSet.map((set, i) => (
                         <td key={i} className="px-6 py-3 text-center">
                           {set.has(f)
-                            ? <Check className="w-4 h-4 text-[#0F5132] mx-auto" />
+                            ? <Check className="w-4 h-4 text-[#1B2A5C] mx-auto" />
                             : <X className="w-4 h-4 text-zinc-500 mx-auto" />}
                         </td>
                       ))}

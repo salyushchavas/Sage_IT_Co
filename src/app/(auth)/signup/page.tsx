@@ -58,7 +58,7 @@ export default function SignupPage() {
       "w-full px-4 py-3 rounded-xl bg-white/60 border text-zinc-900 placeholder-zinc-400 text-sm outline-none transition-all",
       hasError
         ? "border-red-500/50 focus:border-red-500"
-        : "border-zinc-200 focus:border-[#0F5132]/50 focus:shadow-[0_0_12px_rgba(15,81,50,0.1)]"
+        : "border-zinc-200 focus:border-[#1B2A5C]/50 focus:shadow-[0_0_12px_rgba(27,42,92,0.1)]"
     );
 
   return (
@@ -72,7 +72,7 @@ export default function SignupPage() {
         {/* Header */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block mb-4">
-            <span className="text-2xl font-bold bg-gradient-to-r from-[#0F5132] to-[#D4A017] bg-clip-text text-transparent">
+            <span className="text-2xl font-bold bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] bg-clip-text text-transparent">
               {APP_NAME}
             </span>
           </Link>
@@ -174,7 +174,7 @@ export default function SignupPage() {
 
         <p className="text-center text-sm text-zinc-500 mt-6">
           Already have an account?{" "}
-          <Link href="/login" className="text-[#0F5132] hover:underline">
+          <Link href="/login" className="text-[#1B2A5C] hover:underline">
             Sign in
           </Link>
         </p>

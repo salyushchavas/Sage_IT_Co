@@ -28,7 +28,7 @@ export default function SolutionsPreview() {
         >
           {featured.map((sol) => (
             <motion.div key={sol.id} variants={fadeUp}>
-              <GlassCard className="p-8 h-full glow-border" hover3D glowColor="#E8B82E">
+              <GlassCard className="p-8 h-full glow-border" hover3D glowColor="#E8A78D">
                 <span className="text-xs px-3 py-1 rounded-full bg-neon-violet/10 text-neon-violet border border-neon-violet/20 mb-4 inline-block">
                   {sol.category}
                 </span>

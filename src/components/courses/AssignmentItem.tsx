@@ -64,9 +64,9 @@ export default function AssignmentItem({
       {/* Header */}
       <div className="flex items-start justify-between gap-3">
         <div className="flex items-start gap-3">
-          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-[#D4A017]/20 to-[#0A3D26]/20 border border-zinc-200 flex items-center justify-center">
+          <div className="flex-shrink-0 w-10 h-10 rounded-xl bg-gradient-to-br from-[#C87D5C]/20 to-[#0F1F44]/20 border border-zinc-200 flex items-center justify-center">
             {unlocked ? (
-              <FileText className="w-5 h-5 text-[#0A3D26]" />
+              <FileText className="w-5 h-5 text-[#0F1F44]" />
             ) : (
               <Lock className="w-5 h-5 text-zinc-600" />
             )}
@@ -96,7 +96,7 @@ export default function AssignmentItem({
           {!showForm ? (
             <button
               onClick={() => setShowForm(true)}
-              className="px-4 py-2 rounded-xl bg-[#0F5132]/10 border border-[#0F5132]/20 text-[#0F5132] text-sm font-medium hover:bg-[#0F5132]/20 transition-colors flex items-center gap-2"
+              className="px-4 py-2 rounded-xl bg-[#1B2A5C]/10 border border-[#1B2A5C]/20 text-[#1B2A5C] text-sm font-medium hover:bg-[#1B2A5C]/20 transition-colors flex items-center gap-2"
             >
               <Send className="w-4 h-4" />
               Submit Assignment
@@ -108,7 +108,7 @@ export default function AssignmentItem({
                 onChange={(e) => setContent(e.target.value)}
                 rows={5}
                 placeholder="Write your submission here..."
-                className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors resize-none placeholder-zinc-400"
+                className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#1B2A5C]/40 transition-colors resize-none placeholder-zinc-400"
               />
               {error && <p className="text-red-400 text-sm">{error}</p>}
               <div className="flex items-center gap-3">

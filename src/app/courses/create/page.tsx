@@ -47,7 +47,7 @@ export default function CreateCoursePage() {
   };
 
   if (authLoading) {
-    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#0F5132]" /></div>;
+    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#1B2A5C]" /></div>;
   }
 
   if (!isAuthenticated) { router.push("/login?redirect=/courses/create"); return null; }
@@ -75,7 +75,7 @@ export default function CreateCoursePage() {
     );
   }
 
-  const inputClass = "w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm placeholder-zinc-400 outline-none focus:border-[#0F5132]/40 focus:shadow-[0_0_12px_rgba(15,81,50,0.1)] transition-all";
+  const inputClass = "w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm placeholder-zinc-400 outline-none focus:border-[#1B2A5C]/40 focus:shadow-[0_0_12px_rgba(27,42,92,0.1)] transition-all";
 
   return (
     <section className="min-h-screen pt-32 pb-20 px-6">
@@ -83,7 +83,7 @@ export default function CreateCoursePage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
           {/* Header */}
           <div className="flex items-center gap-3 mb-8">
-            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#D4A017] to-[#0F5132] flex items-center justify-center">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-[#C87D5C] to-[#1B2A5C] flex items-center justify-center">
               <BookPlus className="w-6 h-6 text-zinc-900" />
             </div>
             <div>
@@ -147,7 +147,7 @@ export default function CreateCoursePage() {
               className={cn(
                 "w-full py-3.5 rounded-xl text-sm font-semibold transition-all flex items-center justify-center gap-2",
                 "btn-fill text-white",
-                "hover:shadow-[0_0_30px_rgba(15,81,50,0.3)] hover:scale-[1.01]",
+                "hover:shadow-[0_0_30px_rgba(27,42,92,0.3)] hover:scale-[1.01]",
                 "disabled:opacity-50 disabled:cursor-not-allowed"
               )}>
               {loading && <Loader2 className="w-4 h-4 animate-spin" />}

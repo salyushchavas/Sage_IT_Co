@@ -32,7 +32,7 @@ export default function CourseFilter({
               onClick={() => onLevelChange(level)}
               className={`px-4 py-2 rounded-full text-sm font-medium transition-all duration-200 border ${
                 isActive
-                  ? "bg-[#0F5132]/20 border-[#0F5132]/50 text-[#0F5132] shadow-[0_0_12px_rgba(15,81,50,0.15)]"
+                  ? "bg-[#1B2A5C]/20 border-[#1B2A5C]/50 text-[#1B2A5C] shadow-[0_0_12px_rgba(27,42,92,0.15)]"
                   : "bg-white/60 border-zinc-200 text-zinc-600 hover:text-zinc-900 hover:border-zinc-300"
               }`}
             >
@@ -50,7 +50,7 @@ export default function CourseFilter({
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search courses..."
-          className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/60 backdrop-blur-xl border border-zinc-200 text-zinc-900 placeholder-zinc-500 text-sm outline-none focus:border-[#0F5132]/40 focus:shadow-[0_0_12px_rgba(15,81,50,0.1)] transition-all"
+          className="w-full pl-10 pr-4 py-2.5 rounded-xl bg-white/60 backdrop-blur-xl border border-zinc-200 text-zinc-900 placeholder-zinc-500 text-sm outline-none focus:border-[#1B2A5C]/40 focus:shadow-[0_0_12px_rgba(27,42,92,0.1)] transition-all"
         />
       </div>
     </div>

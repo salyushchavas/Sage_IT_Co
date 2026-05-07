@@ -99,7 +99,7 @@ export default function QuizSection({
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="w-6 h-6 text-[#0F5132] animate-spin" />
+        <Loader2 className="w-6 h-6 text-[#1B2A5C] animate-spin" />
       </div>
     );
   }
@@ -115,7 +115,7 @@ export default function QuizSection({
       className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6 space-y-6"
     >
       <div className="flex items-center gap-2">
-        <BrainCircuit className="w-5 h-5 text-[#D4A017]" />
+        <BrainCircuit className="w-5 h-5 text-[#C87D5C]" />
         <h3 className="text-zinc-900 font-semibold">{quiz.title}</h3>
       </div>
 
@@ -161,7 +161,7 @@ export default function QuizSection({
         {quiz.questions.map((q, qi) => (
           <div key={q.id} className="space-y-3">
             <p className="text-zinc-900 text-sm font-medium">
-              <span className="text-[#0F5132] mr-2">{qi + 1}.</span>
+              <span className="text-[#1B2A5C] mr-2">{qi + 1}.</span>
               {q.questionText}
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -176,11 +176,11 @@ export default function QuizSection({
                     disabled={!!result}
                     className={`text-left px-4 py-3 rounded-xl border text-sm transition-all ${
                       selected
-                        ? "bg-[#0F5132]/15 border-[#0F5132]/40 text-zinc-900"
+                        ? "bg-[#1B2A5C]/15 border-[#1B2A5C]/40 text-zinc-900"
                         : "bg-white/60 border-zinc-200 text-zinc-600 hover:border-zinc-300 hover:text-zinc-900"
                     } disabled:cursor-default`}
                   >
-                    <span className="font-semibold mr-2 text-[#0F5132]">{opt}.</span>
+                    <span className="font-semibold mr-2 text-[#1B2A5C]">{opt}.</span>
                     {value}
                   </button>
                 );

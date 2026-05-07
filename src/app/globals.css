@@ -32,14 +32,14 @@ body {
   background: #f4f4f0;
 }
 ::-webkit-scrollbar-thumb {
-  background: linear-gradient(180deg, #0F5132, #D4A017);
+  background: linear-gradient(180deg, #1B2A5C, #C87D5C);
   border-radius: 3px;
 }
 
 /* Selection — warm gold */
 ::selection {
-  background: rgba(212, 160, 23, 0.30);
-  color: #0F5132;
+  background: rgba(200, 125, 92, 0.30);
+  color: #1B2A5C;
 }
 
 /* Circular wavey orbit glow for logo
@@ -72,13 +72,13 @@ body {
   background: conic-gradient(
     from 0deg,
     transparent 0deg 160deg,
-    rgba(212,160,23,0.0) 180deg,
-    rgba(212,160,23,0.45) 210deg,
-    rgba(255,210,74,0.85) 245deg,
+    rgba(200,125,92,0.0) 180deg,
+    rgba(200,125,92,0.45) 210deg,
+    rgba(255,255,255,0.85) 245deg,
     #FFFFFF 268deg,
-    rgba(255,224,102,0.9) 285deg,
-    rgba(212,160,23,0.5) 310deg,
-    rgba(212,160,23,0.0) 335deg,
+    rgba(255,226,200,0.9) 285deg,
+    rgba(200,125,92,0.5) 310deg,
+    rgba(200,125,92,0.0) 335deg,
     transparent 360deg
   );
   rotate: 0deg;
@@ -95,13 +95,13 @@ body {
   background: conic-gradient(
     from 180deg,
     transparent 0deg 200deg,
-    rgba(10,61,38,0.0) 220deg,
-    rgba(15,81,50,0.55) 245deg,
-    rgba(15,81,50,0.95) 268deg,
-    #1B7A4A 278deg,
-    rgba(15,81,50,0.95) 290deg,
-    rgba(10,61,38,0.45) 315deg,
-    rgba(10,61,38,0.0) 340deg,
+    rgba(15,31,68,0.0) 220deg,
+    rgba(27,42,92,0.55) 245deg,
+    rgba(27,42,92,0.95) 268deg,
+    #2D4480 278deg,
+    rgba(27,42,92,0.95) 290deg,
+    rgba(15,31,68,0.45) 315deg,
+    rgba(15,31,68,0.0) 340deg,
     transparent 360deg
   );
   rotate: 0deg;
@@ -159,35 +159,35 @@ body {
    Both swap-fades are aligned so the moment of swap feels intentional. */
 @keyframes logo-glow-swap-gold {
   0%, 38% {
-    filter: drop-shadow(0 0 5px rgba(212,160,23,0.85))
-            drop-shadow(0 0 12px rgba(255,224,102,0.5))
+    filter: drop-shadow(0 0 5px rgba(200,125,92,0.85))
+            drop-shadow(0 0 12px rgba(255,226,200,0.5))
             hue-rotate(0deg);
   }
   50%, 88% {
-    filter: drop-shadow(0 0 5px rgba(15,81,50,0.85))
-            drop-shadow(0 0 12px rgba(15,81,50,0.45))
+    filter: drop-shadow(0 0 5px rgba(27,42,92,0.85))
+            drop-shadow(0 0 12px rgba(27,42,92,0.45))
             hue-rotate(120deg) saturate(0.85);
   }
   100% {
-    filter: drop-shadow(0 0 5px rgba(212,160,23,0.85))
-            drop-shadow(0 0 12px rgba(255,224,102,0.5))
+    filter: drop-shadow(0 0 5px rgba(200,125,92,0.85))
+            drop-shadow(0 0 12px rgba(255,226,200,0.5))
             hue-rotate(0deg);
   }
 }
 @keyframes logo-glow-swap-emerald {
   0%, 38% {
-    filter: drop-shadow(0 0 4px rgba(15,81,50,0.75))
-            drop-shadow(0 0 10px rgba(15,81,50,0.4))
+    filter: drop-shadow(0 0 4px rgba(27,42,92,0.75))
+            drop-shadow(0 0 10px rgba(27,42,92,0.4))
             hue-rotate(0deg);
   }
   50%, 88% {
-    filter: drop-shadow(0 0 4px rgba(212,160,23,0.75))
-            drop-shadow(0 0 10px rgba(255,224,102,0.45))
+    filter: drop-shadow(0 0 4px rgba(200,125,92,0.75))
+            drop-shadow(0 0 10px rgba(255,226,200,0.45))
             hue-rotate(-120deg) saturate(1.4);
   }
   100% {
-    filter: drop-shadow(0 0 4px rgba(15,81,50,0.75))
-            drop-shadow(0 0 10px rgba(15,81,50,0.4))
+    filter: drop-shadow(0 0 4px rgba(27,42,92,0.75))
+            drop-shadow(0 0 10px rgba(27,42,92,0.4))
             hue-rotate(0deg);
   }
 }
@@ -211,8 +211,8 @@ body {
 
   .bg-grid {
     background-image:
-      linear-gradient(rgba(15, 81, 50, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(15, 81, 50, 0.05) 1px, transparent 1px);
+      linear-gradient(rgba(27, 42, 92, 0.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(27, 42, 92, 0.05) 1px, transparent 1px);
     background-size: 60px 60px;
   }
 }
@@ -221,11 +221,11 @@ body {
 .btn-fill {
   position: relative;
   overflow: hidden;
-  background-color: #0F5132;
+  background-color: #1B2A5C;
   color: #ffffff;
   transition: transform 0.3s ease, box-shadow 0.4s ease;
   isolation: isolate;
-  box-shadow: 0 4px 20px rgba(15, 81, 50, 0.25);
+  box-shadow: 0 4px 20px rgba(27, 42, 92, 0.25);
 }
 .btn-fill {
   --spot-x: 50%;

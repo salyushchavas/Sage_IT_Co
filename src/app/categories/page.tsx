@@ -10,21 +10,21 @@ const categories = [
     name: "Web Development",
     description: "Full-stack, frontend & backend frameworks",
     icon: Code,
-    color: "#0F5132",
+    color: "#1B2A5C",
     courses: 42,
   },
   {
     name: "Data Science",
     description: "Machine learning, AI & data analytics",
     icon: Database,
-    color: "#D4A017",
+    color: "#C87D5C",
     courses: 35,
   },
   {
     name: "UI/UX Design",
     description: "User experience, Figma, prototyping",
     icon: Palette,
-    color: "#0A3D26",
+    color: "#0F1F44",
     courses: 28,
   },
   {
@@ -58,7 +58,7 @@ export default function CategoriesPage() {
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="text-center mb-16">
           <h1 className="text-4xl sm:text-5xl font-bold text-zinc-900 mb-4">
             Course{" "}
-            <span className="bg-gradient-to-r from-[#0F5132] to-[#D4A017] bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] bg-clip-text text-transparent">
               Categories
             </span>
           </h1>
@@ -98,7 +98,7 @@ export default function CategoriesPage() {
                       <Icon className="w-6 h-6" style={{ color: cat.color }} />
                     </div>
 
-                    <h3 className="text-lg font-bold text-zinc-900 mb-2 group-hover:text-[#0F5132] transition-colors">
+                    <h3 className="text-lg font-bold text-zinc-900 mb-2 group-hover:text-[#1B2A5C] transition-colors">
                       {cat.name}
                     </h3>
                     <p className="text-sm text-zinc-600 mb-4">{cat.description}</p>
@@ -107,7 +107,7 @@ export default function CategoriesPage() {
                       <span className="text-xs text-zinc-500">
                         {cat.courses} courses
                       </span>
-                      <span className="text-xs font-medium text-[#0F5132] opacity-0 group-hover:opacity-100 transition-opacity">
+                      <span className="text-xs font-medium text-[#1B2A5C] opacity-0 group-hover:opacity-100 transition-opacity">
                         Browse &rarr;
                       </span>
                     </div>

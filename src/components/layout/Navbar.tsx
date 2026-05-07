@@ -73,7 +73,7 @@ export default function Navbar() {
               alt="Sage IT Co"
               fill
               priority
-              className="object-contain drop-shadow-[0_0_15px_rgba(15,81,50,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(212,160,23,0.4)]"
+              className="object-contain drop-shadow-[0_0_15px_rgba(27,42,92,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(200,125,92,0.4)]"
             />
           </div>
         </Link>
@@ -91,16 +91,16 @@ export default function Navbar() {
                 {active && (
                   <motion.span
                     layoutId="nav-pill"
-                    className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                    className="absolute inset-0 rounded-lg bg-gradient-to-br from-slate-900/10 to-orange-300/10 border border-slate-900/15"
                     transition={{ type: "spring", stiffness: 380, damping: 30 }}
                   />
                 )}
-                <span className={cn("relative z-10", active ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+                <span className={cn("relative z-10", active ? "text-slate-900" : "text-zinc-600 group-hover:text-zinc-900")}>
                   {link.label}
                 </span>
                 <span
                   className={cn(
-                    "absolute left-4 right-4 -bottom-0.5 h-px origin-center scale-x-0 bg-gradient-to-r from-transparent via-yellow-600 to-transparent transition-transform duration-300",
+                    "absolute left-4 right-4 -bottom-0.5 h-px origin-center scale-x-0 bg-gradient-to-r from-transparent via-orange-300 to-transparent transition-transform duration-300",
                     !active && "group-hover:scale-x-100"
                   )}
                 />
@@ -117,16 +117,16 @@ export default function Navbar() {
               {learnActive && (
                 <motion.span
                   layoutId="nav-pill"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-slate-900/10 to-orange-300/10 border border-slate-900/15"
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <span className={cn("relative z-10", learnActive ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+              <span className={cn("relative z-10", learnActive ? "text-slate-900" : "text-zinc-600 group-hover:text-zinc-900")}>
                 Learn
               </span>
               <motion.svg
                 width="10" height="10" viewBox="0 0 10 10"
-                className={cn("relative z-10", learnActive ? "text-emerald-900" : "text-zinc-500")}
+                className={cn("relative z-10", learnActive ? "text-slate-900" : "text-zinc-500")}
                 animate={{ rotate: learnOpen ? 180 : 0 }}
                 transition={{ duration: 0.25 }}
               >
@@ -136,7 +136,7 @@ export default function Navbar() {
             <AnimatePresence>
               {learnOpen && (
                 <motion.div
-                  className="absolute left-0 top-full mt-2 w-72 glass rounded-2xl p-2 shadow-xl border border-emerald-900/10"
+                  className="absolute left-0 top-full mt-2 w-72 glass rounded-2xl p-2 shadow-xl border border-slate-900/10"
                   initial={{ opacity: 0, y: -8, scale: 0.96 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
                   exit={{ opacity: 0, y: -8, scale: 0.96 }}
@@ -155,10 +155,10 @@ export default function Navbar() {
                         className="block px-3 py-2.5 rounded-xl hover:bg-white/70 transition-colors group"
                       >
                         <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-sm font-semibold text-zinc-900 group-hover:text-emerald-900 transition-colors">
+                          <span className="text-sm font-semibold text-zinc-900 group-hover:text-slate-900 transition-colors">
                             {l.label}
                           </span>
-                          <span className="text-yellow-700 opacity-0 group-hover:opacity-100 transition-opacity text-xs">→</span>
+                          <span className="text-orange-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs">→</span>
                         </div>
                         <p className="text-xs text-zinc-500 mt-0.5">{l.desc}</p>
                       </Link>
@@ -177,11 +177,11 @@ export default function Navbar() {
               {pathname === "/dashboard" && (
                 <motion.span
                   layoutId="nav-pill"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-slate-900/10 to-orange-300/10 border border-slate-900/15"
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <span className={cn("relative z-10", pathname === "/dashboard" ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+              <span className={cn("relative z-10", pathname === "/dashboard" ? "text-slate-900" : "text-zinc-600 group-hover:text-zinc-900")}>
                 Dashboard
               </span>
             </Link>
@@ -194,11 +194,11 @@ export default function Navbar() {
               {pathname === "/admin" && (
                 <motion.span
                   layoutId="nav-pill"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-emerald-900/10 to-yellow-600/10 border border-emerald-900/15"
+                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-slate-900/10 to-orange-300/10 border border-slate-900/15"
                   transition={{ type: "spring", stiffness: 380, damping: 30 }}
                 />
               )}
-              <span className={cn("relative z-10", pathname === "/admin" ? "text-emerald-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+              <span className={cn("relative z-10", pathname === "/admin" ? "text-slate-900" : "text-zinc-600 group-hover:text-zinc-900")}>
                 Admin
               </span>
             </Link>

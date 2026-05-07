@@ -38,7 +38,7 @@ export default function GlowButton({
     "relative inline-flex items-center justify-center gap-2 px-8 py-3 rounded-full font-medium text-sm tracking-wide transition-transform duration-300 overflow-hidden hover:scale-[1.03]";
 
   const variants = {
-    primary: "bg-sage-green text-white shadow-[0_4px_20px_rgba(15,81,50,0.25)]",
+    primary: "bg-sage-green text-white shadow-[0_4px_20px_rgba(27,42,92,0.25)]",
     secondary: "bg-white border-2 border-sage-green text-sage-green",
   };
 

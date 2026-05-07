@@ -92,10 +92,10 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
         className="w-full flex items-center justify-between p-5 text-left hover:bg-white/[0.02] transition-colors"
       >
         <div className="flex items-center gap-2">
-          <BrainCircuit className="w-5 h-5 text-[#D4A017]" />
+          <BrainCircuit className="w-5 h-5 text-[#C87D5C]" />
           <span className="text-zinc-900 font-semibold">Quiz Builder</span>
           {questionsAdded > 0 && (
-            <span className="text-xs bg-[#D4A017]/20 text-[#D4A017] px-2 py-0.5 rounded-full">
+            <span className="text-xs bg-[#C87D5C]/20 text-[#C87D5C] px-2 py-0.5 rounded-full">
               {questionsAdded} question{questionsAdded !== 1 ? "s" : ""}
             </span>
           )}
@@ -124,7 +124,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                   <input
                     value={quizTitle}
                     onChange={(e) => setQuizTitle(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors"
+                    className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#1B2A5C]/40 transition-colors"
                   />
                   <button
                     onClick={handleCreateQuiz}
@@ -155,7 +155,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                         setQuestion((q) => ({ ...q, questionText: e.target.value }))
                       }
                       rows={2}
-                      className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors resize-none"
+                      className="w-full px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#1B2A5C]/40 transition-colors resize-none"
                       placeholder="Enter the question..."
                     />
 
@@ -171,7 +171,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                             }))
                           }
                           placeholder={`Option ${opt}${opt === "C" || opt === "D" ? " (optional)" : ""}`}
-                          className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#0F5132]/40 transition-colors"
+                          className="px-4 py-2.5 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 text-sm outline-none focus:border-[#1B2A5C]/40 transition-colors"
                         />
                       ))}
                     </div>
@@ -189,7 +189,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                             }
                             className={`w-10 h-10 rounded-lg border text-sm font-semibold transition-all ${
                               question.correctAnswer === opt
-                                ? "bg-[#0F5132]/20 border-[#0F5132]/50 text-[#0F5132]"
+                                ? "bg-[#1B2A5C]/20 border-[#1B2A5C]/50 text-[#1B2A5C]"
                                 : "bg-white/60 border-zinc-200 text-zinc-600 hover:text-zinc-900"
                             }`}
                           >
@@ -202,7 +202,7 @@ export default function QuizBuilder({ lessonId, lessonTitle }: QuizBuilderProps)
                     <button
                       onClick={handleAddQuestion}
                       disabled={!canAddQuestion || adding}
-                      className="px-5 py-2.5 rounded-xl bg-[#D4A017]/20 border border-[#D4A017]/30 text-[#D4A017] font-medium text-sm hover:bg-[#D4A017]/30 transition-colors disabled:opacity-40 flex items-center gap-2"
+                      className="px-5 py-2.5 rounded-xl bg-[#C87D5C]/20 border border-[#C87D5C]/30 text-[#C87D5C] font-medium text-sm hover:bg-[#C87D5C]/30 transition-colors disabled:opacity-40 flex items-center gap-2"
                     >
                       {adding ? (
                         <Loader2 className="w-4 h-4 animate-spin" />
