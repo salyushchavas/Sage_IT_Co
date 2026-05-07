@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useInView, animate } from "framer-motion";
 
 interface CountUpProps {
@@ -14,22 +14,42 @@ interface CountUpProps {
  * animates it from 0 → target when first scrolled into view. Surrounding
  * non-numeric characters (prefix and suffix) are preserved verbatim.
  *
- * Why: stat figures feel static. Counting up draws the eye and signals
- * scale at the moment the user notices the number.
+ * Why initial display is the zeroed string (not the target):
+ *   If we initialized with the full target, the first animation frame
+ *   would snap "200+" → "0" → count up — visible flicker. Starting at
+ *   the zeroed form means motion is monotonic (only upward).
+ *
+ * Why parsing is memoized:
+ *   String.match returns a new array each render. If the parsed match is
+ *   used as a useEffect dep, the effect re-runs on every render and the
+ *   in-flight animation restarts from 0 — also visible flicker.
  */
 export default function CountUp({ value, duration = 1.6, className }: CountUpProps) {
   const ref = useRef<HTMLSpanElement>(null);
   const inView = useInView(ref, { once: true, margin: "-80px" });
-  const [display, setDisplay] = useState(value);
 
-  // Pull leading non-digit prefix, numeric core (with optional decimal), trailing suffix.
-  const match = value.match(/^([^\d.-]*)(-?\d+(?:\.\d+)?)(.*)$/);
+  const parsed = useMemo(() => {
+    const m = value.match(/^([^\d.-]*)(-?\d+(?:\.\d+)?)(.*)$/);
+    if (!m) return null;
+    const [, prefix = "", numStr, suffix = ""] = m;
+    return {
+      prefix,
+      suffix,
+      target: parseFloat(numStr),
+      decimals: (numStr.split(".")[1] || "").length,
+    };
+  }, [value]);
+
+  const initialDisplay = useMemo(() => {
+    if (!parsed) return value;
+    return `${parsed.prefix}${(0).toFixed(parsed.decimals)}${parsed.suffix}`;
+  }, [parsed, value]);
+
+  const [display, setDisplay] = useState(initialDisplay);
 
   useEffect(() => {
-    if (!inView || !match) return;
-    const [, prefix = "", numStr, suffix = ""] = match;
-    const target = parseFloat(numStr);
-    const decimals = (numStr.split(".")[1] || "").length;
+    if (!inView || !parsed) return;
+    const { prefix, suffix, target, decimals } = parsed;
 
     const controls = animate(0, target, {
       duration,
@@ -39,15 +59,10 @@ export default function CountUp({ value, duration = 1.6, className }: CountUpPro
       },
     });
     return () => controls.stop();
-  }, [inView, match, duration]);
-
-  // Fallback for non-numeric strings — render verbatim.
-  if (!match) {
-    return <span ref={ref} className={className}>{value}</span>;
-  }
+  }, [inView, parsed, duration]);
 
   return (
-    <span ref={ref} className={className}>
+    <span ref={ref} className={className} aria-label={value}>
       {display}
     </span>
   );
