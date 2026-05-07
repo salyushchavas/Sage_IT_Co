@@ -84,7 +84,7 @@ export default function Footer() {
             <ul className="space-y-2 text-sm text-zinc-600">
               <li>info@sageitco.com</li>
               <li>+1 (555) 123-4567</li>
-              <li>Hyderabad, India</li>
+              <li>Lewisville, TX</li>
             </ul>
             <div className="flex gap-3 mt-6">
               {socialLinks.map((s) => (

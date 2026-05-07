@@ -176,26 +176,27 @@ export default function ContactPage() {
                     </div>
                     <div>
                       <p className="text-zinc-900 font-medium">Office</p>
+                      <p className="text-zinc-900 text-sm font-semibold mt-1">SAGEITCO LLC</p>
                       <p className="text-zinc-600 text-sm">
-                        HITEC City, Hyderabad<br />
-                        Telangana, India 500081
+                        4400 State Hwy 121, Suite #324<br />
+                        Lewisville, TX 75056
                       </p>
                     </div>
                   </div>
                 </div>
               </GlassCard>
 
-              {/* Map placeholder */}
+              {/* Map */}
               <GlassCard className="p-0 overflow-hidden h-56 sm:h-64">
                 <iframe
-                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3806.313291823474!2d78.37148831485!3d17.44734688804!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcb93dc8c5d69df%3A0x19688beb557fa0ee!2sHITEC%20City%2C%20Hyderabad!5e0!3m2!1sen!2sin!4v1700000000000!5m2!1sen!2sin"
+                  src="https://www.google.com/maps?q=4400+State+Hwy+121+Suite+324+Lewisville+TX+75056&hl=en&z=15&output=embed"
                   width="100%"
                   height="100%"
-                  style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }}
+                  style={{ border: 0 }}
                   allowFullScreen
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"
-                  title="Sage IT Office Location"
+                  title="SAGEITCO LLC office at 4400 State Hwy 121 Suite #324, Lewisville, TX 75056"
                 />
               </GlassCard>
 
