@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import "./globals.css";
 import Navbar from "@/components/layout/Navbar";
@@ -23,6 +23,17 @@ export const metadata: Metadata = {
   description:
     "Sage IT delivers next-generation technology solutions including Cloud, AI, Cybersecurity, Web Development, and Data Analytics for enterprises worldwide.",
   keywords: ["IT services", "cloud solutions", "AI", "cybersecurity", "web development", "data analytics"],
+  icons: {
+    icon: "/icon.png",
+    apple: "/apple-icon.png",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#1B2A5C",
 };
 
 export default function RootLayout({

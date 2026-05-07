@@ -36,27 +36,27 @@ export default function CoursesPage() {
   }, [selectedLevel, search]);
 
   return (
-    <section className="min-h-screen pt-32 pb-20 px-6">
+    <section className="min-h-screen pt-28 sm:pt-32 pb-16 sm:pb-20 px-4 sm:px-6">
       <div className="mx-auto max-w-7xl">
         {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
-          className="mb-10"
+          className="mb-8 sm:mb-10"
         >
-          <h1 className="text-4xl font-bold text-zinc-900 mb-2">
+          <h1 className="text-3xl sm:text-4xl font-bold text-zinc-900 mb-2">
             Explore{" "}
             <span className="bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] bg-clip-text text-transparent">
               Courses
             </span>
           </h1>
-          <p className="text-zinc-600">
+          <p className="text-zinc-600 text-sm sm:text-base">
             Find the perfect course to advance your skills.
           </p>
         </motion.div>
 
         {/* Filters */}
-        <div className="mb-10">
+        <div className="mb-8 sm:mb-10">
           <CourseFilter
             selectedLevel={selectedLevel}
             onLevelChange={setSelectedLevel}
@@ -98,7 +98,7 @@ export default function CoursesPage() {
             variants={staggerContainer}
             initial="hidden"
             animate="visible"
-            className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid gap-5 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3"
           >
             {courses.map((course, i) => (
               <CourseCard key={course.id} course={course} index={i} />

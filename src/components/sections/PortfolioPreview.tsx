@@ -9,7 +9,7 @@ import GlowButton from "../ui/GlowButton";
 
 export default function PortfolioPreview() {
   return (
-    <section className="py-32 px-6 relative">
+    <section className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 relative">
       <div className="max-w-7xl mx-auto">
         <SectionHeading
           label="Portfolio"
@@ -18,7 +18,7 @@ export default function PortfolioPreview() {
         />
 
         <motion.div
-          className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"
+          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 lg:gap-8"
           variants={staggerContainer}
           initial="hidden"
           whileInView="visible"
@@ -29,7 +29,7 @@ export default function PortfolioPreview() {
           ))}
         </motion.div>
 
-        <div className="text-center mt-12">
+        <div className="text-center mt-10 sm:mt-12">
           <GlowButton href="/portfolio" variant="secondary">
             View All Projects
           </GlowButton>

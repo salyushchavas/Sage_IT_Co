@@ -25,17 +25,17 @@ export default function CareersPage() {
 
   return (
     <>
-      <section className="pt-32 pb-20 px-6 bg-grid">
+      <section className="pt-28 sm:pt-32 pb-16 sm:pb-20 px-4 sm:px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
+            className="text-3xl sm:text-4xl md:text-6xl font-bold text-zinc-900 mb-4 sm:mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
           >
             Join <span className="text-gradient">Sage IT</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-600 text-lg"
+            className="text-zinc-600 text-base sm:text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -46,11 +46,11 @@ export default function CareersPage() {
       </section>
 
       {/* Perks */}
-      <section className="py-20 px-6">
+      <section className="py-16 sm:py-20 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <SectionHeading label="Why Sage IT" title="Perks & Culture" />
           <motion.div
-            className="grid md:grid-cols-4 gap-6"
+            className="grid grid-cols-2 md:grid-cols-4 gap-3 sm:gap-5 lg:gap-6"
             variants={staggerContainer}
             initial="hidden"
             whileInView="visible"
@@ -62,10 +62,10 @@ export default function CareersPage() {
               { icon: "⚡", title: "Cutting-Edge Tech", desc: "Work with AI, cloud, and modern stacks" },
               { icon: "🤝", title: "Ownership Culture", desc: "Your ideas shape our products" },
             ].map((perk) => (
-              <motion.div key={perk.title} variants={fadeUp} className="glass p-6 text-center">
-                <div className="text-3xl mb-3">{perk.icon}</div>
-                <h3 className="text-zinc-900 font-semibold mb-2">{perk.title}</h3>
-                <p className="text-zinc-600 text-sm">{perk.desc}</p>
+              <motion.div key={perk.title} variants={fadeUp} className="glass p-4 sm:p-6 text-center">
+                <div className="text-2xl sm:text-3xl mb-2 sm:mb-3">{perk.icon}</div>
+                <h3 className="text-zinc-900 font-semibold mb-1 sm:mb-2 text-sm sm:text-base">{perk.title}</h3>
+                <p className="text-zinc-600 text-xs sm:text-sm">{perk.desc}</p>
               </motion.div>
             ))}
           </motion.div>
@@ -73,11 +73,11 @@ export default function CareersPage() {
       </section>
 
       {/* Job listings */}
-      <section className="py-20 px-6 bg-grid">
+      <section className="py-16 sm:py-20 px-4 sm:px-6 bg-grid">
         <div className="max-w-5xl mx-auto">
           <SectionHeading label="Open Positions" title="Current Openings" />
           <motion.div
-            className="space-y-6"
+            className="space-y-4 sm:space-y-6"
             variants={staggerContainer}
             initial="hidden"
             whileInView="visible"
@@ -96,7 +96,7 @@ export default function CareersPage() {
       <AnimatePresence>
         {selectedJob && (
           <motion.div
-            className="fixed inset-0 z-[100] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-black/60 backdrop-blur-sm overflow-y-auto"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -109,7 +109,7 @@ export default function CareersPage() {
               exit={{ scale: 0.9, opacity: 0 }}
               onClick={(e) => e.stopPropagation()}
             >
-              <GlassCard className="p-8">
+              <GlassCard className="p-6 sm:p-8 my-auto">
                 {submitted ? (
                   <div className="text-center py-8">
                     <div className="text-4xl mb-4">✅</div>

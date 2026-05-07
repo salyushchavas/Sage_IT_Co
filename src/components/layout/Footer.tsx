@@ -5,12 +5,12 @@ import Link from "next/link";
 export default function Footer() {
   return (
     <footer className="relative border-t border-zinc-200 bg-background">
-      <div className="max-w-7xl mx-auto px-6 py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-16">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8 sm:gap-10 lg:gap-12">
           {/* Brand */}
-          <div>
-            <Link href="/" className="inline-block mb-4">
-              <div className="logo-glow relative w-32 h-32">
+          <div className="sm:col-span-2 lg:col-span-1">
+            <Link href="/" className="inline-block mb-3 sm:mb-4">
+              <div className="logo-glow relative w-24 h-24 sm:w-28 sm:h-28 lg:w-32 lg:h-32">
                 <Image
                   src="/sage_logo.png"
                   alt="Sage IT Co"
@@ -19,7 +19,7 @@ export default function Footer() {
                 />
               </div>
             </Link>
-            <p className="text-zinc-600 text-sm leading-relaxed">
+            <p className="text-zinc-600 text-sm leading-relaxed max-w-md">
               Engineering Intelligence. Empowering Growth. We deliver next-gen technology solutions for enterprises worldwide.
             </p>
           </div>
@@ -74,11 +74,11 @@ export default function Footer() {
           </div>
         </div>
 
-        <div className="mt-16 pt-8 border-t border-zinc-200 flex flex-col md:flex-row items-center justify-between gap-4">
-          <p className="text-zinc-500 text-sm">
+        <div className="mt-12 sm:mt-16 pt-6 sm:pt-8 border-t border-zinc-200 flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4 text-center md:text-left">
+          <p className="text-zinc-500 text-xs sm:text-sm">
             &copy; {new Date().getFullYear()} Sage IT. All rights reserved.
           </p>
-          <div className="flex gap-6 text-sm text-zinc-500">
+          <div className="flex gap-4 sm:gap-6 text-xs sm:text-sm text-zinc-500">
             <span>Privacy Policy</span>
             <span>Terms of Service</span>
           </div>
