@@ -168,7 +168,7 @@ export default function ContactPage() {
                     </span>
                   </a>
                   <a
-                    href="tel:+15551234567"
+                    href="tel:+14696663661"
                     className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
                   >
                     <span className="contact-badge contact-badge--copper shrink-0">
@@ -177,7 +177,7 @@ export default function ContactPage() {
                     <span className="block">
                       <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Phone</span>
                       <span className="block text-zinc-900 text-sm sm:text-base mt-0.5 group-hover/badge:text-sage-copper transition-colors">
-                        +1 (555) 123-4567
+                        +1 (469) 666-3661
                       </span>
                     </span>
                   </a>

@@ -121,7 +121,7 @@ const organizationJsonLd = {
   logo: `${SITE_URL}/sage_logo.png`,
   description: defaultDescription,
   email: "info@sageitco.com",
-  telephone: "+1-555-123-4567",
+  telephone: "+1-469-666-3661",
   address: {
     "@type": "PostalAddress",
     streetAddress: "4400 State Hwy 121, Suite #324",
