@@ -28,7 +28,10 @@ const routes: Array<{
 export default function sitemap(): MetadataRoute.Sitemap {
   const lastModified = new Date();
   return routes.map((r) => ({
-    url: `${SITE_URL}${r.path}`,
+    // Next emits canonical tags without a trailing slash (even for "/"),
+    // so the sitemap must use the same form or Google flags it as a
+    // duplicate with a different canonical than the user submitted.
+    url: r.path === "/" ? SITE_URL : `${SITE_URL}${r.path}`,
     lastModified,
     changeFrequency: r.changeFrequency,
     priority: r.priority,
