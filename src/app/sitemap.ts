@@ -22,7 +22,6 @@ const routes: Array<{
   { path: "/contact", priority: 0.7, changeFrequency: "yearly" },
   { path: "/courses", priority: 0.6, changeFrequency: "weekly" },
   { path: "/categories", priority: 0.5, changeFrequency: "monthly" },
-  { path: "/pricing", priority: 0.6, changeFrequency: "monthly" },
 ];
 
 export default function sitemap(): MetadataRoute.Sitemap {
