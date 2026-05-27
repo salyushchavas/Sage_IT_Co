@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import LoadingScreen from "./LoadingScreen";
 import ScrollProgress from "./ScrollProgress";
 import AnimatedCursor from "./AnimatedCursor";
 
@@ -30,6 +31,7 @@ export default function ClientProviders() {
 
   return (
     <>
+      <LoadingScreen />
       <ScrollProgress />
       <AnimatedCursor />
     </>
