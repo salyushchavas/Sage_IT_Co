@@ -83,8 +83,12 @@ export default function Footer() {
             </h4>
             <ul className="space-y-2 text-sm text-zinc-600">
               <li>info@sageitco.com</li>
-              <li>+1 (555) 123-4567</li>
-              <li>Lewisville, TX</li>
+              <li>+1 (469) 666-3661</li>
+              <li>
+                SAGEITCO LLC<br />
+                4400 State Hwy 121, Suite #324<br />
+                Lewisville, TX 75056
+              </li>
             </ul>
             <div className="flex gap-3 mt-6">
               {socialLinks.map((s) => (
