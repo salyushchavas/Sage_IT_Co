@@ -1,0 +1,78 @@
+{
+  "version": "v2.0",
+  "effectiveDate": "2026-05-29",
+  "lastUpdated": "2026-05-29",
+  "platform": "Sage IT Co",
+  "platformUrl": "sageitco.com",
+  "contactEmail": "noreply@sageitco.com",
+  "supportUrl": "sageitco.com/support",
+  "jurisdiction": "Hyderabad, Telangana, India",
+
+  "sections": [
+    {
+      "title": "1. Introduction",
+      "content": "Welcome to Sage IT Co (\"Company\", \"we\", \"us\"). By creating an account and using our platform at sageitco.com, you agree to be bound by these Terms of Service and our Privacy Policy. If you do not agree, please do not use our services."
+    },
+    {
+      "title": "2. Definitions",
+      "content": "\"Platform\" refers to the Sage IT Co website and all related services. \"User\" refers to any individual who creates an account. \"Content\" refers to all courses, video lessons, quizzes, assignments, and educational materials. \"Mentor\" refers to an instructor assigned to guide a User. \"Services\" refers to career services including resume preparation, interview training, LinkedIn optimization, and placement assistance."
+    },
+    {
+      "title": "3. User Accounts",
+      "content": "You must provide accurate and complete information when creating your account. You are responsible for maintaining the confidentiality of your login credentials. You must be at least 18 years of age or have parental/guardian consent. Each individual may maintain only one account. You agree to notify us immediately of any unauthorized use of your account."
+    },
+    {
+      "title": "4. Course Content & Intellectual Property",
+      "content": "All course content, including but not limited to video lessons, quizzes, assignments, code samples, and supplementary materials, is the intellectual property of Sage IT Co and its respective instructors. You are granted a limited, non-exclusive, non-transferable license to access content solely for personal educational purposes. You may NOT record, screenshot, download, copy, distribute, share, or redistribute any course content by any means. You may NOT use screen recording software, capture tools, or any other method to capture course content. Violation of these terms may result in immediate account termination without refund and may subject you to legal action under applicable copyright laws."
+    },
+    {
+      "title": "5. Payments & Refunds",
+      "content": "All course prices are listed in Indian Rupees (INR) and are one-time payments granting lifetime access to the purchased course. Refund requests must be submitted within 7 days of purchase. No refunds will be issued if you have accessed more than 25% of the course content. Custom pricing agreements made through our Contact Sales feature are binding once accepted. Sage IT Co reserves the right to modify pricing at any time. Existing purchases are not affected by price changes."
+    },
+    {
+      "title": "6. Mentorship",
+      "content": "Each course enrollment includes assignment of a personal mentor. Mentors provide guidance, feedback, and support but do not guarantee specific learning outcomes or career results. Session scheduling is subject to mentor availability. Users must attend scheduled sessions or cancel at least 24 hours in advance. Repeated no-shows may result in reduced session privileges. The mentor-student relationship is limited to the platform and course scope."
+    },
+    {
+      "title": "7. Certificates",
+      "content": "Certificates of completion are issued upon finishing all course requirements including lessons and assessments. Each certificate includes a unique verification number that can be independently verified at our verification page. Certificates represent completion of coursework and do not constitute a degree, diploma, or professional certification. Misrepresentation of certificate credentials is strictly prohibited."
+    },
+    {
+      "title": "8. Privacy & Data Collection",
+      "content": "We collect personal information including: name, email address, phone number, learning activity data, IP addresses, browser information, and device details. This data is used for: platform operation and improvement, communication regarding your account and courses, security monitoring and fraud prevention, and analytics to improve our services. We do NOT sell, rent, or trade your personal information to third parties. Activity logs and learning records are maintained for security, audit, and evidence purposes. You may request a complete export of your data or request deletion of your account by contacting support."
+    },
+    {
+      "title": "9. Content Protection Monitoring",
+      "content": "Our platform employs various security measures to protect course content, including but not limited to: browser-level protections against unauthorized copying, watermarking technology that identifies the viewing user, activity monitoring to detect potential content theft, and session tracking for security purposes. By using our platform, you consent to these protective measures. Attempting to circumvent content protection measures is a violation of these terms."
+    },
+    {
+      "title": "10. Account Termination",
+      "content": "Sage IT Co reserves the right to suspend or terminate your account at any time for violation of these Terms of Service, including but not limited to: unauthorized content distribution, fraudulent activity, abusive behavior toward mentors or staff, or any other conduct deemed harmful to the platform or its users. Users may request voluntary account deletion through the support page. Upon termination, access to all courses and content is immediately revoked."
+    },
+    {
+      "title": "11. Limitation of Liability",
+      "content": "The platform and all content are provided on an \"as is\" and \"as available\" basis. Sage IT Co makes no warranties regarding the accuracy, completeness, or reliability of any content. We are not liable for any direct, indirect, incidental, or consequential damages arising from your use of the platform. We do not guarantee specific career outcomes, job placements, or salary increases as a result of completing our courses or services."
+    },
+    {
+      "title": "12. Changes to Terms",
+      "content": "Sage IT Co reserves the right to update or modify these Terms of Service at any time. Users will be notified of significant changes via email and/or platform notification. Continued use of the platform after changes constitutes acceptance of the updated terms. For major changes, users may be required to re-accept the updated terms."
+    },
+    {
+      "title": "13. Governing Law & Dispute Resolution",
+      "content": "These Terms of Service shall be governed by and construed in accordance with the laws of India. Any disputes arising from or relating to these terms shall be subject to the exclusive jurisdiction of the courts in Hyderabad, Telangana, India. Both parties agree to attempt to resolve any disputes through good-faith negotiation before pursuing legal action."
+    },
+    {
+      "title": "14. Contact Information",
+      "content": "For any questions or concerns regarding these Terms of Service, please contact us at: Email: noreply@sageitco.com | Website: sageitco.com/support | Address: Hyderabad, Telangana, India"
+    }
+  ],
+
+  "acceptanceConfirmations": [
+    "I have read and understood the Sage IT Co Terms of Service in full.",
+    "I agree to the Terms of Service and Privacy Policy of Sage IT Co.",
+    "I understand that course content is protected by copyright and may not be recorded, screenshotted, downloaded, or shared with others.",
+    "I consent to the platform's content protection monitoring (watermarking, activity tracking, and session monitoring).",
+    "I confirm that I am at least 18 years of age, or have parental/guardian consent to use this platform.",
+    "I acknowledge that this acceptance is recorded as legal evidence and that misuse of the platform may result in account termination and legal action."
+  ]
+}

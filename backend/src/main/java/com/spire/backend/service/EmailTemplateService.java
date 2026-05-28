@@ -521,14 +521,15 @@ public class EmailTemplateService {
                 + p("By replying, you acknowledge that you have read and accept all terms and conditions stated in the attached document.")
                 + p("This request expires in <strong>30 minutes</strong>.")
                 + p("Regards,<br/>" + brandName() + "<br/>"
-                        + "<span style=\"color:#6b7280;\">info@spireitco.com &nbsp;•&nbsp; www.spireitco.com</span>")
+                        + "<span style=\"color:#6b7280;\">" + brandConfig.getContactEmail()
+                        + " &nbsp;•&nbsp; " + brandConfig.getWebsite() + "</span>")
                 + muted("If you did not initiate this, please ignore this email — no agreement will be recorded.");
 
         java.util.List<EmailService.Attachment> attachments =
                 pendingPdfBytes == null || pendingPdfBytes.length == 0
                         ? java.util.List.of()
                         : java.util.List.of(new EmailService.Attachment(
-                                "Spire_Agreement_v1.0.pdf",
+                                brandConfig.getShortName() + "_Agreement_" + AgreementService.CURRENT_VERSION + ".pdf",
                                 "application/pdf", pendingPdfBytes));
 
         emailService.sendEmail(user.getEmail(), subject,
@@ -613,7 +614,7 @@ public class EmailTemplateService {
         String namePart = (legalName == null || legalName.isBlank())
                 ? (recordId == null ? "signed" : recordId)
                 : legalName.trim().replaceAll("[^A-Za-z0-9._-]", "_");
-        String filename = "Spire_Agreement_Signed_" + namePart + ".pdf";
+        String filename = brandConfig.getShortName() + "_Agreement_Signed_" + namePart + ".pdf";
         // legalName + version are kept on the signature for audit
         // logging on the caller side; the user-facing body shows
         // only the acceptance ID + timestamp per spec.

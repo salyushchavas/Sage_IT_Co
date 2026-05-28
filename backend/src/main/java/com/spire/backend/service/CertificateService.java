@@ -3,6 +3,7 @@ package com.spire.backend.service;
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfContentByte;
 import com.lowagie.text.pdf.PdfWriter;
+import com.spire.backend.config.BrandConfig;
 import com.spire.backend.entity.*;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.exception.UnauthorizedException;
@@ -48,6 +49,7 @@ public class CertificateService {
     private final LessonRepository lessonRepository;
     private final ProgressRepository progressRepository;
     private final QuizAttemptRepository quizAttemptRepository;
+    private final BrandConfig brandConfig;
     private final QuizRepository quizRepository;
     private final SubmissionRepository submissionRepository;
     private final AssignmentRepository assignmentRepository;
@@ -204,7 +206,8 @@ public class CertificateService {
     // ───────────────────────────────────────────────────────────────
 
     /**
-     * Builds {@code SIT-<COURSE>-<INITIALS>-<DDMMYY>}, suffixing
+     * Builds {@code <PREFIX>-<COURSE>-<INITIALS>-<DDMMYY>}, where
+     * PREFIX comes from {@link BrandConfig#getIdPrefix()}, suffixing
      * {@code -2}, {@code -3}, … on collision against existing rows.
      * Falls back to a UUID tail after 50 collisions (defensive, not
      * expected to fire).
@@ -227,7 +230,7 @@ public class CertificateService {
 
         String date = LocalDate.now().format(DateTimeFormatter.ofPattern("ddMMyy"));
 
-        String base = String.format("SIT-%s-%s-%s", courseCode, initials, date);
+        String base = String.format("%s-%s-%s-%s", brandConfig.getIdPrefix(), courseCode, initials, date);
         if (!certificateRepository.findByCertificateId(base).isPresent()) {
             return base;
         }

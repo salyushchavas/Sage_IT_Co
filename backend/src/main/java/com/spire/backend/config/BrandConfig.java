@@ -9,8 +9,7 @@ import org.springframework.stereotype.Component;
  *
  * Every value is overridable via the matching BRAND_* environment
  * variable on Railway (or in application-*.properties). Defaults
- * mirror the original Spire Info Tech deployment, so a build with
- * no overrides is byte-equivalent to the pre-refactor backend.
+ * mirror the Sage IT Co deployment; brand swaps override via env.
  *
  * Pair with frontend/src/config/brand.ts on the Vercel side — the
  * two configs must agree on idPrefix, primaryColor, etc.
@@ -19,72 +18,71 @@ import org.springframework.stereotype.Component;
 @Getter
 public class BrandConfig {
 
-    @Value("${brand.name:Spire Info Tech}")
+    @Value("${brand.name:Sage IT Co}")
     private String name;
 
-    @Value("${brand.short-name:Spire}")
+    @Value("${brand.short-name:Sage}")
     private String shortName;
 
-    @Value("${brand.legal-name:Spire Info Tech}")
+    @Value("${brand.legal-name:Sage IT Co}")
     private String legalName;
 
-    @Value("${brand.tagline:Advance your career with expert coaching and personalized guidance}")
+    @Value("${brand.tagline:IT Consulting and Career Development}")
     private String tagline;
 
-    @Value("${brand.contact-email:info@spireitco.com}")
+    @Value("${brand.contact-email:info@sageitco.com}")
     private String contactEmail;
 
-    @Value("${brand.support-email:support@spireitco.com}")
+    @Value("${brand.support-email:support@sageitco.com}")
     private String supportEmail;
 
-    @Value("${brand.noreply-email:noreply@spireitco.com}")
+    @Value("${brand.noreply-email:noreply@sageitco.com}")
     private String noreplyEmail;
 
-    @Value("${brand.address-line1:H No. 2-91/5, Flat No. 1605}")
+    @Value("${brand.address-line1:}")
     private String addressLine1;
 
-    @Value("${brand.address-line2:Trendset Jayabheri Enclave, Hitech City}")
+    @Value("${brand.address-line2:}")
     private String addressLine2;
 
-    @Value("${brand.city:Hyderabad}")
+    @Value("${brand.city:}")
     private String city;
 
-    @Value("${brand.state:Telangana}")
+    @Value("${brand.state:}")
     private String state;
 
-    @Value("${brand.postal-code:500084}")
+    @Value("${brand.postal-code:}")
     private String postalCode;
 
     @Value("${brand.country:India}")
     private String country;
 
-    @Value("${brand.website:https://spireinfotech.vercel.app}")
+    @Value("${brand.website:https://sageitco.com}")
     private String website;
 
     /**
-     * Prefix used when minting participant IDs — e.g. {@code "SIT"}
-     * gives {@code SIT-2026-00001}. Existing IDs are untouched; only
+     * Prefix used when minting participant IDs — e.g. {@code "SAGE"}
+     * gives {@code SAGE-2026-00001}. Existing IDs are untouched; only
      * newly-minted ones use the current value of this property.
      */
-    @Value("${brand.id-prefix:SIT}")
+    @Value("${brand.id-prefix:SAGE}")
     private String idPrefix;
 
-    @Value("${brand.primary-color:#0F766E}")
+    @Value("${brand.primary-color:#1B2A5C}")
     private String primaryColor;
 
-    @Value("${brand.primary-color-dark:#115E59}")
+    @Value("${brand.primary-color-dark:#0F1F44}")
     private String primaryColorDark;
 
     /**
      * Classpath path (relative to {@code src/main/resources/}) of the
-     * letterhead PDF overlaid on every generated agreement. The
-     * default is the existing Spire letterhead; brand swaps drop in
-     * a different filename + set this env var.
+     * letterhead PDF overlaid on every generated agreement. Brand
+     * swaps drop in a different filename + set this env var.
      */
-    @Value("${brand.letterhead-path:templates/letterhead.pdf}")
+    @Value("${brand.letterhead-path:sage_letterhead.pdf}")
     private String letterheadPath;
 
-    @Value("${brand.logo-url:https://spireinfotech.vercel.app/logo.png}")
+    @Value("${brand.logo-url:https://sageitco.com/sage_logo.png}")
     private String logoUrl;
 
     /** One-line postal address for email footers + letterhead. */

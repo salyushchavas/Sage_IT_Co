@@ -227,22 +227,22 @@ public class DataSeeder implements CommandLineRunner {
         log.info("Seeding users...");
 
         User admin = userRepository.save(User.builder()
-                .email("admin@spire.dev")
+                .email("admin@sageitco.com")
                 .passwordHash(passwordEncoder.encode("admin123"))
-                .fullName("Spire Admin")
+                .fullName("Sage Admin")
                 .role(adminRole)
                 .build());
 
         User student = userRepository.save(User.builder()
-                .email("student@spire.dev")
+                .email("student@sageitco.com")
                 .passwordHash(passwordEncoder.encode("student123"))
                 .fullName("Abhishek Student")
                 .role(studentRole)
-                .bio("A passionate learner exploring new skills on Spire.")
+                .bio("A passionate learner exploring new skills on Sage.")
                 .build());
 
         User arjun = userRepository.save(User.builder()
-                .email("arjun@spire.dev")
+                .email("arjun@sageitco.com")
                 .passwordHash(passwordEncoder.encode("password123"))
                 .fullName("Arjun Mehta")
                 .role(instructorRole)
@@ -250,7 +250,7 @@ public class DataSeeder implements CommandLineRunner {
                 .build());
 
         User priya = userRepository.save(User.builder()
-                .email("priya@spire.dev")
+                .email("priya@sageitco.com")
                 .passwordHash(passwordEncoder.encode("password123"))
                 .fullName("Priya Sharma")
                 .role(instructorRole)
@@ -258,7 +258,7 @@ public class DataSeeder implements CommandLineRunner {
                 .build());
 
         User rahul = userRepository.save(User.builder()
-                .email("rahul@spire.dev")
+                .email("rahul@sageitco.com")
                 .passwordHash(passwordEncoder.encode("password123"))
                 .fullName("Rahul Kapoor")
                 .role(instructorRole)
@@ -569,7 +569,7 @@ public class DataSeeder implements CommandLineRunner {
      * Phase 4 — seed at least one ERM and one of each coach role so
      * the OnboardingService can actually assign team members on a
      * fresh deploy. All idempotent (existsByEmail short-circuits).
-     * Default password "spire-team-2026" — change in any production
+     * Default password "sage-team-2026" — change in any production
      * deploy via the admin panel.
      */
     private void seedPhase4Team() {
@@ -582,47 +582,46 @@ public class DataSeeder implements CommandLineRunner {
             log.warn("Phase 4 roles missing — skipping seed");
             return;
         }
-        String defaultPassword = passwordEncoder.encode("spire-team-2026");
+        String defaultPassword = passwordEncoder.encode("sage-team-2026");
 
-        // Legacy dev seeds — kept for back-compat with any tests /
-        // scripts that hard-coded these addresses. Default password
-        // is the shared "spire-team-2026"; production should rotate
-        // through the admin panel.
-        seedTeamUser("deepthi.erm@spire.dev", "Deepthi R", ermRole, defaultPassword,
+        // Legacy dev seeds — kept for parity with the original team
+        // layout. Default password is the shared "sage-team-2026";
+        // production should rotate through the admin panel.
+        seedTeamUser("deepthi.erm@sageitco.com", "Deepthi R", ermRole, defaultPassword,
                 "Program coordinator and Employee Relationship Manager.");
-        seedTeamUser("arjun.coach@spire.dev", "Arjun Menon", coachRole, defaultPassword,
+        seedTeamUser("arjun.coach@sageitco.com", "Arjun Menon", coachRole, defaultPassword,
                 "Career coach — resume reviews, profile administration, job-market navigation.");
-        seedTeamUser("priya.tech@spire.dev", "Priya Sharma", techAdvisorRole, defaultPassword,
+        seedTeamUser("priya.tech@sageitco.com", "Priya Sharma", techAdvisorRole, defaultPassword,
                 "Technical advisor — Java Full Stack, Python Full Stack, Cloud & DevOps.");
-        seedTeamUser("rahul.interview@spire.dev", "Rahul Kapoor", coachRole, defaultPassword,
+        seedTeamUser("rahul.interview@sageitco.com", "Rahul Kapoor", coachRole, defaultPassword,
                 "Interview coach — mock interviews, communication training.");
 
         // Production-style staff accounts — one per role, each with
         // a distinct password so credentials can be handed out
         // individually rather than sharing one password across the
         // whole team. Operations should rotate these on first login.
-        seedTeamUser("erm@spireitco.com", "Deepthi R", ermRole,
-                passwordEncoder.encode("SpireERM@2026"),
+        seedTeamUser("erm@sageitco.com", "Deepthi R", ermRole,
+                passwordEncoder.encode("SageERM@2026"),
                 "Employee Relationship Manager — primary participant point of contact.");
-        seedTeamUser("coach@spireitco.com", "Arjun Mehta", coachRole,
-                passwordEncoder.encode("SpireCoach@2026"),
+        seedTeamUser("coach@sageitco.com", "Arjun Mehta", coachRole,
+                passwordEncoder.encode("SageCoach@2026"),
                 "Career coach — resume, profile, interview prep.");
-        seedTeamUser("advisor@spireitco.com", "Priya Sharma", techAdvisorRole,
-                passwordEncoder.encode("SpireAdvisor@2026"),
+        seedTeamUser("advisor@sageitco.com", "Priya Sharma", techAdvisorRole,
+                passwordEncoder.encode("SageAdvisor@2026"),
                 "Technical advisor — Java, Python, Cloud & DevOps mentorship.");
         if (financeRole != null) {
-            seedTeamUser("finance@spireitco.com", "Rahul Kumar", financeRole,
-                    passwordEncoder.encode("SpireFinance@2026"),
+            seedTeamUser("finance@sageitco.com", "Rahul Kumar", financeRole,
+                    passwordEncoder.encode("SageFinance@2026"),
                     "Finance — payment plans, invoices, check tracking.");
         } else {
-            log.warn("FINANCE role missing — finance@spireitco.com not seeded");
+            log.warn("FINANCE role missing — finance@sageitco.com not seeded");
         }
         if (opsAdminRole != null) {
-            seedTeamUser("admin@spireitco.com", "Admin User", opsAdminRole,
-                    passwordEncoder.encode("SpireAdmin@2026"),
+            seedTeamUser("admin.ops@sageitco.com", "Admin User", opsAdminRole,
+                    passwordEncoder.encode("SageAdmin@2026"),
                     "Operations admin — enrollment queue, document review, assignments.");
         } else {
-            log.warn("OPERATIONS_ADMIN role missing — admin@spireitco.com not seeded");
+            log.warn("OPERATIONS_ADMIN role missing — admin.ops@sageitco.com not seeded");
         }
     }
 
@@ -644,11 +643,11 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void seedServicesAndTrainer(Role trainerRole) {
-        User meera = userRepository.findByEmail("meera@spire.dev")
+        User meera = userRepository.findByEmail("meera@sageitco.com")
                 .orElseGet(() -> {
-                    log.info("Seeding trainer user: meera@spire.dev");
+                    log.info("Seeding trainer user: meera@sageitco.com");
                     return userRepository.save(User.builder()
-                            .email("meera@spire.dev")
+                            .email("meera@sageitco.com")
                             .passwordHash(passwordEncoder.encode("password123"))
                             .fullName("Meera Iyer")
                             .role(trainerRole)

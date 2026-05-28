@@ -45,7 +45,7 @@ public class AgreementAcceptance {
 
     @Column(name = "agreement_version", nullable = false, length = 20)
     @Builder.Default
-    private String agreementVersion = "v1.0";
+    private String agreementVersion = "v2.0";
 
     /**
      * One of: WAITING_REPLY, CODE_SENT, VERIFIED.

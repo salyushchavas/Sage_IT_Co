@@ -51,7 +51,7 @@ import java.util.Optional;
 @Slf4j
 public class AgreementService {
 
-    public static final String CURRENT_VERSION = "v1.0";
+    public static final String CURRENT_VERSION = "v2.0";
 
     public static final String STATUS_WAITING_REPLY = "WAITING_REPLY";
     public static final String STATUS_CODE_SENT = "CODE_SENT";

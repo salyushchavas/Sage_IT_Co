@@ -1,29 +1,29 @@
--- Spire Course Platform - Seed Data
+-- Sage IT Co Platform - Seed Data
 -- Run this AFTER schema.sql
 
 -- ============================================
 -- USERS
 -- ============================================
 
--- Admin (admin@spire.dev / admin123)
+-- Admin (admin@sageitco.com / admin123)
 INSERT INTO users (id, email, password_hash, full_name, avatar_url, bio, role) VALUES
-('a0000000-0000-0000-0000-000000000001', 'admin@spire.dev',
+('a0000000-0000-0000-0000-000000000001', 'admin@sageitco.com',
  '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy',
- 'Spire Admin', NULL, 'Platform administrator', 'ADMIN');
+ 'Sage Admin', NULL, 'Platform administrator', 'ADMIN');
 
 -- Instructors (password123)
 INSERT INTO users (id, email, password_hash, full_name, avatar_url, bio, role) VALUES
-('b0000000-0000-0000-0000-000000000001', 'arjun@spire.dev',
+('b0000000-0000-0000-0000-000000000001', 'arjun@sageitco.com',
  '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG',
  'Arjun Mehta', '/avatars/arjun.jpg',
  'Full-stack developer with 10+ years of experience building scalable web applications.', 'INSTRUCTOR'),
 
-('b0000000-0000-0000-0000-000000000002', 'priya@spire.dev',
+('b0000000-0000-0000-0000-000000000002', 'priya@sageitco.com',
  '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG',
  'Priya Sharma', '/avatars/priya.jpg',
  'Data scientist and Python expert. Former ML engineer at a leading tech company.', 'INSTRUCTOR'),
 
-('b0000000-0000-0000-0000-000000000003', 'rahul@spire.dev',
+('b0000000-0000-0000-0000-000000000003', 'rahul@sageitco.com',
  '$2a$10$dXJ3SW6G7P50lGmMkkmwe.20cQQubK3.HZWzG3YB1tlRy.fqvM/BG',
  'Rahul Kapoor', '/avatars/rahul.jpg',
  'Cloud architect and DevOps specialist. AWS certified solutions architect.', 'INSTRUCTOR');
