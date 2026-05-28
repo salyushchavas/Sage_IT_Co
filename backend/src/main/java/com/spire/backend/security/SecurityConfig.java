@@ -36,7 +36,7 @@ public class SecurityConfig {
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .authorizeHttpRequests(auth -> auth
-                        .requestMatchers("/api/health").permitAll()
+                        .requestMatchers("/api/health", "/api/brand").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         // Phase 1B participant enrollment is public.
                         .requestMatchers(HttpMethod.POST, "/api/participants/enroll").permitAll()
