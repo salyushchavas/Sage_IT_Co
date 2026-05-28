@@ -1,0 +1,1311 @@
+package com.spire.backend.config;
+
+import com.spire.backend.entity.*;
+import com.spire.backend.entity.Module;
+import com.spire.backend.repository.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
+import org.springframework.stereotype.Component;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.math.BigDecimal;
+import java.util.List;
+
+@Component
+public class DataSeeder implements CommandLineRunner {
+
+    private static final Logger log = LoggerFactory.getLogger(DataSeeder.class);
+
+    @Autowired
+    private UserRepository userRepository;
+
+    @Autowired
+    private RoleRepository roleRepository;
+
+    @Autowired
+    private CourseRepository courseRepository;
+
+    @Autowired
+    private LessonRepository lessonRepository;
+
+    @Autowired
+    private ModuleRepository moduleRepository;
+
+    @Autowired
+    private AchievementRepository achievementRepository;
+
+    @Autowired
+    private EnrollmentRepository enrollmentRepository;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
+
+    @Override
+    @Transactional
+    public void run(String... args) {
+        // Seed roles first (idempotent)
+        Role studentRole = roleRepository.findByName("STUDENT")
+                .orElseGet(() -> roleRepository.save(Role.builder().name("STUDENT").build()));
+        Role instructorRole = roleRepository.findByName("INSTRUCTOR")
+                .orElseGet(() -> roleRepository.save(Role.builder().name("INSTRUCTOR").build()));
+        Role adminRole = roleRepository.findByName("ADMIN")
+                .orElseGet(() -> roleRepository.save(Role.builder().name("ADMIN").build()));
+        Role trainerRole = roleRepository.findByName("TRAINER")
+                .orElseGet(() -> roleRepository.save(Role.builder().name("TRAINER").build()));
+        log.info("Roles ready: STUDENT({}), INSTRUCTOR({}), TRAINER({}), ADMIN({})",
+                studentRole.getId(), instructorRole.getId(), trainerRole.getId(), adminRole.getId());
+
+        // Phase 1A roles — added alongside the legacy LMS roles, not
+        // replacing them. Legacy STUDENT and ADMIN rows continue to
+        // work; the new code paths treat STUDENT as PARTICIPANT and
+        // ADMIN as OPERATIONS_ADMIN via PermissionService's role
+        // alias set. Idempotent, like the block above.
+        String[] phase1aRoles = {
+                "PARTICIPANT", "ERM", "COACH", "TECHNICAL_ADVISOR",
+                "OPERATIONS_ADMIN", "FINANCE", "SYSTEM_ADMIN",
+        };
+        for (String name : phase1aRoles) {
+            roleRepository.findByName(name).orElseGet(() ->
+                    roleRepository.save(Role.builder().name(name).build()));
+        }
+        log.info("Phase 1A roles ensured: {}", String.join(", ", phase1aRoles));
+
+        // ── Audit cleanup migrations (idempotent) ───────────────────
+        // Rename legacy workflow status strings to match the PRD
+        // vocabulary, and drop the never-used docusign_envelopes
+        // shadow table. All statements are no-ops if the rows / table
+        // don't exist, so re-running the seeder is safe.
+        try {
+            int u1 = jdbcTemplate.update(
+                    "UPDATE users SET current_status = 'AGREEMENT_SENT' "
+                    + "WHERE current_status = 'DOCUSIGN_SENT'");
+            int u2 = jdbcTemplate.update(
+                    "UPDATE users SET current_status = 'AGREEMENT_COMPLETED' "
+                    + "WHERE current_status = 'DOCUSIGN_COMPLETED'");
+            int w1 = jdbcTemplate.update(
+                    "UPDATE workflow_states SET from_status = 'AGREEMENT_SENT' "
+                    + "WHERE from_status = 'DOCUSIGN_SENT'");
+            int w2 = jdbcTemplate.update(
+                    "UPDATE workflow_states SET to_status = 'AGREEMENT_SENT' "
+                    + "WHERE to_status = 'DOCUSIGN_SENT'");
+            int w3 = jdbcTemplate.update(
+                    "UPDATE workflow_states SET from_status = 'AGREEMENT_COMPLETED' "
+                    + "WHERE from_status = 'DOCUSIGN_COMPLETED'");
+            int w4 = jdbcTemplate.update(
+                    "UPDATE workflow_states SET to_status = 'AGREEMENT_COMPLETED' "
+                    + "WHERE to_status = 'DOCUSIGN_COMPLETED'");
+            log.info("Workflow status rename: users updated = {} + {}, "
+                    + "workflow_states updated = {} + {} + {} + {}",
+                    u1, u2, w1, w2, w3, w4);
+        } catch (Exception e) {
+            log.warn("Status rename migration skipped: {}", e.getMessage());
+        }
+
+        try {
+            // Postgres + MySQL both accept this form. The IF EXISTS
+            // keeps the call no-op-safe across fresh databases that
+            // never had the table.
+            jdbcTemplate.execute("DROP TABLE IF EXISTS docusign_envelopes");
+            log.info("Dropped legacy docusign_envelopes table (if it existed).");
+        } catch (Exception e) {
+            log.warn("docusign_envelopes drop skipped: {}", e.getMessage());
+        }
+
+        try {
+            // agreement_acceptances → agreement_records to match the
+            // PRD vocabulary. The entity now maps to agreement_records.
+            // We have to reason about FOUR possible DB states:
+            //   1. Only old table exists (pre-rename DB) → rename it.
+            //   2. Only new table exists (fresh deploy, Hibernate auto-
+            //      created from @Table) → nothing to do.
+            //   3. Both exist (rolled-back deploy re-created the new
+            //      table while the old was still around) → drop the
+            //      empty legacy table; if it has rows, leave it and
+            //      log for manual reconciliation rather than fail the
+            //      whole startup.
+            //   4. Neither exists → nothing to do.
+            //
+            // Previous code only checked case 1. Hitting case 3 in
+            // production raised "relation agreement_records already
+            // exists", which Postgres treats as a fatal error inside
+            // the seeder's @Transactional, aborting the whole
+            // transaction and failing every later query (roles, etc.).
+            Integer oldExists = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    + "WHERE table_name = 'agreement_acceptances'",
+                    Integer.class);
+            Integer newExists = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM information_schema.tables "
+                    + "WHERE table_name = 'agreement_records'",
+                    Integer.class);
+            boolean haveOld = oldExists != null && oldExists > 0;
+            boolean haveNew = newExists != null && newExists > 0;
+            if (haveOld && !haveNew) {
+                jdbcTemplate.execute(
+                        "ALTER TABLE agreement_acceptances RENAME TO agreement_records");
+                log.info("Renamed agreement_acceptances → agreement_records.");
+            } else if (haveOld && haveNew) {
+                Integer rows = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM agreement_acceptances", Integer.class);
+                if (rows == null || rows == 0) {
+                    jdbcTemplate.execute("DROP TABLE IF EXISTS agreement_acceptances");
+                    log.info("Dropped empty legacy agreement_acceptances "
+                            + "(agreement_records is canonical).");
+                } else {
+                    log.warn("Both agreement_acceptances ({} rows) and "
+                            + "agreement_records exist. Skipping rename; "
+                            + "manual reconciliation needed.", rows);
+                }
+            }
+        } catch (Exception e) {
+            log.warn("agreement_acceptances rename/cleanup skipped: {}", e.getMessage());
+        }
+
+        // Phase 4 — seed a starter ERM + coach team so dev / first
+        // production deploys have a non-empty assignment pool. The
+        // OnboardingService chain picks from these candidates when
+        // a participant finishes their agreement; without at least
+        // one ERM the participant stays at SIGNED_AGREEMENT_SENT_TO_ERM
+        // forever. Idempotent — only creates each user when the
+        // email isn't already taken.
+        seedPhase4Team();
+
+        // Drop the legacy unique constraint on quiz_attempts(quiz_id,
+        // user_id) before any other migration runs — without this,
+        // the new multi-attempt quiz flow would fail the second time
+        // a student retries a quiz. ddl-auto=update never drops
+        // constraints, so we have to do it ourselves.
+        dropLegacyQuizAttemptUniqueConstraint();
+
+        // Drop the legacy NOT NULL on questions(option_a/b/c/d,
+        // correct_answer). The old fixed-4-option quiz schema marked
+        // these columns NOT NULL; the new normalized model leaves
+        // them nullable but ddl-auto=update never relaxes a NOT NULL
+        // — so on already-seeded DBs every new question save throws
+        // a NOT NULL violation that surfaces as a generic 409.
+        relaxLegacyQuestionColumns();
+
+        // Add the email-verification + password-reset + nudge columns
+        // before Hibernate's ddl-auto=update kicks in. Hibernate would
+        // otherwise refuse to add `email_verified BOOLEAN NOT NULL` to
+        // an already-populated users table because existing rows have
+        // no value to satisfy the NOT NULL constraint — the failed
+        // ALTER cascades and leaves the rest of the migration batch in
+        // a partial state. Doing it here with an explicit DEFAULT FALSE
+        // gives every existing row the right default, so Hibernate's
+        // subsequent run is a clean no-op.
+        addUserEmailColumnsIfMissing();
+
+        if (userRepository.count() > 0) {
+            log.info("Database already seeded. Skipping initial users/courses block.");
+            // Backfill on already-seeded dev DBs that predate the services
+            // feature. Idempotent — does nothing if the trainer + 4 services
+            // already exist.
+            seedServicesAndTrainer(trainerRole);
+            // Bring legacy course/service prices up to the new realistic
+            // values. Only touches courses that still hold the OLD seed
+            // price so any admin-edited price is preserved.
+            backfillCoursePrices();
+            // Wipe the fabricated rating + enrolled-count seeds from
+            // already-deployed DBs. We never had a rating system, so the
+            // 4.7/4.8/4.9 stars and 1k+ ratingsCount values were always
+            // theatre. Real enrollment counts get rebuilt from the
+            // enrollments table by EnrollmentService on next save.
+            backfillFakeStats();
+            return;
+        }
+
+        log.info("Seeding database...");
+
+        // --- Users ---
+        log.info("Seeding users...");
+
+        User admin = userRepository.save(User.builder()
+                .email("admin@spire.dev")
+                .passwordHash(passwordEncoder.encode("admin123"))
+                .fullName("Spire Admin")
+                .role(adminRole)
+                .build());
+
+        User student = userRepository.save(User.builder()
+                .email("student@spire.dev")
+                .passwordHash(passwordEncoder.encode("student123"))
+                .fullName("Abhishek Student")
+                .role(studentRole)
+                .bio("A passionate learner exploring new skills on Spire.")
+                .build());
+
+        User arjun = userRepository.save(User.builder()
+                .email("arjun@spire.dev")
+                .passwordHash(passwordEncoder.encode("password123"))
+                .fullName("Arjun Mehta")
+                .role(instructorRole)
+                .bio("Senior full-stack engineer with 10+ years building scalable web applications. Ex-Flipkart, ex-Razorpay.")
+                .build());
+
+        User priya = userRepository.save(User.builder()
+                .email("priya@spire.dev")
+                .passwordHash(passwordEncoder.encode("password123"))
+                .fullName("Priya Sharma")
+                .role(instructorRole)
+                .bio("Data scientist and ML engineer. Passionate about making complex topics accessible.")
+                .build());
+
+        User rahul = userRepository.save(User.builder()
+                .email("rahul@spire.dev")
+                .passwordHash(passwordEncoder.encode("password123"))
+                .fullName("Rahul Kapoor")
+                .role(instructorRole)
+                .bio("Mobile and cloud architect. Google Developer Expert.")
+                .build());
+
+        log.info("Seeded 5 users.");
+
+        // --- Courses ---
+        log.info("Seeding courses...");
+
+        Course fullStack = courseRepository.save(Course.builder()
+                .title("Full-Stack Web Development")
+                .slug("full-stack-web-development")
+                .description("Master modern web development from front to back. Learn HTML, CSS, JavaScript, React, Node.js, databases, and deployment in one comprehensive course.")
+                .shortDescription("Build complete web applications from scratch")
+                .level(Course.Level.INTERMEDIATE)
+                .price(new BigDecimal("4999.00"))
+                .isFree(false)
+                .durationHours(42.5)
+                .instructor(arjun)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Web Development")
+                .tags("html,css,javascript,react,nodejs,mongodb")
+                .isPublished(true)
+                .build());
+
+        Course react = courseRepository.save(Course.builder()
+                .title("React Mastery")
+                .slug("react-mastery")
+                .description("Take your React skills to the next level. Advanced patterns, performance optimization, state management, and real-world project architecture.")
+                .shortDescription("Advanced React patterns and best practices")
+                .level(Course.Level.ADVANCED)
+                .price(new BigDecimal("3499.00"))
+                .isFree(false)
+                .durationHours(28.0)
+                .instructor(arjun)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Frontend")
+                .tags("react,hooks,redux,nextjs,typescript")
+                .isPublished(true)
+                .build());
+
+        Course python = courseRepository.save(Course.builder()
+                .title("Python for Data Science")
+                .slug("python-for-data-science")
+                .description("Learn Python programming and data science from scratch. Covers NumPy, Pandas, Matplotlib, Scikit-learn, and real-world data analysis projects.")
+                .shortDescription("Data analysis and ML with Python")
+                .level(Course.Level.BEGINNER)
+                .price(new BigDecimal("3999.00"))
+                .isFree(false)
+                .durationHours(35.0)
+                .instructor(priya)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Data Science")
+                .tags("python,numpy,pandas,matplotlib,scikit-learn,ml")
+                .isPublished(true)
+                .build());
+
+        Course aws = courseRepository.save(Course.builder()
+                .title("Cloud Architecture with AWS")
+                .slug("cloud-architecture-with-aws")
+                .description("Design and deploy scalable cloud solutions on AWS. Covers EC2, S3, Lambda, DynamoDB, CloudFormation, and architecture best practices.")
+                .shortDescription("Build scalable cloud solutions on AWS")
+                .level(Course.Level.ADVANCED)
+                .price(new BigDecimal("5499.00"))
+                .isFree(false)
+                .durationHours(32.0)
+                .instructor(rahul)
+                .lessonsCount(4)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Cloud")
+                .tags("aws,ec2,s3,lambda,dynamodb,cloudformation")
+                .isPublished(true)
+                .build());
+
+        Course uiux = courseRepository.save(Course.builder()
+                .title("UI/UX Design Fundamentals")
+                .slug("ui-ux-design-fundamentals")
+                .description("Learn the principles of great user interface and user experience design. Covers Figma, design systems, wireframing, prototyping, and usability testing.")
+                .shortDescription("Design beautiful and usable interfaces")
+                .level(Course.Level.BEGINNER)
+                .price(new BigDecimal("2999.00"))
+                .isFree(false)
+                .durationHours(20.0)
+                .instructor(priya)
+                .lessonsCount(4)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Design")
+                .tags("figma,ui,ux,wireframing,prototyping,design-systems")
+                .isPublished(true)
+                .build());
+
+        Course mobile = courseRepository.save(Course.builder()
+                .title("Mobile App Development with React Native")
+                .slug("mobile-app-development-with-react-native")
+                .description("Build cross-platform mobile apps with React Native. Covers navigation, state management, native modules, animations, and app store deployment.")
+                .shortDescription("Cross-platform mobile apps with React Native")
+                .level(Course.Level.INTERMEDIATE)
+                .price(new BigDecimal("3999.00"))
+                .isFree(false)
+                .durationHours(30.0)
+                .instructor(rahul)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Mobile")
+                .tags("react-native,mobile,ios,android,javascript")
+                .isPublished(true)
+                .build());
+
+        log.info("Seeded 6 courses.");
+
+        // --- Lessons ---
+        log.info("Seeding lessons...");
+
+        // Full-Stack Web Development
+        seedLessons(fullStack, List.of(
+                new String[]{"Introduction to Web Development", "Overview of the web stack and setting up your development environment", "45"},
+                new String[]{"HTML & CSS Deep Dive", "Semantic HTML, CSS Grid, Flexbox, and responsive design", "90"},
+                new String[]{"JavaScript Fundamentals", "Variables, functions, DOM manipulation, and async programming", "80"},
+                new String[]{"Backend with Node.js & Express", "Building REST APIs, middleware, and database integration", "95"},
+                new String[]{"Full-Stack Project: E-Commerce App", "Putting it all together with a capstone project", "120"}
+        ));
+
+        // React Mastery
+        seedLessons(react, List.of(
+                new String[]{"Advanced Component Patterns", "Compound components, render props, and higher-order components", "65"},
+                new String[]{"React Performance Optimization", "Memoization, code splitting, and profiling", "70"},
+                new String[]{"State Management Deep Dive", "Context API, Redux Toolkit, and Zustand", "75"},
+                new String[]{"Server-Side Rendering with Next.js", "SSR, SSG, ISR, and API routes", "80"},
+                new String[]{"Testing React Applications", "Unit testing, integration testing, and E2E with Cypress", "55"}
+        ));
+
+        // Python for Data Science
+        seedLessons(python, List.of(
+                new String[]{"Python Basics for Data Science", "Variables, data types, loops, and functions", "60"},
+                new String[]{"Data Manipulation with Pandas", "DataFrames, filtering, grouping, and merging", "85"},
+                new String[]{"Data Visualization with Matplotlib", "Charts, plots, and customizing visualizations", "70"},
+                new String[]{"Introduction to Machine Learning", "Scikit-learn, classification, and regression", "90"},
+                new String[]{"Capstone: Predictive Analytics Project", "End-to-end ML project with real-world data", "100"}
+        ));
+
+        // Cloud Architecture with AWS
+        seedLessons(aws, List.of(
+                new String[]{"AWS Fundamentals & IAM", "Account setup, IAM roles, and security best practices", "55"},
+                new String[]{"Compute & Storage Services", "EC2, S3, EBS, and auto-scaling groups", "80"},
+                new String[]{"Serverless Architecture with Lambda", "Lambda functions, API Gateway, and event-driven design", "75"},
+                new String[]{"Infrastructure as Code", "CloudFormation, Terraform basics, and CI/CD pipelines", "90"}
+        ));
+
+        // UI/UX Design Fundamentals
+        seedLessons(uiux, List.of(
+                new String[]{"Design Thinking & UX Principles", "User-centered design process and research methods", "50"},
+                new String[]{"Wireframing & Prototyping", "Low-fi to high-fi prototypes with Figma", "65"},
+                new String[]{"Visual Design & Design Systems", "Typography, color theory, and component libraries", "70"},
+                new String[]{"Usability Testing & Iteration", "Conducting user tests and iterating on feedback", "55"}
+        ));
+
+        // Mobile App Development with React Native
+        seedLessons(mobile, List.of(
+                new String[]{"React Native Setup & Core Components", "Environment setup, View, Text, Image, and styling", "60"},
+                new String[]{"Navigation & Routing", "React Navigation, stack, tab, and drawer navigators", "70"},
+                new String[]{"State Management & API Integration", "Redux, AsyncStorage, and REST API consumption", "75"},
+                new String[]{"Animations & Native Modules", "Animated API, Reanimated, and bridging native code", "80"},
+                new String[]{"App Store Deployment", "Building, signing, and publishing to iOS and Android stores", "65"}
+        ));
+
+        log.info("Seeded lessons for all courses.");
+
+        // --- Modules (group lessons by topic) ---
+        log.info("Seeding modules and assigning lessons to them...");
+
+        seedModules(fullStack, List.of(
+                new ModuleSpec("Frontend Foundations",
+                        "Get comfortable with HTML, CSS, and JavaScript before moving to the back end.",
+                        List.of(1, 2, 3)),
+                new ModuleSpec("Backend Development",
+                        "Build a REST API with Node.js and Express.",
+                        List.of(4)),
+                new ModuleSpec("Capstone Project",
+                        "Bring everything together by building a full-stack e-commerce app.",
+                        List.of(5))
+        ));
+
+        seedModules(react, List.of(
+                new ModuleSpec("Components & Performance",
+                        "Advanced component patterns and how to keep React fast.",
+                        List.of(1, 2)),
+                new ModuleSpec("State & Architecture",
+                        "Pick the right state-management strategy and explore Next.js rendering modes.",
+                        List.of(3, 4)),
+                new ModuleSpec("Quality & Testing",
+                        "Test your React applications across unit, integration, and E2E layers.",
+                        List.of(5))
+        ));
+
+        seedModules(python, List.of(
+                new ModuleSpec("Python & Data Foundations",
+                        "Core Python plus the data-manipulation library you'll use every day.",
+                        List.of(1, 2)),
+                new ModuleSpec("Visualization & Insights",
+                        "Communicate findings with charts using Matplotlib.",
+                        List.of(3)),
+                new ModuleSpec("Machine Learning",
+                        "Move from your first scikit-learn model to an end-to-end capstone.",
+                        List.of(4, 5))
+        ));
+
+        seedModules(aws, List.of(
+                new ModuleSpec("AWS Foundations",
+                        "Get oriented in the AWS console and lock down access with IAM.",
+                        List.of(1)),
+                new ModuleSpec("Core Services",
+                        "Compute, storage, and serverless: the AWS workhorses.",
+                        List.of(2, 3)),
+                new ModuleSpec("Operations & IaC",
+                        "Codify your infrastructure with CloudFormation and CI/CD pipelines.",
+                        List.of(4))
+        ));
+
+        seedModules(uiux, List.of(
+                new ModuleSpec("UX Foundations",
+                        "Design thinking and turning ideas into low- and high-fidelity prototypes.",
+                        List.of(1, 2)),
+                new ModuleSpec("Visual Design",
+                        "Visual systems, typography, and reusable component libraries.",
+                        List.of(3)),
+                new ModuleSpec("Validation",
+                        "Run usability tests and iterate based on what you learn.",
+                        List.of(4))
+        ));
+
+        seedModules(mobile, List.of(
+                new ModuleSpec("React Native Foundations",
+                        "Project setup, core components, and navigation.",
+                        List.of(1, 2)),
+                new ModuleSpec("Building the App",
+                        "Connect APIs, manage state, and animate native interactions.",
+                        List.of(3, 4)),
+                new ModuleSpec("Shipping",
+                        "Build, sign, and publish to the App Store and Google Play.",
+                        List.of(5))
+        ));
+
+        log.info("Seeded modules for all courses.");
+
+        // --- Achievements ---
+        log.info("Seeding achievements...");
+
+        achievementRepository.save(Achievement.builder()
+                .user(admin)
+                .badgeName("First Login")
+                .badgeIcon("trophy")
+                .build());
+
+        achievementRepository.save(Achievement.builder()
+                .user(admin)
+                .badgeName("7-Day Streak")
+                .badgeIcon("flame")
+                .build());
+
+        log.info("Seeded 2 achievements.");
+
+        // --- Enrollments ---
+        log.info("Seeding enrollments...");
+
+        seedEnrollment(student, fullStack);
+        seedEnrollment(student, react);
+        seedEnrollment(student, python);
+        seedEnrollment(admin, fullStack);
+
+        log.info("Seeded enrollments.");
+
+        // Services + trainer (idempotent: also called from the early-return
+        // branch above so both fresh and previously-seeded DBs get them).
+        seedServicesAndTrainer(trainerRole);
+
+        log.info("Database seeding complete!");
+    }
+
+    // ─── Services seed ─────────────────────────────────────────────
+    // Services share the courses table (type=SERVICE). Idempotent on email
+    // and slug — re-running this method is safe.
+    //
+    // NOTE on instructor_id: Course.instructor is JPA-mapped @ManyToOne
+    // nullable=false, so the schema requires it. For services we set both
+    // instructor and trainer to the trainer user (Meera). The CourseDTO and
+    // frontend already prefer trainer over instructor when type=SERVICE
+    // (see ServiceCard, /services/[id], cart). The task spec asked for
+    // instructor_id=NULL; honoring that would need a schema + entity change
+    // (loosen nullable=false), which is out of scope for a seed-data task.
+    /**
+     * Phase 4 — seed at least one ERM and one of each coach role so
+     * the OnboardingService can actually assign team members on a
+     * fresh deploy. All idempotent (existsByEmail short-circuits).
+     * Default password "spire-team-2026" — change in any production
+     * deploy via the admin panel.
+     */
+    private void seedPhase4Team() {
+        Role ermRole = roleRepository.findByName("ERM").orElse(null);
+        Role coachRole = roleRepository.findByName("COACH").orElse(null);
+        Role techAdvisorRole = roleRepository.findByName("TECHNICAL_ADVISOR").orElse(null);
+        Role financeRole = roleRepository.findByName("FINANCE").orElse(null);
+        Role opsAdminRole = roleRepository.findByName("OPERATIONS_ADMIN").orElse(null);
+        if (ermRole == null || coachRole == null || techAdvisorRole == null) {
+            log.warn("Phase 4 roles missing — skipping seed");
+            return;
+        }
+        String defaultPassword = passwordEncoder.encode("spire-team-2026");
+
+        // Legacy dev seeds — kept for back-compat with any tests /
+        // scripts that hard-coded these addresses. Default password
+        // is the shared "spire-team-2026"; production should rotate
+        // through the admin panel.
+        seedTeamUser("deepthi.erm@spire.dev", "Deepthi R", ermRole, defaultPassword,
+                "Program coordinator and Employee Relationship Manager.");
+        seedTeamUser("arjun.coach@spire.dev", "Arjun Menon", coachRole, defaultPassword,
+                "Career coach — resume reviews, profile administration, job-market navigation.");
+        seedTeamUser("priya.tech@spire.dev", "Priya Sharma", techAdvisorRole, defaultPassword,
+                "Technical advisor — Java Full Stack, Python Full Stack, Cloud & DevOps.");
+        seedTeamUser("rahul.interview@spire.dev", "Rahul Kapoor", coachRole, defaultPassword,
+                "Interview coach — mock interviews, communication training.");
+
+        // Production-style staff accounts — one per role, each with
+        // a distinct password so credentials can be handed out
+        // individually rather than sharing one password across the
+        // whole team. Operations should rotate these on first login.
+        seedTeamUser("erm@spireitco.com", "Deepthi R", ermRole,
+                passwordEncoder.encode("SpireERM@2026"),
+                "Employee Relationship Manager — primary participant point of contact.");
+        seedTeamUser("coach@spireitco.com", "Arjun Mehta", coachRole,
+                passwordEncoder.encode("SpireCoach@2026"),
+                "Career coach — resume, profile, interview prep.");
+        seedTeamUser("advisor@spireitco.com", "Priya Sharma", techAdvisorRole,
+                passwordEncoder.encode("SpireAdvisor@2026"),
+                "Technical advisor — Java, Python, Cloud & DevOps mentorship.");
+        if (financeRole != null) {
+            seedTeamUser("finance@spireitco.com", "Rahul Kumar", financeRole,
+                    passwordEncoder.encode("SpireFinance@2026"),
+                    "Finance — payment plans, invoices, check tracking.");
+        } else {
+            log.warn("FINANCE role missing — finance@spireitco.com not seeded");
+        }
+        if (opsAdminRole != null) {
+            seedTeamUser("admin@spireitco.com", "Admin User", opsAdminRole,
+                    passwordEncoder.encode("SpireAdmin@2026"),
+                    "Operations admin — enrollment queue, document review, assignments.");
+        } else {
+            log.warn("OPERATIONS_ADMIN role missing — admin@spireitco.com not seeded");
+        }
+    }
+
+    private void seedTeamUser(String email, String fullName, Role role,
+                              String passwordHash, String bio) {
+        if (userRepository.existsByEmail(email)) return;
+        userRepository.save(User.builder()
+                .email(email)
+                .passwordHash(passwordHash)
+                .fullName(fullName)
+                .role(role)
+                .bio(bio)
+                .isActive(true)
+                .emailVerified(true)
+                .agreementAccepted(true)
+                .currentStatus("DASHBOARD_ENABLED")
+                .build());
+        log.info("Seeded team user {} ({}) with role {}", email, fullName, role.getName());
+    }
+
+    private void seedServicesAndTrainer(Role trainerRole) {
+        User meera = userRepository.findByEmail("meera@spire.dev")
+                .orElseGet(() -> {
+                    log.info("Seeding trainer user: meera@spire.dev");
+                    return userRepository.save(User.builder()
+                            .email("meera@spire.dev")
+                            .passwordHash(passwordEncoder.encode("password123"))
+                            .fullName("Meera Iyer")
+                            .role(trainerRole)
+                            .bio("Career coach with 12+ years guiding professionals through resumes, interviews, and placement.")
+                            .build());
+                });
+
+        seedService(meera,
+                "professional-resume-preparation",
+                "Professional Resume Preparation",
+                "Build a resume that gets you interviews. Learn formatting, content strategy, and ATS optimization.",
+                "A practical, video-based walk-through of how to write a resume that survives applicant tracking systems and reads well to a human recruiter. Covers formats, content strategy, and the small details that separate good resumes from great ones.",
+                1999,
+                List.of(
+                        new SvcModule("Resume Fundamentals",
+                                "Start with what recruiters actually look at and the formats that work today.",
+                                List.of(
+                                        new SvcLesson("What Recruiters Look For", 15),
+                                        new SvcLesson("Resume Formats: Chronological vs Functional", 12),
+                                        new SvcLesson("ATS-Friendly Formatting", 10)
+                                )),
+                        new SvcModule("Content Strategy",
+                                "Turn responsibilities into impact statements that convince.",
+                                List.of(
+                                        new SvcLesson("Writing Impact Statements", 18),
+                                        new SvcLesson("Quantifying Your Achievements", 14),
+                                        new SvcLesson("Tailoring for Each Application", 12)
+                                )),
+                        new SvcModule("Final Polish",
+                                "Avoid the common mistakes and build an iteration habit.",
+                                List.of(
+                                        new SvcLesson("Common Mistakes to Avoid", 10),
+                                        new SvcLesson("Review and Iteration Process", 15)
+                                ))
+                ));
+
+        seedService(meera,
+                "interview-training-masterclass",
+                "Interview Training Masterclass",
+                "Prepare for technical and behavioral interviews with proven frameworks and real practice scenarios.",
+                "End-to-end interview preparation: behavioral storytelling with STAR, technical whiteboarding, system design framing, and the soft-skill moments that decide offers.",
+                2999,
+                List.of(
+                        new SvcModule("Interview Fundamentals",
+                                "Map the interview landscape and prepare a research-backed plan.",
+                                List.of(
+                                        new SvcLesson("Understanding Interview Types", 12),
+                                        new SvcLesson("The STAR Method for Behavioral Questions", 18),
+                                        new SvcLesson("Research and Preparation Checklist", 10)
+                                )),
+                        new SvcModule("Technical Interviews",
+                                "Whiteboard, system design, and the patterns behind coding rounds.",
+                                List.of(
+                                        new SvcLesson("Whiteboard Problem-Solving Approach", 20),
+                                        new SvcLesson("System Design Interview Framework", 25),
+                                        new SvcLesson("Coding Interview Patterns", 22)
+                                )),
+                        new SvcModule("Soft Skills & Negotiation",
+                                "Handle pressure, negotiate well, and follow up with intent.",
+                                List.of(
+                                        new SvcLesson("Handling Tough Questions", 15),
+                                        new SvcLesson("Salary Negotiation Strategies", 18),
+                                        new SvcLesson("Post-Interview Follow-Up", 10)
+                                ))
+                ));
+
+        seedService(meera,
+                "linkedin-profile-optimization",
+                "LinkedIn Profile Optimization",
+                "Transform your LinkedIn profile into a powerful career tool that attracts recruiters and opportunities.",
+                "Make your LinkedIn profile work for you. Headline, summary, experience, content, and a connection strategy that gets you noticed by the right people.",
+                1499,
+                List.of(
+                        new SvcModule("Profile Essentials",
+                                "Get the basics right — the parts recruiters scan first.",
+                                List.of(
+                                        new SvcLesson("Headline and Summary That Stand Out", 15),
+                                        new SvcLesson("Experience Section Best Practices", 12),
+                                        new SvcLesson("Skills, Endorsements, and Recommendations", 10)
+                                )),
+                        new SvcModule("Advanced LinkedIn Strategy",
+                                "Move beyond the static profile — content, networks, and search.",
+                                List.of(
+                                        new SvcLesson("Content Creation for Visibility", 18),
+                                        new SvcLesson("Networking and Connection Strategy", 14),
+                                        new SvcLesson("Using LinkedIn for Job Search", 16)
+                                ))
+                ));
+
+        seedService(meera,
+                "placement-assistance-program",
+                "Placement Assistance Program",
+                "End-to-end job placement support including job search strategy, application tracking, and interview prep.",
+                "A complete placement playbook: identify targets, build a pipeline, write strong cover letters, and close offers without leaving money on the table.",
+                4999,
+                List.of(
+                        new SvcModule("Job Search Strategy",
+                                "Pick the right targets and build a pipeline you can manage.",
+                                List.of(
+                                        new SvcLesson("Identifying Target Companies", 15),
+                                        new SvcLesson("Job Board and Referral Strategy", 18),
+                                        new SvcLesson("Building Your Application Pipeline", 12)
+                                )),
+                        new SvcModule("Application Process",
+                                "From cover letter to portfolio to follow-up.",
+                                List.of(
+                                        new SvcLesson("Cover Letter Writing", 14),
+                                        new SvcLesson("Portfolio and GitHub Presentation", 16),
+                                        new SvcLesson("Following Up Effectively", 10)
+                                )),
+                        new SvcModule("Closing the Deal",
+                                "Evaluate, negotiate, and ramp up.",
+                                List.of(
+                                        new SvcLesson("Evaluating Job Offers", 15),
+                                        new SvcLesson("Negotiation and Acceptance", 12),
+                                        new SvcLesson("First 90 Days at Your New Job", 18)
+                                ))
+                ));
+    }
+
+    /**
+     * Backfills the email-verification + password-reset + inactivity
+     * nudge columns on the {@code users} table. Each ALTER uses
+     * {@code ADD COLUMN IF NOT EXISTS} so reruns are idempotent — the
+     * statement no-ops once the column exists.
+     *
+     * The {@code email_verified} column carries an explicit
+     * {@code DEFAULT FALSE} so Hibernate's later ddl-auto=update
+     * doesn't have to grapple with a NOT NULL ALTER on a populated
+     * table. Without this, the deploy that introduced these fields
+     * silently left the columns missing and every welcome / verify
+     * email path failed at write time.
+     *
+     * Postgres-first; falls back to MySQL syntax (which also
+     * supports IF NOT EXISTS on 8.0.16+). Each ALTER is wrapped so
+     * an unsupported dialect / already-applied state is a silent
+     * no-op rather than crashing app startup.
+     */
+    private void addUserEmailColumnsIfMissing() {
+        // Tuples of (column DDL, log label). Order matches the
+        // declarations in User.java for readability.
+        String[][] columns = {
+                {"email_verified BOOLEAN NOT NULL DEFAULT FALSE", "email_verified"},
+                {"verification_token VARCHAR(64)", "verification_token"},
+                {"verification_expires_at TIMESTAMP", "verification_expires_at"},
+                {"verification_code VARCHAR(6)", "verification_code"},
+                {"verification_code_expires_at TIMESTAMP", "verification_code_expires_at"},
+                {"verification_failed_attempts INT NOT NULL DEFAULT 0", "verification_failed_attempts"},
+                {"verification_locked_until TIMESTAMP", "verification_locked_until"},
+                {"last_verification_resend_at TIMESTAMP", "last_verification_resend_at"},
+                {"reset_token VARCHAR(64)", "reset_token"},
+                {"reset_token_expires_at TIMESTAMP", "reset_token_expires_at"},
+                {"last_nudge_sent_at TIMESTAMP", "last_nudge_sent_at"},
+                {"agreement_accepted BOOLEAN NOT NULL DEFAULT FALSE", "agreement_accepted"},
+                {"deactivated_at TIMESTAMP", "deactivated_at"},
+                // Phase 1A — participant lifecycle columns.
+                {"participant_id VARCHAR(20)", "participant_id"},
+                {"participant_id_created_at TIMESTAMP", "participant_id_created_at"},
+                {"availability VARCHAR(100)", "availability"},
+                {"selected_technology VARCHAR(255)", "selected_technology"},
+                {"target_experience_level VARCHAR(50)", "target_experience_level"},
+                {"current_status VARCHAR(50) DEFAULT 'DRAFT_STARTED'", "current_status"},
+        };
+        for (String[] col : columns) {
+            try {
+                jdbcTemplate.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS " + col[0]);
+                log.info("Ensured users.{} exists", col[1]);
+            } catch (Exception e) {
+                log.debug("Couldn't add users.{} (likely already present or unsupported dialect): {}",
+                        col[1], e.getMessage());
+            }
+        }
+
+        // Grandfather pre-OTP accounts. Any existing user that was
+        // unverified under the old token-based flow (no verification_code
+        // populated) is marked verified so the OTP gate doesn't lock
+        // them out on the day this ships. New post-OTP signups always
+        // have a verification_code set, so they're not touched.
+        try {
+            int updated = jdbcTemplate.update(
+                    "UPDATE users SET email_verified = TRUE " +
+                    "WHERE email_verified = FALSE AND verification_code IS NULL");
+            if (updated > 0) {
+                log.info("Grandfathered {} pre-OTP users to email_verified=true", updated);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't grandfather pre-OTP users: {}", e.getMessage());
+        }
+
+        // Grandfather pre-agreement accounts. Email-verified users
+        // who existed before the agreement gate shipped have no
+        // acceptance row to satisfy the new requirement; rather
+        // than retroactively kick them to /agreement on next login,
+        // mark them accepted. New signups always start with
+        // agreement_accepted=false and have to walk through the
+        // /agreement flow.
+        try {
+            int updated = jdbcTemplate.update(
+                    "UPDATE users SET agreement_accepted = TRUE " +
+                    "WHERE agreement_accepted = FALSE AND email_verified = TRUE");
+            if (updated > 0) {
+                log.info("Grandfathered {} pre-agreement users to agreement_accepted=true", updated);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't grandfather pre-agreement users: {}", e.getMessage());
+        }
+
+        // Backfill the signed-PDF URL column on agreement_acceptances.
+        // Set when the post-OTP PDF generator successfully writes the
+        // personalized signed agreement; nullable so historic rows
+        // (accepted before this flow shipped) stay valid.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE agreement_acceptances ADD COLUMN IF NOT EXISTS "
+                            + "signed_agreement_pdf_url VARCHAR(512)");
+            log.info("Ensured agreement_acceptances.signed_agreement_pdf_url exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add agreement_acceptances.signed_agreement_pdf_url "
+                    + "(likely already present, or table not yet created): {}", e.getMessage());
+        }
+
+        // Backfill the signature columns. signature_image holds the
+        // base64-encoded PNG (drawn on canvas or uploaded by the user);
+        // signature_method records 'draw' or 'upload' for audit. Both
+        // nullable so historic rows that pre-date the signature flow
+        // keep validating.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE agreement_acceptances ADD COLUMN IF NOT EXISTS "
+                            + "signature_image TEXT");
+            log.info("Ensured agreement_acceptances.signature_image exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add agreement_acceptances.signature_image: {}", e.getMessage());
+        }
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE agreement_acceptances ADD COLUMN IF NOT EXISTS "
+                            + "signature_method VARCHAR(20)");
+            log.info("Ensured agreement_acceptances.signature_method exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add agreement_acceptances.signature_method: {}", e.getMessage());
+        }
+
+        // Phase 1A — make participant_id unique. The entity carries
+        // @Column(unique = true) but Hibernate ddl-auto=update won't
+        // retro-add a unique constraint to a column that was created
+        // via raw ALTER above, so spell it out.
+        try {
+            jdbcTemplate.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_participant_id "
+                            + "ON users(participant_id)");
+            log.info("Ensured unique idx_users_participant_id");
+        } catch (Exception e) {
+            log.debug("Couldn't create unique index on users.participant_id: {}",
+                    e.getMessage());
+        }
+
+        // Backfill current_status on rows that pre-date the column.
+        // The column-add above carries DEFAULT 'DRAFT_STARTED' but
+        // DEFAULT only fires on new INSERTs; existing rows stay NULL
+        // until we explicitly seed them. Treat any pre-existing user
+        // as "already through onboarding" — they were verified and
+        // (potentially) had accepted an agreement under the legacy
+        // flow, so dropping them at DRAFT_STARTED would visually
+        // un-enroll them. Pin them at DASHBOARD_ENABLED so they
+        // bypass the new participant-lifecycle onboarding pages
+        // entirely — they're legacy LMS users who already have a
+        // dashboard. (Phase 4: WELCOME_SENT now means "post-agreement,
+        // awaiting team assembly" which would loop them on the
+        // welcome page; DASHBOARD_ENABLED is the actual end-state.)
+        try {
+            int updated = jdbcTemplate.update(
+                    "UPDATE users SET current_status = 'DASHBOARD_ENABLED' "
+                            + "WHERE current_status IS NULL "
+                            + "AND email_verified = TRUE");
+            if (updated > 0) {
+                log.info("Grandfathered {} pre-Phase-1A users to current_status=DASHBOARD_ENABLED", updated);
+            }
+            // Also catch already-grandfathered rows that landed at
+            // WELCOME_SENT under the earlier rule — bump them
+            // forward so the routing guard doesn't drop them on
+            // /welcome.
+            int reGrandfathered = jdbcTemplate.update(
+                    "UPDATE users SET current_status = 'DASHBOARD_ENABLED' "
+                            + "WHERE current_status = 'WELCOME_SENT' "
+                            + "AND agreement_accepted = TRUE "
+                            + "AND participant_id IS NULL");
+            if (reGrandfathered > 0) {
+                log.info("Re-grandfathered {} legacy WELCOME_SENT users to DASHBOARD_ENABLED", reGrandfathered);
+            }
+            int draftUpdated = jdbcTemplate.update(
+                    "UPDATE users SET current_status = 'DRAFT_STARTED' "
+                            + "WHERE current_status IS NULL");
+            if (draftUpdated > 0) {
+                log.info("Defaulted {} unverified users to current_status=DRAFT_STARTED", draftUpdated);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't backfill users.current_status: {}", e.getMessage());
+        }
+
+        // Phase 2A: signature columns on the acknowledgments table.
+        // Mirrors the AgreementAcceptance pattern — base64 PNG +
+        // method label. Both nullable so rows from earlier (none
+        // exist yet, but future flows might write without a
+        // signature) keep validating.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE acknowledgments ADD COLUMN IF NOT EXISTS "
+                            + "signature_image TEXT");
+            log.info("Ensured acknowledgments.signature_image exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add acknowledgments.signature_image: {}", e.getMessage());
+        }
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE acknowledgments ADD COLUMN IF NOT EXISTS "
+                            + "signature_method VARCHAR(20)");
+            log.info("Ensured acknowledgments.signature_method exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add acknowledgments.signature_method: {}", e.getMessage());
+        }
+
+        // Phase 2B: not_applicable flag on the documents vault row.
+        // Lets the participant mark a document type (e.g. Work
+        // Authorization for a domestic candidate) as N/A so the
+        // completeness gate can be satisfied without a file. Default
+        // false; existing rows are real uploads.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
+                            + "not_applicable BOOLEAN NOT NULL DEFAULT FALSE");
+            log.info("Ensured documents.not_applicable exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add documents.not_applicable: {}", e.getMessage());
+        }
+
+        // Phase 3B: agreement_acceptances gets erm_notified flag
+        // so the operations dashboard can filter pending-routing
+        // rows. Default false; flipped true once the post-OTP
+        // post-processing routes the signed agreement to ERM.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE agreement_acceptances ADD COLUMN IF NOT EXISTS "
+                            + "erm_notified BOOLEAN NOT NULL DEFAULT FALSE");
+            log.info("Ensured agreement_acceptances.erm_notified exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add agreement_acceptances.erm_notified: {}", e.getMessage());
+        }
+
+        // Phase 3A: program_selections gets the version of the
+        // service-summary text the participant reviewed plus
+        // free-form notes. Both nullable for backward compat.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE program_selections ADD COLUMN IF NOT EXISTS "
+                            + "service_summary_version VARCHAR(20)");
+            log.info("Ensured program_selections.service_summary_version exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add program_selections.service_summary_version: {}", e.getMessage());
+        }
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE program_selections ADD COLUMN IF NOT EXISTS "
+                            + "notes TEXT");
+            log.info("Ensured program_selections.notes exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add program_selections.notes: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Relaxes legacy NOT NULL constraints on the {@code questions}
+     * table's old fixed-4-option columns ({@code option_a..d},
+     * {@code correct_answer}). The new normalized {@link
+     * com.spire.backend.entity.QuizOption} model leaves these
+     * columns out of new inserts, but on databases seeded under
+     * the old schema each insert throws a NOT NULL violation that
+     * Spring surfaces as a generic 409 "Data conflict" — blocking
+     * instructors from adding new questions.
+     *
+     * Probes Postgres first (prod), falls back to MySQL (dev).
+     * Each ALTER is wrapped so a missing column / already-relaxed
+     * column is a silent no-op rather than crashing app startup.
+     */
+    private void relaxLegacyQuestionColumns() {
+        List<String> columns = List.of("option_a", "option_b", "option_c", "option_d", "correct_answer");
+
+        // Postgres: ALTER COLUMN ... DROP NOT NULL is idempotent if the
+        // column is already nullable (it errors only if the column is
+        // missing — which the catch handles).
+        boolean isPg = false;
+        for (String col : columns) {
+            try {
+                jdbcTemplate.execute("ALTER TABLE questions ALTER COLUMN " + col + " DROP NOT NULL");
+                isPg = true;
+                log.info("Relaxed legacy NOT NULL on questions.{} (Postgres)", col);
+            } catch (Exception ignored) {
+                // Column missing, already nullable, or wrong dialect.
+            }
+        }
+        if (isPg) return;
+
+        // MySQL: re-declare the column as NULLable. Using TEXT for the
+        // option_a..d columns and CHAR(1) for correct_answer matches
+        // the original schema; MODIFY rewrites the column definition.
+        for (String col : columns) {
+            try {
+                String def = "correct_answer".equals(col) ? "CHAR(1) NULL" : "TEXT NULL";
+                jdbcTemplate.execute("ALTER TABLE questions MODIFY COLUMN " + col + " " + def);
+                log.info("Relaxed legacy NOT NULL on questions.{} (MySQL)", col);
+            } catch (Exception ignored) {
+                // Column missing or already nullable.
+            }
+        }
+    }
+
+    /**
+     * Drops any unique constraint on quiz_attempts that locks the
+     * (quiz_id, user_id) pair. Pre-migration the entity declared
+     * `@UniqueConstraint(columnNames = {"quiz_id", "user_id"})`,
+     * which forbade retries — incompatible with the new multi-attempt
+     * quiz model. ddl-auto=update doesn't drop constraints
+     * automatically.
+     *
+     * Probes Postgres first (prod), falls back to MySQL (dev). Each
+     * branch is wrapped so a "wrong DB" / "no constraint" path is a
+     * silent no-op rather than crashing app startup.
+     */
+    private void dropLegacyQuizAttemptUniqueConstraint() {
+        // Postgres path — pg_constraint stores the auto-generated name.
+        try {
+            List<String> names = jdbcTemplate.queryForList(
+                    "SELECT conname FROM pg_constraint c " +
+                            "JOIN pg_class t ON c.conrelid = t.oid " +
+                            "WHERE t.relname = 'quiz_attempts' AND c.contype = 'u'",
+                    String.class);
+            for (String name : names) {
+                jdbcTemplate.execute("ALTER TABLE quiz_attempts DROP CONSTRAINT \"" + name + "\"");
+                log.info("Dropped legacy quiz_attempts unique constraint: {}", name);
+            }
+            return;
+        } catch (Exception ignoredPg) {
+            // Not Postgres or the catalog query is unavailable — try MySQL.
+        }
+        try {
+            List<String> names = jdbcTemplate.queryForList(
+                    "SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS " +
+                            "WHERE TABLE_NAME = 'quiz_attempts' AND NON_UNIQUE = 0 " +
+                            "AND INDEX_NAME != 'PRIMARY' " +
+                            "GROUP BY INDEX_NAME",
+                    String.class);
+            for (String name : names) {
+                jdbcTemplate.execute("ALTER TABLE quiz_attempts DROP INDEX `" + name + "`");
+                log.info("Dropped legacy quiz_attempts unique index: {}", name);
+            }
+        } catch (Exception ignoredMysql) {
+            log.debug("Couldn't probe quiz_attempts unique constraints — likely fresh DB or unsupported dialect.");
+        }
+    }
+
+    /**
+     * Bumps legacy course/service prices to the new realistic values on
+     * already-seeded DBs (dev MySQL re-runs, Railway Postgres deploys).
+     *
+     * Only updates a row if its current price is still the OLD seed
+     * value (₹0 for the formerly-free courses, ₹499 for the others,
+     * ₹999 for LinkedIn). That preserves any price an admin has set
+     * manually since the original seed.
+     *
+     * Map<slug, expectedOldPrice → newPrice>. Idempotent — a second run
+     * is a no-op because the price will already match the new value.
+     */
+    private void backfillCoursePrices() {
+        record PriceMigration(String slug, BigDecimal expectedOld, BigDecimal newPrice, boolean wasFree) {}
+        List<PriceMigration> migrations = List.of(
+                new PriceMigration("full-stack-web-development",         BigDecimal.ZERO,                new BigDecimal("4999.00"), true),
+                new PriceMigration("react-mastery",                      new BigDecimal("499.00"),       new BigDecimal("3499.00"), false),
+                new PriceMigration("python-for-data-science",            BigDecimal.ZERO,                new BigDecimal("3999.00"), true),
+                new PriceMigration("cloud-architecture-with-aws",        new BigDecimal("499.00"),       new BigDecimal("5499.00"), false),
+                new PriceMigration("ui-ux-design-fundamentals",          new BigDecimal("499.00"),       new BigDecimal("2999.00"), false),
+                new PriceMigration("mobile-app-development-with-react-native", new BigDecimal("499.00"), new BigDecimal("3999.00"), false),
+                new PriceMigration("linkedin-profile-optimization",      new BigDecimal("999.00"),       new BigDecimal("1499.00"), false)
+        );
+
+        int updated = 0;
+        for (PriceMigration m : migrations) {
+            var opt = courseRepository.findBySlug(m.slug());
+            if (opt.isEmpty()) continue;
+            Course c = opt.get();
+            BigDecimal current = c.getPrice() != null ? c.getPrice() : BigDecimal.ZERO;
+            // compareTo (not equals) — same numeric value, different scale.
+            if (current.compareTo(m.expectedOld()) == 0) {
+                c.setPrice(m.newPrice());
+                if (m.wasFree()) c.setIsFree(false);
+                courseRepository.save(c);
+                updated++;
+                log.info("Backfilled price for {}: ₹{} → ₹{}", m.slug(), current, m.newPrice());
+            }
+        }
+        if (updated > 0) log.info("Course price backfill complete — {} row(s) updated.", updated);
+    }
+
+    /**
+     * One-shot wipe of the fabricated rating + enrolled-count seed data.
+     *
+     * Strategy: for any course whose ratingsCount > 0 (we never created
+     * a real review system, so any value > 0 must be seed theatre), and
+     * for any course whose enrolledCount is bigger than the actual row
+     * count in the enrollments table, reset the display values to the
+     * truth. This preserves any *real* enrollment that has happened
+     * since deploy and fixes the 12,450-style fake numbers in one pass.
+     *
+     * Idempotent — a second run is a no-op because conditions no longer
+     * match once the row has been corrected.
+     */
+    private void backfillFakeStats() {
+        int updated = 0;
+        for (Course c : courseRepository.findAll()) {
+            boolean changed = false;
+
+            int actualEnrollments = (int) enrollmentRepository.countByCourseId(c.getId());
+            int displayed = c.getEnrolledCount() != null ? c.getEnrolledCount() : 0;
+            // If the displayed count is bigger than actual rows, it's
+            // padded — reset to the real count. (Equal or less is fine.)
+            if (displayed > actualEnrollments) {
+                c.setEnrolledCount(actualEnrollments);
+                changed = true;
+            }
+
+            // No real review system → any non-zero rating/ratingsCount
+            // is fake. Wipe both to zero.
+            if (c.getRatingsCount() != null && c.getRatingsCount() > 0) {
+                c.setRating(0.0);
+                c.setRatingsCount(0);
+                changed = true;
+            } else if (c.getRating() != null && c.getRating() > 0.0) {
+                c.setRating(0.0);
+                changed = true;
+            }
+
+            if (changed) {
+                courseRepository.save(c);
+                updated++;
+                log.info("Wiped fake stats on course {}", c.getSlug());
+            }
+        }
+        if (updated > 0) log.info("Fake-stats wipe complete — {} row(s) updated.", updated);
+    }
+
+    private void seedService(User trainer, String slug, String title, String shortDescription,
+                             String description, int priceRupees, List<SvcModule> modules) {
+        if (courseRepository.findBySlug(slug).isPresent()) {
+            return; // already seeded
+        }
+
+        int totalLessons = modules.stream().mapToInt(m -> m.lessons().size()).sum();
+        int totalMinutes = modules.stream()
+                .flatMap(m -> m.lessons().stream())
+                .mapToInt(SvcLesson::durationMinutes)
+                .sum();
+
+        Course service = courseRepository.save(Course.builder()
+                .title(title)
+                .slug(slug)
+                .description(description)
+                .shortDescription(shortDescription)
+                .level(Course.Level.BEGINNER)
+                .price(BigDecimal.valueOf(priceRupees))
+                .isFree(priceRupees <= 0)
+                .durationHours(Math.round(totalMinutes / 60.0 * 10.0) / 10.0)
+                .type("SERVICE")
+                .trainer(trainer)
+                .instructor(trainer)   // see note in seedServicesAndTrainer
+                .lessonsCount(totalLessons)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Career Services")
+                .isPublished(true)
+                .build());
+
+        int lessonOrder = 1;
+        for (int mIdx = 0; mIdx < modules.size(); mIdx++) {
+            SvcModule mod = modules.get(mIdx);
+            Module module = moduleRepository.save(Module.builder()
+                    .course(service)
+                    .title(mod.title())
+                    .description(mod.description())
+                    .orderIndex(mIdx)
+                    .build());
+            for (SvcLesson l : mod.lessons()) {
+                boolean isFirstLesson = (lessonOrder == 1);
+                lessonRepository.save(Lesson.builder()
+                        .course(service)
+                        .module(module)
+                        .title(l.title())
+                        .orderIndex(lessonOrder)
+                        .durationMinutes(l.durationMinutes())
+                        .isFree(isFirstLesson) // first lesson is a free preview
+                        .build());
+                lessonOrder++;
+            }
+        }
+
+        log.info("Seeded service: {} ({} lessons, ~{}h)", slug, totalLessons,
+                Math.round(totalMinutes / 60.0 * 10.0) / 10.0);
+    }
+
+    private record SvcLesson(String title, int durationMinutes) {}
+    private record SvcModule(String title, String description, List<SvcLesson> lessons) {}
+
+    private void seedEnrollment(User user, Course course) {
+        if (!enrollmentRepository.existsByUserIdAndCourseId(user.getId(), course.getId())) {
+            enrollmentRepository.save(Enrollment.builder()
+                    .user(user)
+                    .course(course)
+                    .build());
+            course.setEnrolledCount(course.getEnrolledCount() + 1);
+            courseRepository.save(course);
+        }
+    }
+
+    private void seedLessons(Course course, List<String[]> lessonData) {
+        for (int i = 0; i < lessonData.size(); i++) {
+            String[] data = lessonData.get(i);
+            lessonRepository.save(Lesson.builder()
+                    .course(course)
+                    .title(data[0])
+                    .description(data[1])
+                    .orderIndex(i + 1)
+                    .durationMinutes(Integer.parseInt(data[2]))
+                    .isFree(i == 0)
+                    .build());
+        }
+    }
+
+    private void seedModules(Course course, List<ModuleSpec> specs) {
+        List<Lesson> courseLessons = lessonRepository.findByCourseIdOrderByOrderIndex(course.getId());
+        for (int mIdx = 0; mIdx < specs.size(); mIdx++) {
+            ModuleSpec spec = specs.get(mIdx);
+            Module module = moduleRepository.save(Module.builder()
+                    .course(course)
+                    .title(spec.title())
+                    .description(spec.description())
+                    .orderIndex(mIdx)
+                    .build());
+            for (int lessonOrderIndex : spec.lessonOrderIndices()) {
+                for (Lesson lesson : courseLessons) {
+                    if (lesson.getOrderIndex() == lessonOrderIndex) {
+                        lesson.setModule(module);
+                        lessonRepository.save(lesson);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    private record ModuleSpec(String title, String description, List<Integer> lessonOrderIndices) {}
+}

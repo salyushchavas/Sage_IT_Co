@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Sage IT Co
 
-## Getting Started
+Career development and IT consulting platform.
 
-First, run the development server:
+## Structure
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+```
+/              → Next.js frontend (deploys to Vercel)
+/backend       → Spring Boot backend (deploys to Railway)
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Local Development
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### Frontend
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev
+```
 
-## Learn More
+Runs on http://localhost:3000.
 
-To learn more about Next.js, take a look at the following resources:
+### Backend
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+cd backend
+cp .env.example .env   # fill in values
+./mvnw spring-boot:run
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Runs on http://localhost:8080.
 
-## Deploy on Vercel
+## Brand Configuration
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+All brand-specific values (name, colors, emails, letterhead) are configured via env vars. See:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Frontend: [src/lib/constants.ts](src/lib/constants.ts) and [tailwind.config.ts](tailwind.config.ts)
+- Backend: [backend/src/main/resources/application.properties](backend/src/main/resources/application.properties)
+- Env template: [backend/.env.example](backend/.env.example)
+
+## Deployment
+
+- **Frontend**: auto-deploys to Vercel on push to `main`
+- **Backend**: deployed to Railway, requires manual setup

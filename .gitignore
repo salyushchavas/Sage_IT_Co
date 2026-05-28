@@ -32,3 +32,14 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 node_modules
+
+# Backend build artifacts
+backend/target/
+backend/.idea/
+backend/.env
+backend/HELP.md
+backend/.mvn/wrapper/maven-wrapper.jar
+
+# Backend logs
+backend/logs/
+backend/*.log
