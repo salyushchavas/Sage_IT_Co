@@ -8,7 +8,7 @@ import TestimonialCard from "../ui/TestimonialCard";
 
 export default function Testimonials() {
   return (
-    <section className="py-32 px-6 relative bg-grid">
+    <section className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 relative bg-grid">
       <div className="max-w-7xl mx-auto">
         <SectionHeading
           label="Testimonials"
@@ -17,7 +17,7 @@ export default function Testimonials() {
         />
 
         <motion.div
-          className="grid md:grid-cols-2 lg:grid-cols-3 gap-8"
+          className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 lg:gap-8"
           variants={staggerContainer}
           initial="hidden"
           whileInView="visible"

@@ -6,11 +6,12 @@ import GlowButton from "../ui/GlowButton";
 
 export default function CTA() {
   return (
-    <section className="py-32 px-6 relative overflow-hidden">
-      {/* Background glow */}
-      <div className="absolute inset-0">
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[600px] h-[600px] bg-neon-violet/10 rounded-full blur-[120px]" />
-        <div className="absolute top-1/4 left-1/4 w-[300px] h-[300px] bg-neon-blue/10 rounded-full blur-[80px]" />
+    <section className="py-20 sm:py-28 md:py-32 px-4 sm:px-6 relative overflow-hidden aurora-bg">
+      {/* Background glow — animated organic blobs */}
+      <div className="absolute inset-0 pointer-events-none">
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[300px] h-[300px] sm:w-[450px] sm:h-[450px] md:w-[600px] md:h-[600px] bg-neon-violet/10 rounded-full blur-[80px] sm:blur-[100px] md:blur-[120px] animate-blob-1" />
+        <div className="absolute top-1/4 left-1/4 w-[180px] h-[180px] sm:w-[240px] sm:h-[240px] md:w-[300px] md:h-[300px] bg-neon-blue/10 rounded-full blur-[60px] sm:blur-[80px] animate-blob-2" />
+        <div className="absolute bottom-1/4 right-1/4 w-[140px] h-[140px] sm:w-[200px] sm:h-[200px] bg-sage-copper-light/10 rounded-full blur-[60px] animate-drift" />
       </div>
 
       <motion.div
@@ -20,10 +21,10 @@ export default function CTA() {
         whileInView="visible"
         viewport={{ once: true }}
       >
-        <h2 className="text-3xl md:text-5xl font-bold text-zinc-900 mb-6">
+        <h2 className="text-2xl sm:text-3xl md:text-5xl font-bold text-zinc-900 mb-4 sm:mb-6 text-balance">
           Ready to <span className="text-gradient">Transform</span> Your Business?
         </h2>
-        <p className="text-zinc-600 text-lg mb-10 leading-relaxed">
+        <p className="text-zinc-600 text-base sm:text-lg mb-8 sm:mb-10 leading-relaxed">
           Let&apos;s discuss how Sage IT can help you leverage cutting-edge technology to drive growth,
           efficiency, and innovation.
         </p>

@@ -35,8 +35,8 @@ export default function GlassCard({ children, className, hover3D = false, glowCo
   return (
     <motion.div
       ref={ref}
-      className={cn("glass relative overflow-hidden group", className)}
-      style={{ transform: hover3D ? transform : undefined, transition: "transform 0.3s ease" }}
+      className={cn("glass relative overflow-hidden group sheen-on-hover", className)}
+      style={{ transform: hover3D ? transform : undefined, transition: "transform 0.3s ease, box-shadow 0.4s ease" }}
       onMouseMove={handleMouseMove}
       onMouseLeave={handleMouseLeave}
     >
@@ -45,11 +45,11 @@ export default function GlassCard({ children, className, hover3D = false, glowCo
         <div
           className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
           style={{
-            background: `radial-gradient(circle at ${glowPos.x}% ${glowPos.y}%, ${glowColor}15, transparent 60%)`,
+            background: `radial-gradient(circle at ${glowPos.x}% ${glowPos.y}%, ${glowColor}1f, transparent 60%)`,
           }}
         />
       )}
-      {children}
+      <div className="relative z-[2]">{children}</div>
     </motion.div>
   );
 }

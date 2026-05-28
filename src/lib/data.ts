@@ -12,7 +12,6 @@ export const navLinks = [
 export const learnLinks = [
   { label: "Courses",    href: "/courses",    desc: "Hands-on technology training" },
   { label: "Categories", href: "/categories", desc: "Browse all learning paths" },
-  { label: "Pricing",    href: "/pricing",    desc: "Plans for individuals & teams" },
 ];
 
 // Services

@@ -14,23 +14,27 @@ export default function TimelineItem({ event, index }: TimelineItemProps) {
 
   return (
     <motion.div
-      className="relative flex items-center mb-12 last:mb-0"
+      className="relative flex items-center mb-8 sm:mb-12 last:mb-0"
       variants={fadeUp}
       initial="hidden"
       whileInView="visible"
       viewport={{ once: true, margin: "-50px" }}
     >
-      {/* Line */}
-      <div className="absolute left-1/2 -translate-x-1/2 w-px h-full bg-gradient-to-b from-neon-blue/50 to-transparent" />
+      {/* Line — left rail on mobile, centered on md+ */}
+      <div className="absolute left-2 md:left-1/2 md:-translate-x-1/2 w-px h-full bg-gradient-to-b from-neon-blue/50 to-transparent" />
 
       {/* Dot */}
-      <div className="absolute left-1/2 -translate-x-1/2 w-4 h-4 rounded-full bg-neon-blue shadow-glow-blue z-10" />
+      <div className="absolute left-2 -translate-x-1/2 md:left-1/2 w-3 h-3 sm:w-4 sm:h-4 rounded-full bg-neon-blue shadow-glow-blue z-10" />
 
-      {/* Content */}
-      <div className={`w-5/12 ${isLeft ? "pr-12 text-right" : "pl-12 ml-auto text-left"}`}>
-        <span className="text-neon-blue font-bold text-lg">{event.year}</span>
-        <h3 className="text-zinc-900 font-bold text-xl mt-1">{event.title}</h3>
-        <p className="text-zinc-600 mt-2 leading-relaxed">{event.description}</p>
+      {/* Content — full-width stacked on mobile, alternating on md+ */}
+      <div
+        className={`w-full pl-8 md:w-5/12 md:pl-0 ${
+          isLeft ? "md:pr-12 md:text-right" : "md:pl-12 md:ml-auto md:text-left"
+        }`}
+      >
+        <span className="text-neon-blue font-bold text-base sm:text-lg">{event.year}</span>
+        <h3 className="text-zinc-900 font-bold text-lg sm:text-xl mt-1">{event.title}</h3>
+        <p className="text-zinc-600 mt-2 leading-relaxed text-sm sm:text-base">{event.description}</p>
       </div>
     </motion.div>
   );

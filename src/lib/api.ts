@@ -181,22 +181,6 @@ export async function getAdminCourses() {
 
 // ─── Subscriptions ──────────────────────────────────────────────────
 
-export async function createOrder(plan: string) {
-  const wrapper = await apiFetch<ApiResponse<unknown>>("/api/subscriptions/create", {
-    method: "POST",
-    body: JSON.stringify({ plan }),
-  });
-  return wrapper.data;
-}
-
-export async function verifyPayment(data: { razorpayOrderId: string; razorpayPaymentId: string; razorpaySignature: string }) {
-  const wrapper = await apiFetch<ApiResponse<unknown>>("/api/subscriptions/verify", {
-    method: "POST",
-    body: JSON.stringify(data),
-  });
-  return wrapper.data;
-}
-
 export async function getSubscriptionStatus() {
   const wrapper = await apiFetch<ApiResponse<unknown>>("/api/subscriptions/status");
   return wrapper.data;

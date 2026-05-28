@@ -1,16 +1,17 @@
 "use client";
 
 import { stats } from "@/lib/data";
-import { fadeUp, staggerContainer } from "@/lib/utils";
+import { popIn, fadeUp, staggerContainer } from "@/lib/utils";
 import { motion } from "framer-motion";
 import SectionHeading from "../ui/SectionHeading";
 import GlowButton from "../ui/GlowButton";
+import CountUp from "../ui/CountUp";
 
 export default function AboutPreview() {
   return (
-    <section className="py-32 px-6 relative">
+    <section className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 relative">
       <div className="max-w-7xl mx-auto">
-        <div className="grid lg:grid-cols-2 gap-16 items-center">
+        <div className="grid lg:grid-cols-2 gap-10 sm:gap-12 lg:gap-16 items-center">
           {/* Left: Text */}
           <motion.div
             variants={staggerContainer}
@@ -25,12 +26,12 @@ export default function AboutPreview() {
                 align="left"
               />
             </motion.div>
-            <motion.p variants={fadeUp} className="text-zinc-600 text-lg leading-relaxed mb-6">
+            <motion.p variants={fadeUp} className="text-zinc-600 text-base sm:text-lg leading-relaxed mb-4 sm:mb-6">
               Sage IT is a technology-first company that combines deep engineering expertise with
               AI-driven innovation. We partner with enterprises to modernize infrastructure, secure
               digital assets, and unlock the power of data.
             </motion.p>
-            <motion.p variants={fadeUp} className="text-zinc-600 leading-relaxed mb-8">
+            <motion.p variants={fadeUp} className="text-zinc-600 text-sm sm:text-base leading-relaxed mb-6 sm:mb-8">
               Founded in 2018, we have grown from a cloud consulting startup to a full-spectrum
               technology partner serving Fortune 500 companies across 3 continents.
             </motion.p>
@@ -41,7 +42,7 @@ export default function AboutPreview() {
 
           {/* Right: Stats grid */}
           <motion.div
-            className="grid grid-cols-2 gap-6"
+            className="grid grid-cols-2 gap-3 sm:gap-5 lg:gap-6"
             variants={staggerContainer}
             initial="hidden"
             whileInView="visible"
@@ -50,13 +51,13 @@ export default function AboutPreview() {
             {stats.map((stat) => (
               <motion.div
                 key={stat.label}
-                variants={fadeUp}
-                className="glass p-8 text-center group hover:border-neon-blue/30 transition-all duration-500"
+                variants={popIn}
+                className="glass p-4 sm:p-6 lg:p-8 text-center group hover:border-neon-blue/30 hover:-translate-y-1 transition-all duration-500"
               >
-                <div className="text-3xl md:text-4xl font-bold text-gradient mb-2">
-                  {stat.value}
+                <div className="text-2xl sm:text-3xl md:text-4xl font-bold text-gradient mb-1 sm:mb-2 tabular-nums">
+                  <CountUp value={stat.value} />
                 </div>
-                <div className="text-zinc-600 text-sm">{stat.label}</div>
+                <div className="text-zinc-600 text-xs sm:text-sm">{stat.label}</div>
               </motion.div>
             ))}
           </motion.div>

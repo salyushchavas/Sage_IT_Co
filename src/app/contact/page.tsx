@@ -3,6 +3,7 @@
 import { socialLinks } from "@/lib/data";
 import { fadeUp, staggerContainer, slideInLeft, slideInRight } from "@/lib/utils";
 import { motion } from "framer-motion";
+import { Mail, Phone, MapPin } from "lucide-react";
 import GlassCard from "@/components/ui/GlassCard";
 import GlowButton from "@/components/ui/GlowButton";
 import { useState } from "react";
@@ -47,17 +48,17 @@ export default function ContactPage() {
 
   return (
     <>
-      <section className="pt-32 pb-20 px-6 bg-grid">
+      <section className="pt-28 sm:pt-32 pb-16 sm:pb-20 px-4 sm:px-6 bg-grid">
         <div className="max-w-4xl mx-auto text-center">
           <motion.h1
-            className="text-4xl md:text-6xl font-bold text-zinc-900 mb-6"
+            className="text-3xl sm:text-4xl md:text-6xl font-bold text-zinc-900 mb-4 sm:mb-6"
             initial={{ opacity: 0, y: 30 }}
             animate={{ opacity: 1, y: 0 }}
           >
             Get in <span className="text-gradient">Touch</span>
           </motion.h1>
           <motion.p
-            className="text-zinc-600 text-lg"
+            className="text-zinc-600 text-base sm:text-lg"
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.2 }}
@@ -67,10 +68,10 @@ export default function ContactPage() {
         </div>
       </section>
 
-      <section className="py-20 px-6">
+      <section className="py-16 sm:py-20 px-4 sm:px-6">
         <div className="max-w-7xl mx-auto">
           <motion.div
-            className="grid lg:grid-cols-2 gap-12"
+            className="grid lg:grid-cols-2 gap-6 sm:gap-8 lg:gap-12"
             variants={staggerContainer}
             initial="hidden"
             whileInView="visible"
@@ -78,20 +79,20 @@ export default function ContactPage() {
           >
             {/* Form */}
             <motion.div variants={slideInLeft}>
-              <GlassCard className="p-10">
+              <GlassCard className="p-6 sm:p-8 md:p-10">
                 {submitted ? (
-                  <div className="text-center py-12">
-                    <div className="text-5xl mb-4">🚀</div>
-                    <h3 className="text-2xl font-bold text-zinc-900 mb-3">Message Sent!</h3>
-                    <p className="text-zinc-600 mb-6">
+                  <div className="text-center py-10 sm:py-12">
+                    <div className="text-4xl sm:text-5xl mb-3 sm:mb-4">🚀</div>
+                    <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-2 sm:mb-3">Message Sent!</h3>
+                    <p className="text-zinc-600 mb-5 sm:mb-6 text-sm sm:text-base">
                       Thank you for reaching out. Our team will get back to you within 24 hours.
                     </p>
                     <GlowButton onClick={() => setSubmitted(false)}>Send Another</GlowButton>
                   </div>
                 ) : (
-                  <form onSubmit={handleSubmit} className="space-y-5">
-                    <h3 className="text-2xl font-bold text-zinc-900 mb-6">Send Us a Message</h3>
-                    <div className="grid md:grid-cols-2 gap-4">
+                  <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
+                    <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-4 sm:mb-6">Send Us a Message</h3>
+                    <div className="grid sm:grid-cols-2 gap-3 sm:gap-4">
                       <input
                         name="firstName"
                         type="text"
@@ -148,60 +149,76 @@ export default function ContactPage() {
             </motion.div>
 
             {/* Contact info */}
-            <motion.div variants={slideInRight} className="space-y-8">
-              <GlassCard className="p-8">
-                <h3 className="text-xl font-bold text-zinc-900 mb-6">Contact Information</h3>
-                <div className="space-y-6">
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-neon-blue/10 flex items-center justify-center text-neon-blue shrink-0">
-                      📧
-                    </div>
-                    <div>
-                      <p className="text-zinc-900 font-medium">Email</p>
-                      <p className="text-zinc-600 text-sm">info@sageitco.com</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-neon-violet/10 flex items-center justify-center text-neon-violet shrink-0">
-                      📱
-                    </div>
-                    <div>
-                      <p className="text-zinc-900 font-medium">Phone</p>
-                      <p className="text-zinc-600 text-sm">+1 (555) 123-4567</p>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-neon-cyan/10 flex items-center justify-center text-neon-cyan shrink-0">
-                      📍
-                    </div>
-                    <div>
-                      <p className="text-zinc-900 font-medium">Office</p>
-                      <p className="text-zinc-600 text-sm">
-                        HITEC City, Hyderabad<br />
-                        Telangana, India 500081
-                      </p>
-                    </div>
-                  </div>
+            <motion.div variants={slideInRight} className="space-y-6 sm:space-y-8">
+              <GlassCard className="p-6 sm:p-8">
+                <h3 className="text-lg sm:text-xl font-bold text-zinc-900 mb-4 sm:mb-6">Contact Information</h3>
+                <div className="space-y-5">
+                  <a
+                    href="mailto:info@sageitco.com"
+                    className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
+                  >
+                    <span className="contact-badge contact-badge--navy shrink-0">
+                      <Mail className="w-5 h-5 sm:w-[22px] sm:h-[22px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="block">
+                      <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Email</span>
+                      <span className="block text-zinc-900 text-sm sm:text-base mt-0.5 group-hover/badge:text-sage-navy transition-colors">
+                        info@sageitco.com
+                      </span>
+                    </span>
+                  </a>
+                  <a
+                    href="tel:+14696663661"
+                    className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
+                  >
+                    <span className="contact-badge contact-badge--copper shrink-0">
+                      <Phone className="w-5 h-5 sm:w-[22px] sm:h-[22px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="block">
+                      <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Phone</span>
+                      <span className="block text-zinc-900 text-sm sm:text-base mt-0.5 group-hover/badge:text-sage-copper transition-colors">
+                        +1 (469) 666-3661
+                      </span>
+                    </span>
+                  </a>
+                  <a
+                    href="https://www.google.com/maps?q=4400+State+Hwy+121+Suite+324+Lewisville+TX+75056"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="flex items-start gap-4 group/badge -mx-2 px-2 py-2 rounded-xl hover:bg-white/40 transition-colors"
+                  >
+                    <span className="contact-badge contact-badge--navy-deep shrink-0">
+                      <MapPin className="w-5 h-5 sm:w-[22px] sm:h-[22px]" strokeWidth={1.75} />
+                    </span>
+                    <span className="block">
+                      <span className="block text-zinc-500 text-xs uppercase tracking-wider font-semibold">Office</span>
+                      <span className="block text-zinc-900 text-sm sm:text-base font-semibold mt-0.5">SAGEITCO LLC</span>
+                      <span className="block text-zinc-600 text-xs sm:text-sm leading-relaxed mt-0.5">
+                        4400 State Hwy 121, Suite #324<br />
+                        Lewisville, TX 75056
+                      </span>
+                    </span>
+                  </a>
                 </div>
               </GlassCard>
 
-              {/* Map placeholder */}
-              <GlassCard className="p-0 overflow-hidden h-64">
+              {/* Map */}
+              <GlassCard className="p-0 overflow-hidden h-56 sm:h-64">
                 <iframe
-                  src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d3806.313291823474!2d78.37148831485!3d17.44734688804!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x3bcb93dc8c5d69df%3A0x19688beb557fa0ee!2sHITEC%20City%2C%20Hyderabad!5e0!3m2!1sen!2sin!4v1700000000000!5m2!1sen!2sin"
+                  src="https://www.google.com/maps?q=4400+State+Hwy+121+Suite+324+Lewisville+TX+75056&hl=en&z=15&output=embed"
                   width="100%"
                   height="100%"
-                  style={{ border: 0, filter: "invert(90%) hue-rotate(180deg)" }}
+                  style={{ border: 0 }}
                   allowFullScreen
                   loading="lazy"
                   referrerPolicy="no-referrer-when-downgrade"
-                  title="Sage IT Office Location"
+                  title="SAGEITCO LLC office at 4400 State Hwy 121 Suite #324, Lewisville, TX 75056"
                 />
               </GlassCard>
 
               {/* Social links */}
-              <GlassCard className="p-8">
-                <h3 className="text-lg font-bold text-zinc-900 mb-4">Follow Us</h3>
+              <GlassCard className="p-6 sm:p-8">
+                <h3 className="text-base sm:text-lg font-bold text-zinc-900 mb-3 sm:mb-4">Follow Us</h3>
                 <div className="flex gap-3">
                   {socialLinks.map((s) => (
                     <a

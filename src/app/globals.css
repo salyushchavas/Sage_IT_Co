@@ -15,6 +15,7 @@
 
 html {
   scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
@@ -22,6 +23,22 @@ body {
   background: var(--background);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
   overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Prevent iOS form-element zoom on focus (font-size < 16px triggers it) */
+@media (max-width: 640px) {
+  input,
+  select,
+  textarea {
+    font-size: 16px;
+  }
+}
+
+img,
+video {
+  max-width: 100%;
+  height: auto;
 }
 
 /* Custom scrollbar — sage green to gold on light track */
@@ -205,8 +222,12 @@ body {
     @apply border border-sage-green/30 hover:border-sage-green/60 transition-all duration-500;
   }
 
+  /* Animated gradient text — slow color drift across navy → copper */
   .text-gradient {
-    @apply bg-clip-text text-transparent bg-gradient-to-r from-sage-green to-sage-gold;
+    @apply bg-clip-text text-transparent;
+    background-image: linear-gradient(110deg, #1B2A5C 0%, #2D4480 25%, #C87D5C 55%, #E8A78D 75%, #C87D5C 100%);
+    background-size: 220% 220%;
+    animation: gradient-shift 8s ease-in-out infinite;
   }
 
   .bg-grid {
@@ -214,6 +235,130 @@ body {
       linear-gradient(rgba(27, 42, 92, 0.05) 1px, transparent 1px),
       linear-gradient(90deg, rgba(27, 42, 92, 0.05) 1px, transparent 1px);
     background-size: 60px 60px;
+  }
+
+  /* Aurora mesh background — three soft blobs drifting on a frosted plane */
+  .aurora-bg {
+    position: relative;
+    isolation: isolate;
+  }
+  .aurora-bg::before,
+  .aurora-bg::after {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: -1;
+    pointer-events: none;
+    filter: blur(60px);
+    opacity: 0.65;
+  }
+  .aurora-bg::before {
+    background: radial-gradient(ellipse at 30% 30%, rgba(27, 42, 92, 0.45), transparent 60%),
+      radial-gradient(ellipse at 70% 60%, rgba(200, 125, 92, 0.45), transparent 60%);
+    animation: aurora 18s ease-in-out infinite;
+  }
+  .aurora-bg::after {
+    background: radial-gradient(ellipse at 60% 30%, rgba(232, 167, 141, 0.35), transparent 60%),
+      radial-gradient(ellipse at 30% 70%, rgba(45, 68, 128, 0.35), transparent 60%);
+    animation: aurora 22s ease-in-out infinite reverse;
+  }
+
+  /* Sheen overlay — diagonal light sweep on hover (added to .group via .sheen-on-hover) */
+  .sheen-on-hover {
+    position: relative;
+    overflow: hidden;
+  }
+  .sheen-on-hover::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      105deg,
+      transparent 38%,
+      rgba(255, 255, 255, 0.55) 50%,
+      transparent 62%
+    );
+    transform: translateX(-120%) skewX(-20deg);
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+    pointer-events: none;
+    z-index: 1;
+  }
+  .group:hover .sheen-on-hover::after,
+  .sheen-on-hover:hover::after {
+    transform: translateX(220%) skewX(-20deg);
+  }
+
+  /* Animated underline that draws in when its parent enters .reveal-in state */
+  .underline-draw {
+    transform: scaleX(0);
+    transform-origin: left center;
+    transition: transform 0.9s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+  .reveal-in .underline-draw,
+  .underline-draw[data-revealed="true"] {
+    transform: scaleX(1);
+  }
+
+  /* Contact info badges — solid gradient circle with white icon, soft
+     ring + shadow for depth. Three brand variants: navy (email),
+     copper (phone), navy-deep (location). Springy lift on parent hover. */
+  .contact-badge {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    border-radius: 0.875rem;
+    color: #fff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 6px 18px rgba(15, 31, 68, 0.18);
+    transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 0.4s ease;
+  }
+  @media (min-width: 640px) {
+    .contact-badge {
+      width: 3rem;
+      height: 3rem;
+      border-radius: 1rem;
+    }
+  }
+  .contact-badge::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(
+      135deg,
+      rgba(255, 255, 255, 0.35) 0%,
+      rgba(255, 255, 255, 0) 40%,
+      rgba(255, 255, 255, 0) 100%
+    );
+    pointer-events: none;
+  }
+  .contact-badge--navy {
+    background: linear-gradient(135deg, #2D4480 0%, #1B2A5C 60%, #0F1F44 100%);
+  }
+  .contact-badge--copper {
+    background: linear-gradient(135deg, #E8A78D 0%, #C87D5C 55%, #A55E40 100%);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.25),
+      0 6px 18px rgba(200, 125, 92, 0.28);
+  }
+  .contact-badge--navy-deep {
+    background: linear-gradient(135deg, #1B2A5C 0%, #0F1F44 60%, #050D24 100%);
+  }
+  .group\/badge:hover .contact-badge {
+    transform: translateY(-2px) scale(1.05);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.25),
+      0 10px 24px rgba(15, 31, 68, 0.25);
+  }
+  .group\/badge:hover .contact-badge--copper {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.3),
+      0 10px 24px rgba(200, 125, 92, 0.4);
   }
 }
 
@@ -235,17 +380,23 @@ body {
   content: "";
   position: absolute;
   inset: 0;
+  /* Shiny gold — bright cream core fading through metallic gold to warm
+     copper edge. Multi-stop so the highlight reads as polished metal,
+     not a flat yellow disc. */
   background: radial-gradient(
-    circle 110px at var(--spot-x) var(--spot-y),
-    rgba(255, 215, 0, 0.65) 0%,
-    rgba(255, 215, 0, 0.35) 35%,
-    rgba(255, 215, 0, 0.15) 60%,
-    transparent 85%
+    circle 120px at var(--spot-x) var(--spot-y),
+    rgba(255, 248, 220, 0.85) 0%,
+    rgba(255, 215, 130, 0.7) 18%,
+    rgba(232, 167, 141, 0.55) 38%,
+    rgba(200, 125, 92, 0.35) 58%,
+    rgba(165, 94, 64, 0.18) 75%,
+    transparent 90%
   );
   opacity: 0;
-  transition: opacity 0.2s ease-out;
+  transition: opacity 0.25s ease-out;
   pointer-events: none;
   z-index: 0;
+  mix-blend-mode: screen;
 }
 .btn-fill > * {
   position: relative;
@@ -273,5 +424,39 @@ body {
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+
+  /* Conic shimmer — for borders / decorative outlines */
+  .shimmer-text {
+    background: linear-gradient(
+      90deg,
+      rgba(27, 42, 92, 0.4) 0%,
+      rgba(200, 125, 92, 1) 25%,
+      rgba(27, 42, 92, 0.4) 50%,
+      rgba(200, 125, 92, 1) 75%,
+      rgba(27, 42, 92, 0.4) 100%
+    );
+    background-size: 200% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    animation: shimmer 2.4s linear infinite;
+  }
+
+  /* Will-change hint for elements about to animate on scroll */
+  .will-animate {
+    will-change: transform, opacity, filter;
+  }
+}
+
+/* Honor user's reduced-motion preference */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

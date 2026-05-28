@@ -64,10 +64,10 @@ export default function Navbar() {
       animate={{ y: 0 }}
       transition={{ duration: 0.6 }}
     >
-      <div className="max-w-7xl mx-auto px-6 h-20 flex items-center justify-between">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between">
         {/* Logo */}
         <Link href="/" className="flex items-center gap-2 group">
-          <div className="logo-glow relative w-12 h-12 transition-transform duration-300 group-hover:scale-110">
+          <div className="logo-glow relative w-10 h-10 sm:w-12 sm:h-12 transition-transform duration-300 group-hover:scale-110">
             <Image
               src="/sage_logo.png"
               alt="Sage IT Co"
@@ -279,7 +279,7 @@ export default function Navbar() {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <div className="px-6 py-4 space-y-2">
+            <div className="px-4 sm:px-6 py-4 space-y-2 max-h-[calc(100vh-4rem)] overflow-y-auto">
               {allLinks.map((link) => (
                 <Link
                   key={link.href}
