@@ -1140,3 +1140,288 @@ export async function resendVerificationCode(email: string): Promise<{ cooldownS
   return wrapper.data ?? { cooldownSeconds: 60 };
 }
 
+
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 9D APPEND -- weekly reports, employment, payments
+// Ported from Spire api.ts (Phase 6 + 7 sections).
+// ═══════════════════════════════════════════════════════════════════
+
+// ─── Weekly reports ───────────────────────────────────────────────
+
+export interface WeeklyReportJobSubmission {
+  company?: string;
+  client?: string;
+  jobTitle?: string;
+  technology?: string;
+  portal?: string;
+  applicationLink?: string;
+  submissionDate?: string;
+  status?: string;
+  followUpDate?: string;
+}
+
+export interface WeeklyReportRequest {
+  weekStart?: string;
+  weekEnd?: string;
+  jobSubmissions?: WeeklyReportJobSubmission[];
+  resumeActivities?: Record<string, string>;
+  interviewTraining?: Record<string, string>;
+  communications?: Record<string, string>;
+}
+
+export interface WeeklyReportDTO {
+  id: number;
+  weekStart: string | null;
+  weekEnd: string | null;
+  submissionDueDate: string | null;
+  submittedAt: string | null;
+  ermReviewDate: string | null;
+  ermNotes: string | null;
+  /** JSON-encoded form payload. */
+  reportData: string | null;
+  status: string;
+}
+
+export async function submitWeeklyReport(body: WeeklyReportRequest): Promise<WeeklyReportDTO> {
+  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO>>(
+    "/api/participants/reports/weekly",
+    { method: "POST", body: JSON.stringify(body) });
+  return wrapper.data;
+}
+
+export async function saveWeeklyReportDraft(body: WeeklyReportRequest): Promise<WeeklyReportDTO> {
+  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO>>(
+    "/api/participants/reports/weekly/draft",
+    { method: "POST", body: JSON.stringify(body) });
+  return wrapper.data;
+}
+
+export async function listWeeklyReports(): Promise<WeeklyReportDTO[]> {
+  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO[]>>(
+    "/api/participants/reports/weekly");
+  return wrapper.data ?? [];
+}
+
+export async function getWeeklyReport(id: number): Promise<WeeklyReportDTO> {
+  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO>>(
+    `/api/participants/reports/weekly/${id}`);
+  return wrapper.data;
+}
+
+// ─── Phase 6: employment + Phase 1 completion ────────────────────
+
+export interface EmploymentAcceptRequest {
+  employer: string;
+  jobTitle: string;
+  startDate: string;        // YYYY-MM-DD
+  location?: string | null;
+  employmentType?: string | null;
+  offerDocumentUrl?: string | null;
+  notes?: string | null;
+}
+
+export interface EmploymentStatus {
+  submitted: boolean;
+  ermVerified: boolean;
+  ermName?: string | null;
+  ermEmail?: string | null;
+  details?: {
+    id: number;
+    employerClient: string | null;
+    jobTitle: string | null;
+    startDate: string | null;
+    location: string | null;
+    employmentType: string | null;
+    offerDocumentUrl: string | null;
+    notes: string | null;
+    acceptanceDate: string | null;
+    ermVerifiedDate: string | null;
+    ermNotes: string | null;
+  };
+  phase1?: {
+    acceptedAt: string | null;
+    acknowledgmentVersion: string | null;
+    ermApproved: boolean;
+    ermApprovedDate: string | null;
+  };
+}
+
+export async function acceptEmployment(body: EmploymentAcceptRequest): Promise<{
+  success: boolean; pendingVerification: boolean; employmentId: number;
+}> {
+  const wrapper = await apiFetch<ApiResponse<{
+    success: boolean; pendingVerification: boolean; employmentId: number;
+  }>>("/api/participants/employment/accept",
+    { method: "POST", body: JSON.stringify(body) });
+  return wrapper.data;
+}
+
+export async function uploadOfferDocument(file: File): Promise<{ url: string }> {
+  const token = typeof window === "undefined"
+    ? null : localStorage.getItem("access_token");
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch(`${API_BASE_URL}/api/participants/employment/offer-upload`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: form,
+  });
+  if (!res.ok) {
+    let msg = `Upload failed (${res.status})`;
+    try { const b = await res.json(); if (b?.message) msg = b.message; } catch {}
+    throw new Error(msg);
+  }
+  const body = (await res.json()) as ApiResponse<{ url: string }>;
+  return body.data;
+}
+
+export async function getEmploymentStatus(): Promise<EmploymentStatus> {
+  const wrapper = await apiFetch<ApiResponse<EmploymentStatus>>(
+    "/api/participants/employment/status");
+  return wrapper.data ?? { submitted: false, ermVerified: false };
+}
+
+export async function acceptPhase1Completion(version = "PH1-v1.0"): Promise<{
+  success: boolean; paymentEnabled: boolean; phaseCompletionId: number; acceptedAt: string;
+}> {
+  const wrapper = await apiFetch<ApiResponse<{
+    success: boolean; paymentEnabled: boolean; phaseCompletionId: number; acceptedAt: string;
+  }>>("/api/participants/phases/phase-1-complete",
+    { method: "POST", body: JSON.stringify({
+      acknowledgmentAccepted: true, acknowledgmentVersion: version,
+    }) });
+  return wrapper.data;
+}
+
+// ── ERM-side ─────────────────────────────────────────────────────
+
+// ─── Phase 7: payment plans, invoices, ledger, check tracking ────
+
+export interface PaymentScheduleItem {
+  dueDate: string | null;
+  amount: string | number | null;
+  label?: string | null;
+}
+
+export interface PaymentPlanDTO {
+  id: number;
+  planId: string;
+  userId: number;
+  totalAmount: string | number | null;
+  installments: number | null;
+  schedule: string | null;
+  acceptanceTextVersion: string | null;
+  acceptedAt: string | null;
+  ipAddress: string | null;
+  status: string;
+}
+
+export interface ParticipantPaymentPlanResponse {
+  plan: PaymentPlanDTO | null;
+  schedule: PaymentScheduleItem[];
+  acknowledgmentVersion: string;
+}
+
+export interface InvoiceDTO {
+  id: number;
+  invoiceNumber: string;
+  userId: number;
+  paymentPlanId: number | null;
+  amount: string | number | null;
+  dueDate: string | null;
+  issueDate: string | null;
+  paidDate: string | null;
+  balance: string | number | null;
+  status: string;
+}
+
+export interface PaymentLedgerDTO {
+  id: number;
+  invoiceId: number | null;
+  userId: number;
+  amountReceived: string | number | null;
+  receiptDate: string | null;
+  method: string | null;
+  adjustment: string | number | null;
+  balance: string | number | null;
+  notes: string | null;
+  financeReviewer: string | null;
+  createdAt: string | null;
+}
+
+export interface PaymentSummary {
+  totalDue?: string | number;
+  totalPaid?: string | number;
+  balance?: string | number;
+  overdue?: string | number;
+  nextDueAmount?: string | number | null;
+  nextDueDate?: string | null;
+  nextDueInvoice?: string | null;
+}
+
+export interface CheckTrackingDTO {
+  id: number;
+  checkNumber: string | null;
+  carrier: string | null;
+  trackingId: string | null;
+  mailedDate: string | null;
+  expectedReceiptDate: string | null;
+  receivedDate: string | null;
+  status: string;
+}
+
+export async function getParticipantPaymentPlan(): Promise<ParticipantPaymentPlanResponse> {
+  const wrapper = await apiFetch<ApiResponse<ParticipantPaymentPlanResponse>>(
+    "/api/participants/payments/plan");
+  return wrapper.data ?? { plan: null, schedule: [], acknowledgmentVersion: "PPL-v1.0" };
+}
+
+export async function acceptPaymentPlan(planId?: number, version = "PPL-v1.0"): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    "/api/participants/payments/plan/accept",
+    { method: "POST", body: JSON.stringify({
+      accepted: true,
+      planId: planId ?? null,
+      acknowledgmentVersion: version,
+    }) });
+  return wrapper.data;
+}
+
+export async function submitCheckTracking(body: {
+  checkNumber: string;
+  carrier: string;
+  trackingId: string;
+  mailedDate: string;
+  expectedReceiptDate?: string | null;
+}): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    "/api/participants/payments/check-tracking",
+    { method: "POST", body: JSON.stringify(body) });
+  return wrapper.data;
+}
+
+export async function listParticipantCheckTracking(): Promise<CheckTrackingDTO[]> {
+  const wrapper = await apiFetch<ApiResponse<CheckTrackingDTO[]>>(
+    "/api/participants/payments/check-tracking");
+  return wrapper.data ?? [];
+}
+
+export async function listParticipantInvoices(): Promise<InvoiceDTO[]> {
+  const wrapper = await apiFetch<ApiResponse<InvoiceDTO[]>>(
+    "/api/participants/payments/invoices");
+  return wrapper.data ?? [];
+}
+
+export async function getParticipantPaymentSummary(): Promise<PaymentSummary> {
+  const wrapper = await apiFetch<ApiResponse<PaymentSummary>>(
+    "/api/participants/payments/summary");
+  return wrapper.data ?? {};
+}
+
+export async function listParticipantPaymentHistory(): Promise<PaymentLedgerDTO[]> {
+  const wrapper = await apiFetch<ApiResponse<PaymentLedgerDTO[]>>(
+    "/api/participants/payments/history");
+  return wrapper.data ?? [];
+}
+
+// ── Finance side ──────────────────────────────────────────────────

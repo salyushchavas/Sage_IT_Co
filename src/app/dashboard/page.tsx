@@ -5,16 +5,19 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import DashboardLayout from "@/components/layout/DashboardLayout";
-import AgreementTab from "@/components/dashboard/AgreementTab";
-import ComingSoonTab from "@/components/dashboard/ComingSoonTab";
-import DocumentsTab from "@/components/dashboard/DocumentsTab";
-import HomeTab from "@/components/dashboard/HomeTab";
+import AgreementTab from "@/components/dashboard/tabs/AgreementTab";
+import ComingSoonTab from "@/components/dashboard/tabs/ComingSoonTab";
+import DocumentsTab from "@/components/dashboard/tabs/DocumentsTab";
+import EmploymentTab from "@/components/dashboard/tabs/EmploymentTab";
+import HomeTab from "@/components/dashboard/tabs/HomeTab";
+import InterviewTab from "@/components/dashboard/tabs/InterviewTab";
 import LockedTabView from "@/components/dashboard/LockedTabView";
-import MessagesTab from "@/components/dashboard/MessagesTab";
+import MessagesTab from "@/components/dashboard/tabs/MessagesTab";
 import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
 import ProfileCompletionChecklist from "@/components/dashboard/ProfileCompletionChecklist";
-import ProfileTab from "@/components/dashboard/ProfileTab";
-import TeamTab from "@/components/dashboard/TeamTab";
+import ProfileTab from "@/components/dashboard/tabs/ProfileTab";
+import ResumeTab from "@/components/dashboard/tabs/ResumeTab";
+import TeamTab from "@/components/dashboard/tabs/TeamTab";
 import { useAuth } from "@/lib/auth-context";
 import {
   getOnboardingRoute,
@@ -306,29 +309,11 @@ function renderGatedReal(
         />
       );
     case "resume":
-      return (
-        <ComingSoonTab
-          title="Resume / Profile activity"
-          copy="Resume version tracking, profile updates, and coach feedback ship in a follow-up phase."
-          hint="Send draft resumes to your Resume Specialist via the My Team tab."
-        />
-      );
+      return <ResumeTab />;
     case "interview":
-      return (
-        <ComingSoonTab
-          title="Interview training"
-          copy="Mock interview scheduling, coach feedback, and practice tasks ship in a follow-up phase."
-          hint="Talk to your Interview Coach via My Team to schedule a mock."
-        />
-      );
+      return <InterviewTab />;
     case "employment":
-      return (
-        <ComingSoonTab
-          title="Employment"
-          copy="Offer tracking and post-placement support land in a follow-up phase."
-          hint="When you receive an offer, email your ERM directly so they can record it."
-        />
-      );
+      return <EmploymentTab />;
     case "payments":
       return (
         <ComingSoonTab
