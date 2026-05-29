@@ -12,6 +12,7 @@ import EmploymentTab from "@/components/dashboard/tabs/EmploymentTab";
 import HomeTab from "@/components/dashboard/tabs/HomeTab";
 import InterviewTab from "@/components/dashboard/tabs/InterviewTab";
 import MyCoursesTab from "@/components/dashboard/tabs/MyCoursesTab";
+import PaymentsTab from "@/components/dashboard/tabs/PaymentsTab";
 import LockedTabView from "@/components/dashboard/LockedTabView";
 import MessagesTab from "@/components/dashboard/tabs/MessagesTab";
 import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
@@ -310,13 +311,7 @@ function renderGatedReal(
     case "employment":
       return <EmploymentTab />;
     case "payments":
-      return (
-        <ComingSoonTab
-          title="Payments"
-          copy="Payment plan acceptance, invoices, and ledger land in a follow-up phase."
-          hint="Finance will reach out with payment details before any plan activates."
-        />
-      );
+      return <PaymentsTab />;
     default:
       return null;
   }
