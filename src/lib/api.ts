@@ -3128,3 +3128,82 @@ export async function sendSalesQuote(id: number, data: {
   );
   return wrapper.data;
 }
+
+// ─── Phase 11E Batch 7: User Records / audit log ──
+
+export interface UserRecord {
+  id: number;
+  userId: number;
+  recordType: string;
+  category: string;
+  title: string;
+  description: string;
+  details: string | null;
+  ipAddress: string | null;
+  deviceType: string | null;
+  browser: string | null;
+  os: string | null;
+  city: string | null;
+  createdAt: string;
+}
+
+export interface UserRecordsPage {
+  records: UserRecord[];
+  page: number;
+  size: number;
+  totalPages: number;
+  totalElements: number;
+  hasNext: boolean;
+}
+
+export interface UserRecordsSummary {
+  total: number;
+  byCategory: Record<string, number>;
+}
+
+export async function getUserRecords(
+  userId: number | string,
+  params: { category?: string; from?: string; to?: string; page?: number; size?: number } = {}
+) {
+  const qs = "?" + new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => [k, String(v)])
+  ).toString();
+  const wrapper = await apiFetch<ApiResponse<UserRecordsPage>>(
+    `/api/admin/users/${userId}/records${qs}`
+  );
+  return wrapper.data;
+}
+
+export async function getUserRecordsSummary(userId: number | string) {
+  const wrapper = await apiFetch<ApiResponse<UserRecordsSummary>>(
+    `/api/admin/users/${userId}/records/summary`
+  );
+  return wrapper.data;
+}
+
+/**
+ * Streams the CSV directly from the backend (bypasses apiFetch
+ * because the response is text/csv, not JSON) and triggers a
+ * browser download with a sage-branded filename.
+ */
+export async function downloadUserRecordsCsv(userId: number | string, fileBaseName: string) {
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const res = await fetch(`${BASE_URL}/api/admin/users/${userId}/records/download`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Download failed (${res.status})`);
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const today = new Date().toISOString().slice(0, 10);
+  // Sanitise the basename: lower-case, dashes only.
+  const safe = fileBaseName.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "user";
+  a.download = `sage-${safe}-records-${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}

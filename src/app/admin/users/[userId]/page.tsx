@@ -22,6 +22,7 @@ import {
   updateUserRoleAsAdmin,
   updateUserStatusAsAdmin,
 } from "@/lib/api";
+import { UserRecordsPanel } from "@/components/admin/UserRecordsPanel";
 
 interface UserProfile {
   id: number;
@@ -360,6 +361,13 @@ export default function AdminUserDetailPage() {
                 : "Saves immediately on selection."}
             </p>
           </div>
+        </div>
+
+        <div className="mb-5">
+          <UserRecordsPanel
+            userId={profile.id}
+            fileBaseName={profile.fullName ?? profile.email}
+          />
         </div>
 
         <div className="bg-white border border-zinc-200 rounded-2xl p-6">
