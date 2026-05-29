@@ -1759,4 +1759,156 @@ export async function createCoachFeedback(body: CoachingFeedbackDTO): Promise<Co
   return wrapper.data;
 }
 
-// ── Finance side ──────────────────────────────────────────────────
+// Phase 10D: Finance dashboard (FINANCE role)
+
+export interface FinancePlanRow {
+  id: number;
+  planNumber: string;
+  userId: number;
+  participantId: string | null;
+  participantName: string | null;
+  totalAmount: string | number | null;
+  installments: number | null;
+  status: string;
+  acceptedAt: string | null;
+  schedule: PaymentScheduleItem[];
+}
+
+export async function getFinancePlans(): Promise<FinancePlanRow[]> {
+  const wrapper = await apiFetch<ApiResponse<FinancePlanRow[]>>("/api/finance/plans");
+  return wrapper.data ?? [];
+}
+
+export async function createFinancePlan(body: {
+  participantId: number;
+  totalAmount: number;
+  installments: number;
+  schedule: { dueDate: string; amount: number; label?: string }[];
+}): Promise<PaymentPlanDTO> {
+  const wrapper = await apiFetch<ApiResponse<PaymentPlanDTO>>(
+    "/api/finance/plans",
+    { method: "POST", body: JSON.stringify(body) });
+  return wrapper.data;
+}
+
+export async function getFinanceInvoices(status?: string): Promise<InvoiceDTO[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  const wrapper = await apiFetch<ApiResponse<InvoiceDTO[]>>(
+    `/api/finance/invoices${qs}`);
+  return wrapper.data ?? [];
+}
+
+export async function generateInvoice(paymentPlanId: number): Promise<InvoiceDTO> {
+  const wrapper = await apiFetch<ApiResponse<InvoiceDTO>>(
+    "/api/finance/invoices/generate",
+    { method: "POST", body: JSON.stringify({ paymentPlanId }) });
+  return wrapper.data;
+}
+
+export async function bulkGenerateInvoices(): Promise<{ issued: number; invoices: string[] }> {
+  const wrapper = await apiFetch<ApiResponse<{ issued: number; invoices: string[] }>>(
+    "/api/finance/invoices/bulk-generate",
+    { method: "POST" });
+  return wrapper.data;
+}
+
+export async function markOverdueInvoices(): Promise<{ marked: number }> {
+  const wrapper = await apiFetch<ApiResponse<{ marked: number }>>(
+    "/api/finance/invoices/mark-overdue",
+    { method: "POST" });
+  return wrapper.data;
+}
+
+export async function getFinanceLedger(): Promise<PaymentLedgerDTO[]> {
+  const wrapper = await apiFetch<ApiResponse<PaymentLedgerDTO[]>>(
+    "/api/finance/payments");
+  return wrapper.data ?? [];
+}
+
+export async function recordPaymentReceipt(body: {
+  invoiceId: number;
+  amountReceived: number;
+  receiptDate?: string;
+  method?: string;
+  notes?: string;
+}): Promise<PaymentLedgerDTO> {
+  const wrapper = await apiFetch<ApiResponse<PaymentLedgerDTO>>(
+    "/api/finance/payments/receive",
+    { method: "PUT", body: JSON.stringify(body) });
+  return wrapper.data;
+}
+
+export interface FinanceTrackingRow extends CheckTrackingDTO {
+  paymentPlanId: number;
+  userId: number | null;
+  participantId: string | null;
+  participantName: string | null;
+}
+
+export async function getFinanceTrackings(status?: string): Promise<FinanceTrackingRow[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  const wrapper = await apiFetch<ApiResponse<FinanceTrackingRow[]>>(
+    `/api/finance/check-tracking${qs}`);
+  return wrapper.data ?? [];
+}
+
+export async function updateTrackingStatus(
+  trackingId: number,
+  status: "RECEIVED" | "EXCEPTION" | "IN_TRANSIT" | "RETURNED" | "LOST",
+  receivedDate?: string,
+): Promise<CheckTrackingDTO> {
+  const wrapper = await apiFetch<ApiResponse<CheckTrackingDTO>>(
+    `/api/finance/check-tracking/${trackingId}/update`,
+    { method: "PUT", body: JSON.stringify({ status, receivedDate: receivedDate ?? null }) });
+  return wrapper.data;
+}
+
+export interface FinanceDashboardSummary {
+  totalPlans: number;
+  activePlans: number;
+  unpaidInvoices: number;
+  overdueInvoices: number;
+  totalCollected: string | number;
+}
+
+export async function getFinanceDashboard(): Promise<FinanceDashboardSummary> {
+  const wrapper = await apiFetch<ApiResponse<FinanceDashboardSummary>>(
+    "/api/finance/dashboard");
+  return wrapper.data ?? {
+    totalPlans: 0, activePlans: 0,
+    unpaidInvoices: 0, overdueInvoices: 0, totalCollected: 0,
+  };
+}
+
+export interface FinanceCheckRow {
+  id: number;
+  userId: number;
+  participantId: string | null;
+  participantName: string | null;
+  checkNumber: string | null;
+  amount: number | null;
+  checkDate: string | null;
+  notes: string | null;
+  reviewStatus: string;
+  maskingStatus: string;
+  fileUrl: string | null;
+  uploadedAt: string | null;
+}
+
+export async function getFinanceChecks(status?: string): Promise<FinanceCheckRow[]> {
+  const qs = status ? `?status=${encodeURIComponent(status)}` : "";
+  const wrapper = await apiFetch<ApiResponse<FinanceCheckRow[]>>(
+    `/api/finance/checks${qs}`);
+  return wrapper.data ?? [];
+}
+
+export async function reviewFinanceCheck(
+  checkId: number,
+  status: "APPROVED" | "REJECTED",
+  notes = "",
+): Promise<FinanceCheckRow> {
+  const wrapper = await apiFetch<ApiResponse<FinanceCheckRow>>(
+    `/api/finance/checks/${checkId}/review`,
+    { method: "PUT", body: JSON.stringify({ status, notes }) });
+  return wrapper.data;
+}

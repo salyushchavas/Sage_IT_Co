@@ -128,6 +128,10 @@ function DashboardPageInner() {
         router.replace("/coach-dashboard");
         return;
       }
+      if (role === "FINANCE") {
+        router.replace("/finance-dashboard");
+        return;
+      }
       if (role === "OPERATIONS_ADMIN" || role === "SYSTEM_ADMIN") {
         router.replace("/operations");
         return;
