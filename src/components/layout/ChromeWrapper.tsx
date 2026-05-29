@@ -27,6 +27,7 @@ const FULLSCREEN_PREFIXES = [
   "/agreement",
   "/check-upload",
   "/welcome",
+  "/dashboard",
 ] as const;
 
 export default function ChromeWrapper({ children }: { children: ReactNode }) {

@@ -1,254 +1,178 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { motion } from "framer-motion";
-import {
-  Loader2, BookOpen, Plus, Eye, EyeOff, Trash2, Users, ShieldCheck, GraduationCap,
-} from "lucide-react";
+import { Suspense, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Loader2 } from "lucide-react";
+
+import DashboardLayout from "@/components/layout/DashboardLayout";
 import { useAuth } from "@/lib/auth-context";
-import {
-  getEnrollments, getMyCourses, publishCourse, unpublishCourse,
-  deleteCourse, getInstructorStudents, requestInstructor,
-} from "@/lib/api";
-import { cn, fadeUp, staggerContainer } from "@/lib/utils";
-import EnrolledCourses from "@/components/dashboard/EnrolledCourses";
-import StreakCard from "@/components/dashboard/StreakCard";
+import { getOnboardingRoute, isDashboardStatus } from "@/lib/api";
 
-interface MyCourse {
-  id: number; title: string; level: string; isPublished: boolean;
-  enrolledCount: number; lessonsCount: number; category: string;
-}
-
-interface EnrollmentItem {
-  id: number; courseId: number; courseTitle: string; courseThumbnailUrl?: string | null;
-  courseCategory?: string; progress?: number; enrolledAt: string;
-}
-
-interface StudentItem {
-  studentName: string; email: string; courseTitle: string; enrolledAt: string;
-}
-
-export default function DashboardPage() {
+/**
+ * Participant dashboard surface.
+ *
+ * Routing rules (in order):
+ *   1. Not signed in → /login
+ *   2. ADMIN role → /admin (preserves existing admin panel)
+ *   3. INSTRUCTOR role → /admin (Sage doesn't have a separate
+ *      instructor surface yet; falls back to admin)
+ *   4. No participantId → /enroll
+ *   5. currentStatus not a dashboard-tier value → matching
+ *      onboarding step
+ *   6. Otherwise → render the sidebar shell with placeholder tabs
+ *
+ * Tab content is intentionally stubbed in Phase 9A. Real content
+ * lands in 9B (Complete Profile), 9C (Courses + Wishlist locked
+ * views), and 9D (everything else).
+ */
+function DashboardPageInner() {
   const router = useRouter();
-  const { user, isAuthenticated, isLoading: authLoading } = useAuth();
+  const searchParams = useSearchParams();
+  const activeTab = searchParams.get("tab") || "overview";
 
-  const [enrollments, setEnrollments] = useState<EnrollmentItem[]>([]);
-  const [myCourses, setMyCourses] = useState<MyCourse[]>([]);
-  const [students, setStudents] = useState<StudentItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [requestingInstructor, setRequestingInstructor] = useState(false);
-  const [instructorMsg, setInstructorMsg] = useState("");
-
-  const role = user?.role?.toUpperCase();
-  const isInstructor = role === "INSTRUCTOR";
-  const isAdmin = role === "ADMIN";
+  const { user, isLoading, refreshUser } = useAuth();
+  const [routingDecided, setRoutingDecided] = useState(false);
 
   useEffect(() => {
-    if (authLoading) return;
-    if (!isAuthenticated) { router.push("/login?redirect=/dashboard"); return; }
+    if (isLoading) return;
+    let cancelled = false;
 
-    const fetchData = async () => {
-      setLoading(true);
-      try {
-        const enrollData = await getEnrollments();
-        setEnrollments(enrollData as EnrollmentItem[]);
+    (async () => {
+      if (!user) {
+        router.replace("/login?redirect=/dashboard");
+        return;
+      }
 
-        if (isInstructor || isAdmin) {
-          const courses = await getMyCourses();
-          setMyCourses(courses as MyCourse[]);
-          try {
-            const s = await getInstructorStudents();
-            setStudents(s as StudentItem[]);
-          } catch { /* no students */ }
+      const role = (user.role ?? "").toUpperCase();
+      if (role === "ADMIN" || role === "INSTRUCTOR") {
+        router.replace("/admin");
+        return;
+      }
+
+      // Participant lifecycle. Pull a fresh profile if the in-memory
+      // copy is missing critical fields — the auth context can hold
+      // stale data after soft navigations.
+      let status = user.currentStatus;
+      let participantId = user.participantId;
+      if (!status || !participantId) {
+        try {
+          await refreshUser();
+        } catch {
+          // ignore — we'll fall through to the not-enrolled branch
         }
-      } catch { /* */ }
-      finally { setLoading(false); }
+        if (cancelled) return;
+      }
+
+      if (!participantId && !user.participantId) {
+        router.replace("/enroll");
+        return;
+      }
+
+      if (status && !isDashboardStatus(status)) {
+        router.replace(getOnboardingRoute(status));
+        return;
+      }
+
+      if (!cancelled) setRoutingDecided(true);
+    })();
+
+    return () => {
+      cancelled = true;
     };
-    fetchData();
-  }, [authLoading, isAuthenticated, isInstructor, isAdmin, router]);
+  }, [isLoading, user, router, refreshUser]);
 
-  const handlePublish = async (courseId: number, publish: boolean) => {
-    try {
-      if (publish) await publishCourse(courseId);
-      else await unpublishCourse(courseId);
-      setMyCourses((prev) => prev.map((c) => c.id === courseId ? { ...c, isPublished: publish } : c));
-    } catch (err) { alert(err instanceof Error ? err.message : "Failed"); }
-  };
-
-  const handleDelete = async (courseId: number) => {
-    if (!confirm("Delete this course?")) return;
-    try {
-      await deleteCourse(courseId);
-      setMyCourses((prev) => prev.filter((c) => c.id !== courseId));
-    } catch (err) { alert(err instanceof Error ? err.message : "Failed"); }
-  };
-
-  const handleRequestInstructor = async () => {
-    setRequestingInstructor(true); setInstructorMsg("");
-    try {
-      await requestInstructor();
-      setInstructorMsg("Request submitted! An admin will review it soon.");
-    } catch (err) {
-      setInstructorMsg(err instanceof Error ? err.message : "Failed to submit request");
-    } finally { setRequestingInstructor(false); }
-  };
-
-  if (authLoading || loading) {
-    return <div className="flex items-center justify-center min-h-screen pt-24"><Loader2 className="w-8 h-8 animate-spin text-[#1B2A5C]" /></div>;
+  if (isLoading || !routingDecided) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
+      </div>
+    );
   }
 
   return (
-    <section className="min-h-screen pt-28 pb-20 px-6">
-      <div className="mx-auto max-w-6xl">
-        {/* Header */}
-        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-10">
-          <h1 className="text-3xl font-bold text-zinc-900 mb-1">
-            Welcome back, <span className="bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] bg-clip-text text-transparent">{user?.fullName}</span>
-          </h1>
-          <p className="text-zinc-600 text-sm">
-            {isAdmin ? "Admin Dashboard" : isInstructor ? "Instructor Dashboard" : "Student Dashboard"}
-          </p>
-        </motion.div>
+    <DashboardLayout activeTab={activeTab}>
+      {renderTab(activeTab)}
+    </DashboardLayout>
+  );
+}
 
-        {/* Gamification */}
-        <div className="grid gap-6 md:grid-cols-3 mb-10">
-          <StreakCard streak={7} xp={1250} level="Developer" className="md:col-span-1" />
-          <div className="md:col-span-2 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6">
-            <div className="grid grid-cols-3 gap-4 text-center">
-              <div>
-                <p className="text-2xl font-bold text-[#1B2A5C]">{enrollments.length}</p>
-                <p className="text-xs text-zinc-500 mt-1">Enrolled Courses</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-[#C87D5C]">{myCourses.length}</p>
-                <p className="text-xs text-zinc-500 mt-1">{isInstructor || isAdmin ? "My Courses" : "Completed"}</p>
-              </div>
-              <div>
-                <p className="text-2xl font-bold text-[#0F1F44]">{students.length}</p>
-                <p className="text-xs text-zinc-500 mt-1">{isInstructor || isAdmin ? "Students" : "Certificates"}</p>
-              </div>
-            </div>
-          </div>
-        </div>
+function renderTab(tab: string) {
+  switch (tab) {
+    case "overview":
+      return (
+        <PlaceholderTab
+          title="Overview"
+          body="Welcome back. Phase 9B will fill this with your participant snapshot — current status, progress, next action."
+        />
+      );
+    case "complete-profile":
+      return (
+        <PlaceholderTab
+          title="Complete Your Profile"
+          body="Phase 9B will surface the onboarding checklist here (Acknowledgment, Documents, Program Selection, Agreement, Check Upload, About You)."
+        />
+      );
+    case "courses":
+      return (
+        <PlaceholderTab
+          title="My Courses"
+          body="Phase 9C will surface the locked-until-onboarded course view here."
+        />
+      );
+    case "wishlist":
+      return (
+        <PlaceholderTab
+          title="My Wishlist"
+          body="Phase 9C will surface saved courses here."
+        />
+      );
+    case "weekly-report":
+      return <PlaceholderTab title="Weekly Report" body="Coming in Phase 9D." />;
+    case "resume":
+      return <PlaceholderTab title="Resume" body="Coming in Phase 9D." />;
+    case "interviews":
+      return <PlaceholderTab title="Interviews" body="Coming in Phase 9D." />;
+    case "employment":
+      return <PlaceholderTab title="Employment" body="Coming in Phase 9D." />;
+    case "payments":
+      return <PlaceholderTab title="Payments" body="Coming in Phase 9D." />;
+    case "documents":
+      return <PlaceholderTab title="Documents" body="Coming in Phase 9D." />;
+    case "agreement":
+      return <PlaceholderTab title="Agreement" body="Coming in Phase 9D." />;
+    case "team":
+      return <PlaceholderTab title="My Team" body="Coming in Phase 9D." />;
+    case "messages":
+      return <PlaceholderTab title="Messages" body="Coming in Phase 9D." />;
+    case "profile":
+      return <PlaceholderTab title="Profile" body="Coming in Phase 9D." />;
+    default:
+      return (
+        <PlaceholderTab
+          title="Not found"
+          body={`No tab matches "${tab}". Try a sidebar link.`}
+        />
+      );
+  }
+}
 
-        {/* Admin link */}
-        {isAdmin && (
-          <Link href="/admin" className="inline-flex items-center gap-2 mb-8 px-5 py-2.5 rounded-xl bg-[#C87D5C]/20 border border-[#C87D5C]/30 text-[#C87D5C] text-sm font-medium hover:bg-[#C87D5C]/30 transition-colors">
-            <ShieldCheck className="w-4 h-4" /> Go to Admin Panel
-          </Link>
-        )}
+function PlaceholderTab({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="px-6 md:px-10 py-8 md:py-10 max-w-4xl">
+      <h1 className="text-3xl font-bold text-sage-navy mb-2">{title}</h1>
+      <p className="text-gray-600 leading-relaxed">{body}</p>
+    </div>
+  );
+}
 
-        {/* Enrolled Courses */}
-        <div className="mb-12">
-          <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
-            <GraduationCap className="w-5 h-5 text-[#1B2A5C]" /> Enrolled Courses
-          </h2>
-          <EnrolledCourses enrollments={enrollments} />
-        </div>
-
-        {/* Become Instructor (students only) */}
-        {!isInstructor && !isAdmin && (
-          <div className="mb-12 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6">
-            <h3 className="text-lg font-semibold text-zinc-900 mb-2">Become an Instructor</h3>
-            <p className="text-sm text-zinc-600 mb-4">Share your knowledge and create courses on Sage IT.</p>
-            <button onClick={handleRequestInstructor} disabled={requestingInstructor}
-              className="px-5 py-2.5 rounded-xl btn-fill text-white text-sm font-semibold disabled:opacity-50 hover:shadow-[0_0_20px_rgba(27,42,92,0.2)] transition">
-              {requestingInstructor ? "Submitting..." : "Request Instructor Access"}
-            </button>
-            {instructorMsg && <p className={cn("text-xs mt-3", instructorMsg.includes("submitted") ? "text-green-400" : "text-red-400")}>{instructorMsg}</p>}
-          </div>
-        )}
-
-        {/* Instructor: My Courses */}
-        {(isInstructor || isAdmin) && (
-          <div className="mb-12">
-            <div className="flex items-center justify-between mb-6">
-              <h2 className="text-xl font-bold text-zinc-900 flex items-center gap-2">
-                <BookOpen className="w-5 h-5 text-[#C87D5C]" /> My Courses
-              </h2>
-              <Link href="/courses/create" className="flex items-center gap-1.5 text-sm font-medium text-[#1B2A5C] hover:text-[#0F1F44] transition-colors">
-                <Plus className="w-4 h-4" /> Create Course
-              </Link>
-            </div>
-
-            {myCourses.length === 0 ? (
-              <div className="text-center py-12 bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl">
-                <BookOpen className="w-8 h-8 mx-auto text-zinc-600 mb-3" />
-                <p className="text-zinc-500 text-sm">No courses yet. Create your first course!</p>
-              </div>
-            ) : (
-              <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="space-y-3">
-                {myCourses.map((course) => (
-                  <motion.div key={course.id} variants={fadeUp}
-                    className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4 flex items-center gap-4">
-                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-[#C87D5C]/30 to-[#1B2A5C]/20 flex items-center justify-center text-zinc-900 font-bold text-sm shrink-0">
-                      {course.title.charAt(0)}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <Link href={`/courses/${course.id}`} className="text-sm font-semibold text-zinc-900 hover:text-[#1B2A5C] transition-colors truncate block">
-                        {course.title}
-                      </Link>
-                      <div className="flex items-center gap-3 text-xs text-zinc-500 mt-0.5">
-                        <span>{course.level}</span>
-                        <span>{course.lessonsCount} lessons</span>
-                        <span>{course.enrolledCount} enrolled</span>
-                        <span className={course.isPublished ? "text-green-400" : "text-amber-400"}>
-                          {course.isPublished ? "Published" : "Draft"}
-                        </span>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button onClick={() => handlePublish(course.id, !course.isPublished)}
-                        className="p-2 rounded-lg hover:bg-white/60 text-zinc-600 hover:text-zinc-900 transition-colors" title={course.isPublished ? "Unpublish" : "Publish"}>
-                        {course.isPublished ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                      </button>
-                      <button onClick={() => handleDelete(course.id)}
-                        className="p-2 rounded-lg hover:bg-red-500/10 text-zinc-600 hover:text-red-400 transition-colors" title="Delete">
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                    </div>
-                  </motion.div>
-                ))}
-              </motion.div>
-            )}
-          </div>
-        )}
-
-        {/* Instructor: Students Table */}
-        {(isInstructor || isAdmin) && students.length > 0 && (
-          <div>
-            <h2 className="text-xl font-bold text-zinc-900 mb-6 flex items-center gap-2">
-              <Users className="w-5 h-5 text-[#0F1F44]" /> Your Students
-            </h2>
-            <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-zinc-200 text-zinc-600">
-                      <th className="text-left px-4 py-3 font-medium">Student</th>
-                      <th className="text-left px-4 py-3 font-medium">Email</th>
-                      <th className="text-left px-4 py-3 font-medium">Course</th>
-                      <th className="text-left px-4 py-3 font-medium">Enrolled</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {students.map((s, i) => (
-                      <tr key={i} className="border-b border-zinc-200 hover:bg-white/[0.02] transition-colors">
-                        <td className="px-4 py-3 text-zinc-900">{s.studentName}</td>
-                        <td className="px-4 py-3 text-zinc-600">{s.email}</td>
-                        <td className="px-4 py-3 text-zinc-500">{s.courseTitle}</td>
-                        <td className="px-4 py-3 text-zinc-500">{new Date(s.enrolledAt).toLocaleDateString()}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
-    </section>
+    }>
+      <DashboardPageInner />
+    </Suspense>
   );
 }
