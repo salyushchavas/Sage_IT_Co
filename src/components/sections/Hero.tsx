@@ -105,9 +105,9 @@ export default function Hero() {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 1.2 }}
         >
-          <GlowButton href="/services">Explore Services</GlowButton>
-          <GlowButton href="/contact" variant="secondary">
-            Contact Us
+          <GlowButton href="/enroll">Start Your Journey</GlowButton>
+          <GlowButton href="/services" variant="secondary">
+            Explore Services
           </GlowButton>
         </motion.div>
       </div>

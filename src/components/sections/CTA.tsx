@@ -22,16 +22,16 @@ export default function CTA() {
         viewport={{ once: true }}
       >
         <h2 className="text-2xl sm:text-3xl md:text-5xl font-bold text-zinc-900 mb-4 sm:mb-6 text-balance">
-          Ready to <span className="text-gradient">Transform</span> Your Business?
+          Ready to <span className="text-gradient">Start</span> Your Journey?
         </h2>
         <p className="text-zinc-600 text-base sm:text-lg mb-8 sm:mb-10 leading-relaxed">
-          Let&apos;s discuss how Sage IT can help you leverage cutting-edge technology to drive growth,
-          efficiency, and innovation.
+          Enroll in the Sage program and we&apos;ll pair you with mentors, structured learning tracks,
+          and the placement support you need to grow.
         </p>
         <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-          <GlowButton href="/contact">Start a Conversation</GlowButton>
-          <GlowButton href="/careers" variant="secondary">
-            Join Our Team
+          <GlowButton href="/enroll">Get Started</GlowButton>
+          <GlowButton href="/contact" variant="secondary">
+            Talk to Us
           </GlowButton>
         </div>
       </motion.div>

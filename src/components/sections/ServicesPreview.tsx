@@ -29,7 +29,8 @@ export default function ServicesPreview() {
           ))}
         </motion.div>
 
-        <div className="text-center mt-10 sm:mt-12">
+        <div className="mt-10 sm:mt-12 flex flex-col sm:flex-row items-center justify-center gap-3 sm:gap-4">
+          <GlowButton href="/enroll">Get Started</GlowButton>
           <GlowButton href="/services" variant="secondary">
             View All Services
           </GlowButton>
