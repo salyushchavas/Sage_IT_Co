@@ -587,6 +587,7 @@ public class DataSeeder implements CommandLineRunner {
         Role techAdvisorRole = roleRepository.findByName("TECHNICAL_ADVISOR").orElse(null);
         Role financeRole = roleRepository.findByName("FINANCE").orElse(null);
         Role opsAdminRole = roleRepository.findByName("OPERATIONS_ADMIN").orElse(null);
+        Role sysAdminRole = roleRepository.findByName("SYSTEM_ADMIN").orElse(null);
         if (ermRole == null || coachRole == null || techAdvisorRole == null) {
             log.warn("Phase 4 roles missing — skipping seed");
             return;
@@ -631,6 +632,13 @@ public class DataSeeder implements CommandLineRunner {
                     "Operations admin — enrollment queue, document review, assignments.");
         } else {
             log.warn("OPERATIONS_ADMIN role missing — admin.ops@sageitco.com not seeded");
+        }
+        if (sysAdminRole != null) {
+            seedTeamUser("superadmin@sageitco.com", "Super Admin", sysAdminRole,
+                    passwordEncoder.encode("SageSuper@2026"),
+                    "System administrator — full user CRUD, role assignment, audit access.");
+        } else {
+            log.warn("SYSTEM_ADMIN role missing — superadmin@sageitco.com not seeded");
         }
     }
 

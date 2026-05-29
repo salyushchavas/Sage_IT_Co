@@ -132,8 +132,12 @@ function DashboardPageInner() {
         router.replace("/finance-dashboard");
         return;
       }
-      if (role === "OPERATIONS_ADMIN" || role === "SYSTEM_ADMIN") {
+      if (role === "OPERATIONS_ADMIN") {
         router.replace("/operations");
+        return;
+      }
+      if (role === "SYSTEM_ADMIN") {
+        router.replace("/admin");
         return;
       }
 

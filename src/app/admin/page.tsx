@@ -1,16 +1,18 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
   Loader2, LayoutDashboard, Users, BookOpen, UserCheck,
-  Eye, EyeOff, Trash2, Check, X, TrendingUp, GraduationCap, DollarSign,
+  Eye, EyeOff, Trash2, Check, X, GraduationCap, DollarSign,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
-  getAnalytics, getUsers, getAdminCourses, publishCourse, unpublishCourse,
-  deleteCourse, getPendingInstructorRequests, approveInstructor, rejectInstructor,
+  getAnalytics, getUsers, getUserCountsAsAdmin, getAdminCourses, publishCourse,
+  unpublishCourse, deleteCourse, getPendingInstructorRequests, approveInstructor,
+  rejectInstructor,
+  type AdminUserCounts,
 } from "@/lib/api";
 import { cn, fadeUp } from "@/lib/utils";
 
@@ -41,8 +43,12 @@ export default function AdminPage() {
   const { user, isAuthenticated, isLoading: authLoading } = useAuth();
 
   const [tab, setTab] = useState<Tab>("overview");
+  const [usersSubTab, setUsersSubTab] = useState<"active" | "inactive">("active");
   const [analytics, setAnalytics] = useState<AnalyticsData | null>(null);
   const [users, setUsers] = useState<UserItem[]>([]);
+  const [userCounts, setUserCounts] = useState<AdminUserCounts>({
+    total: 0, active: 0, inactive: 0,
+  });
   const [courses, setCourses] = useState<CourseItem[]>([]);
   const [requests, setRequests] = useState<InstructorRequest[]>([]);
   const [loading, setLoading] = useState(true);
@@ -52,19 +58,24 @@ export default function AdminPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) { router.push("/login?redirect=/admin"); return; }
-    if (role !== "ADMIN") { router.push("/dashboard"); return; }
+    if (role !== "ADMIN" && role !== "SYSTEM_ADMIN") {
+      router.push("/dashboard");
+      return;
+    }
 
     const fetchData = async () => {
       setLoading(true);
       try {
-        const [analyticsData, usersData, coursesData, requestsData] = await Promise.all([
+        const [analyticsData, usersData, countsData, coursesData, requestsData] = await Promise.all([
           getAnalytics(),
-          getUsers(),
+          getUsers("active"),
+          getUserCountsAsAdmin(),
           getAdminCourses(),
           getPendingInstructorRequests(),
         ]);
         setAnalytics(analyticsData as AnalyticsData);
         setUsers(usersData as UserItem[]);
+        setUserCounts(countsData);
         setCourses(coursesData as CourseItem[]);
         setRequests(requestsData as InstructorRequest[]);
       } catch { /* */ }
@@ -72,6 +83,21 @@ export default function AdminPage() {
     };
     fetchData();
   }, [authLoading, isAuthenticated, role, router]);
+
+  // Refetch the users list whenever the active/inactive subtab flips.
+  const refetchUsers = useCallback(async (sub: "active" | "inactive") => {
+    try {
+      const data = await getUsers(sub);
+      setUsers(data as UserItem[]);
+    } catch {
+      /* keep previous list on failure */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab !== "users") return;
+    void refetchUsers(usersSubTab);
+  }, [tab, usersSubTab, refetchUsers]);
 
   const handlePublish = async (courseId: number, publish: boolean) => {
     try {
@@ -213,7 +239,36 @@ export default function AdminPage() {
           {/* USERS */}
           {tab === "users" && (
             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
-              <h1 className="text-2xl font-bold text-zinc-900 mb-8">All Users ({users.length})</h1>
+              <h1 className="text-2xl font-bold text-zinc-900 mb-5">All Users</h1>
+
+              <div className="flex items-center gap-2 mb-5">
+                <button
+                  onClick={() => setUsersSubTab("active")}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-semibold transition cursor-pointer",
+                    usersSubTab === "active"
+                      ? "bg-sage-navy text-white shadow-sm"
+                      : "bg-white/60 border border-zinc-200 text-zinc-600 hover:border-sage-navy hover:text-sage-navy"
+                  )}
+                >
+                  Active users ({userCounts.active})
+                </button>
+                <button
+                  onClick={() => setUsersSubTab("inactive")}
+                  className={cn(
+                    "px-4 py-2 rounded-lg text-sm font-semibold transition cursor-pointer",
+                    usersSubTab === "inactive"
+                      ? "bg-red-700 text-white shadow-sm"
+                      : "bg-white/60 border border-zinc-200 text-zinc-600 hover:border-red-400 hover:text-red-700"
+                  )}
+                >
+                  Deactivated users ({userCounts.inactive})
+                </button>
+                <span className="ml-auto text-xs text-zinc-500 hidden sm:block">
+                  Click any row to view + manage
+                </span>
+              </div>
+
               <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
@@ -222,22 +277,45 @@ export default function AdminPage() {
                       <th className="text-left px-4 py-3 font-medium">Name</th>
                       <th className="text-left px-4 py-3 font-medium">Email</th>
                       <th className="text-left px-4 py-3 font-medium">Role</th>
-                      <th className="text-left px-4 py-3 font-medium">Joined</th>
+                      <th className="text-left px-4 py-3 font-medium">
+                        {usersSubTab === "active" ? "Joined" : "Status"}
+                      </th>
                     </tr></thead>
                     <tbody>
                       {users.map((u) => (
-                        <tr key={u.id} className="border-b border-zinc-200 hover:bg-white/[0.02]">
+                        <tr
+                          key={u.id}
+                          onClick={() => router.push(`/admin/users/${u.id}`)}
+                          className="border-b border-zinc-200 hover:bg-sage-navy/5 cursor-pointer transition-colors"
+                        >
                           <td className="px-4 py-3 text-zinc-500">#{u.id}</td>
                           <td className="px-4 py-3 text-zinc-900">{u.fullName}</td>
                           <td className="px-4 py-3 text-zinc-600">{u.email}</td>
                           <td className="px-4 py-3"><span className={cn("text-xs px-2 py-0.5 rounded-full",
-                            u.role === "ADMIN" ? "bg-[#C87D5C]/20 text-[#C87D5C]" :
+                            u.role === "ADMIN" || u.role === "SYSTEM_ADMIN" ? "bg-[#C87D5C]/20 text-[#C87D5C]" :
                             u.role === "INSTRUCTOR" ? "bg-[#1B2A5C]/20 text-[#1B2A5C]" :
                             "bg-white/80 text-zinc-600"
                           )}>{u.role}</span></td>
-                          <td className="px-4 py-3 text-zinc-500">{new Date(u.createdAt).toLocaleDateString()}</td>
+                          <td className="px-4 py-3 text-zinc-500">
+                            {usersSubTab === "active" ? (
+                              new Date(u.createdAt).toLocaleDateString()
+                            ) : (
+                              <span className="text-xs px-2 py-0.5 rounded-full bg-red-50 text-red-700">
+                                Deactivated
+                              </span>
+                            )}
+                          </td>
                         </tr>
                       ))}
+                      {users.length === 0 && (
+                        <tr>
+                          <td colSpan={5} className="px-4 py-6 text-center text-zinc-400">
+                            {usersSubTab === "active"
+                              ? "No active users found."
+                              : "No deactivated users."}
+                          </td>
+                        </tr>
+                      )}
                     </tbody>
                   </table>
                 </div>

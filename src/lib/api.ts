@@ -243,8 +243,55 @@ export async function getAnalytics() {
   return wrapper.data;
 }
 
-export async function getUsers() {
-  const wrapper = await apiFetch<ApiResponse<unknown[]>>("/api/admin/users");
+export async function getUsers(status?: "active" | "inactive" | "all") {
+  const qs = status && status !== "all" ? `?status=${status}` : "";
+  const wrapper = await apiFetch<ApiResponse<unknown[]>>(`/api/admin/users${qs}`);
+  return wrapper.data;
+}
+
+export interface AdminUserCounts {
+  total: number;
+  active: number;
+  inactive: number;
+}
+
+export async function getUserCountsAsAdmin(): Promise<AdminUserCounts> {
+  const wrapper = await apiFetch<ApiResponse<AdminUserCounts>>(
+    "/api/admin/users/counts");
+  return wrapper.data ?? { total: 0, active: 0, inactive: 0 };
+}
+
+export async function getUserProfileAsAdmin(userId: number | string) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/users/${userId}/profile`);
+  return wrapper.data;
+}
+
+export async function updateUserRoleAsAdmin(userId: number | string, role: string) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/users/${userId}/role`,
+    { method: "PUT", body: JSON.stringify({ role }) });
+  return wrapper.data;
+}
+
+export async function updateUserStatusAsAdmin(userId: number | string, active: boolean) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/users/${userId}/status`,
+    { method: "PUT", body: JSON.stringify({ active }) });
+  return wrapper.data;
+}
+
+export async function reactivateUserAsAdmin(userId: number | string) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/users/${userId}/reactivate`,
+    { method: "PUT" });
+  return wrapper.data;
+}
+
+export async function softDeleteUserAsAdmin(userId: number | string) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/users/${userId}`,
+    { method: "DELETE" });
   return wrapper.data;
 }
 
@@ -1639,8 +1686,10 @@ export async function getAssignmentQueue(): Promise<Record<string, unknown>[]> {
  *   ERM            -> /erm-dashboard
  *   COACH / TECHNICAL_ADVISOR -> /coach-dashboard
  *   FINANCE        -> /finance-dashboard
- *   OPERATIONS_ADMIN / SYSTEM_ADMIN -> /operations
- *   ADMIN          -> /admin (legacy LMS admin)
+ *   OPERATIONS_ADMIN -> /operations
+ *   SYSTEM_ADMIN / ADMIN -> /admin (full admin surface; SYSTEM_ADMIN
+ *                                   gets the same LMS view + can still
+ *                                   reach /operations via sidebar)
  *   INSTRUCTOR     -> /instructor
  *   anything else / participant -> /dashboard
  */
@@ -1649,8 +1698,8 @@ export function dashboardRouteForRole(role: string | null | undefined): string {
   if (r === "ERM") return "/erm-dashboard";
   if (r === "COACH" || r === "TECHNICAL_ADVISOR") return "/coach-dashboard";
   if (r === "FINANCE") return "/finance-dashboard";
-  if (r === "OPERATIONS_ADMIN" || r === "SYSTEM_ADMIN") return "/operations";
-  if (r === "ADMIN") return "/admin";
+  if (r === "OPERATIONS_ADMIN") return "/operations";
+  if (r === "SYSTEM_ADMIN" || r === "ADMIN") return "/admin";
   if (r === "INSTRUCTOR") return "/instructor";
   return "/dashboard";
 }
