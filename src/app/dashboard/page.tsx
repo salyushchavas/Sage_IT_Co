@@ -11,6 +11,7 @@ import DocumentsTab from "@/components/dashboard/tabs/DocumentsTab";
 import EmploymentTab from "@/components/dashboard/tabs/EmploymentTab";
 import HomeTab from "@/components/dashboard/tabs/HomeTab";
 import InterviewTab from "@/components/dashboard/tabs/InterviewTab";
+import MyCoursesTab from "@/components/dashboard/tabs/MyCoursesTab";
 import LockedTabView from "@/components/dashboard/LockedTabView";
 import MessagesTab from "@/components/dashboard/tabs/MessagesTab";
 import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
@@ -293,13 +294,7 @@ function renderGatedReal(
     // ComingSoonTab card lands the user softly until each tab gets a
     // dedicated build-out.
     case "courses":
-      return (
-        <ComingSoonTab
-          title="My Courses"
-          copy="Course enrollment and progress tracking ships in a follow-up phase."
-          hint="In the meantime, your assigned coach can recommend resources via the My Team tab."
-        />
-      );
+      return <MyCoursesTab />;
     case "weekly":
       return (
         <ComingSoonTab
