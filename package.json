@@ -12,6 +12,7 @@
     "@hookform/resolvers": "^5.2.2",
     "@react-three/drei": "^10.7.7",
     "@react-three/fiber": "^9.5.0",
+    "@types/react-signature-canvas": "^1.0.7",
     "@types/three": "^0.183.1",
     "clsx": "^2.1.1",
     "framer-motion": "^12.38.0",
@@ -21,6 +22,7 @@
     "react": "^18",
     "react-dom": "^18",
     "react-hook-form": "^7.72.1",
+    "react-signature-canvas": "^1.1.0-alpha.2",
     "tailwind-merge": "^3.5.0",
     "three": "^0.183.2",
     "zod": "^4.3.6"

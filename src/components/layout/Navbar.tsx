@@ -250,7 +250,7 @@ export default function Navbar() {
               <Link href="/login" className="text-sm text-zinc-600 hover:text-zinc-900 transition-colors px-4 py-2">
                 Sign In
               </Link>
-              <GlowButton href="/signup">Get Started</GlowButton>
+              <GlowButton href="/enroll">Get Started</GlowButton>
             </>
           )}
         </div>
@@ -314,7 +314,7 @@ export default function Navbar() {
                     <Link href="/login" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">
                       Sign In
                     </Link>
-                    <GlowButton href="/signup" className="w-full">
+                    <GlowButton href="/enroll" className="w-full">
                       Get Started
                     </GlowButton>
                   </>

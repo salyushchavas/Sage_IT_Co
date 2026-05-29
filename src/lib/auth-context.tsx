@@ -27,6 +27,15 @@ interface AuthContextValue {
   login: (email: string, password: string) => Promise<void>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
+  // Stash a freshly-minted session (e.g. from the /enroll endpoint
+  // that returns tokens alongside the new participant) without
+  // having to re-login. Mirrors the storeTokens path used after a
+  // normal login/register.
+  setSession: (data: AuthResponse) => void;
+  // Re-fetch the current user profile from the backend. Used by the
+  // onboarding pages to pick up workflow-state changes (e.g.
+  // acknowledgmentComplete flipping true after the page submits).
+  refreshUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -96,9 +105,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     window.location.href = "/";
   }, [clearAuth]);
 
+  const setSession = useCallback((data: AuthResponse) => {
+    storeTokens(data);
+  }, []);
+
+  const refreshUser = useCallback(async () => {
+    try {
+      const profile = await getProfile();
+      setUser(profile);
+    } catch {
+      // Swallow — refreshUser is a best-effort sync. Pages decide
+      // whether to redirect on stale data themselves.
+    }
+  }, []);
+
   return (
     <AuthContext.Provider
-      value={{ user, isAuthenticated: !!user, isLoading, login, register, logout }}
+      value={{
+        user,
+        isAuthenticated: !!user,
+        isLoading,
+        login,
+        register,
+        logout,
+        setSession,
+        refreshUser,
+      }}
     >
       {children}
     </AuthContext.Provider>
