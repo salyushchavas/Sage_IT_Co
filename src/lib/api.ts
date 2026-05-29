@@ -44,6 +44,9 @@ export interface UserDTO {
   programSelectionComplete?: boolean;
   agreementComplete?: boolean;
   checkUploadComplete?: boolean;
+  // Cached profile-completion percentage. The banner watches this so
+  // it can re-fetch when a step elsewhere on the page flips it.
+  profileCompletionPct?: number;
 }
 
 export interface AuthResponse {

@@ -5,25 +5,29 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
+import ProfileCompletionChecklist from "@/components/dashboard/ProfileCompletionChecklist";
 import { useAuth } from "@/lib/auth-context";
-import { getOnboardingRoute, isDashboardStatus } from "@/lib/api";
+import {
+  getOnboardingRoute,
+  getProfileCompletion,
+  isDashboardStatus,
+  type ProfileCompletion,
+} from "@/lib/api";
 
 /**
  * Participant dashboard surface.
  *
  * Routing rules (in order):
- *   1. Not signed in → /login
- *   2. ADMIN role → /admin (preserves existing admin panel)
- *   3. INSTRUCTOR role → /admin (Sage doesn't have a separate
- *      instructor surface yet; falls back to admin)
- *   4. No participantId → /enroll
- *   5. currentStatus not a dashboard-tier value → matching
+ *   1. Not signed in -> /login
+ *   2. ADMIN / INSTRUCTOR -> /admin
+ *   3. No participantId -> /enroll
+ *   4. currentStatus not a dashboard-tier value -> matching
  *      onboarding step
- *   6. Otherwise → render the sidebar shell with placeholder tabs
+ *   5. Otherwise -> sidebar shell with tab content
  *
- * Tab content is intentionally stubbed in Phase 9A. Real content
- * lands in 9B (Complete Profile), 9C (Courses + Wishlist locked
- * views), and 9D (everything else).
+ * Phase 9B fills in the Complete Profile tab (checklist + banner +
+ * sidebar % badge); the remaining tabs stay as placeholders for 9C/9D.
  */
 function DashboardPageInner() {
   const router = useRouter();
@@ -33,6 +37,12 @@ function DashboardPageInner() {
 
   const { user, isLoading, refreshUser } = useAuth();
   const [routingDecided, setRoutingDecided] = useState(false);
+
+  // Profile-completion snapshot fetched once at the dashboard level so
+  // we can render the sidebar % badge alongside whatever tab the user
+  // is on. The banner + checklist refetch their own copies so they
+  // stay live after a step is completed.
+  const [completion, setCompletion] = useState<ProfileCompletion | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -51,7 +61,7 @@ function DashboardPageInner() {
       }
 
       // Participant lifecycle. Pull a fresh profile if the in-memory
-      // copy is missing critical fields — the auth context can hold
+      // copy is missing critical fields -- the auth context can hold
       // stale data after soft navigations.
       let status = user.currentStatus;
       let participantId = user.participantId;
@@ -59,7 +69,7 @@ function DashboardPageInner() {
         try {
           await refreshUser();
         } catch {
-          // ignore — we'll fall through to the not-enrolled branch
+          // ignore -- we'll fall through to the not-enrolled branch
         }
         if (cancelled) return;
       }
@@ -82,6 +92,18 @@ function DashboardPageInner() {
     };
   }, [isLoading, user, router, refreshUser]);
 
+  // Fetch profile completion once the gatekeeper is done. Refetches
+  // when the user's stored profileCompletionPct changes (after a step
+  // is submitted from elsewhere).
+  useEffect(() => {
+    if (!routingDecided) return;
+    let cancelled = false;
+    getProfileCompletion()
+      .then((res) => { if (!cancelled) setCompletion(res); })
+      .catch(() => { /* badge just stays hidden */ });
+    return () => { cancelled = true; };
+  }, [routingDecided, user?.profileCompletionPct]);
+
   if (isLoading || !routingDecided) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -90,8 +112,23 @@ function DashboardPageInner() {
     );
   }
 
+  // Sidebar badge: percentage chip while profile is incomplete.
+  const badges =
+    completion && completion.completionPercentage < 100
+      ? {
+          "complete-profile": (
+            <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
+              {completion.completionPercentage}%
+            </span>
+          ),
+        }
+      : undefined;
+
   return (
-    <DashboardLayout activeTab={activeTab}>
+    <DashboardLayout activeTab={activeTab} badges={badges}>
+      {/* Sticky completion banner above every tab. Self-hides at 100%
+          (with a one-time 5s celebration) or for 24h after dismiss. */}
+      <ProfileCompletionBanner />
       {renderTab(activeTab)}
     </DashboardLayout>
   );
@@ -106,15 +143,14 @@ function renderTab(tab: string) {
       return (
         <PlaceholderTab
           title="Dashboard"
-          body="Welcome back. Phase 9B will fill this with your participant snapshot -- current status, progress, next action."
+          body="Welcome back. Phase 9C/9D will fill this with your participant snapshot -- current status, progress, next action."
         />
       );
     case "complete-profile":
       return (
-        <PlaceholderTab
-          title="Complete Your Profile"
-          body="Phase 9B will surface the onboarding checklist here (Acknowledgment, Documents, Program Selection, Agreement, Check Upload, About You)."
-        />
+        <div className="px-6 md:px-10 py-8 md:py-10 max-w-4xl">
+          <ProfileCompletionChecklist />
+        </div>
       );
     case "courses":
       return (
