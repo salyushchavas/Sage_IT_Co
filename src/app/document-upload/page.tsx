@@ -304,7 +304,7 @@ function DocumentUploadPageInner() {
                     <button
                       type="button"
                       onClick={() => handleView(d)}
-                      className="text-[#1B2A5C] hover:text-[#2D4480] cursor-pointer"
+                      className="text-sage-navy hover:text-sage-navy-deep cursor-pointer"
                       aria-label="View"
                     >
                       <Eye size={14} />
@@ -347,7 +347,7 @@ function DocumentUploadPageInner() {
                   type="button"
                   onClick={() => fileInputs.current[slot.type]?.click()}
                   disabled={uploading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#1B2A5C] text-white hover:bg-[#2D4480] disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
                 >
                   {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadIcon size={12} />}
                   {uploading ? "Uploading…" : (docs.length > 0 ? "Add another" : "Upload")}
@@ -358,7 +358,7 @@ function DocumentUploadPageInner() {
                   type="button"
                   onClick={() => fileInputs.current[slot.type]?.click()}
                   disabled={uploading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-[#1B2A5C] hover:text-[#1B2A5C] disabled:opacity-60 transition cursor-pointer"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
                 >
                   {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadIcon size={12} />}
                   Replace
@@ -402,8 +402,8 @@ function DocumentUploadPageInner() {
 
   if (authLoading || !gateChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     );
   }
@@ -414,7 +414,7 @@ function DocumentUploadPageInner() {
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
-          <Link href="/acknowledgment" className="text-xs text-[#1B2A5C] font-semibold hover:underline mt-3 inline-block">
+          <Link href="/acknowledgment" className="text-xs text-sage-navy font-semibold hover:underline mt-3 inline-block">
             ← Back to acknowledgment
           </Link>
         </div>
@@ -445,11 +445,11 @@ function DocumentUploadPageInner() {
               <strong className="text-gray-800">{completedRequired}</strong> of{" "}
               <strong className="text-gray-800">{requiredCount}</strong> required documents uploaded
             </span>
-            <span className="font-mono text-[#1B2A5C] font-bold">{progressPct}%</span>
+            <span className="font-mono text-sage-navy font-bold">{progressPct}%</span>
           </div>
           <div className="mt-1.5 h-2 w-full rounded-full bg-gray-100 overflow-hidden">
             <div
-              className="h-full bg-[#1B2A5C] transition-all"
+              className="h-full bg-sage-navy transition-all"
               style={{ width: `${progressPct}%` }}
             />
           </div>
@@ -500,7 +500,7 @@ function DocumentUploadPageInner() {
             type="button"
             onClick={handleSaveLater}
             disabled={refreshing || completing}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-[#1B2A5C] hover:text-[#1B2A5C] disabled:opacity-60 transition cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
           >
             <Save size={14} /> Save and continue later
           </button>
@@ -511,7 +511,7 @@ function DocumentUploadPageInner() {
             className={
               "flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition "
               + (canContinue
-                  ? "bg-[#1B2A5C] text-white hover:bg-[#2D4480] shadow-md hover:shadow-lg cursor-pointer"
+                  ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-md hover:shadow-lg cursor-pointer"
                   : "bg-gray-200 text-gray-500 cursor-not-allowed")
             }
           >
@@ -533,8 +533,8 @@ function DocumentUploadPageInner() {
 export default function DocumentUploadPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     }>
       <DocumentUploadPageInner />
