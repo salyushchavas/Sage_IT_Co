@@ -124,6 +124,10 @@ function DashboardPageInner() {
         router.replace("/erm-dashboard");
         return;
       }
+      if (role === "COACH" || role === "TECHNICAL_ADVISOR") {
+        router.replace("/coach-dashboard");
+        return;
+      }
       if (role === "OPERATIONS_ADMIN" || role === "SYSTEM_ADMIN") {
         router.replace("/operations");
         return;
