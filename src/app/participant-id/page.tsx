@@ -6,17 +6,17 @@ import Link from "next/link";
 import { motion } from "framer-motion";
 import { CheckCircle2, Copy, Loader2, Mail } from "lucide-react";
 
+import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import { useAuth } from "@/lib/auth-context";
 import { getParticipantMe } from "@/lib/api";
 
 /**
- * Phase 1C — read-only participant-ID display. The page is no longer
- * part of the main onboarding flow (verify-email now routes straight
- * to /dashboard), but stays reachable for users who want to look
- * their ID up. Linked from the profile menu + sidebar.
+ * Read-only participant-ID display. Not part of the active
+ * onboarding chain (verify-email routes straight to /dashboard now),
+ * but stays reachable from the profile menu + sidebar so users can
+ * look their ID up at any time.
  *
- * No routing guard — anyone signed-in can view this page, regardless
- * of where their currentStatus says they are.
+ * No completion-state guard — any signed-in user can view this.
  */
 export default function ParticipantIdPage() {
   const router = useRouter();
@@ -61,45 +61,49 @@ export default function ParticipantIdPage() {
 
   if (authLoading || loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center bg-[#F8FAFC] px-4">
+    <SplitAuthLayout
+      heroTitle={"Welcome to\nSage IT Co."}
+      heroSubtitle="Every participant gets a unique ID that follows them through the program — use it on tickets, emails, and any correspondence with the team."
+      heroFooter="Your participant ID"
+    >
       <motion.section
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="w-full max-w-md bg-white rounded-2xl shadow-lg border border-gray-100 p-6 sm:p-8 text-center"
+        className="text-center"
       >
-        <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-700 mb-4">
-          <CheckCircle2 size={22} />
+        <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-50 text-emerald-700 mb-4">
+          <CheckCircle2 size={26} />
         </div>
-        <h1 className="font-serif text-2xl font-bold text-gray-900">
+        <h2 className="text-3xl font-bold text-sage-navy">
           Your Participant ID
-        </h1>
-        <p className="text-sm text-gray-500 mt-2">
+        </h2>
+        <p className="text-sm text-gray-600 mt-2">
           Use this ID in all future communications. A copy was also emailed to you.
         </p>
 
         {error && (
-          <div className="mt-5 p-3 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm text-left">
+          <div className="mt-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm text-left">
             {error}
           </div>
         )}
 
-        <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-gray-200 bg-[#F0F2F8] px-5 py-4 shadow-sm">
-          <code className="font-mono font-bold text-xl tracking-[0.2em] text-[#1B2A5C]">
+        <div className="mt-6 inline-flex items-center gap-3 rounded-xl border border-sage-navy/20 bg-sage-navy/5 px-5 py-4 shadow-sm">
+          <code className="font-mono font-bold text-xl tracking-[0.2em] text-sage-navy">
             {participantId ?? "—"}
           </code>
           <button
             type="button"
             onClick={handleCopy}
             disabled={!participantId}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-[#1B2A5C] bg-white px-3 py-1.5 text-xs font-bold text-[#1B2A5C] hover:bg-[#1B2A5C] hover:text-white transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            className="inline-flex items-center gap-1.5 rounded-lg border border-sage-navy bg-white px-3 py-1.5 text-xs font-bold text-sage-navy hover:bg-sage-navy hover:text-white transition disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
           >
             <Copy size={12} /> {copied ? "Copied!" : "Copy"}
           </button>
@@ -111,11 +115,11 @@ export default function ParticipantIdPage() {
 
         <Link
           href="/dashboard"
-          className="mt-7 inline-flex items-center justify-center gap-2 bg-[#1B2A5C] hover:bg-[#2D4480] text-white text-sm font-bold px-6 py-2.5 rounded-lg shadow-sm hover:shadow-md transition"
+          className="mt-7 inline-flex w-full items-center justify-center gap-2 bg-sage-navy hover:bg-sage-navy-deep text-white text-sm font-semibold px-6 py-3 rounded-lg transition"
         >
-          ← Back to Dashboard
+          Continue to Dashboard →
         </Link>
       </motion.section>
-    </div>
+    </SplitAuthLayout>
   );
 }
