@@ -1424,4 +1424,125 @@ export async function listParticipantPaymentHistory(): Promise<PaymentLedgerDTO[
   return wrapper.data ?? [];
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// PHASE 10A APPEND -- ERM dashboard helpers + admin assignment
+// ═══════════════════════════════════════════════════════════════════
+
+export interface ErmPendingEmploymentRow {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  employmentId: number;
+  employerClient: string | null;
+  jobTitle: string | null;
+  startDate: string | null;
+  location: string | null;
+  employmentType: string | null;
+  offerDocumentUrl: string | null;
+  notes: string | null;
+  acceptanceDate: string | null;
+}
+
+export async function getErmPendingEmployment(): Promise<ErmPendingEmploymentRow[]> {
+  const wrapper = await apiFetch<ApiResponse<ErmPendingEmploymentRow[]>>(
+    "/api/erm/employment/pending");
+  return wrapper.data ?? [];
+}
+
+export async function verifyEmployment(participantId: number, notes = ""): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/erm/employment/${participantId}/verify`,
+    { method: "PUT", body: JSON.stringify({ verified: true, notes }) });
+  return wrapper.data;
+}
+
+export interface ErmPendingPhaseRow {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  phaseCompletionId: number;
+  acceptedAt: string | null;
+  acknowledgmentVersion: string | null;
+}
+
+export async function getErmPendingPhaseApprovals(): Promise<ErmPendingPhaseRow[]> {
+  const wrapper = await apiFetch<ApiResponse<ErmPendingPhaseRow[]>>(
+    "/api/erm/phases/pending");
+  return wrapper.data ?? [];
+}
+
+export async function approvePhase1(participantId: number, notes = ""): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/erm/phases/${participantId}/approve`,
+    { method: "PUT", body: JSON.stringify({ approved: true, notes }) });
+  return wrapper.data;
+}
+
+export interface ErmRosterRow {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  email: string | null;
+  program: string | null;
+  technology: string | null;
+  targetJobTitle: string | null;
+  currentStatus: string | null;
+  lastActivity: string | null;
+}
+
+export async function getErmRoster(): Promise<ErmRosterRow[]> {
+  const wrapper = await apiFetch<ApiResponse<ErmRosterRow[]>>("/api/erm/participants");
+  return wrapper.data ?? [];
+}
+
+export async function getErmParticipantDetail(participantId: number): Promise<Record<string, unknown>> {
+  const wrapper = await apiFetch<ApiResponse<Record<string, unknown>>>(
+    `/api/erm/participants/${participantId}`);
+  return wrapper.data ?? {};
+}
+
+export async function getErmReports(): Promise<WeeklyReportDTO[]> {
+  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO[]>>("/api/erm/reports");
+  return wrapper.data ?? [];
+}
+
+export async function reviewErmReport(reportId: number, notes: string): Promise<WeeklyReportDTO> {
+  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO>>(
+    `/api/erm/reports/${reportId}/review`,
+    { method: "PUT", body: JSON.stringify({ notes }) });
+  return wrapper.data;
+}
+
+export async function addErmNote(
+  participantId: number,
+  note: string,
+  escalation = false,
+): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/erm/participants/${participantId}/notes`,
+    { method: "POST", body: JSON.stringify({ note, escalation }) });
+  return wrapper.data;
+}
+
+export async function assignErmToParticipant(
+  participantId: number,
+  ermUserId: number,
+): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/assignments/erm/${participantId}`,
+    { method: "PUT", body: JSON.stringify({ ermUserId }) });
+  return wrapper.data;
+}
+
+export async function assignCoachToParticipant(
+  participantId: number,
+  coachUserId: number,
+  coachRole: string,
+): Promise<unknown> {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/admin/assignments/coach/${participantId}`,
+    { method: "PUT", body: JSON.stringify({ coachUserId, coachRole }) });
+  return wrapper.data;
+}
+
 // ── Finance side ──────────────────────────────────────────────────
