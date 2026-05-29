@@ -156,6 +156,22 @@ export function logout() {
   return Promise.resolve();
 }
 
+export async function requestPasswordReset(email: string): Promise<{ message: string }> {
+  const wrapper = await apiFetch<ApiResponse<{ message: string }>>(
+    "/api/auth/forgot-password",
+    { method: "POST", body: JSON.stringify({ email }) },
+  );
+  return wrapper.data;
+}
+
+export async function resetPassword(token: string, newPassword: string): Promise<{ message: string }> {
+  const wrapper = await apiFetch<ApiResponse<{ message: string }>>(
+    "/api/auth/reset-password",
+    { method: "POST", body: JSON.stringify({ token, newPassword }) },
+  );
+  return wrapper.data;
+}
+
 // ─── User / Profile ─────────────────────────────────────────────────
 
 export async function getProfile(): Promise<UserDTO> {

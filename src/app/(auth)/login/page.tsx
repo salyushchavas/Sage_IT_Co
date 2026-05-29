@@ -22,6 +22,7 @@ function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get("redirect") || "/dashboard";
+  const justReset = searchParams.get("reset") === "1";
   const { login } = useAuth();
 
   const [showPassword, setShowPassword] = useState(false);
@@ -64,6 +65,12 @@ function LoginForm() {
         <p className="text-center text-gray-600 mb-8">
           Sign in to continue your learning journey.
         </p>
+
+        {justReset && (
+          <div className="mb-5 px-4 py-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm">
+            Password updated. Sign in with your new password.
+          </div>
+        )}
 
         {apiError && (
           <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
