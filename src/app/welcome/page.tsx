@@ -145,8 +145,8 @@ export default function WelcomePage() {
   // ── Render ───────────────────────────────────────────────────
   if (authLoading || !gateChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     );
   }
@@ -156,7 +156,7 @@ export default function WelcomePage() {
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
-          <Link href="/dashboard" className="text-xs text-[#1B2A5C] font-semibold hover:underline mt-3 inline-block">
+          <Link href="/dashboard" className="text-xs text-sage-navy font-semibold hover:underline mt-3 inline-block">
             Go to dashboard
           </Link>
         </div>
@@ -177,7 +177,7 @@ export default function WelcomePage() {
         className="bg-white rounded-2xl shadow-lg border border-gray-100 px-5 py-6 sm:px-7 sm:py-7"
       >
         <div className="text-center">
-          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-[#F0F2F8] text-[#1B2A5C] mb-3 text-2xl">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-2xl bg-sage-navy/5 text-sage-navy mb-3 text-2xl">
             🎉
           </div>
           <h1 className="font-serif text-2xl sm:text-3xl font-bold text-gray-900">
@@ -253,7 +253,7 @@ export default function WelcomePage() {
               type="button"
               onClick={handleRefresh}
               disabled={refreshing}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-600 hover:border-[#1B2A5C] hover:text-[#1B2A5C] disabled:opacity-50 cursor-pointer transition"
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-white border border-gray-200 text-gray-600 hover:border-sage-navy hover:text-sage-navy disabled:opacity-50 cursor-pointer transition"
             >
               <RefreshCw size={12} className={refreshing ? "animate-spin" : ""} />
               {refreshing ? "Checking…" : "Check now"}
@@ -268,7 +268,7 @@ export default function WelcomePage() {
               className={
                 "inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-bold transition "
                 + (dashboardReady
-                    ? "bg-[#1B2A5C] text-white hover:bg-[#2D4480] shadow-md hover:shadow-lg cursor-pointer"
+                    ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-md hover:shadow-lg cursor-pointer"
                     : "bg-gray-200 text-gray-500 cursor-not-allowed")
               }
             >
@@ -291,11 +291,11 @@ function StatusRow({ done, inProgress, label }: {
       {done ? (
         <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
       ) : inProgress ? (
-        <Loader2 size={16} className="animate-spin text-[#1B2A5C] shrink-0" />
+        <Loader2 size={16} className="animate-spin text-sage-navy shrink-0" />
       ) : (
         <Clock size={16} className="text-gray-300 shrink-0" />
       )}
-      <span className={done ? "text-gray-800" : inProgress ? "text-[#1B2A5C] font-medium" : "text-gray-400"}>
+      <span className={done ? "text-gray-800" : inProgress ? "text-sage-navy font-medium" : "text-gray-400"}>
         {label}
       </span>
     </li>

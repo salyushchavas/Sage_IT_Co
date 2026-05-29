@@ -171,8 +171,8 @@ function CheckUploadPageInner() {
 
   if (isLoading || !gateChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     );
   }
@@ -184,7 +184,7 @@ function CheckUploadPageInner() {
           <p className="text-sm text-red-700">{gateError}</p>
           <Link
             href="/agreement"
-            className="text-xs text-[#1B2A5C] font-semibold hover:underline mt-3 inline-block"
+            className="text-xs text-sage-navy font-semibold hover:underline mt-3 inline-block"
           >
             ← Back to agreement
           </Link>
@@ -217,7 +217,7 @@ function CheckUploadPageInner() {
               name="checkMode"
               checked={mode === "na"}
               onChange={() => setMode("na")}
-              className="accent-[#1B2A5C]"
+              className="accent-sage-navy"
             />
             <span className="text-gray-800">Check upload is not applicable to me</span>
           </label>
@@ -227,7 +227,7 @@ function CheckUploadPageInner() {
               name="checkMode"
               checked={mode === "upload"}
               onChange={() => setMode("upload")}
-              className="accent-[#1B2A5C]"
+              className="accent-sage-navy"
             />
             <span className="text-gray-800">I need to upload check copies</span>
           </label>
@@ -279,7 +279,7 @@ function CheckUploadPageInner() {
               <button
                 type="button"
                 onClick={() => setDrafts((prev) => [...prev, newDraft()])}
-                className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#1B2A5C] hover:text-[#2D4480] cursor-pointer"
+                className="inline-flex items-center gap-1.5 text-xs font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
               >
                 <Plus size={12} /> Add another check
               </button>
@@ -299,7 +299,7 @@ function CheckUploadPageInner() {
               type="button"
               onClick={handleSkipNotApplicable}
               disabled={submitting}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold bg-[#1B2A5C] text-white hover:bg-[#2D4480] disabled:opacity-60 cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
             >
               {submitting ? <Loader2 size={14} className="animate-spin" /> : <Send size={14} />}
               {submitting ? "Saving…" : "Skip — Not applicable"}
@@ -309,7 +309,7 @@ function CheckUploadPageInner() {
             <button
               type="button"
               onClick={handleContinue}
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold bg-[#1B2A5C] text-white hover:bg-[#2D4480] cursor-pointer"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
             >
               Continue → <Send size={14} />
             </button>
@@ -345,7 +345,7 @@ function DraftCard({
           onChange={(e) =>
             onPatch({ file: e.target.files?.[0] ?? null, error: "" })
           }
-          className="block w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-[#1B2A5C] file:text-white hover:file:bg-[#2D4480] cursor-pointer"
+          className="block w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-sage-navy file:text-white hover:file:bg-sage-navy-deep cursor-pointer"
         />
         {draft.file && (
           <p className="text-[11px] text-gray-500 mt-1 inline-flex items-center gap-1">
@@ -392,7 +392,7 @@ function DraftCard({
           type="button"
           onClick={onUpload}
           disabled={draft.uploading || !draft.file || !draft.checkNumber.trim()}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-[#1B2A5C] text-white hover:bg-[#2D4480] disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
         >
           {draft.uploading ? (
             <Loader2 size={12} className="animate-spin" />
@@ -459,8 +459,8 @@ function Input({
 export default function CheckUploadPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     }>
       <CheckUploadPageInner />
