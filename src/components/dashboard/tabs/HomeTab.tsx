@@ -1,11 +1,18 @@
 "use client";
 
-import { ArrowRight, CheckCircle2, Mail } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  ArrowRight, CheckCircle2, Mail,
+  Calendar, ClipboardCheck, PlayCircle, Rocket, Compass,
+} from "lucide-react";
 
-import type {
-  ParticipantDashboard as DashboardData,
-  ParticipantTeam,
+import {
+  getNextAction,
+  type NextAction,
+  type ParticipantDashboard as DashboardData,
+  type ParticipantTeam,
 } from "@/lib/api";
+import { formatISTShort } from "@/lib/datetime";
 
 interface Props {
   data: DashboardData;
@@ -29,6 +36,18 @@ export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
       : 0;
   const coaches = team?.coaches ?? {};
   const coachEntries = Object.entries(coaches);
+
+  // LMS "what to do next" — separate from the onboarding next step
+  // inside the roadmap card. Lets the participant jump straight back
+  // into a course / session / assignment they have in flight.
+  const [next, setNext] = useState<NextAction | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getNextAction()
+      .then((n) => { if (!cancelled) setNext(n); })
+      .catch(() => { /* silent -- widget just stays hidden */ });
+    return () => { cancelled = true; };
+  }, []);
 
   return (
     <div className="space-y-5">
@@ -117,6 +136,8 @@ export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
         )}
       </div>
 
+      <NextActionCard action={next} />
+
       {/* Team summary */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
         <SmallTeamCard
@@ -192,6 +213,128 @@ export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
         ) : (
           <p className="text-xs text-gray-400 italic">No activity yet.</p>
         )}
+      </div>
+    </div>
+  );
+}
+
+interface NextActionView {
+  Icon: typeof Calendar;
+  header: string;
+  title: string;
+  description: string | null;
+  ctaLabel: string;
+  ctaHref: string;
+}
+
+function viewFor(action: NextAction): NextActionView | null {
+  const courseTitle = action.courseTitle ?? "your course";
+  switch (action.type) {
+    case "SESSION_SOON": {
+      const when = action.scheduledAt ? formatISTShort(action.scheduledAt) : null;
+      const mentor = action.mentorName ?? "your mentor";
+      return {
+        Icon: Calendar,
+        header: "Live session coming up",
+        title: when
+          ? `Session with ${mentor} on ${when}`
+          : `Upcoming session with ${mentor}`,
+        description: action.courseTitle
+          ? `For ${action.courseTitle}.`
+          : null,
+        ctaLabel: action.meetingUrl ? "Join meeting" : "View details",
+        ctaHref: action.meetingUrl
+          ?? (action.courseId ? `/courses/${action.courseId}` : "/dashboard?tab=home"),
+      };
+    }
+    case "ASSIGNMENT_DUE": {
+      const due = action.dueDate ? formatISTShort(action.dueDate) : null;
+      return {
+        Icon: ClipboardCheck,
+        header: "Assignment due",
+        title: action.assignmentTitle ?? "Assignment pending",
+        description: due ? `Due ${due}.` : null,
+        ctaLabel: "Open assignment",
+        ctaHref: action.courseId ? `/courses/${action.courseId}` : "/dashboard?tab=courses",
+      };
+    }
+    case "CONTINUE_COURSE": {
+      const pct = action.progressPercent ?? null;
+      return {
+        Icon: PlayCircle,
+        header: "Pick up where you left off",
+        title: action.nextLessonTitle
+          ? `Continue: ${action.nextLessonTitle}`
+          : `Continue ${courseTitle}`,
+        description: pct != null
+          ? `You're ${Math.round(pct)}% through ${courseTitle}.`
+          : (action.moduleTitle ? `Module: ${action.moduleTitle}.` : null),
+        ctaLabel: "Resume course",
+        ctaHref: action.courseId ? `/courses/${action.courseId}` : "/dashboard?tab=courses",
+      };
+    }
+    case "START_COURSE": {
+      return {
+        Icon: Rocket,
+        header: "Ready to begin",
+        title: action.firstLessonTitle
+          ? `Start: ${action.firstLessonTitle}`
+          : `Start ${courseTitle}`,
+        description: action.courseTitle
+          ? `Your first lesson on ${action.courseTitle} is ready.`
+          : "Your first lesson is ready.",
+        ctaLabel: "Start lesson",
+        ctaHref: action.courseId ? `/courses/${action.courseId}` : "/dashboard?tab=courses",
+      };
+    }
+    case "BROWSE_COURSES": {
+      return {
+        Icon: Compass,
+        header: "Browse the catalogue",
+        title: "Find your next course",
+        description:
+          "Pick a track or service that matches your goals — your team will guide you from there.",
+        ctaLabel: "Browse courses",
+        ctaHref: "/courses",
+      };
+    }
+    case "ALL_COMPLETE":
+    default:
+      return null;
+  }
+}
+
+function NextActionCard({ action }: { action: NextAction | null }) {
+  if (!action) return null;
+  const view = viewFor(action);
+  if (!view) return null;
+
+  const { Icon, header, title, description, ctaLabel, ctaHref } = view;
+  const isExternal = /^https?:\/\//i.test(ctaHref);
+
+  return (
+    <div className="rounded-2xl border border-sage-navy/20 bg-sage-navy/5 p-5">
+      <div className="flex items-start gap-4">
+        <div className="shrink-0 w-10 h-10 rounded-xl bg-sage-navy text-white flex items-center justify-center">
+          <Icon size={18} />
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="text-[11px] uppercase tracking-wider font-semibold text-sage-navy">
+            {header}
+          </p>
+          <p className="mt-1 text-base font-bold text-gray-900">{title}</p>
+          {description && (
+            <p className="mt-1 text-sm text-gray-600">{description}</p>
+          )}
+        </div>
+        <a
+          href={ctaHref}
+          target={isExternal ? "_blank" : undefined}
+          rel={isExternal ? "noopener noreferrer" : undefined}
+          className="shrink-0 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+        >
+          {ctaLabel} <ArrowRight size={12} />
+        </a>
       </div>
     </div>
   );
