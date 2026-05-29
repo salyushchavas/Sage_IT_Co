@@ -172,6 +172,247 @@ export async function resetPassword(token: string, newPassword: string): Promise
   return wrapper.data;
 }
 
+// ─── Rich profile types (admin user-detail + future self-service /profile) ─
+
+export interface ProfileAgreementSummary {
+  id: number;
+  accepted: boolean;
+  status?: AgreementStatusValue;
+  legalName: string | null;
+  version: string;
+  acceptedAt: string | null;
+  agreementEmailSentAt?: string | null;
+  userReplyReceivedAt?: string | null;
+  userReplyContent?: string | null;
+  verificationCodeSentAt?: string | null;
+  verificationCodeVerifiedAt?: string | null;
+  ipAddress: string | null;
+  browser: string | null;
+  os: string | null;
+  recordId: string;
+  signedAgreementPdfUrl?: string | null;
+  signatureImage?: string | null;
+  signatureMethod?: "draw" | "upload" | null;
+}
+
+export interface ProfileCourseSummary {
+  id: number;
+  title: string;
+  type: string;
+  progressPercent: number;
+  completedLessons: number;
+  totalLessons: number;
+  completed: boolean;
+  enrolledAt: string | null;
+}
+
+export interface ProfileCertSummary {
+  id: number;
+  certificateId: string | null;
+  courseTitle: string | null;
+  certificateUrl: string | null;
+  issuedAt: string | null;
+}
+
+export interface ProfileData extends UserDTO {
+  phone: string | null;
+  location: string | null;
+  createdAt: string | null;
+  enrolledCoursesCount: number;
+  completedCoursesCount: number;
+  certificatesCount: number;
+  streakDays: number;
+  totalLessonsCompleted: number;
+  totalLearningMinutes: number;
+  lastActiveAt: string | null;
+  contributions: Record<string, number>;
+  enrolledCourses: ProfileCourseSummary[] | null;
+  certificates: ProfileCertSummary[] | null;
+  agreement: ProfileAgreementSummary | null;
+}
+
+export interface UpdateProfileBody {
+  fullName: string;
+  phone?: string;
+  bio?: string;
+  location?: string;
+}
+
+export async function updateProfile(data: UpdateProfileBody): Promise<ProfileData> {
+  const wrapper = await apiFetch<ApiResponse<ProfileData>>("/api/users/profile", {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+// ─── Announcements ──────────────────────────────────────────────────
+
+export interface Announcement {
+  id: number;
+  title: string;
+  message: string;
+  type: "INFO" | "SUCCESS" | "WARNING";
+  isActive: boolean;
+  expiresAt: string | null;
+  createdAt: string;
+  createdByName: string | null;
+}
+
+export async function getActiveAnnouncements() {
+  const wrapper = await apiFetch<ApiResponse<Announcement[]>>("/api/announcements/active");
+  return wrapper.data;
+}
+
+export async function getAllAnnouncements() {
+  const wrapper = await apiFetch<ApiResponse<Announcement[]>>("/api/announcements");
+  return wrapper.data;
+}
+
+export async function createAnnouncement(data: {
+  title: string;
+  message: string;
+  type: "INFO" | "SUCCESS" | "WARNING";
+  isActive?: boolean;
+  expiresAt?: string | null;
+}) {
+  const wrapper = await apiFetch<ApiResponse<Announcement>>("/api/announcements", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function updateAnnouncement(id: number, data: Partial<{
+  title: string;
+  message: string;
+  type: "INFO" | "SUCCESS" | "WARNING";
+  isActive: boolean;
+  expiresAt: string | null;
+}>) {
+  const wrapper = await apiFetch<ApiResponse<Announcement>>(`/api/announcements/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function deleteAnnouncement(id: number) {
+  return apiFetch<ApiResponse<unknown>>(`/api/announcements/${id}`, { method: "DELETE" });
+}
+
+// ─── Sales inquiries (B2B custom-pricing chat) ──────────────────────
+
+export interface SalesQuoteItem {
+  item: string;
+  price: number;
+}
+
+export interface SalesMessage {
+  id: number;
+  senderId: number | null;
+  senderName: string | null;
+  senderRole: string | null;
+  message: string;
+  attachmentUrl: string | null;
+  isQuote: boolean;
+  quotedPrice: number | null;
+  quotedItems: string | null;
+  quoteStatus: string | null;
+  createdAt: string;
+}
+
+export interface SalesInquiry {
+  id: number;
+  userId: number | null;
+  studentName: string | null;
+  studentEmail: string | null;
+  courseId: number | null;
+  courseTitle: string | null;
+  courseType: string | null;
+  instructorId: number | null;
+  instructorName: string | null;
+  status: "NEW" | "IN_PROGRESS" | "QUOTED" | "CONVERTED" | "CLOSED" | "LOST";
+  subject: string;
+  budgetRange: string | null;
+  createdAt: string;
+  updatedAt: string;
+  closedAt: string | null;
+  lastMessagePreview: string | null;
+  lastMessageSenderName: string | null;
+  lastMessageAt: string | null;
+  messages: SalesMessage[] | null;
+}
+
+export function parseQuoteItems(raw: string | null): SalesQuoteItem[] {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((p: { item?: unknown; price?: unknown }) => ({
+      item: typeof p.item === "string" ? p.item : "",
+      price: Number(p.price ?? 0),
+    }));
+  } catch {
+    return [];
+  }
+}
+
+export async function createSalesInquiry(data: {
+  courseId: number;
+  subject?: string;
+  budgetRange?: string;
+  message: string;
+}) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>("/api/sales/inquiries", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function getMySalesInquiries() {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry[]>>("/api/sales/inquiries/my");
+  return wrapper.data;
+}
+
+export async function getSalesInquiry(id: number) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(`/api/sales/inquiries/${id}`);
+  return wrapper.data;
+}
+
+export async function postSalesMessage(id: number, message: string) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(
+    `/api/sales/inquiries/${id}/messages`,
+    { method: "POST", body: JSON.stringify({ message }) }
+  );
+  return wrapper.data;
+}
+
+export async function acceptSalesQuote(inquiryId: number, messageId: number) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(
+    `/api/sales/inquiries/${inquiryId}/accept-quote`,
+    { method: "POST", body: JSON.stringify({ messageId }) }
+  );
+  return wrapper.data;
+}
+
+export async function declineSalesQuote(inquiryId: number, messageId: number) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(
+    `/api/sales/inquiries/${inquiryId}/decline-quote`,
+    { method: "POST", body: JSON.stringify({ messageId }) }
+  );
+  return wrapper.data;
+}
+
+export async function closeSalesInquiry(id: number, reason?: string) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(
+    `/api/sales/inquiries/${id}/close`,
+    { method: "POST", body: JSON.stringify({ reason: reason ?? null }) }
+  );
+  return wrapper.data;
+}
+
 // ─── User / Profile ─────────────────────────────────────────────────
 
 export async function getProfile(): Promise<UserDTO> {

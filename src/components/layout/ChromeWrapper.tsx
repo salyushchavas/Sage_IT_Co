@@ -32,6 +32,8 @@ const FULLSCREEN_PREFIXES = [
   "/coach-dashboard",
   "/finance-dashboard",
   "/operations",
+  "/messages",
+  "/profile",
 ] as const;
 
 export default function ChromeWrapper({ children }: { children: ReactNode }) {

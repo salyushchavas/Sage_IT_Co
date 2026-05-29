@@ -1,6 +1,7 @@
 "use client";
 
-import { Bell, Mail } from "lucide-react";
+import Link from "next/link";
+import { Bell, Mail, MessageSquare } from "lucide-react";
 
 import type {
   ParticipantDashboard as DashboardData,
@@ -72,6 +73,14 @@ export default function MessagesTab({ data, team }: Props) {
           ))
         )}
       </div>
+
+      <Link
+        href="/messages"
+        className="inline-flex items-center gap-1.5 text-xs font-semibold text-sage-copper hover:underline"
+      >
+        <MessageSquare size={12} />
+        Sales conversations →
+      </Link>
     </div>
   );
 }
