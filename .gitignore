@@ -43,3 +43,10 @@ backend/.mvn/wrapper/maven-wrapper.jar
 # Backend logs
 backend/logs/
 backend/*.log
+
+# Secrets / credentials
+credentials.xlsx
+~$*.xlsx
+~$*.docx
+*.env.local
+.env.production.local
