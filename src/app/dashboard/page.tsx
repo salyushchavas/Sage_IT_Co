@@ -13,6 +13,7 @@ import HomeTab from "@/components/dashboard/tabs/HomeTab";
 import InterviewTab from "@/components/dashboard/tabs/InterviewTab";
 import MyCoursesTab from "@/components/dashboard/tabs/MyCoursesTab";
 import PaymentsTab from "@/components/dashboard/tabs/PaymentsTab";
+import WeeklyReportTab from "@/components/dashboard/tabs/WeeklyReportTab";
 import LockedTabView from "@/components/dashboard/LockedTabView";
 import MessagesTab from "@/components/dashboard/tabs/MessagesTab";
 import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
@@ -297,13 +298,8 @@ function renderGatedReal(
     case "courses":
       return <MyCoursesTab />;
     case "weekly":
-      return (
-        <ComingSoonTab
-          title="Weekly Report"
-          copy="The weekly job-search reporting flow lands in a follow-up phase."
-          hint="Your ERM will reach out by email when weekly reporting opens."
-        />
-      );
+      if (!dashboardData) return <TabLoading />;
+      return <WeeklyReportTab dashboardData={dashboardData} />;
     case "resume":
       return <ResumeTab />;
     case "interview":
