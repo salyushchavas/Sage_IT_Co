@@ -124,6 +124,10 @@ function DashboardPageInner() {
         router.replace("/erm-dashboard");
         return;
       }
+      if (role === "OPERATIONS_ADMIN" || role === "SYSTEM_ADMIN") {
+        router.replace("/operations");
+        return;
+      }
 
       // Participant lifecycle. Refresh in-memory user if any critical
       // fields are missing -- auth context can hold stale data after

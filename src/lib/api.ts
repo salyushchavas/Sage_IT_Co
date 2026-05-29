@@ -1534,6 +1534,111 @@ export async function assignErmToParticipant(
   return wrapper.data;
 }
 
+// ─── Phase 5B: Operations admin tabs ─────────────────────────────
+
+export interface OperationsQueueRow {
+  userId: number;
+  participantId?: string | null;
+  fullName: string | null;
+  email: string | null;
+  currentStatus: string | null;
+  createdAt?: string | null;
+  emailVerified?: boolean;
+  agreementStatus?: string | null;
+  agreementSentAt?: string | null;
+}
+
+export async function getEnrollmentQueue(): Promise<OperationsQueueRow[]> {
+  const wrapper = await apiFetch<ApiResponse<OperationsQueueRow[]>>(
+    "/api/admin/operations/enrollment-queue");
+  return wrapper.data ?? [];
+}
+
+export async function getAgreementQueue(): Promise<OperationsQueueRow[]> {
+  const wrapper = await apiFetch<ApiResponse<OperationsQueueRow[]>>(
+    "/api/admin/operations/agreement-queue");
+  return wrapper.data ?? [];
+}
+
+export interface AuditRow {
+  id: number;
+  userId: number;
+  recordType: string;
+  category: string;
+  title: string;
+  description: string;
+  createdAt: string;
+}
+
+export async function getAuditTrail(opts: {
+  userId?: number; category?: string; limit?: number;
+} = {}): Promise<AuditRow[]> {
+  const qs = new URLSearchParams();
+  if (opts.userId) qs.set("userId", String(opts.userId));
+  if (opts.category) qs.set("category", opts.category);
+  if (opts.limit) qs.set("limit", String(opts.limit));
+  const wrapper = await apiFetch<ApiResponse<AuditRow[]>>(
+    `/api/admin/operations/audit${qs.size ? `?${qs.toString()}` : ""}`);
+  return wrapper.data ?? [];
+}
+
+export interface OperationsException {
+  type: string;
+  userId: number;
+  fullName: string | null;
+  currentStatus: string | null;
+  openSince: string | null;
+}
+
+export async function getOperationsExceptions(): Promise<OperationsException[]> {
+  const wrapper = await apiFetch<ApiResponse<OperationsException[]>>(
+    "/api/admin/operations/exceptions");
+  return wrapper.data ?? [];
+}
+
+export interface StaffPool {
+  erm: { id: number; fullName: string; email: string }[];
+  coach: { id: number; fullName: string; email: string }[];
+  technicalAdvisor: { id: number; fullName: string; email: string }[];
+}
+
+export async function getStaffPool(): Promise<StaffPool> {
+  const wrapper = await apiFetch<ApiResponse<StaffPool>>(
+    "/api/admin/operations/staff-pool");
+  return wrapper.data ?? { erm: [], coach: [], technicalAdvisor: [] };
+}
+
+export async function getAssignmentQueue(): Promise<Record<string, unknown>[]> {
+  const wrapper = await apiFetch<ApiResponse<Record<string, unknown>[]>>(
+    "/api/admin/assignments/queue");
+  return wrapper.data ?? [];
+}
+
+/**
+ * Routes a logged-in user to the dashboard URL appropriate for their
+ * role. Used by the participant /dashboard gatekeeper (and any other
+ * "land here on login" router) to direct staff away from the
+ * participant flow.
+ *
+ *   ERM            -> /erm-dashboard
+ *   COACH / TECHNICAL_ADVISOR -> /coach-dashboard
+ *   FINANCE        -> /finance-dashboard
+ *   OPERATIONS_ADMIN / SYSTEM_ADMIN -> /operations
+ *   ADMIN          -> /admin (legacy LMS admin)
+ *   INSTRUCTOR     -> /instructor
+ *   anything else / participant -> /dashboard
+ */
+export function dashboardRouteForRole(role: string | null | undefined): string {
+  const r = (role ?? "").toUpperCase();
+  if (r === "ERM") return "/erm-dashboard";
+  if (r === "COACH" || r === "TECHNICAL_ADVISOR") return "/coach-dashboard";
+  if (r === "FINANCE") return "/finance-dashboard";
+  if (r === "OPERATIONS_ADMIN" || r === "SYSTEM_ADMIN") return "/operations";
+  if (r === "ADMIN") return "/admin";
+  if (r === "INSTRUCTOR") return "/instructor";
+  return "/dashboard";
+}
+
 export async function assignCoachToParticipant(
   participantId: number,
   coachUserId: number,
