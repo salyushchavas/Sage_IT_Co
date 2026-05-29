@@ -8,7 +8,8 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useState } from "react";
-import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
+import OnboardingProgressBar from "@/components/OnboardingProgressBar";
 import { enrollParticipant } from "@/lib/api";
 
 const QUICK_SIGNUP_STEPS = ["Sign Up", "Verify"] as const;
@@ -39,11 +40,8 @@ const enrollSchema = z.object({
 type EnrollValues = z.infer<typeof enrollSchema>;
 
 const INPUT_CLASS =
-  "w-full px-3.5 py-2.5 text-sm rounded-lg border border-gray-200 bg-white " +
-  "text-gray-900 placeholder-gray-400 transition focus:outline-none " +
-  "focus:border-[#1B2A5C] focus:ring-1 focus:ring-[#1B2A5C] " +
-  "disabled:bg-gray-50 disabled:cursor-not-allowed";
-const LABEL_CLASS = "block text-[13px] font-medium text-gray-700 mb-1";
+  "w-full px-4 py-3 bg-white border rounded-lg text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-sage-copper focus:border-transparent transition";
+const LABEL_CLASS = "block text-sm font-semibold text-gray-700 mb-1.5";
 
 export default function EnrollPage() {
   const [showPassword, setShowPassword] = useState(false);
@@ -74,25 +72,32 @@ export default function EnrollPage() {
   };
 
   return (
-    <OnboardingLayout currentStep={1} steps={QUICK_SIGNUP_STEPS} contentMaxWidth="xl">
-      <motion.section
+    <SplitAuthLayout
+      heroTitle={"Start your\ncareer journey."}
+      heroSubtitle="Just a few quick details to get started. Complete your full profile in the dashboard at your own pace."
+      heroFooter="Step 1 of 2 · Sign Up"
+    >
+      <motion.div
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35 }}
-        className="bg-white rounded-2xl shadow-lg border border-gray-100 px-6 py-7 sm:px-8 sm:py-8"
+        transition={{ duration: 0.4 }}
       >
-        <p className="text-[11px] uppercase tracking-wider font-semibold text-[#1B2A5C] text-center">
+        <p className="text-xs uppercase tracking-widest font-bold text-sage-copper text-center">
           Step 1 of 2 · Sign Up
         </p>
-        <h1 className="font-serif text-2xl sm:text-3xl font-bold text-gray-900 text-center mt-1.5">
+        <h2 className="text-3xl font-bold text-sage-navy text-center mt-2 mb-2">
           Create your account
-        </h1>
-        <p className="text-gray-500 mt-1.5 mb-5 text-center text-sm">
-          Just a few quick details to get started — you can complete your profile later.
+        </h2>
+        <p className="text-center text-gray-600 mb-6">
+          Just a few quick details to get started.
         </p>
 
+        <div className="mb-6">
+          <OnboardingProgressBar currentStep={1} steps={QUICK_SIGNUP_STEPS} />
+        </div>
+
         {error && (
-          <div className="mb-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-sm">
+          <div className="mb-4 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
             {error}
           </div>
         )}
@@ -106,10 +111,10 @@ export default function EnrollPage() {
               type="text"
               autoComplete="name"
               {...register("fullName")}
-              className={INPUT_CLASS + (errors.fullName ? " !border-red-500" : "")}
+              className={INPUT_CLASS + (errors.fullName ? " !border-red-400" : " border-gray-200")}
               placeholder="Arjun Mehta"
             />
-            {errors.fullName && <p className="text-[11px] text-red-500 mt-1">{errors.fullName.message}</p>}
+            {errors.fullName && <p className="text-xs text-red-500 mt-1">{errors.fullName.message}</p>}
           </div>
 
           <div>
@@ -120,10 +125,10 @@ export default function EnrollPage() {
               type="email"
               autoComplete="email"
               {...register("email")}
-              className={INPUT_CLASS + (errors.email ? " !border-red-500" : "")}
+              className={INPUT_CLASS + (errors.email ? " !border-red-400" : " border-gray-200")}
               placeholder="you@example.com"
             />
-            {errors.email && <p className="text-[11px] text-red-500 mt-1">{errors.email.message}</p>}
+            {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>}
           </div>
 
           <div>
@@ -134,10 +139,10 @@ export default function EnrollPage() {
               type="tel"
               autoComplete="tel"
               {...register("phone")}
-              className={INPUT_CLASS + (errors.phone ? " !border-red-500" : "")}
-              placeholder="+91 90000 00000"
+              className={INPUT_CLASS + (errors.phone ? " !border-red-400" : " border-gray-200")}
+              placeholder="+1 (555) 555-5555"
             />
-            {errors.phone && <p className="text-[11px] text-red-500 mt-1">{errors.phone.message}</p>}
+            {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone.message}</p>}
           </div>
 
           <div>
@@ -149,39 +154,41 @@ export default function EnrollPage() {
                 type={showPassword ? "text" : "password"}
                 autoComplete="new-password"
                 {...register("password")}
-                className={INPUT_CLASS + " pr-10" + (errors.password ? " !border-red-500" : "")}
+                className={INPUT_CLASS + " pr-10" + (errors.password ? " !border-red-400" : " border-gray-200")}
                 placeholder="At least 8 characters"
               />
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
                 aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
             </div>
-            {errors.password && <p className="text-[11px] text-red-500 mt-1">{errors.password.message}</p>}
+            {errors.password && <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>}
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full py-2.5 rounded-lg bg-[#1B2A5C] text-white text-sm font-semibold hover:bg-[#2D4480] focus:outline-none focus:ring-2 focus:ring-[#C87D5C] focus:ring-offset-2 transition-colors disabled:opacity-60 disabled:cursor-not-allowed inline-flex items-center justify-center gap-2 cursor-pointer"
+            className="w-full py-3 rounded-lg bg-sage-navy hover:bg-sage-navy-deep text-white font-semibold text-sm transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {isSubmitting && <Loader2 size={16} className="animate-spin" />}
             {isSubmitting ? "Creating account…" : "Create Account"}
           </button>
         </form>
 
-        <p className="text-[11px] text-center text-gray-400 mt-4">
+        <p className="text-xs text-gray-500 mt-4 text-center">
           By signing up, you agree to start your profile setup in the dashboard.
         </p>
-        <p className="text-xs text-center text-gray-500 mt-2">
+        <p className="text-sm text-gray-600 mt-3 text-center">
           Already have an account?{" "}
-          <Link href="/login" className="text-[#1B2A5C] font-semibold hover:underline">Sign in</Link>
+          <Link href="/login" className="text-sage-copper font-semibold hover:underline">
+            Sign in
+          </Link>
         </p>
-      </motion.section>
-    </OnboardingLayout>
+      </motion.div>
+    </SplitAuthLayout>
   );
 }

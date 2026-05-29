@@ -14,6 +14,10 @@ import PageTransition from "./PageTransition";
  * (which live at the app root) need this opt-out.
  */
 const FULLSCREEN_PREFIXES = [
+  "/login",
+  "/signup",
+  "/forgot-password",
+  "/reset-password",
   "/enroll",
   "/verify-email",
   "/participant-id",

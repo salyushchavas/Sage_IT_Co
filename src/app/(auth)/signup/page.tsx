@@ -62,13 +62,26 @@ export default function SignupPage() {
     );
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="w-full max-w-md"
-    >
-      <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-8">
+    <div className="relative min-h-screen overflow-hidden bg-[#050510] flex items-center justify-center px-4 py-12">
+      {/* Background grid pattern */}
+      <div
+        className="fixed inset-0 pointer-events-none z-0"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)",
+          backgroundSize: "60px 60px",
+        }}
+      />
+      {/* Ambient copper glow */}
+      <div className="fixed top-1/4 left-1/2 -translate-x-1/2 w-[600px] h-[600px] bg-[#C87D5C]/10 rounded-full blur-[150px] pointer-events-none z-0" />
+
+      <motion.div
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5 }}
+        className="relative z-10 w-full max-w-md"
+      >
+        <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-8">
         {/* Header */}
         <div className="text-center mb-8">
           <Link href="/" className="inline-block mb-4">
@@ -178,7 +191,8 @@ export default function SignupPage() {
             Sign in
           </Link>
         </p>
-      </div>
-    </motion.div>
+        </div>
+      </motion.div>
+    </div>
   );
 }

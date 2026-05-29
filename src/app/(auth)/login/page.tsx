@@ -7,10 +7,9 @@ import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Loader2, LogIn, Eye, EyeOff } from "lucide-react";
+import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { cn } from "@/lib/utils";
-import { APP_NAME } from "@/lib/constants";
+import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 
 const schema = z.object({
   email: z.string().email("Enter a valid email"),
@@ -49,106 +48,104 @@ function LoginForm() {
   };
 
   return (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.5 }}
-      className="w-full max-w-md"
+    <SplitAuthLayout
+      heroTitle={"Welcome back.\nLet's pick up where you left off."}
+      heroSubtitle="Sign in to continue your program — your mentors, courses, and assignments are waiting."
+      heroFooter="Need an account? Use the Create one link on the right."
     >
-      <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-8">
-        {/* Header */}
-        <div className="text-center mb-8">
-          <Link href="/" className="inline-block mb-4">
-            <span className="text-2xl font-bold bg-gradient-to-r from-[#1B2A5C] to-[#C87D5C] bg-clip-text text-transparent">
-              {APP_NAME}
-            </span>
-          </Link>
-          <h1 className="text-xl font-semibold text-zinc-900">Welcome back</h1>
-          <p className="text-sm text-zinc-600 mt-1">Sign in to your account</p>
-        </div>
+      <motion.div
+        initial={{ opacity: 0, y: 16 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+      >
+        <h2 className="text-3xl font-bold text-sage-navy text-center mb-2">
+          Welcome back
+        </h2>
+        <p className="text-center text-gray-600 mb-8">
+          Sign in to continue your learning journey.
+        </p>
 
         {apiError && (
-          <div className="mb-6 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-sm text-center">
+          <div className="mb-5 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
             {apiError}
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          {/* Email */}
+        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           <div>
-            <label className="block text-sm text-zinc-600 mb-1.5">Email</label>
+            <label className="block text-sm font-semibold text-gray-700 mb-1.5">
+              Email address
+            </label>
             <input
               type="email"
+              autoComplete="email"
               {...register("email")}
               placeholder="you@example.com"
-              className={cn(
-                "w-full px-4 py-3 rounded-xl bg-white/60 border text-zinc-900 placeholder-zinc-400 text-sm outline-none transition-all",
-                errors.email
-                  ? "border-red-500/50 focus:border-red-500"
-                  : "border-zinc-200 focus:border-[#1B2A5C]/50 focus:shadow-[0_0_12px_rgba(27,42,92,0.1)]"
-              )}
+              className={
+                "w-full px-4 py-3 bg-white border rounded-lg text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-sage-copper focus:border-transparent transition " +
+                (errors.email ? "border-red-400" : "border-gray-200")
+              }
             />
             {errors.email && (
-              <p className="text-xs text-red-400 mt-1">{errors.email.message}</p>
+              <p className="text-xs text-red-500 mt-1">{errors.email.message}</p>
             )}
           </div>
 
-          {/* Password */}
           <div>
-            <label className="block text-sm text-zinc-600 mb-1.5">Password</label>
+            <div className="flex items-center justify-between mb-1.5">
+              <label className="block text-sm font-semibold text-gray-700">
+                Password
+              </label>
+              <Link
+                href="/forgot-password"
+                className="text-xs text-sage-copper font-semibold hover:underline"
+              >
+                Forgot password?
+              </Link>
+            </div>
             <div className="relative">
               <input
                 type={showPassword ? "text" : "password"}
+                autoComplete="current-password"
                 {...register("password")}
                 placeholder="Enter your password"
-                className={cn(
-                  "w-full px-4 py-3 pr-11 rounded-xl bg-white/60 border text-zinc-900 placeholder-zinc-400 text-sm outline-none transition-all",
-                  errors.password
-                    ? "border-red-500/50 focus:border-red-500"
-                    : "border-zinc-200 focus:border-[#1B2A5C]/50 focus:shadow-[0_0_12px_rgba(27,42,92,0.1)]"
-                )}
+                className={
+                  "w-full px-4 py-3 pr-11 bg-white border rounded-lg text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-sage-copper focus:border-transparent transition " +
+                  (errors.password ? "border-red-400" : "border-gray-200")
+                }
               />
               <button
                 type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-500"
+                onClick={() => setShowPassword((v) => !v)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
             {errors.password && (
-              <p className="text-xs text-red-400 mt-1">{errors.password.message}</p>
+              <p className="text-xs text-red-500 mt-1">{errors.password.message}</p>
             )}
           </div>
 
-          {/* Submit */}
           <button
             type="submit"
             disabled={loading}
-            className={cn(
-              "w-full py-3 rounded-full font-medium text-sm transition-all duration-300 flex items-center justify-center gap-2",
-              "btn-fill text-white",
-              "hover:scale-[1.02]",
-              "disabled:opacity-50 disabled:cursor-not-allowed"
-            )}
+            className="w-full py-3 rounded-lg bg-sage-navy hover:bg-sage-navy-deep text-white font-semibold text-sm transition flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <LogIn className="w-4 h-4" />
-            )}
+            {loading && <Loader2 className="w-4 h-4 animate-spin" />}
             {loading ? "Signing in..." : "Sign In"}
           </button>
         </form>
 
-        <p className="text-center text-sm text-zinc-500 mt-6">
+        <p className="text-center text-sm text-gray-600 mt-6">
           Don&apos;t have an account?{" "}
-          <Link href="/signup" className="text-[#1B2A5C] hover:underline">
-            Sign up
+          <Link href="/enroll" className="text-sage-copper font-semibold hover:underline">
+            Create one
           </Link>
         </p>
-      </div>
-    </motion.div>
+      </motion.div>
+    </SplitAuthLayout>
   );
 }
 

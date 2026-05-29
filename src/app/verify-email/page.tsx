@@ -5,7 +5,8 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, MailCheck, AlertCircle } from "lucide-react";
-import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
+import OnboardingProgressBar from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
 import { resendVerificationCode, verifyCode } from "@/lib/api";
 
@@ -176,22 +177,33 @@ function VerifyEmailInner() {
   // ── Render ──────────────────────────────────────────────────────
 
   return (
-    <OnboardingLayout currentStep={2} steps={QUICK_SIGNUP_STEPS} contentMaxWidth="xl">
+    <SplitAuthLayout
+      heroTitle={"Almost in.\nCheck your inbox."}
+      heroSubtitle="We just emailed you a 6-digit code. Type it in to verify your address and unlock the dashboard."
+      heroFooter="Step 2 of 2 · Verify Email"
+    >
       <motion.section
         initial={{ opacity: 0, y: 16 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.35 }}
-        className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 sm:p-8 text-center"
+        className="text-center"
       >
-        <h1 className="font-serif text-2xl font-bold text-gray-900">
+        <p className="text-xs uppercase tracking-widest font-bold text-sage-copper">
+          Step 2 of 2 · Verify Email
+        </p>
+        <h2 className="text-3xl font-bold text-sage-navy mt-2">
           <span className="inline-flex items-center gap-2">
-            <MailCheck size={20} className="text-[#1B2A5C]" />
+            <MailCheck size={22} className="text-sage-navy" />
             Verify your email
           </span>
-        </h1>
-        <p className="text-sm text-gray-500 mt-2">
-          We sent a 6-digit code to <span className="font-mono text-gray-700">{masked}</span>
+        </h2>
+        <p className="text-sm text-gray-600 mt-2 mb-5">
+          We sent a 6-digit code to <span className="font-mono text-gray-900">{masked}</span>
         </p>
+
+        <div className="mb-5 text-left">
+          <OnboardingProgressBar currentStep={2} steps={QUICK_SIGNUP_STEPS} />
+        </div>
 
         <motion.div
           key={shake}
@@ -281,20 +293,20 @@ function VerifyEmailInner() {
           {resendInfo && <p className="mt-1 text-emerald-700 text-xs">{resendInfo}</p>}
         </div>
 
-        <p className="mt-6 text-xs text-gray-400">
+        <p className="mt-6 text-xs text-gray-500">
           Wrong email?{" "}
-          <Link href="/enroll" className="text-[#1B2A5C] font-semibold hover:underline">
+          <Link href="/enroll" className="text-sage-copper font-semibold hover:underline">
             Go back to enrollment
           </Link>
         </p>
       </motion.section>
-    </OnboardingLayout>
+    </SplitAuthLayout>
   );
 }
 
 export default function VerifyEmailPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]"><Loader2 className="animate-spin text-[#1B2A5C]" /></div>}>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-gray-50"><Loader2 className="animate-spin text-sage-navy" /></div>}>
       <VerifyEmailInner />
     </Suspense>
   );
