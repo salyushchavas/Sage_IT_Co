@@ -2,135 +2,147 @@
 
 import { useState } from "react";
 import { motion } from "framer-motion";
-import { Play, Trash2, CheckCircle2, Clock, Gift, Loader2 } from "lucide-react";
+import { Play, Lock, Trash2, CheckCircle, Loader2, Circle } from "lucide-react";
 import { completeLesson } from "@/lib/api";
+import { cn } from "@/lib/utils";
 
 interface LessonItemProps {
   id: number;
   title: string;
-  description: string;
+  description?: string | null;
   orderIndex: number;
-  durationMinutes: number;
+  durationMinutes?: number | null;
   isFree: boolean;
-  videoUrl: string | null;
-  canManage: boolean;
-  canComplete: boolean;
-  index: number;
+  videoUrl?: string | null;
+  canManage?: boolean;
+  canComplete?: boolean;  // student is enrolled
+  /** Controlled completion state from server. If unset, falls back to local state. */
+  completed?: boolean;
+  /** First uncompleted lesson — gets a play icon and accent border. */
+  isCurrent?: boolean;
+  /**
+   * The viewer is browsing as a non-enrolled, non-admin visitor.
+   * In that case we hide all action affordances (FREE badge, play
+   * icon, Complete button) and show a lock — they need to enroll
+   * before any interaction.
+   */
+  lockedForVisitor?: boolean;
+  index?: number;
   onDelete?: (id: number) => void;
-  onClick?: (id: number) => void;
-  onComplete?: (id: number) => void;
+  onComplete?: () => void;  // callback after completion
+  onClick?: () => void;
 }
 
-export default function LessonItem({
+export function LessonItem({
   id,
   title,
-  description,
   orderIndex,
   durationMinutes,
   isFree,
-  canManage,
-  canComplete,
-  index,
+  videoUrl,
+  canManage = false,
+  canComplete = false,
+  completed: completedProp,
+  isCurrent = false,
+  lockedForVisitor = false,
+  index = 0,
   onDelete,
-  onClick,
   onComplete,
+  onClick,
 }: LessonItemProps) {
+  // For non-enrolled, non-admin visitors: every lesson is locked,
+  // regardless of free-preview flags. Enrollment is the gate.
+  const hasAccess = !lockedForVisitor && (isFree || !!videoUrl);
   const [completing, setCompleting] = useState(false);
-  const [completed, setCompleted] = useState(false);
+  const [optimisticDone, setOptimisticDone] = useState(false);
+  const completed = completedProp ?? optimisticDone;
 
   const handleComplete = async (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (completing || completed) return;
     setCompleting(true);
     try {
       await completeLesson(id);
-      setCompleted(true);
-      onComplete?.(id);
+      setOptimisticDone(true);
+      onComplete?.();
     } catch {
-      // error silently handled
+      // silently fail — user may not be enrolled
     } finally {
       setCompleting(false);
     }
   };
 
-  const handleDelete = (e: React.MouseEvent) => {
-    e.stopPropagation();
-    onDelete?.(id);
-  };
-
   return (
     <motion.div
-      initial={{ opacity: 0, x: -16 }}
+      initial={{ opacity: 0, x: -10 }}
       animate={{ opacity: 1, x: 0 }}
-      transition={{ duration: 0.3, delay: index * 0.05 }}
-      onClick={() => onClick?.(id)}
-      className="group flex items-center gap-4 p-4 rounded-xl bg-white/60 backdrop-blur-xl border border-zinc-200 hover:border-[#1B2A5C]/20 transition-all cursor-pointer"
+      transition={{ delay: index * 0.05, duration: 0.3 }}
+      whileHover={{ scale: hasAccess ? 1.01 : 1, transition: { duration: 0.15 } }}
+      onClick={hasAccess ? onClick : undefined}
+      className={cn(
+        "flex items-center gap-4 p-4 rounded-xl border transition-all",
+        completed ? "bg-teal-50/50 border-teal-200" :
+        isCurrent && hasAccess ? "bg-white border-l-4 border-l-sage-navy border-y-gray-200 border-r-gray-200 hover:shadow-md cursor-pointer" :
+        hasAccess ? "bg-white border-gray-200 hover:border-teal-300 hover:shadow-md cursor-pointer" :
+        "bg-gray-50 border-gray-100 cursor-default"
+      )}
     >
-      {/* Order number */}
-      <div className="flex-shrink-0 w-10 h-10 rounded-lg bg-gradient-to-br from-[#C87D5C]/30 to-[#1B2A5C]/20 flex items-center justify-center text-zinc-900 font-semibold text-sm">
-        {orderIndex}
+      {/* Status indicator: completed -> check, current -> play, otherwise empty circle */}
+      <div className={cn(
+        "w-9 h-9 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0",
+        completed ? "bg-teal-200 text-teal-700" :
+        isCurrent && hasAccess ? "bg-sage-navy text-white" :
+        hasAccess ? "bg-teal-100 text-teal-700" : "bg-gray-200 text-gray-400"
+      )}>
+        {completed ? <CheckCircle size={18} /> :
+         isCurrent && hasAccess ? <Play size={16} className="ml-0.5" /> :
+         hasAccess ? orderIndex : <Circle size={16} />}
       </div>
 
-      {/* Content */}
+      {/* Lesson info */}
       <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2">
-          <h4 className="text-zinc-900 font-medium truncate">{title}</h4>
-          {isFree && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 bg-emerald-500/15 border border-emerald-500/20 px-2 py-0.5 rounded-full">
-              <Gift className="w-3 h-3" />
-              Free
-            </span>
-          )}
-          {completed && (
-            <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-          )}
-        </div>
-        {description && (
-          <p className="text-zinc-500 text-sm truncate mt-0.5">{description}</p>
+        <p className={cn("font-medium text-sm", hasAccess ? "text-gray-900" : "text-gray-500")}>
+          {title}
+        </p>
+        {durationMinutes && (
+          <p className="text-xs text-gray-400 mt-0.5">{durationMinutes} min</p>
         )}
       </div>
-
-      {/* Duration */}
-      <span className="flex items-center gap-1 text-xs text-zinc-500 flex-shrink-0">
-        <Clock className="w-3.5 h-3.5" />
-        {durationMinutes}m
-      </span>
 
       {/* Actions */}
       <div className="flex items-center gap-2 flex-shrink-0">
-        {canComplete && !completed && (
-          <button
-            onClick={handleComplete}
-            disabled={completing}
-            className="p-2 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 hover:bg-emerald-500/20 transition-colors disabled:opacity-50"
-            title="Mark complete"
-          >
-            {completing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <CheckCircle2 className="w-4 h-4" />
-            )}
+        {/* The FREE badge was removed — there is no real free-preview
+            system on the platform yet (the `isFree` flag was a holdover
+            from seed data and didn't actually let visitors watch).
+            Showing "FREE" on a lesson inside a paid course was just
+            misleading, so the badge is gone until a proper preview
+            flow exists. */}
+
+        {completed && (
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full bg-teal-100 text-teal-600">DONE</span>
+        )}
+
+        {/* Mark Complete button (for enrolled students with access) */}
+        {hasAccess && canComplete && !completed && !canManage && (
+          <button onClick={handleComplete} disabled={completing}
+            className="text-[10px] font-semibold px-2.5 py-1 rounded-full bg-sage-navy text-white hover:bg-sage-navy-deep transition disabled:opacity-50 flex items-center gap-1">
+            {completing ? <Loader2 size={10} className="animate-spin" /> : <CheckCircle size={10} />}
+            {completing ? "..." : "Complete"}
           </button>
         )}
-        {onClick && (
-          <button
-            onClick={(e) => {
-              e.stopPropagation();
-              onClick(id);
-            }}
-            className="p-2 rounded-lg bg-[#1B2A5C]/10 border border-[#1B2A5C]/20 text-[#1B2A5C] hover:bg-[#1B2A5C]/20 transition-colors"
-            title="Play lesson"
-          >
-            <Play className="w-4 h-4" />
-          </button>
+
+        {/* Visitor or genuinely-locked premium lesson — show the lock. */}
+        {(!hasAccess || lockedForVisitor) && !completed && (
+          <Lock size={16} className="text-gray-300" />
         )}
+
+        {hasAccess && !completed && !canComplete && (
+          <Play size={16} className="text-teal-600" />
+        )}
+
         {canManage && onDelete && (
-          <button
-            onClick={handleDelete}
-            className="p-2 rounded-lg bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-colors"
-            title="Delete lesson"
-          >
-            <Trash2 className="w-4 h-4" />
+          <button onClick={(e) => { e.stopPropagation(); onDelete(id); }}
+            className="text-gray-300 hover:text-red-500 transition ml-1">
+            <Trash2 size={14} />
           </button>
         )}
       </div>

@@ -3072,3 +3072,40 @@ export async function createService(data: {
   });
   return wrapper.data;
 }
+
+// ─── Phase 11E Batch 4: Cart + Checkout ──
+
+export async function addToCart(courseId: number) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(`/api/cart/${courseId}`, { method: "POST" });
+  return wrapper.data;
+}
+
+export async function getCart() {
+  const wrapper = await apiFetch<ApiResponse<unknown[]>>("/api/cart");
+  return wrapper.data;
+}
+
+export async function removeFromCart(courseId: number) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(`/api/cart/${courseId}`, { method: "DELETE" });
+  return wrapper.data;
+}
+
+export async function clearCart() {
+  const wrapper = await apiFetch<ApiResponse<unknown>>("/api/cart", { method: "DELETE" });
+  return wrapper.data;
+}
+
+export interface CheckoutResult {
+  subtotal: number;
+  discount: number;
+  total: number;
+  couponCode: string | null;
+}
+
+export async function checkoutCart(couponCode?: string | null) {
+  const wrapper = await apiFetch<ApiResponse<CheckoutResult>>("/api/cart/checkout", {
+    method: "POST",
+    body: JSON.stringify({ couponCode: couponCode ?? null }),
+  });
+  return wrapper.data;
+}

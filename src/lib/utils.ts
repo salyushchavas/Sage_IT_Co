@@ -98,3 +98,16 @@ export const tiltIn = {
     transition: { type: "spring" as const, stiffness: 180, damping: 16 },
   },
 };
+
+export function friendlyEnrollmentError(err: unknown): string {
+  const raw = err instanceof Error ? err.message : "";
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes("already exist") ||
+    lower.includes("duplicate") ||
+    lower.includes("same identifier")
+  ) {
+    return "You're already enrolled in this course.";
+  }
+  return raw || "Something went wrong. Please try again.";
+}

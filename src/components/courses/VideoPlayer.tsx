@@ -1,55 +1,53 @@
 "use client";
 
 import { motion } from "framer-motion";
-import { Lock, Play } from "lucide-react";
+import { Play, Lock } from "lucide-react";
 
 interface VideoPlayerProps {
-  videoUrl: string | null;
+  videoUrl?: string | null;
   title: string;
   isFree: boolean;
 }
 
-export default function VideoPlayer({ videoUrl, title, isFree }: VideoPlayerProps) {
+export function VideoPlayer({ videoUrl, title, isFree }: VideoPlayerProps) {
   if (!videoUrl) {
     return (
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        className="relative w-full aspect-video rounded-2xl bg-white/60 backdrop-blur-xl border border-zinc-200 flex flex-col items-center justify-center gap-3"
-      >
-        {!isFree ? (
+      <div className="aspect-video bg-gray-100 rounded-xl flex flex-col items-center justify-center text-gray-400">
+        {isFree ? (
           <>
-            <Lock className="w-12 h-12 text-zinc-600" />
-            <p className="text-zinc-600 text-sm">Enroll to unlock this video</p>
+            <Play size={32} className="mb-2" />
+            <p className="text-sm">No video uploaded yet</p>
           </>
         ) : (
           <>
-            <Play className="w-12 h-12 text-zinc-600" />
-            <p className="text-zinc-600 text-sm">No video available yet</p>
+            <Lock size={32} className="mb-2" />
+            <p className="text-sm">Enroll to access this video</p>
           </>
         )}
-      </motion.div>
+      </div>
     );
   }
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 16 }}
-      animate={{ opacity: 1, y: 0 }}
-      transition={{ duration: 0.4 }}
-      className="relative w-full aspect-video rounded-2xl overflow-hidden bg-black border border-zinc-200"
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      className="rounded-xl overflow-hidden bg-black"
     >
       <video
         src={videoUrl}
-        title={title}
         controls
         controlsList="nodownload"
         onContextMenu={(e) => e.preventDefault()}
-        className="w-full h-full object-contain bg-black"
+        className="w-full aspect-video"
+        playsInline
       >
         <track kind="captions" />
         Your browser does not support the video tag.
       </video>
+      <div className="bg-gray-900 px-4 py-2">
+        <p className="text-white text-sm font-medium truncate">{title}</p>
+      </div>
     </motion.div>
   );
 }
