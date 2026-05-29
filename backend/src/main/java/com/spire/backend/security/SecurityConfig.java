@@ -47,7 +47,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/verify/**").permitAll()
                         // Public read of the active Terms of Service text.
                         .requestMatchers(HttpMethod.GET, "/api/agreement/terms").permitAll()
-                        .requestMatchers("/api/admin/**").hasRole("ADMIN")
+                        .requestMatchers("/api/admin/**")
+                                .hasAnyRole("ADMIN", "OPERATIONS_ADMIN", "SYSTEM_ADMIN")
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
