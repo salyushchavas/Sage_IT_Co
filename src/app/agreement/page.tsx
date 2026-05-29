@@ -194,8 +194,8 @@ function AgreementPageInner() {
 
   if (authLoading || !gateChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     );
   }
@@ -206,7 +206,7 @@ function AgreementPageInner() {
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
           <Link href="/program-selection"
-            className="text-xs text-[#1B2A5C] font-semibold hover:underline mt-3 inline-block">
+            className="text-xs text-sage-navy font-semibold hover:underline mt-3 inline-block">
             ← Back to program selection
           </Link>
         </div>
@@ -287,7 +287,7 @@ function AgreementPageInner() {
                 checked={confirmAccept}
                 onChange={(e) => setConfirmAccept(e.target.checked)}
                 disabled={!scrolledToBottom}
-                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#1B2A5C] focus:ring-[#C87D5C] disabled:opacity-50"
+                className="mt-0.5 w-4 h-4 rounded border-gray-300 text-sage-navy focus:ring-sage-copper disabled:opacity-50"
               />
               <span>
                 I confirm all information above is correct and I accept this agreement.{" "}
@@ -305,7 +305,7 @@ function AgreementPageInner() {
                   value={legalName}
                   onChange={(e) => setLegalName(e.target.value)}
                   placeholder="Your full legal name"
-                  className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-[#1B2A5C] focus:ring-1 focus:ring-[#1B2A5C]"
+                  className="w-full px-3.5 py-2.5 text-sm rounded-lg border border-gray-200 bg-white focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
                 />
                 {legalName.trim() && nameWordCount < 2 && (
                   <p className="text-[11px] text-red-500 mt-1">Enter first and last name.</p>
@@ -322,8 +322,8 @@ function AgreementPageInner() {
                     className={
                       "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer "
                       + (signatureMethod === "draw"
-                          ? "bg-[#1B2A5C] text-white shadow-sm"
-                          : "bg-transparent text-gray-600 hover:text-[#1B2A5C]")
+                          ? "bg-sage-navy text-white shadow-sm"
+                          : "bg-transparent text-gray-600 hover:text-sage-navy")
                     }
                   >
                     <PenLine size={12} /> Draw
@@ -334,8 +334,8 @@ function AgreementPageInner() {
                     className={
                       "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer "
                       + (signatureMethod === "upload"
-                          ? "bg-[#1B2A5C] text-white shadow-sm"
-                          : "bg-transparent text-gray-600 hover:text-[#1B2A5C]")
+                          ? "bg-sage-navy text-white shadow-sm"
+                          : "bg-transparent text-gray-600 hover:text-sage-navy")
                     }
                   >
                     <UploadIcon size={12} /> Upload
@@ -366,14 +366,14 @@ function AgreementPageInner() {
                     <p className="text-[11px] text-gray-500">Sign here with your mouse or finger.</p>
                     <button type="button" onClick={handleClearDrawn}
                       disabled={!signatureData}
-                      className="text-[11px] font-semibold text-[#1B2A5C] hover:text-[#2D4480] disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
+                      className="text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep disabled:text-gray-400 disabled:cursor-not-allowed cursor-pointer"
                     >Clear &amp; re-sign</button>
                   </div>
                 </div>
               ) : (
                 <label
                   htmlFor="agree-sig-upload"
-                  className="block rounded-xl border-2 border-dashed border-gray-300 hover:border-[#1B2A5C] hover:bg-[#F0F2F8] bg-gray-50 px-4 py-5 text-center cursor-pointer transition"
+                  className="block rounded-xl border-2 border-dashed border-gray-300 hover:border-sage-navy hover:bg-sage-navy/5 bg-gray-50 px-4 py-5 text-center cursor-pointer transition"
                 >
                   <UploadIcon size={18} className="mx-auto text-gray-400 mb-1.5" />
                   <p className="text-sm font-semibold text-gray-700">Click to upload</p>
@@ -414,7 +414,7 @@ function AgreementPageInner() {
               className={
                 "mt-5 w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-bold transition "
                 + (canSign
-                    ? "bg-[#1B2A5C] text-white hover:bg-[#2D4480] shadow-md hover:shadow-lg cursor-pointer"
+                    ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-md hover:shadow-lg cursor-pointer"
                     : "bg-gray-200 text-gray-500 cursor-not-allowed")
               }
             >
@@ -462,8 +462,8 @@ function SummaryRow({ label, value, mono }: {
 export default function AgreementPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     }>
       <AgreementPageInner />
