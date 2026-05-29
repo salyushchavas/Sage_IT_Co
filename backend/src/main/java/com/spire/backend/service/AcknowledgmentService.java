@@ -65,11 +65,17 @@ public class AcknowledgmentService {
 
         // ── Idempotent return if already accepted ───────────────────
         if (workflowService.isStatusAtLeast(user, WorkflowService.Status.ACKNOWLEDGMENT_ACCEPTED)) {
-            return acknowledgmentRepository
+            Acknowledgment existing = acknowledgmentRepository
                     .findByUserIdAndAcknowledgmentType(userId, TYPE_INTEREST_AND_ACCEPTANCE)
                     .stream()
                     .findFirst()
                     .orElseGet(() -> persist(user, req, httpRequest));
+            // Self-heal: if workflow already advanced (e.g. earlier
+            // submit set the status but the per-step flag fell
+            // behind), re-run markStepComplete here. It's a no-op when
+            // the flag is already true.
+            profileCompletionService.markStepComplete(user, "ACKNOWLEDGMENT");
+            return existing;
         }
 
         // ── Validate ────────────────────────────────────────────────

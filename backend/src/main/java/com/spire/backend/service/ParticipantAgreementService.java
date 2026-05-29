@@ -53,8 +53,11 @@ public class ParticipantAgreementService {
         // Idempotent re-sign — if the user has already moved past
         // AGREEMENT_COMPLETED (e.g. they're on the check-upload step
         // already), route them forward without re-running anything.
+        // Still re-run markStepComplete to self-heal the per-step
+        // flag if it fell behind workflow status.
         if (workflowService.isStatusAtLeast(user,
                 WorkflowService.Status.CHECK_COPY_UPLOADED)) {
+            profileCompletionService.markStepComplete(user, "AGREEMENT");
             return Map.of(
                     "success", true,
                     "alreadySigned", true,
@@ -64,6 +67,7 @@ public class ParticipantAgreementService {
         }
         if (workflowService.isStatusAtLeast(user,
                 WorkflowService.Status.AGREEMENT_COMPLETED)) {
+            profileCompletionService.markStepComplete(user, "AGREEMENT");
             return Map.of(
                     "success", true,
                     "alreadySigned", true,

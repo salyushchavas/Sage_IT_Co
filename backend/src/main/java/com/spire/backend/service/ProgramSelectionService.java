@@ -88,10 +88,13 @@ public class ProgramSelectionService {
 
         // Idempotent return if already past this step.
         if (workflowService.isStatusAtLeast(user, WorkflowService.Status.PROGRAM_SELECTED)) {
-            return programSelectionRepository
+            ProgramSelection existing = programSelectionRepository
                     .findFirstByUserIdOrderBySelectionDateDesc(userId)
                     .orElseGet(() -> programSelectionRepository.save(
                             buildRow(userId, req)));
+            // Self-heal the per-step flag if it fell behind status.
+            profileCompletionService.markStepComplete(user, "PROGRAM_SELECTION");
+            return existing;
         }
 
         validate(req);
