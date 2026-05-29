@@ -6,6 +6,8 @@ import { motion } from "framer-motion";
 import {
   Loader2, LayoutDashboard, Users, BookOpen, UserCheck,
   Eye, EyeOff, Trash2, Check, X, GraduationCap, DollarSign,
+  ClipboardList, Calendar, IndianRupee, Megaphone, Ticket,
+  MessageSquare,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
@@ -15,8 +17,17 @@ import {
   type AdminUserCounts,
 } from "@/lib/api";
 import { cn, fadeUp } from "@/lib/utils";
+import { AdminEnrollmentsTab } from "@/components/admin/tabs/AdminEnrollmentsTab";
+import { AdminSessionsTab } from "@/components/admin/tabs/AdminSessionsTab";
+import { AdminRevenueTab } from "@/components/admin/tabs/AdminRevenueTab";
+import { AdminAnnouncementsTab } from "@/components/admin/tabs/AdminAnnouncementsTab";
+import { AdminCouponsTab } from "@/components/admin/tabs/AdminCouponsTab";
+import { AdminSalesTab } from "@/components/admin/tabs/AdminSalesTab";
+import { AdminMentorPoolsTab } from "@/components/admin/tabs/AdminMentorPoolsTab";
 
-type Tab = "overview" | "users" | "courses" | "requests";
+type Tab = "overview" | "users" | "courses" | "requests"
+  | "enrollments" | "sessions" | "revenue" | "announcements" | "coupons"
+  | "sales" | "mentorPools";
 
 interface AnalyticsData {
   totalUsers: number; totalCourses: number; totalEnrollments: number; totalRevenue: number;
@@ -137,6 +148,13 @@ export default function AdminPage() {
     { key: "overview", label: "Overview", icon: <LayoutDashboard className="w-4 h-4" /> },
     { key: "users", label: "Users", icon: <Users className="w-4 h-4" /> },
     { key: "courses", label: "Courses", icon: <BookOpen className="w-4 h-4" /> },
+    { key: "enrollments", label: "Enrollments", icon: <ClipboardList className="w-4 h-4" /> },
+    { key: "sessions", label: "Sessions", icon: <Calendar className="w-4 h-4" /> },
+    { key: "revenue", label: "Revenue", icon: <IndianRupee className="w-4 h-4" /> },
+    { key: "announcements", label: "Announcements", icon: <Megaphone className="w-4 h-4" /> },
+    { key: "coupons", label: "Coupons", icon: <Ticket className="w-4 h-4" /> },
+    { key: "sales", label: "Sales", icon: <MessageSquare className="w-4 h-4" /> },
+    { key: "mentorPools", label: "Mentor Pools", icon: <GraduationCap className="w-4 h-4" /> },
     { key: "requests", label: "Requests", icon: <UserCheck className="w-4 h-4" /> },
   ];
 
@@ -360,6 +378,15 @@ export default function AdminPage() {
               </div>
             </motion.div>
           )}
+
+          {/* BATCH 3 TABS */}
+          {tab === "enrollments" && <AdminEnrollmentsTab />}
+          {tab === "sessions" && <AdminSessionsTab />}
+          {tab === "revenue" && <AdminRevenueTab />}
+          {tab === "announcements" && <AdminAnnouncementsTab />}
+          {tab === "coupons" && <AdminCouponsTab />}
+          {tab === "sales" && <AdminSalesTab />}
+          {tab === "mentorPools" && <AdminMentorPoolsTab />}
 
           {/* INSTRUCTOR REQUESTS */}
           {tab === "requests" && (

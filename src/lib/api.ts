@@ -2328,3 +2328,259 @@ export async function verifyCertificate(certificateId: string) {
     return wrapper.data;
   }
 }
+
+// ─── Phase 11E Batch 3: admin tabs (Enrollments, Sessions, Revenue,
+//                                    Coupons, Sales, Mentor Pools, CSV) ─
+
+export interface AdminEnrollmentRow {
+  enrollmentId: number;
+  userId: number;
+  studentName: string;
+  studentEmail: string;
+  courseId: number;
+  courseTitle: string;
+  courseType: string;
+  enrolledAt: string;
+  progressPercent: number;
+  completedLessons: number;
+  totalLessons: number;
+  completed: boolean;
+  mentorName: string | null;
+  mentorAssignmentStatus: string | null;
+}
+
+export async function getAdminEnrollments() {
+  const wrapper = await apiFetch<ApiResponse<AdminEnrollmentRow[]>>(
+    "/api/admin/enrollments"
+  );
+  return wrapper.data;
+}
+
+export interface AdminSessionRow {
+  sessionId: number;
+  studentName: string | null;
+  studentEmail: string | null;
+  mentorName: string | null;
+  courseTitle: string | null;
+  status: string;
+  topic: string | null;
+  requestedAt: string | null;
+  scheduledAt: string | null;
+  completedAt: string | null;
+  meetingUrl: string | null;
+}
+
+export async function getAdminSessions() {
+  const wrapper = await apiFetch<ApiResponse<AdminSessionRow[]>>(
+    "/api/admin/sessions"
+  );
+  return wrapper.data;
+}
+
+export interface RevenueSummary {
+  totalRevenue: number;
+  revenueThisMonth: number;
+  revenueLastMonth: number;
+  totalTransactions: number;
+  avgOrderValue: number;
+  topCoursesByRevenue: Array<{
+    courseId: number;
+    courseTitle: string;
+    type: string;
+    enrollments: number;
+    revenue: number;
+  }>;
+}
+
+export interface RevenueTransaction {
+  id: number;
+  studentName: string | null;
+  studentEmail: string | null;
+  amount: number;
+  currency: string;
+  status: string | null;
+  razorpayPaymentId: string | null;
+  razorpayOrderId: string | null;
+  createdAt: string | null;
+}
+
+export async function getRevenueSummary() {
+  const wrapper = await apiFetch<ApiResponse<RevenueSummary>>("/api/admin/revenue/summary");
+  return wrapper.data;
+}
+
+export async function getRevenueTransactions(params?: {
+  from?: string;
+  to?: string;
+  status?: string;
+}) {
+  const qs = params
+    ? "?" + new URLSearchParams(
+        Object.entries(params).filter(([, v]) => v) as [string, string][]
+      ).toString()
+    : "";
+  const wrapper = await apiFetch<ApiResponse<RevenueTransaction[]>>(
+    `/api/admin/revenue/transactions${qs}`
+  );
+  return wrapper.data;
+}
+
+/**
+ * CSV exports stream text/csv -- bypass apiFetch and trigger a
+ * browser download via blob URL. Filename prefix is "sage-" to
+ * match the brand.
+ */
+export async function downloadAdminCsv(kind: "users" | "enrollments" | "sessions" | "revenue") {
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const res = await fetch(`${BASE_URL}/api/admin/export/${kind}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    throw new Error(`Export failed (${res.status})`);
+  }
+  const blob = await res.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  const today = new Date().toISOString().slice(0, 10);
+  a.download = `sage-${kind}-${today}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ─── Admin: sales inquiries (B2B) ──
+
+export async function getAdminSalesInquiries() {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry[]>>("/api/admin/sales/inquiries");
+  return wrapper.data;
+}
+
+export async function getAdminSalesInquiry(id: number) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(`/api/admin/sales/inquiries/${id}`);
+  return wrapper.data;
+}
+
+export interface SalesStats {
+  totalInquiries: number;
+  newCount: number;
+  inProgressCount: number;
+  quotedCount: number;
+  convertedCount: number;
+  closedCount: number;
+  lostCount: number;
+  conversionRate: number;
+}
+
+export async function getAdminSalesStats() {
+  const wrapper = await apiFetch<ApiResponse<SalesStats>>("/api/admin/sales/stats");
+  return wrapper.data;
+}
+
+// ─── Coupons (admin CRUD + public validation) ──
+
+export interface Coupon {
+  id: number;
+  code: string;
+  discountType: "PERCENT" | "FLAT";
+  discountValue: number;
+  minOrderAmount: number | null;
+  maxUses: number | null;
+  usesCount: number;
+  expiresAt: string | null;
+  isActive: boolean;
+  createdAt: string;
+}
+
+export interface CouponValidation {
+  code: string;
+  discountType: "PERCENT" | "FLAT";
+  discountValue: number;
+  cartTotal: number;
+  discountAmount: number;
+  finalTotal: number;
+}
+
+export async function validateCoupon(code: string, cartTotal: number) {
+  const wrapper = await apiFetch<ApiResponse<CouponValidation>>("/api/coupons/validate", {
+    method: "POST",
+    body: JSON.stringify({ code, cartTotal }),
+  });
+  return wrapper.data;
+}
+
+export async function getAllCoupons() {
+  const wrapper = await apiFetch<ApiResponse<Coupon[]>>("/api/admin/coupons");
+  return wrapper.data;
+}
+
+export async function createCoupon(data: {
+  code: string;
+  discountType: "PERCENT" | "FLAT";
+  discountValue: number;
+  minOrderAmount?: number | null;
+  maxUses?: number | null;
+  expiresAt?: string | null;
+  isActive?: boolean;
+}) {
+  const wrapper = await apiFetch<ApiResponse<Coupon>>("/api/admin/coupons", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function updateCoupon(id: number, data: Partial<{
+  discountType: "PERCENT" | "FLAT";
+  discountValue: number;
+  minOrderAmount: number | null;
+  maxUses: number | null;
+  expiresAt: string | null;
+  isActive: boolean;
+}>) {
+  const wrapper = await apiFetch<ApiResponse<Coupon>>(`/api/admin/coupons/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function deleteCoupon(id: number) {
+  return apiFetch<ApiResponse<unknown>>(`/api/admin/coupons/${id}`, { method: "DELETE" });
+}
+
+// ─── Course Mentors (Mentor Pools admin) ──
+
+export interface CourseMentor {
+  id: number;
+  courseId: number;
+  mentorId: number;
+  mentorName: string;
+  mentorEmail: string;
+  activeStudentCount: number;
+  maxStudents: number;
+  isActive: boolean;
+}
+
+export async function getCourseMentors(courseId: number) {
+  const wrapper = await apiFetch<ApiResponse<CourseMentor[]>>(
+    `/api/admin/courses/${courseId}/mentors`
+  );
+  return wrapper.data;
+}
+
+export async function addMentorToCourse(courseId: number, userId: number) {
+  const wrapper = await apiFetch<ApiResponse<CourseMentor>>(
+    `/api/admin/courses/${courseId}/mentors`,
+    { method: "POST", body: JSON.stringify({ userId }) }
+  );
+  return wrapper.data;
+}
+
+export async function removeMentorFromCourse(courseId: number, userId: number) {
+  return apiFetch<ApiResponse<unknown>>(
+    `/api/admin/courses/${courseId}/mentors/${userId}`,
+    { method: "DELETE" }
+  );
+}
