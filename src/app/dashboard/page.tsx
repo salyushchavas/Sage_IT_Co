@@ -28,7 +28,8 @@ import { getOnboardingRoute, isDashboardStatus } from "@/lib/api";
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const activeTab = searchParams.get("tab") || "overview";
+  // "home" matches Spire's default tab id.
+  const activeTab = searchParams.get("tab") || "home";
 
   const { user, isLoading, refreshUser } = useAuth();
   const [routingDecided, setRoutingDecided] = useState(false);
@@ -97,12 +98,15 @@ function DashboardPageInner() {
 }
 
 function renderTab(tab: string) {
+  // Tab ids match Spire's NAV array exactly (home, complete-profile,
+  // courses, weekly, resume, interview, employment, payments,
+  // documents, agreement, team, messages, profile -- 13 tabs).
   switch (tab) {
-    case "overview":
+    case "home":
       return (
         <PlaceholderTab
-          title="Overview"
-          body="Welcome back. Phase 9B will fill this with your participant snapshot — current status, progress, next action."
+          title="Dashboard"
+          body="Welcome back. Phase 9B will fill this with your participant snapshot -- current status, progress, next action."
         />
       );
     case "complete-profile":
@@ -119,18 +123,11 @@ function renderTab(tab: string) {
           body="Phase 9C will surface the locked-until-onboarded course view here."
         />
       );
-    case "wishlist":
-      return (
-        <PlaceholderTab
-          title="My Wishlist"
-          body="Phase 9C will surface saved courses here."
-        />
-      );
-    case "weekly-report":
+    case "weekly":
       return <PlaceholderTab title="Weekly Report" body="Coming in Phase 9D." />;
     case "resume":
       return <PlaceholderTab title="Resume" body="Coming in Phase 9D." />;
-    case "interviews":
+    case "interview":
       return <PlaceholderTab title="Interviews" body="Coming in Phase 9D." />;
     case "employment":
       return <PlaceholderTab title="Employment" body="Coming in Phase 9D." />;

@@ -5,22 +5,21 @@ import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  BookOpen,
   Briefcase,
   ClipboardList,
   CreditCard,
-  FileSignature,
   FileText,
-  FolderOpen,
-  Heart,
   LayoutDashboard,
   Loader2,
   type LucideIcon,
   Menu,
-  MessageCircle,
   MessageSquare,
-  ScrollText,
+  Settings,
+  ShieldCheck,
+  Sparkles,
+  Target,
   Users,
-  UserCircle2,
   X,
   LogOut,
 } from "lucide-react";
@@ -32,21 +31,23 @@ interface SidebarTab {
   Icon: LucideIcon | ComponentType<{ size?: number; className?: string }>;
 }
 
+// 1:1 with Spire's NAV array (13 tabs, no Wishlist). Matching ids,
+// labels, and icons exactly so the routing + active-state behaviour
+// is byte-equivalent to the Spire participant dashboard.
 const SIDEBAR_TABS: ReadonlyArray<SidebarTab> = [
-  { id: "overview",         label: "Overview",         Icon: LayoutDashboard },
-  { id: "complete-profile", label: "Complete Profile", Icon: ClipboardList },
-  { id: "courses",          label: "My Courses",       Icon: ScrollText },
-  { id: "wishlist",         label: "My Wishlist",      Icon: Heart },
-  { id: "weekly-report",    label: "Weekly Report",    Icon: FileText },
-  { id: "resume",           label: "Resume",           Icon: FileSignature },
-  { id: "interviews",       label: "Interviews",       Icon: MessageSquare },
+  { id: "home",             label: "Dashboard",        Icon: LayoutDashboard },
+  { id: "complete-profile", label: "Complete Profile", Icon: Sparkles },
+  { id: "courses",          label: "My Courses",       Icon: BookOpen },
+  { id: "weekly",           label: "Weekly Report",    Icon: ClipboardList },
+  { id: "resume",           label: "Resume",           Icon: BookOpen },
+  { id: "interview",        label: "Interviews",       Icon: Target },
   { id: "employment",       label: "Employment",       Icon: Briefcase },
   { id: "payments",         label: "Payments",         Icon: CreditCard },
-  { id: "documents",        label: "Documents",        Icon: FolderOpen },
-  { id: "agreement",        label: "Agreement",        Icon: ScrollText },
+  { id: "documents",        label: "Documents",        Icon: FileText },
+  { id: "agreement",        label: "Agreement",        Icon: ShieldCheck },
   { id: "team",             label: "My Team",          Icon: Users },
-  { id: "messages",         label: "Messages",         Icon: MessageCircle },
-  { id: "profile",          label: "Profile",          Icon: UserCircle2 },
+  { id: "messages",         label: "Messages",         Icon: MessageSquare },
+  { id: "profile",          label: "Profile",          Icon: Settings },
 ];
 
 interface DashboardLayoutProps {
