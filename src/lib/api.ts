@@ -3109,3 +3109,22 @@ export async function checkoutCart(couponCode?: string | null) {
   });
   return wrapper.data;
 }
+
+// ─── Phase 11E Batch 6: Sales B2B instructor inbox ──
+
+export async function getInstructorSalesInquiries() {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry[]>>("/api/sales/inquiries/instructor");
+  return wrapper.data;
+}
+
+export async function sendSalesQuote(id: number, data: {
+  message: string;
+  quotedPrice: number;
+  quotedItems: SalesQuoteItem[];
+}) {
+  const wrapper = await apiFetch<ApiResponse<SalesInquiry>>(
+    `/api/sales/inquiries/${id}/quote`,
+    { method: "POST", body: JSON.stringify(data) }
+  );
+  return wrapper.data;
+}
