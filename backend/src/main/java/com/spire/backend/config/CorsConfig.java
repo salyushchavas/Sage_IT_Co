@@ -19,9 +19,14 @@ public class CorsConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration config = new CorsConfiguration();
-        config.setAllowedOrigins(Arrays.asList(allowedOrigins.split(",")));
+        // setAllowedOriginPatterns (not setAllowedOrigins) so wildcard
+        // entries like https://*.vercel.app work alongside allow-credentials.
+        // Spring forbids setAllowedOrigins("*") + allowCredentials(true),
+        // but the *Patterns variant is the supported escape hatch.
+        config.setAllowedOriginPatterns(Arrays.asList(allowedOrigins.split(",")));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
+        config.setExposedHeaders(List.of("Authorization", "Content-Type"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
