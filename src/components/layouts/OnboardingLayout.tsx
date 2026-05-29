@@ -67,7 +67,7 @@ export default function OnboardingLayout({
             priority
             className="h-8 w-8 object-contain"
           />
-          <span className="font-serif text-sm font-bold text-brand">
+          <span className="text-sm font-bold text-sage-navy">
             {BRAND.name}
           </span>
         </Link>

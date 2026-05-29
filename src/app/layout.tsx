@@ -2,10 +2,8 @@ import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
 import Script from "next/script";
 import "./globals.css";
-import Navbar from "@/components/layout/Navbar";
-import Footer from "@/components/layout/Footer";
+import ChromeWrapper from "@/components/layout/ChromeWrapper";
 import ClientProviders from "@/components/layout/ClientProviders";
-import PageTransition from "@/components/layout/PageTransition";
 import { AuthProvider } from "@/lib/auth-context";
 import { SITE_URL } from "@/lib/seo";
 
@@ -173,11 +171,7 @@ export default function RootLayout({
         />
         <AuthProvider>
           <ClientProviders />
-          <Navbar />
-          <main className="min-h-screen">
-            <PageTransition>{children}</PageTransition>
-          </main>
-          <Footer />
+          <ChromeWrapper>{children}</ChromeWrapper>
         </AuthProvider>
       </body>
     </html>
