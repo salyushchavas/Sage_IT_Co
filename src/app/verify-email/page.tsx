@@ -4,28 +4,22 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "framer-motion";
 import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Loader2, MailCheck, AlertCircle } from "lucide-react";
+import { Loader2, MailCheck, AlertCircle, CheckCircle2 } from "lucide-react";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
-import OnboardingProgressBar from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
 import { resendVerificationCode, verifyCode } from "@/lib/api";
 
 /**
- * /verify-email?email=… — OTP gate for new signups (Phase 1B).
+ * /verify-email?email=… — OTP gate for new signups.
  *
- * The user lands here straight from /enroll with their email
- * pre-populated. They paste or type the 6-digit code we emailed
- * them; on success the backend hands back an AuthResponse (now
- * including a freshly-minted participantId) and the page promotes
- * the session and routes them to /participant-id.
- *
- * Lives outside the {@code (auth)} route group so the
- * marketing-panel layout doesn't stack on top of OnboardingLayout.
+ * Split-screen layout (Sage navy hero + form panel). The user
+ * lands here from /enroll with their email pre-populated; on
+ * success the backend hands back an AuthResponse and we promote
+ * the session and route to /dashboard.
  */
 
 const RESEND_COOLDOWN_SECONDS = 150;
 const CODE_LENGTH = 6;
-const QUICK_SIGNUP_STEPS = ["Sign Up", "Verify"] as const;
 
 function maskEmail(email: string | null | undefined): string {
   if (!email) return "your email";
@@ -188,28 +182,22 @@ function VerifyEmailInner() {
         transition={{ duration: 0.35 }}
         className="text-center"
       >
-        <p className="text-xs uppercase tracking-widest font-bold text-sage-copper">
-          Step 2 of 2 · Verify Email
-        </p>
-        <h2 className="text-3xl font-bold text-sage-navy mt-2">
-          <span className="inline-flex items-center gap-2">
-            <MailCheck size={22} className="text-sage-navy" />
-            Verify your email
-          </span>
+        <h2 className="text-3xl font-bold text-sage-navy inline-flex items-center justify-center gap-2 w-full">
+          <MailCheck className="w-7 h-7" />
+          Verify your email
         </h2>
-        <p className="text-sm text-gray-600 mt-2 mb-5">
-          We sent a 6-digit code to <span className="font-mono text-gray-900">{masked}</span>
+        <p className="text-sm text-gray-600 mt-2">
+          We sent a 6-digit code to
         </p>
-
-        <div className="mb-5 text-left">
-          <OnboardingProgressBar currentStep={2} steps={QUICK_SIGNUP_STEPS} />
-        </div>
+        <p className="text-sage-navy font-semibold font-mono break-all mb-7">
+          {masked}
+        </p>
 
         <motion.div
           key={shake}
           animate={shake > 0 ? { x: [0, -10, 10, -8, 8, -4, 4, 0] } : { x: 0 }}
           transition={{ duration: 0.5 }}
-          className="flex justify-center gap-2 sm:gap-3 mt-7"
+          className="flex justify-center gap-2 sm:gap-3"
         >
           {digits.map((d, i) => (
             <input
@@ -229,8 +217,8 @@ function VerifyEmailInner() {
                 "w-11 h-14 sm:w-12 text-center text-2xl font-bold rounded-lg border-2 " +
                 "transition-colors focus:outline-none disabled:opacity-60 " +
                 (d
-                  ? "border-[#1B2A5C] bg-[#F0F2F8] text-gray-900"
-                  : "border-gray-200 bg-white text-gray-700 focus:border-[#1B2A5C]")
+                  ? "border-sage-navy bg-sage-navy/5 text-sage-navy"
+                  : "border-gray-200 bg-white text-gray-700 focus:border-sage-navy")
               }
             />
           ))}
@@ -252,11 +240,15 @@ function VerifyEmailInner() {
 
         {success && (
           <motion.div
-            initial={{ scale: 0.95, opacity: 0 }}
+            initial={{ scale: 0.9, opacity: 0 }}
             animate={{ scale: 1, opacity: 1 }}
-            className="mt-4 inline-flex items-center gap-1.5 text-sm font-semibold text-emerald-700"
+            className="mt-6 flex flex-col items-center"
           >
-            ✅ Email verified! Taking you to the next step…
+            <div className="w-14 h-14 rounded-full bg-sage-navy flex items-center justify-center mb-3">
+              <CheckCircle2 className="w-8 h-8 text-white" />
+            </div>
+            <p className="text-sage-navy font-semibold">Email verified!</p>
+            <p className="text-gray-600 text-sm">Taking you to your dashboard…</p>
           </motion.div>
         )}
 
@@ -264,14 +256,14 @@ function VerifyEmailInner() {
           type="button"
           onClick={handleSubmit}
           disabled={!ready || submitting || success}
-          className="mt-6 w-full inline-flex items-center justify-center gap-1.5 bg-[#1B2A5C] text-white text-sm font-bold py-3 rounded-lg shadow-md hover:shadow-lg hover:bg-[#2D4480] focus:outline-none focus:ring-2 focus:ring-[#C87D5C] focus:ring-offset-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          className="mt-6 w-full inline-flex items-center justify-center gap-2 bg-sage-navy hover:bg-sage-navy-deep text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {submitting && <Loader2 size={15} className="animate-spin" />}
-          {submitting ? "Verifying…" : success ? "Verified" : "Verify Email"}
+          {submitting && <Loader2 className="w-4 h-4 animate-spin" />}
+          {submitting ? "Verifying…" : success ? "Verified" : "Verify and Continue"}
         </button>
 
-        <div className="mt-5 text-sm text-gray-500">
-          <p>Didn&apos;t receive the code?</p>
+        <div className="mt-5 text-sm border-t border-gray-100 pt-5">
+          <p className="text-gray-600">Didn&apos;t receive the code?</p>
           {resendCooldown > 0 ? (
             <p className="mt-1 text-gray-400">
               Resend code in{" "}
@@ -285,7 +277,7 @@ function VerifyEmailInner() {
               type="button"
               onClick={handleResend}
               disabled={resending}
-              className="mt-1 text-[#1B2A5C] hover:text-[#2D4480] font-semibold disabled:opacity-50 cursor-pointer"
+              className="mt-1 text-sage-copper hover:text-sage-copper-deep font-semibold disabled:text-gray-400 disabled:cursor-not-allowed"
             >
               {resending ? "Sending…" : "Resend code"}
             </button>
