@@ -40,7 +40,7 @@ public class EmailNudgeJob {
     private final EmailService emailService;
     private final MentorAssignmentService mentorAssignmentService;
 
-    @Value("${app.url:https://spireinfotech.vercel.app}")
+    @Value("${app.url:https://sageitco.com}")
     private String appUrl;
 
     @Value("${app.nudge.inactiveDays:7}")

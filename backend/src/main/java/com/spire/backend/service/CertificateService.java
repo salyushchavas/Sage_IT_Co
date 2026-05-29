@@ -31,9 +31,13 @@ import java.util.stream.Collectors;
 @Slf4j
 public class CertificateService {
 
-    private static final Color TEAL_PRIMARY = new Color(15, 118, 110);   // #0F766E
-    private static final Color TEAL_DARK = new Color(19, 78, 74);        // #134E4A
-    private static final Color TEAL_LIGHT = new Color(94, 234, 212);     // #5EEAD4
+    // Sage navy. Kept as a fallback if BrandConfig.primaryColor is
+    // unparseable; brandPrimary() reads the live brand config so a
+    // re-deploy under a different brand swaps the PDF colour without
+    // code changes.
+    private static final Color BRAND_FALLBACK = new Color(27, 42, 92);   // #1B2A5C
+    private static final Color TEAL_DARK = new Color(19, 78, 74);        // #134E4A (deep accent stripe)
+    private static final Color TEAL_LIGHT = new Color(94, 234, 212);     // #5EEAD4 (light accent stripe)
     private static final Color GOLD_ACCENT = new Color(180, 142, 35);    // signature line color
     private static final Color INK = new Color(31, 41, 55);              // dark body
     private static final Color MUTED = new Color(107, 114, 128);         // muted body
@@ -41,6 +45,18 @@ public class CertificateService {
     private static final Set<String> COURSE_CODE_STOPWORDS = Set.of(
             "a", "an", "the", "and", "or", "of", "for", "to", "in", "with", "on"
     );
+
+    private Color brandPrimary() {
+        String hex = brandConfig.getPrimaryColor();
+        if (hex == null || hex.isBlank()) return BRAND_FALLBACK;
+        String h = hex.startsWith("#") ? hex.substring(1) : hex;
+        try {
+            int rgb = Integer.parseInt(h, 16);
+            return new Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        } catch (NumberFormatException e) {
+            return BRAND_FALLBACK;
+        }
+    }
 
     private final CertificateRepository certificateRepository;
     private final CourseRepository courseRepository;
@@ -147,7 +163,7 @@ public class CertificateService {
         new File(dirPath).mkdirs();
         generatePdf(filePath, user.getFullName(), course.getTitle(),
                 certificate.getCertificateId(), finalScore,
-                course.getInstructor() != null ? course.getInstructor().getFullName() : "Spire Info Tech");
+                course.getInstructor() != null ? course.getInstructor().getFullName() : brandConfig.getName());
 
         // 8. Patch URL on the saved row
         certificate.setCertificateUrl("/api/certificates/download/" + courseId + "/" + fileName);
@@ -274,10 +290,11 @@ public class CertificateService {
             PdfContentByte cb = writer.getDirectContent();
             float pageW = doc.getPageSize().getWidth();
             float pageH = doc.getPageSize().getHeight();
+            Color brandColor = brandPrimary();
 
-            // ── Outer double border (teal) ──────────────────────────
+            // ── Outer double border (brand colour) ───────────────────
             float pad = 24f;
-            cb.setColorStroke(TEAL_PRIMARY);
+            cb.setColorStroke(brandColor);
             cb.setLineWidth(2.5f);
             cb.rectangle(pad, pad, pageW - 2 * pad, pageH - 2 * pad);
             cb.stroke();
@@ -292,7 +309,7 @@ public class CertificateService {
             cb.stroke();
 
             // ── Top + bottom decorative rules ───────────────────────
-            cb.setColorStroke(TEAL_PRIMARY);
+            cb.setColorStroke(brandColor);
             cb.setLineWidth(2f);
             cb.moveTo(pageW / 2 - 80, pageH - 70);
             cb.lineTo(pageW / 2 + 80, pageH - 70);
@@ -303,7 +320,7 @@ public class CertificateService {
             cb.lineTo(pageW / 2 + 100, pageH - 75);
             cb.stroke();
 
-            cb.setColorStroke(TEAL_PRIMARY);
+            cb.setColorStroke(brandColor);
             cb.setLineWidth(2f);
             cb.moveTo(pageW / 2 - 80, 70);
             cb.lineTo(pageW / 2 + 80, 70);
@@ -338,15 +355,15 @@ public class CertificateService {
             // ── Text content (centered, top-down) ───────────────────
             doc.add(spacer(40));
 
-            doc.add(centered("SPIRE INFO TECH",
+            doc.add(centered(brandConfig.getName().toUpperCase(),
                     new Font(Font.HELVETICA, 13, Font.BOLD, TEAL_DARK)));
             doc.add(spacer(2));
-            doc.add(centered("Online learning with personal mentorship",
+            doc.add(centered(brandConfig.getTagline(),
                     new Font(Font.HELVETICA, 9, Font.ITALIC, MUTED)));
 
             doc.add(spacer(24));
             doc.add(centered("CERTIFICATE OF COMPLETION",
-                    new Font(Font.TIMES_ROMAN, 32, Font.BOLD, TEAL_PRIMARY)));
+                    new Font(Font.TIMES_ROMAN, 32, Font.BOLD, brandColor)));
 
             doc.add(spacer(20));
             doc.add(centered("This certifies that",
@@ -376,7 +393,7 @@ public class CertificateService {
             renderSignatureLabel(cb, leftSigX + sigW / 2, sigY - 14,
                     instructorName, "Course Instructor");
             renderSignatureLabel(cb, rightSigX + sigW / 2, sigY - 14,
-                    "Spire Info Tech", "Issuing Platform");
+                    brandConfig.getName(), "Issuing Platform");
 
             // ── Cert ID + verification URL, bottom-left ─────────────
             cb.beginText();
@@ -394,7 +411,10 @@ public class CertificateService {
                     com.lowagie.text.pdf.BaseFont.WINANSI, false), 8);
             cb.setColorFill(MUTED);
             cb.setTextMatrix(60, 38);
-            cb.showText("Verify: spireinfotech.vercel.app/verify/" + certNumber);
+            String verifyHost = brandConfig.getWebsite()
+                    .replaceFirst("^https?://", "")
+                    .replaceFirst("/.*$", "");
+            cb.showText("Verify: " + verifyHost + "/verify/" + certNumber);
             cb.endText();
 
             doc.close();

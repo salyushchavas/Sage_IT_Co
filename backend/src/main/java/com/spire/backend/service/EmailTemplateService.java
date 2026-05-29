@@ -53,7 +53,7 @@ public class EmailTemplateService {
         return brandConfig.getName();
     }
 
-    @Value("${app.url:https://spireinfotech.vercel.app}")
+    @Value("${app.url:https://sageitco.com}")
     private String appUrl;
 
     /**
@@ -431,9 +431,9 @@ public class EmailTemplateService {
         String idBlock =
                 "<div style=\"text-align:center; margin:24px 0;\">"
                         + "<span style=\"display:inline-block; font-size:26px; font-weight:bold; "
-                        + "letter-spacing:4px; color:#0F766E; background:#f0fdf9; "
+                        + "letter-spacing:4px; color:" + brandConfig.getPrimaryColor() + "; background:#f9fafb;"
                         + "padding:14px 28px; border-radius:8px; "
-                        + "border:1px solid rgba(15,118,110,0.2); font-family:'Courier New',monospace;\">"
+                        + "border:1px solid #e5e7eb; font-family:'Courier New',monospace;\">"
                         + escape(participantId)
                         + "</span></div>";
         String body = p("Dear " + escape(greeting) + ",")
@@ -460,9 +460,9 @@ public class EmailTemplateService {
         String codeBlock =
                 "<div style=\"text-align:center; margin:24px 0;\">"
                         + "<span style=\"display:inline-block; font-size:32px; font-weight:bold; "
-                        + "letter-spacing:8px; color:#0F766E; background:#f0fdf9; "
+                        + "letter-spacing:8px; color:" + brandConfig.getPrimaryColor() + "; background:#f9fafb;"
                         + "padding:12px 24px; border-radius:8px; "
-                        + "border:1px solid rgba(15,118,110,0.2); font-family:'Courier New',monospace;\">"
+                        + "border:1px solid #e5e7eb; font-family:'Courier New',monospace;\">"
                         + escape(code)
                         + "</span>"
                         + "</div>";
@@ -506,9 +506,9 @@ public class EmailTemplateService {
         String replyCallout =
                 "<div style=\"text-align:center; margin:24px 0;\">"
                         + "<span style=\"display:inline-block; font-size:20px; font-weight:bold; "
-                        + "letter-spacing:1px; color:#0F766E; background:#f0fdf9; "
+                        + "letter-spacing:1px; color:" + brandConfig.getPrimaryColor() + "; background:#f9fafb;"
                         + "padding:12px 28px; border-radius:8px; "
-                        + "border:1px solid rgba(15,118,110,0.2); font-family:Arial,Helvetica,sans-serif;\">"
+                        + "border:1px solid #e5e7eb; font-family:Arial,Helvetica,sans-serif;\">"
                         + "Yes, I agree"
                         + "</span></div>";
 
@@ -547,9 +547,9 @@ public class EmailTemplateService {
         String codeBlock =
                 "<div style=\"text-align:center; margin:24px 0;\">"
                         + "<span style=\"display:inline-block; font-size:32px; font-weight:bold; "
-                        + "letter-spacing:8px; color:#0F766E; background:#f0fdf9; "
+                        + "letter-spacing:8px; color:" + brandConfig.getPrimaryColor() + "; background:#f9fafb;"
                         + "padding:12px 24px; border-radius:8px; "
-                        + "border:1px solid rgba(15,118,110,0.2); font-family:'Courier New',monospace;\">"
+                        + "border:1px solid #e5e7eb; font-family:'Courier New',monospace;\">"
                         + escape(code)
                         + "</span>"
                         + "</div>";
@@ -724,7 +724,7 @@ public class EmailTemplateService {
                 + button("Download Certificate", pdfUrl)
                 + secondaryButton("Verify Certificate", verifyUrl)
                 + p("Share your achievement: "
-                        + "<a href=\"" + linkedIn + "\" style=\"color:#0F766E; text-decoration:none; font-weight:bold;\">Share on LinkedIn →</a>")
+                        + "<a href=\"" + linkedIn + "\" style=\"color:" + brandConfig.getPrimaryColor() + "; text-decoration:none; font-weight:bold;\">Share on LinkedIn →</a>")
                 + muted("Keep learning — browse more courses at " + brandName() + ".");
         emailService.sendEmail(
                 user.getEmail(),
@@ -1113,24 +1113,26 @@ public class EmailTemplateService {
                 + "✓ " + escape(text) + "</p>";
     }
 
-    private static String button(String label, String url) {
+    private String button(String label, String url) {
+        String primary = brandConfig.getPrimaryColor();
         return """
         <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
-          <tr><td style="background:#0F766E; border-radius:8px;">
+          <tr><td style="background:%s; border-radius:8px;">
             <a href="%s" style="display:inline-block; padding:12px 28px; color:#ffffff; text-decoration:none; font-size:14px; font-weight:bold;">%s</a>
           </td></tr>
         </table>
-        """.formatted(url, escape(label));
+        """.formatted(primary, url, escape(label));
     }
 
-    private static String secondaryButton(String label, String url) {
+    private String secondaryButton(String label, String url) {
+        String primary = brandConfig.getPrimaryColor();
         return """
         <table cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
-          <tr><td style="background:#ffffff; border:1px solid #0F766E; border-radius:8px;">
-            <a href="%s" style="display:inline-block; padding:11px 28px; color:#0F766E; text-decoration:none; font-size:14px; font-weight:bold;">%s</a>
+          <tr><td style="background:#ffffff; border:1px solid %s; border-radius:8px;">
+            <a href="%s" style="display:inline-block; padding:11px 28px; color:%s; text-decoration:none; font-size:14px; font-weight:bold;">%s</a>
           </td></tr>
         </table>
-        """.formatted(url, escape(label));
+        """.formatted(primary, url, primary, escape(label));
     }
 
     /** Bordered "receipt" block — used for payment / cert / session details. */
@@ -1149,8 +1151,8 @@ public class EmailTemplateService {
     }
 
     /** Inline blockquote — used for the sales reply preview. */
-    private static String quote(String text) {
-        return "<div style=\"background:#f9fafb; border-left:3px solid #0F766E; "
+    private String quote(String text) {
+        return "<div style=\"background:#f9fafb; border-left:3px solid " + brandConfig.getPrimaryColor() + "; "
                 + "padding:12px 16px; margin:16px 0; border-radius:4px;\">"
                 + "<p style=\"color:#374151; font-size:14px; margin:0; line-height:1.6;\">"
                 + text + "</p></div>";

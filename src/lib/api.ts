@@ -1105,7 +1105,7 @@ export async function resendAgreementCode(): Promise<{ cooldownSeconds: number }
  */
 export async function downloadSignedAgreementPdf(
   relativePath: string,
-  filename = "Spire-Agreement.pdf",
+  filename = "Sage-Agreement.pdf",
 ): Promise<void> {
   const token = typeof window === "undefined"
     ? null

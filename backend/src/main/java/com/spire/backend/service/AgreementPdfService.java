@@ -8,6 +8,7 @@ import com.lowagie.text.pdf.PdfPTable;
 import com.lowagie.text.pdf.PdfReader;
 import com.lowagie.text.pdf.PdfStamper;
 import com.lowagie.text.pdf.PdfWriter;
+import com.spire.backend.config.BrandConfig;
 import com.spire.backend.entity.AgreementAcceptance;
 import com.spire.backend.entity.User;
 import com.spire.backend.service.TermsContentService.Section;
@@ -55,11 +56,28 @@ import java.util.Locale;
 @Slf4j
 public class AgreementPdfService {
 
-    private static final Color TEAL_PRIMARY = new Color(15, 118, 110);   // #0F766E
-    private static final Color TEAL_DARK = new Color(19, 78, 74);        // #134E4A
+    private final BrandConfig brandConfig;
+
+    // Sage navy fallback if BrandConfig.primaryColor is unparseable.
+    // brandPrimary() reads the live brand config so a re-deploy under
+    // a different brand swaps the PDF colour without code changes.
+    private static final Color BRAND_FALLBACK = new Color(27, 42, 92);   // #1B2A5C
+    private static final Color TEAL_DARK = new Color(19, 78, 74);        // #134E4A (deep accent)
     private static final Color INK = new Color(31, 41, 55);
     private static final Color MUTED = new Color(107, 114, 128);
     private static final Color LIGHT_BG = new Color(249, 250, 251);
+
+    private Color brandPrimary() {
+        String hex = brandConfig.getPrimaryColor();
+        if (hex == null || hex.isBlank()) return BRAND_FALLBACK;
+        String h = hex.startsWith("#") ? hex.substring(1) : hex;
+        try {
+            int rgb = Integer.parseInt(h, 16);
+            return new Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        } catch (NumberFormatException e) {
+            return BRAND_FALLBACK;
+        }
+    }
 
     private static final String LETTERHEAD_PATH = "templates/letterhead.pdf";
     private static final String OUTPUT_DIR = "signed-agreements";
@@ -303,9 +321,9 @@ public class AgreementPdfService {
         return p;
     }
 
-    private static Paragraph sectionHeader(String text) {
+    private Paragraph sectionHeader(String text) {
         Paragraph p = new Paragraph(text,
-                new Font(Font.HELVETICA, 11, Font.BOLD, TEAL_PRIMARY));
+                new Font(Font.HELVETICA, 11, Font.BOLD, brandPrimary()));
         p.setSpacingBefore(6);
         p.setSpacingAfter(8);
         return p;
@@ -330,10 +348,10 @@ public class AgreementPdfService {
      * before base64 decoding; on any decode / embed failure we fall
      * back to a placeholder line so the page still composes.
      */
-    private static void addSignatureBlock(Document document, String dataUrl) {
+    private void addSignatureBlock(Document document, String dataUrl) {
         try {
             Paragraph label = new Paragraph("Digital Signature",
-                    new Font(Font.HELVETICA, 10, Font.BOLD, TEAL_PRIMARY));
+                    new Font(Font.HELVETICA, 10, Font.BOLD, brandPrimary()));
             label.setSpacingBefore(2);
             label.setSpacingAfter(4);
             document.add(label);
