@@ -5,6 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import LockedTabView from "@/components/dashboard/LockedTabView";
 import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
 import ProfileCompletionChecklist from "@/components/dashboard/ProfileCompletionChecklist";
 import { useAuth } from "@/lib/auth-context";
@@ -14,6 +15,64 @@ import {
   isDashboardStatus,
   type ProfileCompletion,
 } from "@/lib/api";
+
+// Per Spire correction: nine dashboard tabs are gated behind a
+// fully-complete participant profile. Each entry below carries the
+// title (matches the sidebar label), a short subtitle, and the
+// long-form body shown inside the lock card. Home, Complete Profile,
+// Messages, and Profile tabs stay accessible at all completion %.
+interface GatedCopy {
+  title: string;
+  subtitle: string;
+  body: string;
+}
+const GATED_TABS: Record<string, GatedCopy> = {
+  courses: {
+    title: "My Courses",
+    subtitle: "Browse and enroll in your learning tracks.",
+    body: "Course access opens once your profile is complete -- enroll in tracks, watch lessons, take quizzes, and earn certificates.",
+  },
+  weekly: {
+    title: "Weekly Report",
+    subtitle: "Submit your weekly job-search progress.",
+    body: "Weekly reporting kicks in after onboarding so your coaching team can track your job-search activity.",
+  },
+  resume: {
+    title: "Resume",
+    subtitle: "Build and edit your resume with coach feedback.",
+    body: "Resume reviews are part of the active phase that begins after your profile is complete.",
+  },
+  interview: {
+    title: "Interviews",
+    subtitle: "Mock interviews and coaching slots.",
+    body: "Interview prep sessions become available once you've finished onboarding.",
+  },
+  employment: {
+    title: "Employment",
+    subtitle: "Track offers and post-placement support.",
+    body: "Employment tracking opens after the rest of the profile is in place.",
+  },
+  payments: {
+    title: "Payments",
+    subtitle: "Manage your payment plan and invoices.",
+    body: "Your payment plan, invoices, and ledger appear here once enrollment is finalised.",
+  },
+  documents: {
+    title: "Documents",
+    subtitle: "View and download your participant documents.",
+    body: "Document access opens once the onboarding upload step is complete and reviewed.",
+  },
+  agreement: {
+    title: "Agreement",
+    subtitle: "Read and download your signed participant agreement.",
+    body: "Your signed agreement and related records appear here after the agreement step is complete.",
+  },
+  team: {
+    title: "My Team",
+    subtitle: "See your assigned ERM and coaches.",
+    body: "Your dedicated team is assigned during onboarding and shown here once your profile is complete.",
+  },
+};
 
 /**
  * Participant dashboard surface.
@@ -129,21 +188,53 @@ function DashboardPageInner() {
       {/* Sticky completion banner above every tab. Self-hides at 100%
           (with a one-time 5s celebration) or for 24h after dismiss. */}
       <ProfileCompletionBanner />
-      {renderTab(activeTab)}
+      {renderTab(activeTab, completion)}
     </DashboardLayout>
   );
 }
 
-function renderTab(tab: string) {
+function renderTab(tab: string, completion: ProfileCompletion | null) {
+  // Profile-complete check. Conservative on missing data: if the
+  // fetch hasn't landed yet, we treat profile as incomplete and show
+  // the locked view (which fetches its own copy and degrades nicely).
+  const isComplete = completion
+    ? completion.completionPercentage >= 100
+    : false;
+
   // Tab ids match Spire's NAV array exactly (home, complete-profile,
   // courses, weekly, resume, interview, employment, payments,
   // documents, agreement, team, messages, profile -- 13 tabs).
+  // Nine of those are profile-gated; see GATED_TABS at the top.
+  const gated = GATED_TABS[tab];
+  if (gated) {
+    if (!isComplete) {
+      return (
+        <div className="px-6 md:px-10 py-8 md:py-10 max-w-4xl">
+          <LockedTabView
+            title={gated.title}
+            subtitle={gated.subtitle}
+            headline={`${gated.title} unlocks once your profile is complete`}
+            body={gated.body}
+          />
+        </div>
+      );
+    }
+    // Profile complete -- real content lands in Phase 9D. Placeholder
+    // keeps the page non-empty so the gate change is visually obvious.
+    return (
+      <PlaceholderTab
+        title={gated.title}
+        body="Coming in Phase 9D -- real content goes here."
+      />
+    );
+  }
+
   switch (tab) {
     case "home":
       return (
         <PlaceholderTab
           title="Dashboard"
-          body="Welcome back. Phase 9C/9D will fill this with your participant snapshot -- current status, progress, next action."
+          body="Welcome back. Phase 9D will fill this with your participant snapshot -- current status, progress, next action."
         />
       );
     case "complete-profile":
@@ -152,29 +243,6 @@ function renderTab(tab: string) {
           <ProfileCompletionChecklist />
         </div>
       );
-    case "courses":
-      return (
-        <PlaceholderTab
-          title="My Courses"
-          body="Phase 9C will surface the locked-until-onboarded course view here."
-        />
-      );
-    case "weekly":
-      return <PlaceholderTab title="Weekly Report" body="Coming in Phase 9D." />;
-    case "resume":
-      return <PlaceholderTab title="Resume" body="Coming in Phase 9D." />;
-    case "interview":
-      return <PlaceholderTab title="Interviews" body="Coming in Phase 9D." />;
-    case "employment":
-      return <PlaceholderTab title="Employment" body="Coming in Phase 9D." />;
-    case "payments":
-      return <PlaceholderTab title="Payments" body="Coming in Phase 9D." />;
-    case "documents":
-      return <PlaceholderTab title="Documents" body="Coming in Phase 9D." />;
-    case "agreement":
-      return <PlaceholderTab title="Agreement" body="Coming in Phase 9D." />;
-    case "team":
-      return <PlaceholderTab title="My Team" body="Coming in Phase 9D." />;
     case "messages":
       return <PlaceholderTab title="Messages" body="Coming in Phase 9D." />;
     case "profile":
