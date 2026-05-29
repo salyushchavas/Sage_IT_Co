@@ -202,6 +202,15 @@ public class DataSeeder implements CommandLineRunner {
         // subsequent run is a clean no-op.
         addUserEmailColumnsIfMissing();
 
+        // Catalog repair -- if a previous deploy ran the full seed block
+        // before /enroll signups existed (so users count was already > 0
+        // when DataSeeder ran), the early-return below skipped courses
+        // and the participant dashboard's Browse view ended up empty.
+        // This runs independently of user count so the catalog can be
+        // backfilled on any already-deployed DB. Idempotent --
+        // short-circuits if courses already exist.
+        seedSampleCoursesIfMissing();
+
         if (userRepository.count() > 0) {
             log.info("Database already seeded. Skipping initial users/courses block.");
             // Backfill on already-seeded dev DBs that predate the services
@@ -1120,6 +1129,147 @@ public class DataSeeder implements CommandLineRunner {
      * Map<slug, expectedOldPrice → newPrice>. Idempotent — a second run
      * is a no-op because the price will already match the new value.
      */
+    /**
+     * Backfill the six sample published courses on any DB that has
+     * users but no courses. Runs independently of the main "first
+     * seed" path so it repairs the historical bug where the user-count
+     * guard at the top of {@link #run} skipped course seeding once a
+     * single /enroll signup had landed.
+     *
+     * Instructors are looked up by email (arjun/priya/rahul@sageitco.com).
+     * If any one is missing -- e.g. the seed user step never ran on
+     * this deployment -- we log a warning and bail out rather than
+     * leave the catalog with NULL instructor refs.
+     */
+    private void seedSampleCoursesIfMissing() {
+        if (courseRepository.count() > 0) return;
+        User arjun = userRepository.findByEmail("arjun@sageitco.com").orElse(null);
+        User priya = userRepository.findByEmail("priya@sageitco.com").orElse(null);
+        User rahul = userRepository.findByEmail("rahul@sageitco.com").orElse(null);
+        if (arjun == null || priya == null || rahul == null) {
+            log.warn("seedSampleCoursesIfMissing: instructor users missing -- "
+                    + "skipping catalog seed. (arjun={}, priya={}, rahul={})",
+                    arjun != null, priya != null, rahul != null);
+            return;
+        }
+
+        courseRepository.save(Course.builder()
+                .title("Full-Stack Web Development")
+                .slug("full-stack-web-development")
+                .description("Master modern web development from front to back. Learn HTML, CSS, JavaScript, React, Node.js, databases, and deployment in one comprehensive course.")
+                .shortDescription("Build complete web applications from scratch")
+                .level(Course.Level.INTERMEDIATE)
+                .price(new BigDecimal("4999.00"))
+                .isFree(false)
+                .durationHours(42.5)
+                .instructor(arjun)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Web Development")
+                .tags("html,css,javascript,react,nodejs,mongodb")
+                .isPublished(true)
+                .build());
+
+        courseRepository.save(Course.builder()
+                .title("React Mastery")
+                .slug("react-mastery")
+                .description("Take your React skills to the next level. Advanced patterns, performance optimization, state management, and real-world project architecture.")
+                .shortDescription("Advanced React patterns and best practices")
+                .level(Course.Level.ADVANCED)
+                .price(new BigDecimal("3499.00"))
+                .isFree(false)
+                .durationHours(28.0)
+                .instructor(arjun)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Frontend")
+                .tags("react,hooks,redux,nextjs,typescript")
+                .isPublished(true)
+                .build());
+
+        courseRepository.save(Course.builder()
+                .title("Python for Data Science")
+                .slug("python-for-data-science")
+                .description("Learn Python programming and data science from scratch. Covers NumPy, Pandas, Matplotlib, Scikit-learn, and real-world data analysis projects.")
+                .shortDescription("Data analysis and ML with Python")
+                .level(Course.Level.BEGINNER)
+                .price(new BigDecimal("3999.00"))
+                .isFree(false)
+                .durationHours(35.0)
+                .instructor(priya)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Data Science")
+                .tags("python,numpy,pandas,matplotlib,scikit-learn,ml")
+                .isPublished(true)
+                .build());
+
+        courseRepository.save(Course.builder()
+                .title("Cloud Architecture with AWS")
+                .slug("cloud-architecture-with-aws")
+                .description("Design and deploy scalable cloud solutions on AWS. Covers EC2, S3, Lambda, DynamoDB, CloudFormation, and architecture best practices.")
+                .shortDescription("Build scalable cloud solutions on AWS")
+                .level(Course.Level.ADVANCED)
+                .price(new BigDecimal("5499.00"))
+                .isFree(false)
+                .durationHours(32.0)
+                .instructor(rahul)
+                .lessonsCount(4)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Cloud")
+                .tags("aws,ec2,s3,lambda,dynamodb,cloudformation")
+                .isPublished(true)
+                .build());
+
+        courseRepository.save(Course.builder()
+                .title("UI/UX Design Fundamentals")
+                .slug("ui-ux-design-fundamentals")
+                .description("Learn the principles of great user interface and user experience design. Covers Figma, design systems, wireframing, prototyping, and usability testing.")
+                .shortDescription("Design beautiful and usable interfaces")
+                .level(Course.Level.BEGINNER)
+                .price(new BigDecimal("2999.00"))
+                .isFree(false)
+                .durationHours(20.0)
+                .instructor(priya)
+                .lessonsCount(4)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Design")
+                .tags("figma,ui,ux,wireframing,prototyping,design-systems")
+                .isPublished(true)
+                .build());
+
+        courseRepository.save(Course.builder()
+                .title("Mobile App Development with React Native")
+                .slug("mobile-app-development-with-react-native")
+                .description("Build cross-platform mobile apps with React Native. Covers navigation, state management, native modules, animations, and app store deployment.")
+                .shortDescription("Cross-platform mobile apps with React Native")
+                .level(Course.Level.INTERMEDIATE)
+                .price(new BigDecimal("3999.00"))
+                .isFree(false)
+                .durationHours(30.0)
+                .instructor(rahul)
+                .lessonsCount(5)
+                .enrolledCount(0)
+                .rating(0.0)
+                .ratingsCount(0)
+                .category("Mobile")
+                .tags("react-native,mobile,ios,android,javascript")
+                .isPublished(true)
+                .build());
+
+        log.info("seedSampleCoursesIfMissing: seeded 6 published courses.");
+    }
+
     private void backfillCoursePrices() {
         record PriceMigration(String slug, BigDecimal expectedOld, BigDecimal newPrice, boolean wasFree) {}
         List<PriceMigration> migrations = List.of(
