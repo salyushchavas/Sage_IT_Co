@@ -1,152 +1,116 @@
 package com.spire.backend.service;
 
+import com.spire.backend.config.BrandConfig;
+import jakarta.mail.MessagingException;
+import jakarta.mail.internet.MimeMessage;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.http.HttpEntity;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
-import org.springframework.http.client.SimpleClientHttpRequestFactory;
+import org.springframework.core.io.ByteArrayResource;
+import org.springframework.mail.javamail.JavaMailSender;
+import org.springframework.mail.javamail.MimeMessageHelper;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
 
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
+import java.io.UnsupportedEncodingException;
 import java.util.List;
-import java.util.Map;
 
 /**
- * Email relay client. Posts to a Vercel-hosted Next.js API route
- * (see {@code frontend/src/app/api/send-email/route.ts}) which
- * forwards to Gmail SMTP via Nodemailer.
+ * Direct Gmail SMTP sender via Spring's JavaMailSender. Replaces
+ * the previous "POST to a Vercel relay" pattern -- Sage owns its
+ * own SMTP credentials on Railway and ships them straight to
+ * Gmail.
  *
- * Why the indirection: Railway's egress firewall blocks SMTP on
- * every port (587, 465, 25) so the JavaMail-based path could never
- * connect. Vercel's Node runtime can reach SMTP, so the backend
- * formats the message and delegates the wire-level send.
+ * IMPORTANT: if the Railway egress firewall blocks outbound SMTP
+ * (port 587), every send here will silently time out. The original
+ * Spire codebase used the relay pattern specifically because that
+ * was the case. Verify SMTP is reachable from Railway before
+ * relying on this in prod -- if not, the rollback is to re-set
+ * EMAIL_RELAY_URL / EMAIL_RELAY_SECRET env vars and restore the
+ * old relay-based implementation.
  *
- * Authentication is a shared secret in the JSON body; the Vercel
- * route refuses any request whose {@code secret} doesn't match.
- *
- * Sends are best-effort and synchronous — slow Vercel responses
- * delay the calling request, but every callsite already wraps
- * sendEmail in try/catch so an outage can't break signup,
- * enrollment, etc.
+ * Public API kept identical to the relay version so callers
+ * (EmailTemplateService and the cron jobs) need no changes.
  */
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class EmailService {
 
-    @Value("${email.relay.url:}")
-    private String relayUrl;
+    private final JavaMailSender mailSender;
+    private final BrandConfig brandConfig;
 
-    @Value("${email.relay.secret:}")
-    private String relaySecret;
-
-    private final RestTemplate restTemplate;
-
-    public EmailService() {
-        // Tight timeouts so a hung Vercel deploy can't pin the calling
-        // thread for the default minutes-long fetch. 5s connect / 15s
-        // read is ample for a JSON POST + Gmail handoff.
-        // Configured via SimpleClientHttpRequestFactory for portability
-        // across Spring Boot versions where RestTemplateBuilder's
-        // timeout API differs.
-        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
-        factory.setConnectTimeout(5_000);
-        factory.setReadTimeout(15_000);
-        this.restTemplate = new RestTemplate(factory);
-    }
+    @Value("${spring.mail.username:}")
+    private String fromEmail;
 
     /**
-     * True when both the relay URL and shared secret are wired up.
-     * Used by the test endpoint and the inactive-nudge cron to bail
-     * out cleanly when email isn't configured for the environment.
+     * True when SMTP credentials are configured. Used by the test
+     * endpoint and any cron path that wants to bail early when
+     * email isn't wired up for the environment.
      */
     public boolean isConfigured() {
-        return relayUrl != null && !relayUrl.isBlank()
-                && relaySecret != null && !relaySecret.isBlank();
+        return fromEmail != null && !fromEmail.isBlank();
     }
 
-    /**
-     * Posts the message to the relay. Logs and swallows any
-     * exception — callers expect this to never throw.
-     */
     public void sendEmail(String to, String subject, String htmlBody) {
         sendEmail(to, subject, htmlBody, List.of());
     }
 
     /**
-     * Send a message with one or more PDF / binary attachments.
-     * Attachments are base64-encoded into the JSON payload and
-     * decoded by the Vercel relay before handing them to Nodemailer.
-     * Keep payload size reasonable — relay HTTP body is bounded by
-     * Vercel's request limits (4.5 MB on hobby/Pro routes).
+     * Send an HTML message with optional binary attachments.
+     * Attachments are added via MimeMessageHelper -- bytes are
+     * wrapped in ByteArrayResource so JavaMail picks them up
+     * without writing temp files.
+     *
+     * Errors are logged and swallowed; callers historically expect
+     * this method never to throw.
      */
     public void sendEmail(String to, String subject, String htmlBody, List<Attachment> attachments) {
         if (!isConfigured()) {
-            log.warn("Email relay not configured — skipping send: subject='{}' to='{}'", subject, to);
+            log.warn("SMTP not configured -- skipping send: subject='{}' to='{}'", subject, to);
             return;
         }
         try {
-            // Use Object map (not String map) so we can mix the JSON
-            // string fields with the attachments array.
-            Map<String, Object> payload = new HashMap<>();
-            payload.put("to", to);
-            payload.put("subject", subject);
-            payload.put("html", htmlBody);
-            payload.put("secret", relaySecret);
+            MimeMessage message = mailSender.createMimeMessage();
+            // multipart=true so we can attach files; UTF-8 keeps subject
+            // / body encoded properly for non-ASCII content.
+            MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-            if (attachments != null && !attachments.isEmpty()) {
-                List<Map<String, String>> attachList = new ArrayList<>(attachments.size());
+            helper.setFrom(fromEmail, brandConfig.getName());
+            helper.setTo(to);
+            helper.setSubject(subject);
+            helper.setText(htmlBody, true);
+
+            if (attachments != null) {
                 for (Attachment a : attachments) {
                     if (a == null || a.content() == null || a.filename() == null) continue;
-                    Map<String, String> entry = new HashMap<>();
-                    entry.put("filename", a.filename());
-                    entry.put("contentType", a.contentType() == null
-                            ? "application/octet-stream" : a.contentType());
-                    entry.put("contentBase64", Base64.getEncoder().encodeToString(a.content()));
-                    attachList.add(entry);
+                    String contentType = a.contentType() == null
+                            ? "application/octet-stream"
+                            : a.contentType();
+                    helper.addAttachment(
+                            a.filename(),
+                            new ByteArrayResource(a.content()),
+                            contentType);
                 }
-                payload.put("attachments", attachList);
             }
 
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_JSON);
-            HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+            mailSender.send(message);
 
-            // Use LinkedHashMap so any future logging of the response
-            // body keeps a stable field order.
-            @SuppressWarnings("rawtypes")
-            ResponseEntity<LinkedHashMap> response = restTemplate.postForEntity(
-                    relayUrl, request, LinkedHashMap.class);
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> body = response.getBody();
-            boolean ok = response.getStatusCode().is2xxSuccessful()
-                    && body != null
-                    && Boolean.TRUE.equals(body.get("ok"));
-
-            if (ok) {
-                log.info("Email relayed via Vercel: subject='{}' to='{}' attachments={}",
-                        subject, to, attachments == null ? 0 : attachments.size());
-            } else {
-                String detail = body != null && body.get("message") != null
-                        ? body.get("message").toString() : "no body";
-                log.error("Relay rejected send: subject='{}' to='{}': {}", subject, to, detail);
-            }
+            log.info("Email sent via SMTP: subject='{}' to='{}' attachments={}",
+                    subject, to, attachments == null ? 0 : attachments.size());
+        } catch (MessagingException | UnsupportedEncodingException e) {
+            log.error("Failed to build email message for {}: {}", to, e.getMessage());
         } catch (Exception e) {
-            log.error("Email relay call failed: subject='{}' to='{}': {}",
+            // JavaMailSender wraps SMTP failures in MailSendException
+            // (RuntimeException subtype) -- catch broadly so a Railway
+            // egress block / Gmail throttle doesn't crash the calling
+            // request.
+            log.error("SMTP send failed: subject='{}' to='{}': {}",
                     subject, to, e.getMessage());
         }
     }
 
     /**
-     * Single attachment payload — raw bytes, filename, and MIME type.
-     * The relay client base64-encodes {@code content} into the JSON
-     * body the Vercel route expects.
+     * Single attachment payload -- raw bytes, filename, and MIME type.
      */
     public record Attachment(String filename, String contentType, byte[] content) {}
 }
