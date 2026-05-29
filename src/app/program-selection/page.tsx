@@ -80,7 +80,7 @@ const AVAILABILITY_OPTIONS = [
 const INPUT_CLASS =
   "w-full px-3.5 py-2.5 text-sm rounded-lg border border-gray-200 bg-white " +
   "text-gray-900 placeholder-gray-400 transition focus:outline-none " +
-  "focus:border-[#1B2A5C] focus:ring-1 focus:ring-[#1B2A5C] " +
+  "focus:border-sage-navy focus:ring-1 focus:ring-sage-navy " +
   "disabled:bg-gray-50 disabled:cursor-not-allowed";
 const LABEL_CLASS = "block text-[13px] font-medium text-gray-700 mb-1";
 
@@ -247,8 +247,8 @@ function ProgramSelectionPageInner() {
   // ── Render ────────────────────────────────────────────────────
   if (authLoading || !gateChecked) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     );
   }
@@ -259,7 +259,7 @@ function ProgramSelectionPageInner() {
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
-          <Link href="/document-upload" className="text-xs text-[#1B2A5C] font-semibold hover:underline mt-3 inline-block">
+          <Link href="/document-upload" className="text-xs text-sage-navy font-semibold hover:underline mt-3 inline-block">
             ← Back to document upload
           </Link>
         </div>
@@ -296,7 +296,7 @@ function ProgramSelectionPageInner() {
           <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
             <div>
               <p className="font-semibold text-gray-900 mb-1">Phase 1: Pre-employment Readiness</p>
-              <ul className="space-y-1 text-gray-700 list-disc list-inside marker:text-[#1B2A5C]">
+              <ul className="space-y-1 text-gray-700 list-disc list-inside marker:text-sage-navy">
                 <li>Career coaching and professional guidance</li>
                 <li>Resume and profile administration</li>
                 <li>Interview preparation and mock interviews</li>
@@ -308,7 +308,7 @@ function ProgramSelectionPageInner() {
             </div>
             <div>
               <p className="font-semibold text-gray-900 mb-1">Phase 2: Post-offer / Transition Support</p>
-              <ul className="space-y-1 text-gray-700 list-disc list-inside marker:text-[#1B2A5C]">
+              <ul className="space-y-1 text-gray-700 list-disc list-inside marker:text-sage-navy">
                 <li>Post-offer technical enhancement</li>
                 <li>Documentation and transition support</li>
                 <li>Role-aligned coaching</li>
@@ -323,7 +323,7 @@ function ProgramSelectionPageInner() {
             type="checkbox"
             checked={reviewed}
             onChange={(e) => setReviewed(e.target.checked)}
-            className="mt-0.5 w-4 h-4 rounded border-gray-300 text-[#1B2A5C] focus:ring-[#C87D5C]"
+            className="mt-0.5 w-4 h-4 rounded border-gray-300 text-sage-navy focus:ring-sage-copper"
           />
           <span>
             I have reviewed the service summary{" "}
@@ -457,7 +457,7 @@ function ProgramSelectionPageInner() {
             type="button"
             onClick={handleSaveAndExit}
             disabled={savingDraft || submitting}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-[#1B2A5C] hover:text-[#1B2A5C] disabled:opacity-60 transition cursor-pointer"
+            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
           >
             {savingDraft ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
             Save and continue later
@@ -469,7 +469,7 @@ function ProgramSelectionPageInner() {
             className={
               "flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition "
               + (canContinue
-                  ? "bg-[#1B2A5C] text-white hover:bg-[#2D4480] shadow-md hover:shadow-lg cursor-pointer"
+                  ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-md hover:shadow-lg cursor-pointer"
                   : "bg-gray-200 text-gray-500 cursor-not-allowed")
             }
           >
@@ -485,8 +485,8 @@ function ProgramSelectionPageInner() {
 export default function ProgramSelectionPage() {
   return (
     <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-[#F8FAFC]">
-        <Loader2 size={28} className="animate-spin text-[#1B2A5C]" />
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
+        <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
     }>
       <ProgramSelectionPageInner />
