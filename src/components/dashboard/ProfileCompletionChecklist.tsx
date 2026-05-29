@@ -60,10 +60,16 @@ export default function ProfileCompletionChecklist() {
     }
   };
 
+  // Refetch on every ?step= change so a redirect back from a
+  // standalone step page (acknowledgment, documents, ...) shows
+  // the freshly-completed state. Bare mount runs this too because
+  // stepParam is null on direct visits. Without this dep, Next.js
+  // App Router's client cache could serve a stale checklist after
+  // router.replace().
   useEffect(() => {
     void reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [stepParam]);
 
   // Auto-scroll + toast once data is loaded and we have a step hint.
   // Handled-step ref prevents repeats on re-render -- once we've
