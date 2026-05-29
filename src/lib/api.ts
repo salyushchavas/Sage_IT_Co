@@ -47,6 +47,9 @@ export interface UserDTO {
   // Cached profile-completion percentage. The banner watches this so
   // it can re-fetch when a step elsewhere on the page flips it.
   profileCompletionPct?: number;
+  // Optional fields surfaced on the Profile tab.
+  location?: string | null;
+  createdAt?: string | null;
 }
 
 export interface AuthResponse {

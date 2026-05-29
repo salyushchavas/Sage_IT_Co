@@ -5,22 +5,32 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import DashboardLayout from "@/components/layout/DashboardLayout";
+import AgreementTab from "@/components/dashboard/AgreementTab";
+import ComingSoonTab from "@/components/dashboard/ComingSoonTab";
+import DocumentsTab from "@/components/dashboard/DocumentsTab";
+import HomeTab from "@/components/dashboard/HomeTab";
 import LockedTabView from "@/components/dashboard/LockedTabView";
+import MessagesTab from "@/components/dashboard/MessagesTab";
 import ProfileCompletionBanner from "@/components/dashboard/ProfileCompletionBanner";
 import ProfileCompletionChecklist from "@/components/dashboard/ProfileCompletionChecklist";
+import ProfileTab from "@/components/dashboard/ProfileTab";
+import TeamTab from "@/components/dashboard/TeamTab";
 import { useAuth } from "@/lib/auth-context";
 import {
   getOnboardingRoute,
+  getParticipantDashboard,
+  getParticipantTeam,
   getProfileCompletion,
   isDashboardStatus,
+  type ParticipantDashboard as DashboardData,
+  type ParticipantTeam,
   type ProfileCompletion,
 } from "@/lib/api";
 
-// Per Spire correction: nine dashboard tabs are gated behind a
-// fully-complete participant profile. Each entry below carries the
-// title (matches the sidebar label), a short subtitle, and the
-// long-form body shown inside the lock card. Home, Complete Profile,
-// Messages, and Profile tabs stay accessible at all completion %.
+// Profile-gated tab metadata. The nine tabs listed here render
+// LockedTabView while pct < 100, and their real content (or a
+// ComingSoonTab placeholder) once unlocked. Home, Complete Profile,
+// Messages, and Profile stay accessible at every completion level.
 interface GatedCopy {
   title: string;
   subtitle: string;
@@ -74,20 +84,6 @@ const GATED_TABS: Record<string, GatedCopy> = {
   },
 };
 
-/**
- * Participant dashboard surface.
- *
- * Routing rules (in order):
- *   1. Not signed in -> /login
- *   2. ADMIN / INSTRUCTOR -> /admin
- *   3. No participantId -> /enroll
- *   4. currentStatus not a dashboard-tier value -> matching
- *      onboarding step
- *   5. Otherwise -> sidebar shell with tab content
- *
- * Phase 9B fills in the Complete Profile tab (checklist + banner +
- * sidebar % badge); the remaining tabs stay as placeholders for 9C/9D.
- */
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -97,11 +93,11 @@ function DashboardPageInner() {
   const { user, isLoading, refreshUser } = useAuth();
   const [routingDecided, setRoutingDecided] = useState(false);
 
-  // Profile-completion snapshot fetched once at the dashboard level so
-  // we can render the sidebar % badge alongside whatever tab the user
-  // is on. The banner + checklist refetch their own copies so they
-  // stay live after a step is completed.
+  // Snapshots fetched once at the dashboard level so the sidebar
+  // % badge + home tab + messages tab + team tab all share data.
   const [completion, setCompletion] = useState<ProfileCompletion | null>(null);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [team, setTeam] = useState<ParticipantTeam | null>(null);
 
   useEffect(() => {
     if (isLoading) return;
@@ -119,16 +115,16 @@ function DashboardPageInner() {
         return;
       }
 
-      // Participant lifecycle. Pull a fresh profile if the in-memory
-      // copy is missing critical fields -- the auth context can hold
-      // stale data after soft navigations.
+      // Participant lifecycle. Refresh in-memory user if any critical
+      // fields are missing -- auth context can hold stale data after
+      // soft navigations.
       let status = user.currentStatus;
       let participantId = user.participantId;
       if (!status || !participantId) {
         try {
           await refreshUser();
         } catch {
-          // ignore -- we'll fall through to the not-enrolled branch
+          /* ignore -- fall through to not-enrolled branch */
         }
         if (cancelled) return;
       }
@@ -151,17 +147,40 @@ function DashboardPageInner() {
     };
   }, [isLoading, user, router, refreshUser]);
 
-  // Fetch profile completion once the gatekeeper is done. Refetches
-  // when the user's stored profileCompletionPct changes (after a step
-  // is submitted from elsewhere).
+  // Profile-completion snapshot. Drives sidebar % badge + gate decision.
   useEffect(() => {
     if (!routingDecided) return;
     let cancelled = false;
     getProfileCompletion()
-      .then((res) => { if (!cancelled) setCompletion(res); })
-      .catch(() => { /* badge just stays hidden */ });
-    return () => { cancelled = true; };
+      .then((res) => {
+        if (!cancelled) setCompletion(res);
+      })
+      .catch(() => {
+        /* badge / gate just stay hidden / locked */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [routingDecided, user?.profileCompletionPct]);
+
+  // Dashboard + team snapshots for tab content. Run in parallel so
+  // both land roughly together.
+  useEffect(() => {
+    if (!routingDecided) return;
+    let cancelled = false;
+    Promise.all([getParticipantDashboard(), getParticipantTeam()])
+      .then(([d, t]) => {
+        if (cancelled) return;
+        setDashboardData(d);
+        setTeam(t);
+      })
+      .catch(() => {
+        /* tabs that need this data degrade gracefully */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [routingDecided]);
 
   if (isLoading || !routingDecided) {
     return (
@@ -171,7 +190,7 @@ function DashboardPageInner() {
     );
   }
 
-  // Sidebar badge: percentage chip while profile is incomplete.
+  // Sidebar badge: amber percentage chip while profile is incomplete.
   const badges =
     completion && completion.completionPercentage < 100
       ? {
@@ -183,96 +202,163 @@ function DashboardPageInner() {
         }
       : undefined;
 
+  const handleJumpTo = (tab: string) => {
+    router.push(`/dashboard?tab=${tab}`);
+  };
+
   return (
     <DashboardLayout activeTab={activeTab} badges={badges}>
-      {/* Sticky completion banner above every tab. Self-hides at 100%
-          (with a one-time 5s celebration) or for 24h after dismiss. */}
       <ProfileCompletionBanner />
-      {renderTab(activeTab, completion)}
+      <div className="px-6 md:px-10 py-8 md:py-10 max-w-5xl">
+        {renderTab(activeTab, completion, dashboardData, team, user?.email ?? null, handleJumpTo)}
+      </div>
     </DashboardLayout>
   );
 }
 
-function renderTab(tab: string, completion: ProfileCompletion | null) {
-  // Profile-complete check. Conservative on missing data: if the
-  // fetch hasn't landed yet, we treat profile as incomplete and show
-  // the locked view (which fetches its own copy and degrades nicely).
-  const isComplete = completion
-    ? completion.completionPercentage >= 100
-    : false;
+function renderTab(
+  tab: string,
+  completion: ProfileCompletion | null,
+  dashboardData: DashboardData | null,
+  team: ParticipantTeam | null,
+  userEmail: string | null,
+  jumpTo: (id: string) => void,
+) {
+  const isComplete = completion ? completion.completionPercentage >= 100 : false;
 
-  // Tab ids match Spire's NAV array exactly (home, complete-profile,
-  // courses, weekly, resume, interview, employment, payments,
-  // documents, agreement, team, messages, profile -- 13 tabs).
-  // Nine of those are profile-gated; see GATED_TABS at the top.
+  // Profile-gated tabs: lock until pct=100, then render real content
+  // (or a ComingSoonTab placeholder for the tabs we haven't ported).
   const gated = GATED_TABS[tab];
   if (gated) {
     if (!isComplete) {
       return (
-        <div className="px-6 md:px-10 py-8 md:py-10 max-w-4xl">
-          <LockedTabView
-            title={gated.title}
-            subtitle={gated.subtitle}
-            headline={`${gated.title} unlocks once your profile is complete`}
-            body={gated.body}
-          />
-        </div>
+        <LockedTabView
+          title={gated.title}
+          subtitle={gated.subtitle}
+          headline={`${gated.title} unlocks once your profile is complete`}
+          body={gated.body}
+        />
       );
     }
-    // Profile complete -- real content lands in Phase 9D. Placeholder
-    // keeps the page non-empty so the gate change is visually obvious.
-    return (
-      <PlaceholderTab
-        title={gated.title}
-        body="Coming in Phase 9D -- real content goes here."
-      />
-    );
+    return renderGatedReal(tab, dashboardData, team);
   }
 
+  // Ungated tabs.
   switch (tab) {
     case "home":
+      if (!dashboardData) return <TabLoading />;
       return (
-        <PlaceholderTab
-          title="Dashboard"
-          body="Welcome back. Phase 9D will fill this with your participant snapshot -- current status, progress, next action."
+        <HomeTab
+          data={dashboardData}
+          team={team}
+          userEmail={userEmail}
+          onJumpTo={jumpTo}
         />
       );
     case "complete-profile":
-      return (
-        <div className="px-6 md:px-10 py-8 md:py-10 max-w-4xl">
-          <ProfileCompletionChecklist />
-        </div>
-      );
+      return <ProfileCompletionChecklist />;
     case "messages":
-      return <PlaceholderTab title="Messages" body="Coming in Phase 9D." />;
+      if (!dashboardData) return <TabLoading />;
+      return <MessagesTab data={dashboardData} team={team} />;
     case "profile":
-      return <PlaceholderTab title="Profile" body="Coming in Phase 9D." />;
+      return <ProfileTab />;
     default:
       return (
-        <PlaceholderTab
+        <ComingSoonTab
           title="Not found"
-          body={`No tab matches "${tab}". Try a sidebar link.`}
+          copy={`No tab matches "${tab}". Use a sidebar link.`}
         />
       );
   }
 }
 
-function PlaceholderTab({ title, body }: { title: string; body: string }) {
+function renderGatedReal(
+  tab: string,
+  dashboardData: DashboardData | null,
+  team: ParticipantTeam | null,
+) {
+  switch (tab) {
+    case "documents":
+      return <DocumentsTab />;
+    case "agreement":
+      return <AgreementTab participantId={dashboardData?.participantId ?? null} />;
+    case "team":
+      if (!dashboardData) return <TabLoading />;
+      return <TeamTab team={team} data={dashboardData} />;
+
+    // Tabs with real backend support but UI port deferred -- the
+    // ComingSoonTab card lands the user softly until each tab gets a
+    // dedicated build-out.
+    case "courses":
+      return (
+        <ComingSoonTab
+          title="My Courses"
+          copy="Course enrollment and progress tracking ships in a follow-up phase."
+          hint="In the meantime, your assigned coach can recommend resources via the My Team tab."
+        />
+      );
+    case "weekly":
+      return (
+        <ComingSoonTab
+          title="Weekly Report"
+          copy="The weekly job-search reporting flow lands in a follow-up phase."
+          hint="Your ERM will reach out by email when weekly reporting opens."
+        />
+      );
+    case "resume":
+      return (
+        <ComingSoonTab
+          title="Resume / Profile activity"
+          copy="Resume version tracking, profile updates, and coach feedback ship in a follow-up phase."
+          hint="Send draft resumes to your Resume Specialist via the My Team tab."
+        />
+      );
+    case "interview":
+      return (
+        <ComingSoonTab
+          title="Interview training"
+          copy="Mock interview scheduling, coach feedback, and practice tasks ship in a follow-up phase."
+          hint="Talk to your Interview Coach via My Team to schedule a mock."
+        />
+      );
+    case "employment":
+      return (
+        <ComingSoonTab
+          title="Employment"
+          copy="Offer tracking and post-placement support land in a follow-up phase."
+          hint="When you receive an offer, email your ERM directly so they can record it."
+        />
+      );
+    case "payments":
+      return (
+        <ComingSoonTab
+          title="Payments"
+          copy="Payment plan acceptance, invoices, and ledger land in a follow-up phase."
+          hint="Finance will reach out with payment details before any plan activates."
+        />
+      );
+    default:
+      return null;
+  }
+}
+
+function TabLoading() {
   return (
-    <div className="px-6 md:px-10 py-8 md:py-10 max-w-4xl">
-      <h1 className="text-3xl font-bold text-sage-navy mb-2">{title}</h1>
-      <p className="text-gray-600 leading-relaxed">{body}</p>
+    <div className="text-center py-10">
+      <Loader2 size={20} className="animate-spin text-sage-navy inline" />
     </div>
   );
 }
 
 export default function DashboardPage() {
   return (
-    <Suspense fallback={
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 size={28} className="animate-spin text-sage-navy" />
-      </div>
-    }>
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <Loader2 size={28} className="animate-spin text-sage-navy" />
+        </div>
+      }
+    >
       <DashboardPageInner />
     </Suspense>
   );
