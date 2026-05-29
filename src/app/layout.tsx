@@ -3,6 +3,7 @@ import localFont from "next/font/local";
 import Script from "next/script";
 import "./globals.css";
 import ChromeWrapper from "@/components/layout/ChromeWrapper";
+import { ToastProvider } from "@/components/ui/Toast";
 import ClientProviders from "@/components/layout/ClientProviders";
 import { AuthProvider } from "@/lib/auth-context";
 import { SITE_URL } from "@/lib/seo";
@@ -170,8 +171,10 @@ export default function RootLayout({
           dangerouslySetInnerHTML={{ __html: JSON.stringify(websiteJsonLd) }}
         />
         <AuthProvider>
-          <ClientProviders />
-          <ChromeWrapper>{children}</ChromeWrapper>
+          <ToastProvider>
+            <ClientProviders />
+            <ChromeWrapper>{children}</ChromeWrapper>
+          </ToastProvider>
         </AuthProvider>
       </body>
     </html>

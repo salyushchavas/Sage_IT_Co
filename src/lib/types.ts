@@ -138,6 +138,32 @@ export interface CourseFilters {
   is_free?: boolean;
 }
 
+// ─── Course modules + lessons (Batch 5b camelCase shape) ──────────
+
+export interface LessonItem {
+  id: number;
+  courseId: number;
+  title: string;
+  description: string | null;
+  videoUrl: string | null;
+  orderIndex: number;
+  durationMinutes: number | null;
+  isFree: boolean;
+  createdAt?: string;
+  updatedAt?: string;
+}
+
+export interface Module {
+  id: number;
+  courseId: number;
+  title: string;
+  description: string | null;
+  orderIndex: number;
+  lessons: LessonItem[];
+  createdAt?: string;
+  updatedAt?: string;
+}
+
 // ─── Mentorship + sessions (Batch 5a) ───────────────────────────────
 
 export interface MentorInfo {

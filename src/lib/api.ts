@@ -584,7 +584,7 @@ export async function getCourseLessons(courseId: number | string) {
   return wrapper.data;
 }
 
-export async function createLesson(courseId: number | string, data: { title: string; description?: string; videoUrl?: string; orderIndex?: number; durationMinutes?: number; isFree?: boolean }) {
+export async function createLesson(courseId: number | string, data: { title: string; description?: string; videoUrl?: string; orderIndex?: number; durationMinutes?: number; isFree?: boolean; moduleId?: number }) {
   const wrapper = await apiFetch<ApiResponse<unknown>>(`/api/courses/${courseId}/lessons`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -2854,5 +2854,221 @@ export async function completeSession(sessionId: number) {
     `/api/sessions/${sessionId}/complete`,
     { method: "PUT" }
   );
+  return wrapper.data;
+}
+
+// ─── Phase 11E Batch 5b: Cloudinary + Modules + Course progress ──
+
+export interface CloudinarySignature {
+  cloudName: string;
+  apiKey: string;
+  timestamp: number;
+  folder: string;
+  signature: string;
+}
+
+export async function getCloudinarySignature() {
+  const wrapper = await apiFetch<ApiResponse<CloudinarySignature>>(
+    "/api/instructor/cloudinary-signature"
+  );
+  return wrapper.data;
+}
+
+export async function uploadCourseThumbnail(courseId: number, file: File) {
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const formData = new FormData();
+  formData.append("file", file);
+  const res = await fetch(`${BASE_URL}/api/courses/${courseId}/thumbnail`, {
+    method: "POST",
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    body: formData,
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(body.message || "Thumbnail upload failed");
+  }
+  const wrapper = await res.json();
+  return wrapper.data as { thumbnailUrl: string };
+}
+
+export interface VideoUploadHandle {
+  promise: Promise<{ lessonId: number; videoUrl: string; durationMinutes: number | null }>;
+  cancel: () => void;
+}
+
+export function uploadLessonVideoWithProgress(
+  lessonId: number,
+  file: File,
+  onProgress?: (percent: number) => void,
+): VideoUploadHandle {
+  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<{ lessonId: number; videoUrl: string; durationMinutes: number | null }>(
+    (resolve, reject) => {
+      const formData = new FormData();
+      formData.append("file", file);
+      xhr.open("POST", `${BASE_URL}/api/lessons/${lessonId}/upload-video`);
+      if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+      xhr.upload.addEventListener("progress", (e) => {
+        if (e.lengthComputable && onProgress) {
+          onProgress(Math.round((e.loaded / e.total) * 100));
+        }
+      });
+      xhr.addEventListener("load", () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            const wrapper = JSON.parse(xhr.responseText);
+            resolve(wrapper.data);
+          } catch {
+            reject(new Error("Malformed upload response"));
+          }
+        } else {
+          let message = `Upload failed (${xhr.status})`;
+          try {
+            const body = JSON.parse(xhr.responseText);
+            if (body.message) message = body.message;
+          } catch { /* keep default */ }
+          reject(new Error(message));
+        }
+      });
+      xhr.addEventListener("error", () => reject(new Error("Network error during upload")));
+      xhr.addEventListener("abort", () => reject(new Error("Upload cancelled")));
+      xhr.send(formData);
+    }
+  );
+  return { promise, cancel: () => xhr.abort() };
+}
+
+export async function clearLessonVideo(lessonId: number) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(
+    `/api/lessons/${lessonId}/video`,
+    { method: "DELETE" }
+  );
+  return wrapper.data;
+}
+
+export async function reorderLessons(lessonIds: number[]) {
+  return apiFetch<ApiResponse<unknown>>("/api/lessons/reorder", {
+    method: "PUT",
+    body: JSON.stringify({ lessonIds }),
+  });
+}
+
+// ─── Modules ──
+
+export async function getCourseModules(courseId: number | string) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").Module[]>>(
+    `/api/courses/${courseId}/modules`
+  );
+  return wrapper.data;
+}
+
+export async function createModule(
+  courseId: number | string,
+  data: { title: string; description?: string; orderIndex?: number }
+) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").Module>>(
+    `/api/courses/${courseId}/modules`,
+    { method: "POST", body: JSON.stringify(data) }
+  );
+  return wrapper.data;
+}
+
+export async function updateModule(
+  moduleId: number,
+  data: { title?: string; description?: string; orderIndex?: number }
+) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").Module>>(
+    `/api/modules/${moduleId}`,
+    { method: "PUT", body: JSON.stringify(data) }
+  );
+  return wrapper.data;
+}
+
+export async function deleteModule(moduleId: number) {
+  return apiFetch<ApiResponse<unknown>>(
+    `/api/modules/${moduleId}`,
+    { method: "DELETE" }
+  );
+}
+
+// ─── Course progress ──
+
+export interface LessonProgress {
+  lessonId: number;
+  title: string;
+  orderIndex: number;
+  completed: boolean;
+  videoPositionSec?: number;
+}
+
+export interface ModuleProgress {
+  moduleId: number;
+  moduleTitle: string;
+  orderIndex: number;
+  totalLessons: number;
+  completedLessons: number;
+  progressPercent: number;
+  lessons: LessonProgress[];
+}
+
+export interface CourseProgress {
+  courseId: number;
+  enrollmentId: number;
+  totalLessons: number;
+  completedLessons: number;
+  progressPercent: number;
+  modules: ModuleProgress[];
+  orphanLessons: LessonProgress[];
+}
+
+export async function getCourseProgress(courseId: number | string) {
+  const wrapper = await apiFetch<ApiResponse<CourseProgress>>(
+    `/api/courses/${courseId}/progress`
+  );
+  return wrapper.data;
+}
+
+export async function saveLessonPosition(
+  courseId: number | string,
+  lessonId: number,
+  videoPositionSec: number
+) {
+  return apiFetch<ApiResponse<unknown>>(
+    `/api/users/progress/${courseId}`,
+    {
+      method: "PUT",
+      body: JSON.stringify({
+        lessonId,
+        videoPositionSec: Math.max(0, Math.round(videoPositionSec)),
+      }),
+    }
+  );
+}
+
+// ─── Services (courses where type=SERVICE) ──
+
+export async function getServices() {
+  const wrapper = await apiFetch<ApiResponse<unknown[]>>("/api/courses?type=SERVICE");
+  return wrapper.data;
+}
+
+export async function getService(id: string | number) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>(`/api/courses/${id}`);
+  return wrapper.data;
+}
+
+export async function createService(data: {
+  title: string;
+  description?: string;
+  shortDescription?: string;
+  price?: number;
+  category?: string;
+  trainerId?: number;
+}) {
+  const wrapper = await apiFetch<ApiResponse<unknown>>("/api/courses", {
+    method: "POST",
+    body: JSON.stringify({ ...data, type: "SERVICE" }),
+  });
   return wrapper.data;
 }
