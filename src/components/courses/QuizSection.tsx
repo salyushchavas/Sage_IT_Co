@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { BrainCircuit, Lock, Loader2, CheckCircle2, XCircle, RotateCcw } from "lucide-react";
-import { getLessonQuiz, submitQuiz } from "@/lib/api";
+import { getLessonQuiz, submitSimpleQuiz as submitQuiz } from "@/lib/api";
 
 interface Question {
   id: number;

@@ -630,7 +630,10 @@ export async function getLessonQuiz(lessonId: number) {
   return wrapper.data;
 }
 
-export async function submitQuiz(quizId: number, answers: Record<number, string>) {
+// Legacy quiz helpers (kept for QuizBuilder / QuizSection in
+// courses/[id]). Spire's richer submitQuiz / addQuizQuestion arrive
+// in Batch 5a below under their canonical names.
+export async function submitSimpleQuiz(quizId: number, answers: Record<number, string>) {
   const wrapper = await apiFetch<ApiResponse<unknown>>(`/api/quizzes/${quizId}/submit`, {
     method: "POST",
     body: JSON.stringify({ answers }),
@@ -646,7 +649,7 @@ export async function createQuiz(lessonId: number, title: string) {
   return wrapper.data;
 }
 
-export async function addQuizQuestion(quizId: number, data: { questionText: string; optionA: string; optionB: string; optionC?: string; optionD?: string; correctAnswer: string }) {
+export async function addSimpleQuizQuestion(quizId: number, data: { questionText: string; optionA: string; optionB: string; optionC?: string; optionD?: string; correctAnswer: string }) {
   const wrapper = await apiFetch<ApiResponse<unknown>>(`/api/quizzes/${quizId}/questions`, {
     method: "POST",
     body: JSON.stringify(data),
@@ -2583,4 +2586,273 @@ export async function removeMentorFromCourse(courseId: number, userId: number) {
     `/api/admin/courses/${courseId}/mentors/${userId}`,
     { method: "DELETE" }
   );
+}
+
+// ─── Phase 11E Batch 5a: Quizzes (rich), Sessions, Course readiness ──
+
+export interface PublishReadiness {
+  ready: boolean;
+  missing: string[];
+}
+
+export async function getPublishReadiness(id: number) {
+  const wrapper = await apiFetch<ApiResponse<PublishReadiness>>(
+    `/api/instructor/courses/${id}/publish-readiness`,
+  );
+  return wrapper.data ?? { ready: false, missing: [] };
+}
+
+
+export type QuizQuestionType = "MULTIPLE_CHOICE" | "TRUE_FALSE" | "MULTI_SELECT";
+
+export interface QuizOption {
+  id: number;
+  optionText: string;
+  isCorrect?: boolean | null;
+  orderIndex: number;
+}
+
+export interface QuizQuestion {
+  id: number;
+  questionText: string;
+  questionType: QuizQuestionType;
+  points: number;
+  orderIndex: number;
+  explanation?: string | null;
+  options: QuizOption[];
+}
+
+export interface Quiz {
+  id: number;
+  courseId: number | null;
+  moduleId: number | null;
+  lessonId: number | null;
+  moduleTitle: string | null;
+  lessonTitle: string | null;
+  title: string;
+  description: string | null;
+  passThreshold: number;
+  timeLimitMinutes: number | null;
+  maxAttempts: number | null;
+  isActive: boolean;
+  orderIndex: number;
+  questions?: QuizQuestion[];
+  questionCount?: number;
+  attemptCount?: number;
+  bestScorePercent?: number | null;
+}
+
+export interface QuizQuestionResult {
+  questionId: number;
+  correct: boolean;
+  selectedOptionIds: number[];
+  correctOptionIds: number[];
+  explanation: string | null;
+}
+
+export interface QuizSubmitResult {
+  attemptId: number;
+  scorePercent: number;
+  passed: boolean;
+  passThreshold: number;
+  attemptNumber: number;
+  attemptsRemaining: number | null;
+  totalQuestions: number;
+  correctCount: number;
+  timeTakenSeconds: number | null;
+  results: QuizQuestionResult[];
+}
+
+export interface QuizAttemptSummary {
+  id: number;
+  quizId: number;
+  scorePercent: number | null;
+  passed: boolean | null;
+  attemptNumber: number | null;
+  startedAt: string | null;
+  completedAt: string | null;
+  timeTakenSeconds: number | null;
+}
+
+export async function createInstructorQuiz(data: {
+  courseId: number;
+  moduleId?: number | null;
+  lessonId?: number | null;
+  title: string;
+  description?: string;
+  passThreshold?: number;
+  timeLimitMinutes?: number | null;
+  maxAttempts?: number | null;
+  isActive?: boolean;
+}) {
+  const wrapper = await apiFetch<ApiResponse<Quiz>>("/api/instructor/quizzes", {
+    method: "POST",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function listInstructorQuizzes(courseId: number) {
+  const wrapper = await apiFetch<ApiResponse<Quiz[]>>(
+    `/api/instructor/courses/${courseId}/quizzes`
+  );
+  return wrapper.data;
+}
+
+export async function getInstructorQuiz(quizId: number) {
+  const wrapper = await apiFetch<ApiResponse<Quiz>>(`/api/instructor/quizzes/${quizId}`);
+  return wrapper.data;
+}
+
+export async function updateInstructorQuiz(quizId: number, data: Partial<{
+  title: string;
+  description: string;
+  passThreshold: number;
+  timeLimitMinutes: number | null;
+  maxAttempts: number | null;
+  isActive: boolean;
+  orderIndex: number;
+}>) {
+  const wrapper = await apiFetch<ApiResponse<Quiz>>(`/api/instructor/quizzes/${quizId}`, {
+    method: "PUT",
+    body: JSON.stringify(data),
+  });
+  return wrapper.data;
+}
+
+export async function deleteInstructorQuiz(quizId: number) {
+  return apiFetch<ApiResponse<unknown>>(`/api/instructor/quizzes/${quizId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function addQuizQuestion(quizId: number, data: {
+  questionText: string;
+  questionType: QuizQuestionType;
+  points?: number;
+  explanation?: string;
+  options: { optionText: string; isCorrect: boolean }[];
+}) {
+  const wrapper = await apiFetch<ApiResponse<QuizQuestion>>(
+    `/api/instructor/quizzes/${quizId}/questions`,
+    { method: "POST", body: JSON.stringify(data) }
+  );
+  return wrapper.data;
+}
+
+export async function updateQuizQuestion(questionId: number, data: {
+  questionText: string;
+  questionType: QuizQuestionType;
+  points?: number;
+  explanation?: string;
+  options: { optionText: string; isCorrect: boolean }[];
+}) {
+  const wrapper = await apiFetch<ApiResponse<QuizQuestion>>(
+    `/api/instructor/questions/${questionId}`,
+    { method: "PUT", body: JSON.stringify(data) }
+  );
+  return wrapper.data;
+}
+
+export async function deleteQuizQuestion(questionId: number) {
+  return apiFetch<ApiResponse<unknown>>(`/api/instructor/questions/${questionId}`, {
+    method: "DELETE",
+  });
+}
+
+export async function reorderQuizQuestions(quizId: number, questionIds: number[]) {
+  return apiFetch<ApiResponse<unknown>>(
+    `/api/instructor/quizzes/${quizId}/questions/reorder`,
+    { method: "PUT", body: JSON.stringify({ questionIds }) }
+  );
+}
+
+export async function listCourseQuizzes(courseId: number) {
+  const wrapper = await apiFetch<ApiResponse<Quiz[]>>(`/api/courses/${courseId}/quizzes`);
+  return wrapper.data;
+}
+
+export async function getQuizForStudent(quizId: number) {
+  const wrapper = await apiFetch<ApiResponse<Quiz>>(`/api/quizzes/${quizId}`);
+  return wrapper.data;
+}
+
+export async function submitQuiz(
+  quizId: number,
+  data: {
+    answers: { questionId: number; selectedOptionIds: number[] }[];
+    timeTakenSeconds?: number;
+  }
+) {
+  const wrapper = await apiFetch<ApiResponse<QuizSubmitResult>>(
+    `/api/quizzes/${quizId}/submit`,
+    { method: "POST", body: JSON.stringify(data) }
+  );
+  return wrapper.data;
+}
+
+export async function getMyQuizAttempts(quizId: number) {
+  const wrapper = await apiFetch<ApiResponse<QuizAttemptSummary[]>>(
+    `/api/quizzes/${quizId}/attempts`
+  );
+  return wrapper.data;
+}
+
+// ─── Sessions (live mentorship) ──
+
+export async function requestSession(enrollmentId: number, topic: string) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest>>(
+    "/api/sessions",
+    { method: "POST", body: JSON.stringify({ enrollmentId, topic }) }
+  );
+  return wrapper.data;
+}
+
+export async function getMySessions() {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest[]>>(
+    "/api/sessions/my"
+  );
+  return wrapper.data;
+}
+
+export async function cancelSession(sessionId: number) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest>>(
+    `/api/sessions/${sessionId}/cancel`,
+    { method: "PUT" }
+  );
+  return wrapper.data;
+}
+
+export async function getMentorSessions() {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest[]>>(
+    "/api/sessions/mentor"
+  );
+  return wrapper.data;
+}
+
+export async function getMentorPendingRequests() {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest[]>>(
+    "/api/sessions/mentor/pending"
+  );
+  return wrapper.data;
+}
+
+export async function acceptSessionRequest(
+  sessionId: number,
+  scheduledAt: string,
+  meetingUrl: string
+) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest>>(
+    `/api/sessions/${sessionId}/accept`,
+    { method: "PUT", body: JSON.stringify({ scheduledAt, meetingUrl }) }
+  );
+  return wrapper.data;
+}
+
+export async function completeSession(sessionId: number) {
+  const wrapper = await apiFetch<ApiResponse<import("./types").SessionRequest>>(
+    `/api/sessions/${sessionId}/complete`,
+    { method: "PUT" }
+  );
+  return wrapper.data;
 }

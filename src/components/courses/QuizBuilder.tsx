@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Plus, ChevronDown, ChevronUp, Loader2, CheckCircle2, BrainCircuit } from "lucide-react";
-import { createQuiz, addQuizQuestion } from "@/lib/api";
+import { createQuiz, addSimpleQuizQuestion as addQuizQuestion } from "@/lib/api";
 
 interface QuizBuilderProps {
   lessonId: number;

@@ -137,3 +137,30 @@ export interface CourseFilters {
   sort?: "popular" | "newest" | "price_asc" | "price_desc" | "rating";
   is_free?: boolean;
 }
+
+// ─── Mentorship + sessions (Batch 5a) ───────────────────────────────
+
+export interface MentorInfo {
+  enrollmentId: number;
+  assignmentId: number;
+  mentorName: string | null;
+  mentorEmail: string | null;
+  status: string;
+}
+
+export interface SessionRequest {
+  id: number;
+  enrollmentId: number;
+  courseTitle: string;
+  studentName: string;
+  studentEmail: string;
+  mentorName: string;
+  mentorEmail: string;
+  status: string;
+  topic: string;
+  requestedAt: string;
+  scheduledAt: string | null;
+  meetingUrl: string | null;
+  notes: string | null;
+  completedAt: string | null;
+}

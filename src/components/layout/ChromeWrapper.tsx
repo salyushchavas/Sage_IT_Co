@@ -34,6 +34,8 @@ const FULLSCREEN_PREFIXES = [
   "/operations",
   "/messages",
   "/profile",
+  "/instructor",
+  "/quiz",
 ] as const;
 
 export default function ChromeWrapper({ children }: { children: ReactNode }) {
