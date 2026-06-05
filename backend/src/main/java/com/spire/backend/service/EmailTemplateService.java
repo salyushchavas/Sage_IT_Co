@@ -1271,23 +1271,32 @@ public class EmailTemplateService {
                 + "✓ " + escape(text) + "</p>";
     }
 
+    /**
+     * Primary CTA used in every transactional email. Gmail and
+     * Outlook both strip <style> blocks and class= attributes, so
+     * every rule has to live inline on the <a>. We also keep the
+     * brand color on the <a> itself (not just the wrapping <td>) so
+     * the button still renders when a client drops the table layout,
+     * and use {@code color:#FFFFFF !important} so Gmail's "linkify
+     * blue" pass leaves the label readable.
+     */
     private String button(String label, String url) {
         String primary = brandConfig.getPrimaryColor();
         return """
-        <table cellpadding="0" cellspacing="0" style="margin:24px 0;">
-          <tr><td style="background:%s; border-radius:8px;">
-            <a href="%s" style="display:inline-block; padding:12px 28px; color:#ffffff; text-decoration:none; font-size:14px; font-weight:bold;">%s</a>
+        <table cellpadding="0" cellspacing="0" border="0" style="margin:24px 0;">
+          <tr><td style="background-color:%s; border-radius:8px;">
+            <a href="%s" target="_blank" rel="noopener" style="display:inline-block; padding:12px 28px; background-color:%s; color:#FFFFFF !important; text-decoration:none !important; font-size:14px; font-weight:bold; font-family:Arial,sans-serif; border-radius:8px; mso-padding-alt:0;">%s</a>
           </td></tr>
         </table>
-        """.formatted(primary, url, escape(label));
+        """.formatted(primary, url, primary, escape(label));
     }
 
     private String secondaryButton(String label, String url) {
         String primary = brandConfig.getPrimaryColor();
         return """
-        <table cellpadding="0" cellspacing="0" style="margin:8px 0 24px;">
-          <tr><td style="background:#ffffff; border:1px solid %s; border-radius:8px;">
-            <a href="%s" style="display:inline-block; padding:11px 28px; color:%s; text-decoration:none; font-size:14px; font-weight:bold;">%s</a>
+        <table cellpadding="0" cellspacing="0" border="0" style="margin:8px 0 24px;">
+          <tr><td style="background-color:#ffffff; border:1px solid %s; border-radius:8px;">
+            <a href="%s" target="_blank" rel="noopener" style="display:inline-block; padding:11px 28px; background-color:#ffffff; color:%s !important; text-decoration:none !important; font-size:14px; font-weight:bold; font-family:Arial,sans-serif; border-radius:8px;">%s</a>
           </td></tr>
         </table>
         """.formatted(primary, url, primary, escape(label));
