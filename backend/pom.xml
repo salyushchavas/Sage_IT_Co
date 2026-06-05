@@ -101,6 +101,28 @@
             <version>1.38.0</version>
         </dependency>
 
+        <!-- Apache POI: low-level DOCX read/write. docx-stamper
+             depends on this transitively but pinning here keeps the
+             version explicit. -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+
+        <!-- office-stamper engine (renamed from docx-stamper): runs
+             ${placeholder} substitution against a Word template.
+             Drives AgreementDocumentService.fillTemplate. v2.x lives
+             under groupId pro.verron.office-stamper, artifactId
+             engine, with the public API at
+             pro.verron.officestamper.api.* and presets at
+             pro.verron.officestamper.preset.*. -->
+        <dependency>
+            <groupId>pro.verron.office-stamper</groupId>
+            <artifactId>engine</artifactId>
+            <version>2.4.0</version>
+        </dependency>
+
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>

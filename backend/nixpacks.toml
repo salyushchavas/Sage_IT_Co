@@ -1,0 +1,17 @@
+# Railway uses nixpacks to build this service (see railway.toml).
+# We need LibreOffice on the runtime image so the
+# AgreementDocumentService can shell out to `libreoffice --headless
+# --convert-to pdf` after the docx-stamper template fill.
+#
+# nixpacks installs nixPkgs at build time and aptPkgs at runtime.
+# Putting libreoffice + a font package in aptPkgs ensures both
+# the binary and its required Liberation fonts are present when
+# the Java service spawns the conversion process.
+
+[phases.setup]
+aptPkgs = [
+    "libreoffice-writer",
+    "libreoffice-core",
+    "fonts-liberation",
+    "fontconfig",
+]
