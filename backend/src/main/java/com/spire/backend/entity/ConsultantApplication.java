@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -120,6 +121,111 @@ public class ConsultantApplication {
 
     @Column(name = "otp_locked_until")
     private LocalDateTime otpLockedUntil;
+
+    // ── Two-stage fill workflow ──────────────────────────────────────
+    //
+    // From the multi-stage agreement workflow: the ERM seeds the row
+    // with rate fields + identity at creation; the consultant fills
+    // their personal block, Exhibit A (scope), Appendix 1 (employment),
+    // and the four optional appendices (ACH, background check, portal
+    // access, security check). All columns are nullable and additive --
+    // no state machine, endpoint, or service code references them yet.
+    // The DDL fixup in DataSeeder backfills them on existing rows so
+    // Hibernate's ddl-auto=update sees a no-op on the next boot.
+
+    // ── ERM-filled (rate card, set at creation) ──────────────────────
+
+    @Column(name = "rate_period_1") private String ratePeriod1;
+    @Column(name = "rate_amount_1") private String rateAmount1;
+    @Column(name = "rate_period_2") private String ratePeriod2;
+    @Column(name = "rate_amount_2") private String rateAmount2;
+
+    // ── Consultant-filled: personal (required) ───────────────────────
+
+    @Column(name = "primary_phone") private String primaryPhone;
+    @Column(name = "work_authorization_category") private String workAuthorizationCategory;
+    @Column(name = "residence_address", columnDefinition = "TEXT") private String residenceAddress;
+    @Column(name = "effective_date") private LocalDate effectiveDate;
+
+    // ── Exhibit A (scope of engagement) ──────────────────────────────
+
+    @Column(name = "technology_track") private String technologyTrack;
+    @Column(name = "custom_scope_notes", columnDefinition = "TEXT") private String customScopeNotes;
+
+    // ── Appendix 1: Phase 2 employment ───────────────────────────────
+
+    @Column(name = "employer_payroll_entity") private String employerPayrollEntity;
+    @Column(name = "implementation_partner") private String implementationPartner;
+    @Column(name = "end_client") private String endClient;
+    @Column(name = "role_title") private String roleTitle;
+    @Column(name = "verified_start_date") private LocalDate verifiedStartDate;
+    @Column(name = "payroll_cycle") private String payrollCycle;
+
+    // ── Appendix 2: ACH (optional) ───────────────────────────────────
+
+    @Column(name = "ach_account_type") private String achAccountType;
+    @Column(name = "ach_bank_name") private String achBankName;
+    @Column(name = "ach_account_holder_name") private String achAccountHolderName;
+    @Column(name = "ach_routing_number") private String achRoutingNumber;
+    @Column(name = "ach_account_number") private String achAccountNumber;
+    @Column(name = "ach_notice_email") private String achNoticeEmail;
+    @Column(name = "ach_debit_dates") private String achDebitDates;
+    @Column(name = "ach_debit_amounts") private String achDebitAmounts;
+
+    // ── Appendix 3: background check (sensitive PII) ─────────────────
+
+    @Column(name = "bg_full_legal_name") private String bgFullLegalName;
+    @Column(name = "bg_other_names_used") private String bgOtherNamesUsed;
+    @Column(name = "bg_current_address", columnDefinition = "TEXT") private String bgCurrentAddress;
+    @Column(name = "bg_date_of_birth") private LocalDate bgDateOfBirth;
+    @Column(name = "bg_full_ssn", columnDefinition = "TEXT") private String bgFullSsn;
+    @Column(name = "bg_driver_license", columnDefinition = "TEXT") private String bgDriverLicense;
+
+    // ── Appendix 4: portal access (optional) ─────────────────────────
+
+    @Column(name = "portal_platform") private String portalPlatform;
+    @Column(name = "portal_username") private String portalUsername;
+    @Column(name = "portal_authorized_actions", columnDefinition = "TEXT") private String portalAuthorizedActions;
+    @Column(name = "portal_effective_date") private LocalDate portalEffectiveDate;
+    @Column(name = "portal_revocation_contact") private String portalRevocationContact;
+
+    // ── Appendix 5: security check (optional) ────────────────────────
+
+    @Column(name = "security_check_count") private String securityCheckCount;
+    @Column(name = "security_check_numbers") private String securityCheckNumbers;
+    @Column(name = "security_check_bank") private String securityCheckBank;
+    @Column(name = "security_check_holder_name") private String securityCheckHolderName;
+    @Column(name = "security_check_amount") private String securityCheckAmount;
+    @Column(name = "security_check_dates") private String securityCheckDates;
+
+    // ── ERM countersignature (distinct from the consultant signature
+    //    captured by signatureImage / signedLegalName / signedAt) ─────
+
+    @Column(name = "erm_name") private String ermName;
+    @Column(name = "erm_title") private String ermTitle;
+    @Column(name = "erm_signature_url", columnDefinition = "TEXT") private String ermSignatureUrl;
+    @Column(name = "signature_date") private LocalDateTime signatureDate;
+
+    // ── Revision tracking ────────────────────────────────────────────
+    //
+    // revisionNotes (above) holds the latest consultant-side reason;
+    // currentRevisionRemarks holds the ERM-side rebuttal / instructions
+    // for the next pass. revisionCount is a cheap denormalized counter.
+
+    @Column(name = "current_revision_remarks", columnDefinition = "TEXT")
+    private String currentRevisionRemarks;
+
+    @Column(name = "revision_count")
+    @Builder.Default
+    private Integer revisionCount = 0;
+
+    // ── Final countersigned PDF (post-ERM signature) ─────────────────
+    //
+    // Distinct from signedPdfUrl (which is the consultant-signed
+    // intermediate PDF generated immediately after sign()).
+
+    @Column(name = "final_pdf_url", columnDefinition = "TEXT")
+    private String finalPdfUrl;
 
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────

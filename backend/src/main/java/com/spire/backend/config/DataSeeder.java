@@ -202,6 +202,16 @@ public class DataSeeder implements CommandLineRunner {
         // subsequent run is a clean no-op.
         addUserEmailColumnsIfMissing();
 
+        // Two-stage consultant-agreement fill workflow: ~48 nullable
+        // columns added to consultant_applications for the ERM rate
+        // card, consultant personal block, Exhibit A scope, Appendix
+        // 1 (employment) plus optional Appendices 2-5 (ACH,
+        // background check, portal access, security check), ERM
+        // countersignature, and revision tracking. Runs before
+        // Hibernate's ddl-auto=update so existing rows have the new
+        // columns when JPA boots; idempotent on reruns.
+        addConsultantApplicationColumnsIfMissing();
+
         // Catalog repair -- if a previous deploy ran the full seed block
         // before /enroll signups existed (so users count was already > 0
         // when DataSeeder ran), the early-return below skipped courses
@@ -1032,6 +1042,102 @@ public class DataSeeder implements CommandLineRunner {
             log.info("Ensured program_selections.notes exists");
         } catch (Exception e) {
             log.debug("Couldn't add program_selections.notes: {}", e.getMessage());
+        }
+    }
+
+    /**
+     * Backfills the two-stage agreement-fill columns onto
+     * {@code consultant_applications}. All nullable / additive --
+     * the existing state machine, controllers, and services don't
+     * reference any of these yet, so this is purely a schema-prep
+     * migration that lets the upcoming multi-stage form persist
+     * its data without each PR having to re-run a DDL change.
+     *
+     * Idempotent: every column uses {@code ADD COLUMN IF NOT EXISTS}
+     * and each statement is wrapped so an unsupported dialect /
+     * already-applied state logs at debug and continues with the
+     * next column rather than crashing app startup. Mirrors the
+     * pattern from {@link #addUserEmailColumnsIfMissing()}.
+     *
+     * Order roughly mirrors the appendix layout in the field spec:
+     * ERM rate card, consultant personal block, Exhibit A scope,
+     * Appendix 1 (employment), Appendix 2 (ACH), Appendix 3
+     * (background check), Appendix 4 (portal access), Appendix 5
+     * (security check), ERM countersignature, revision tracking,
+     * and the final post-ERM-signature PDF URL.
+     */
+    private void addConsultantApplicationColumnsIfMissing() {
+        String[][] columns = {
+                // ERM-filled rate card.
+                {"rate_period_1 VARCHAR(255)", "rate_period_1"},
+                {"rate_amount_1 VARCHAR(255)", "rate_amount_1"},
+                {"rate_period_2 VARCHAR(255)", "rate_period_2"},
+                {"rate_amount_2 VARCHAR(255)", "rate_amount_2"},
+                // Consultant personal (required at fill-in time).
+                {"primary_phone VARCHAR(255)", "primary_phone"},
+                {"work_authorization_category VARCHAR(255)", "work_authorization_category"},
+                {"residence_address TEXT", "residence_address"},
+                {"effective_date DATE", "effective_date"},
+                // Exhibit A.
+                {"technology_track VARCHAR(255)", "technology_track"},
+                {"custom_scope_notes TEXT", "custom_scope_notes"},
+                // Appendix 1 -- Phase 2 employment.
+                {"employer_payroll_entity VARCHAR(255)", "employer_payroll_entity"},
+                {"implementation_partner VARCHAR(255)", "implementation_partner"},
+                {"end_client VARCHAR(255)", "end_client"},
+                {"role_title VARCHAR(255)", "role_title"},
+                {"verified_start_date DATE", "verified_start_date"},
+                {"payroll_cycle VARCHAR(255)", "payroll_cycle"},
+                // Appendix 2 -- ACH (all optional).
+                {"ach_account_type VARCHAR(255)", "ach_account_type"},
+                {"ach_bank_name VARCHAR(255)", "ach_bank_name"},
+                {"ach_account_holder_name VARCHAR(255)", "ach_account_holder_name"},
+                {"ach_routing_number VARCHAR(255)", "ach_routing_number"},
+                {"ach_account_number VARCHAR(255)", "ach_account_number"},
+                {"ach_notice_email VARCHAR(255)", "ach_notice_email"},
+                {"ach_debit_dates VARCHAR(255)", "ach_debit_dates"},
+                {"ach_debit_amounts VARCHAR(255)", "ach_debit_amounts"},
+                // Appendix 3 -- background check (sensitive PII).
+                {"bg_full_legal_name VARCHAR(255)", "bg_full_legal_name"},
+                {"bg_other_names_used VARCHAR(255)", "bg_other_names_used"},
+                {"bg_current_address TEXT", "bg_current_address"},
+                {"bg_date_of_birth DATE", "bg_date_of_birth"},
+                {"bg_full_ssn TEXT", "bg_full_ssn"},
+                {"bg_driver_license TEXT", "bg_driver_license"},
+                // Appendix 4 -- portal access (optional).
+                {"portal_platform VARCHAR(255)", "portal_platform"},
+                {"portal_username VARCHAR(255)", "portal_username"},
+                {"portal_authorized_actions TEXT", "portal_authorized_actions"},
+                {"portal_effective_date DATE", "portal_effective_date"},
+                {"portal_revocation_contact VARCHAR(255)", "portal_revocation_contact"},
+                // Appendix 5 -- security check (optional).
+                {"security_check_count VARCHAR(255)", "security_check_count"},
+                {"security_check_numbers VARCHAR(255)", "security_check_numbers"},
+                {"security_check_bank VARCHAR(255)", "security_check_bank"},
+                {"security_check_holder_name VARCHAR(255)", "security_check_holder_name"},
+                {"security_check_amount VARCHAR(255)", "security_check_amount"},
+                {"security_check_dates VARCHAR(255)", "security_check_dates"},
+                // ERM countersignature.
+                {"erm_name VARCHAR(255)", "erm_name"},
+                {"erm_title VARCHAR(255)", "erm_title"},
+                {"erm_signature_url TEXT", "erm_signature_url"},
+                {"signature_date TIMESTAMP", "signature_date"},
+                // Revision tracking.
+                {"current_revision_remarks TEXT", "current_revision_remarks"},
+                {"revision_count INTEGER DEFAULT 0", "revision_count"},
+                // Final post-countersignature PDF.
+                {"final_pdf_url TEXT", "final_pdf_url"},
+        };
+        for (String[] col : columns) {
+            try {
+                jdbcTemplate.execute(
+                        "ALTER TABLE consultant_applications ADD COLUMN IF NOT EXISTS " + col[0]);
+                log.info("Ensured consultant_applications.{} exists", col[1]);
+            } catch (Exception e) {
+                log.debug("Couldn't add consultant_applications.{} "
+                        + "(likely already present or unsupported dialect): {}",
+                        col[1], e.getMessage());
+            }
         }
     }
 
