@@ -5,7 +5,7 @@ import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
-import com.spire.backend.security.ConsultantOtpRateLimiter;
+import com.spire.backend.security.ConsultantRateLimiter;
 import com.spire.backend.service.ConsultantApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -16,7 +16,6 @@ import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
-import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.LinkedHashMap;
@@ -25,31 +24,35 @@ import java.util.Map;
 
 /**
  * Two scoping segments:
- *   /api/internal/consultant-applications/**  -- ERM-only, normal JWT
- *   /api/consultant/applications/**           -- public OTP + consultant JWT
+ *   /api/agreement-erm/applications/**     -- operator console, gated
+ *                                              by ROLE_AGREEMENT_ERM.
+ *   /api/consultant/applications/**        -- consultant himself,
+ *                                              public + rate-limited.
+ *                                              The UUID applicationId
+ *                                              is the credential.
  *
- * The "internal" base path is a deliberate signal that this surface
- * is not exposed via the public marketing nav. It's a hidden feature
- * accessed by direct URL only.
+ * Both bases are deliberately separate from the marketing site and
+ * from Sage's regular /erm-dashboard surface. The consultant base
+ * has no auth header at all -- a leak of an application UUID gives
+ * an attacker access to that single application until it expires
+ * (7 days) or is cancelled. The rate limiter and audit log mitigate
+ * the blast radius.
  */
 @RestController
 @RequiredArgsConstructor
 public class ConsultantApplicationController {
 
     private final ConsultantApplicationService consultantService;
-    private final ConsultantOtpRateLimiter otpRateLimiter;
+    private final ConsultantRateLimiter rateLimiter;
 
-    // ── ERM-side (requires ERM or SYSTEM_ADMIN) ─────────────────────
+    // ── Agreement-ERM-side (requires ROLE_AGREEMENT_ERM) ────────────
 
-    @PostMapping("/api/internal/consultant-applications")
-    @PreAuthorize("hasAnyRole('ERM', 'SYSTEM_ADMIN')")
+    @PostMapping("/api/agreement-erm/applications")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<ConsultantApplication>> create(
             @RequestBody CreateBody body,
-            Authentication auth,
             HttpServletRequest request) {
-        Long ermUserId = Long.parseLong(auth.getPrincipal().toString());
         ConsultantApplication app = consultantService.createApplication(
-                ermUserId,
                 body.consultantEmail,
                 body.consultantName,
                 body.consultantPhone,
@@ -59,40 +62,29 @@ public class ConsultantApplicationController {
                 .body(ApiResponse.success("Consultant application created", app));
     }
 
-    @GetMapping("/api/internal/consultant-applications")
-    @PreAuthorize("hasAnyRole('ERM', 'SYSTEM_ADMIN')")
+    @GetMapping("/api/agreement-erm/applications")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<PageResponse<ConsultantApplication>>> list(
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "20") int size,
-            Authentication auth) {
-        Long ermUserId = Long.parseLong(auth.getPrincipal().toString());
+            @RequestParam(value = "size", defaultValue = "20") int size) {
         Pageable pageable = PageRequest.of(
                 Math.max(0, page),
                 Math.min(100, Math.max(1, size)),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
         Page<ConsultantApplication> result =
-                consultantService.listForErm(ermUserId, status, pageable);
+                consultantService.listApplications(status, pageable);
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(result)));
     }
 
-    @GetMapping("/api/internal/consultant-applications/{appId}")
-    @PreAuthorize("hasAnyRole('ERM', 'SYSTEM_ADMIN')")
+    @GetMapping("/api/agreement-erm/applications/{appId}")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> get(
-            @PathVariable String appId,
-            Authentication auth) {
-        Long ermUserId = Long.parseLong(auth.getPrincipal().toString());
+            @PathVariable String appId) {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
-        if (!app.getErmUserId().equals(ermUserId)
-                && !auth.getAuthorities().stream()
-                        .anyMatch(a -> "ROLE_SYSTEM_ADMIN".equals(a.getAuthority()))) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(ApiResponse.error("This application belongs to a different ERM."));
-        }
-        List<ConsultantApplicationEvent> events =
-                consultantService.listEvents(appId, app.getErmUserId());
+        List<ConsultantApplicationEvent> events = consultantService.listEvents(appId);
         List<ConsultantApplicationRevision> revisions =
-                consultantService.listRevisions(appId, app.getErmUserId());
+                consultantService.listRevisions(appId);
 
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("application", app);
@@ -101,158 +93,104 @@ public class ConsultantApplicationController {
         return ResponseEntity.ok(ApiResponse.success(view));
     }
 
-    @PutMapping("/api/internal/consultant-applications/{appId}")
-    @PreAuthorize("hasAnyRole('ERM', 'SYSTEM_ADMIN')")
+    @PutMapping("/api/agreement-erm/applications/{appId}")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<ConsultantApplication>> update(
             @PathVariable String appId,
             @RequestBody UpdateBody body,
-            Authentication auth,
             HttpServletRequest request) {
-        Long ermUserId = Long.parseLong(auth.getPrincipal().toString());
         ConsultantApplication app = consultantService.updateApplication(
-                appId, ermUserId,
+                appId,
                 body.consultantEmail, body.consultantName, body.consultantPhone,
                 body.payload, request);
         return ResponseEntity.ok(ApiResponse.success("Updated", app));
     }
 
-    @PostMapping("/api/internal/consultant-applications/{appId}/cancel")
-    @PreAuthorize("hasAnyRole('ERM', 'SYSTEM_ADMIN')")
+    @PostMapping("/api/agreement-erm/applications/{appId}/cancel")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<ConsultantApplication>> cancel(
             @PathVariable String appId,
-            Authentication auth,
             HttpServletRequest request) {
-        Long ermUserId = Long.parseLong(auth.getPrincipal().toString());
-        ConsultantApplication app = consultantService.cancel(appId, ermUserId, request);
+        ConsultantApplication app = consultantService.cancel(appId, request);
         return ResponseEntity.ok(ApiResponse.success("Cancelled", app));
     }
 
-    @PostMapping("/api/internal/consultant-applications/{appId}/resend-invite")
-    @PreAuthorize("hasAnyRole('ERM', 'SYSTEM_ADMIN')")
+    @PostMapping("/api/agreement-erm/applications/{appId}/resend-invite")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<Map<String, String>>> resendInvite(
             @PathVariable String appId,
-            Authentication auth,
             HttpServletRequest request) {
-        Long ermUserId = Long.parseLong(auth.getPrincipal().toString());
-        consultantService.resendInvite(appId, ermUserId, request);
+        consultantService.resendInvite(appId, request);
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of("message", "Invite re-sent")));
     }
 
-    // ── Consultant-side ─────────────────────────────────────────────
-
-    /**
-     * Public endpoint. Always returns 200 OK regardless of whether the
-     * application or email match -- prevents enumeration. The actual
-     * OTP email only goes out when the request is legitimate.
-     */
-    @PostMapping("/api/consultant/applications/{appId}/request-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> requestOtp(
-            @PathVariable String appId,
-            @RequestBody Map<String, String> body,
-            HttpServletRequest request) {
-        if (!otpRateLimiter.allowRequestOtp(appId, clientIp(request))) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many requests. Try again later."));
-        }
-        consultantService.requestOtp(appId, body.get("email"), request);
-        return ResponseEntity.ok(ApiResponse.success(
-                Map.of("message", "If that email matches our records, "
-                        + "a verification code has been sent.")));
-    }
-
-    /**
-     * Public endpoint. Returns a short-lived consultant JWT on success.
-     * The frontend stores the token in sessionStorage and presents it
-     * as a Bearer header on subsequent consultant calls.
-     */
-    @PostMapping("/api/consultant/applications/{appId}/verify-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> verifyOtp(
-            @PathVariable String appId,
-            @RequestBody Map<String, String> body,
-            HttpServletRequest request) {
-        if (!otpRateLimiter.allowVerifyOtp(appId)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many attempts. Try again later."));
-        }
-        String token = consultantService.verifyOtp(appId, body.get("otp"), request);
-        return ResponseEntity.ok(ApiResponse.success(
-                Map.of("accessToken", token, "applicationId", appId)));
-    }
-
-    // ── Consultant-side (require ROLE_CONSULTANT from the short-lived
-    //    JWT issued by verify-otp). The path appId must match the
-    //    token's subject -- enforced via requireSelf below. ──────────
+    // ── Consultant-side (public, rate-limited) ──────────────────────
 
     @GetMapping("/api/consultant/applications/{appId}")
-    @PreAuthorize("hasRole('CONSULTANT')")
-    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantGet(
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantGet(
             @PathVariable String appId,
-            Authentication auth) {
-        requireSelf(appId, auth);
+            HttpServletRequest request) {
+        if (!rateLimiter.allowRead(clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
         return ResponseEntity.ok(ApiResponse.success(
-                consultantService.getForConsultant(appId)));
+                consultantService.getForConsultant(appId, request)));
     }
 
     @PostMapping("/api/consultant/applications/{appId}/verify-details")
-    @PreAuthorize("hasRole('CONSULTANT')")
-    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantVerifyDetails(
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantVerifyDetails(
             @PathVariable String appId,
-            Authentication auth,
             HttpServletRequest request) {
-        requireSelf(appId, auth);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 "Details verified",
                 consultantService.verifyDetails(appId, request)));
     }
 
     @PostMapping("/api/consultant/applications/{appId}/request-revision")
-    @PreAuthorize("hasRole('CONSULTANT')")
-    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantRequestRevision(
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantRequestRevision(
             @PathVariable String appId,
             @RequestBody Map<String, String> body,
-            Authentication auth,
             HttpServletRequest request) {
-        requireSelf(appId, auth);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 "Revision requested",
                 consultantService.requestRevision(appId, body.get("reason"), request)));
     }
 
     @PostMapping("/api/consultant/applications/{appId}/sign")
-    @PreAuthorize("hasRole('CONSULTANT')")
-    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantSign(
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantSign(
             @PathVariable String appId,
             @RequestBody SignBody body,
-            Authentication auth,
             HttpServletRequest request) {
-        requireSelf(appId, auth);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 "Signed",
                 consultantService.sign(appId, body.legalName, body.signatureImage, request)));
     }
 
     @PostMapping("/api/consultant/applications/{appId}/request-copy")
-    @PreAuthorize("hasRole('CONSULTANT')")
     public ResponseEntity<ApiResponse<Map<String, String>>> consultantRequestCopy(
             @PathVariable String appId,
-            Authentication auth,
             HttpServletRequest request) {
-        requireSelf(appId, auth);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
         consultantService.requestCopy(appId, request);
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of("message", "A copy is on its way to your inbox.")));
-    }
-
-    private static void requireSelf(String pathAppId, Authentication auth) {
-        // ConsultantJwtAuthFilter set the principal to the application
-        // UUID from the token's subject. Reject any cross-application
-        // access attempt.
-        if (auth == null || auth.getName() == null
-                || !auth.getName().equals(pathAppId)) {
-            throw new com.spire.backend.exception.UnauthorizedException(
-                    "Token does not match this application.");
-        }
     }
 
     private static String clientIp(HttpServletRequest request) {
@@ -305,5 +243,4 @@ public class ConsultantApplicationController {
             return r;
         }
     }
-
 }

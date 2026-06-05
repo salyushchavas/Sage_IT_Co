@@ -34,18 +34,18 @@ public class JwtService {
     }
 
     /**
-     * Consultant Agreement feature: short-lived (1h) token issued after
-     * a successful OTP verification. Subject is the public {@code
-     * applicationId} (UUID); the {@code purpose} claim differentiates
-     * this token from user-auth tokens so the regular JwtAuthFilter
-     * doesn't accidentally accept it as a user login.
+     * Agreement-ERM console: 8h session token issued by the hardcoded
+     * {@code /api/agreement-erm/login} endpoint. Subject is the fixed
+     * operator email; {@code purpose=agreement_erm} keeps the regular
+     * {@link JwtAuthFilter} from trying to parse the subject as a
+     * numeric user id.
      */
-    public String generateConsultantToken(String applicationId) {
-        long oneHourMs = 60L * 60L * 1000L;
-        return buildToken(Map.of("purpose", "consultant"), applicationId, oneHourMs);
+    public String generateAgreementErmToken(String email) {
+        long eightHoursMs = 8L * 60L * 60L * 1000L;
+        return buildToken(Map.of("purpose", "agreement_erm"), email, eightHoursMs);
     }
 
-    public String extractConsultantApplicationId(String token) {
+    public String extractSubject(String token) {
         return extractClaim(token, Claims::getSubject);
     }
 

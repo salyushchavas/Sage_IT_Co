@@ -18,8 +18,8 @@ import {
   updateConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
 } from "@/lib/api";
-import ConsultantStatusPill from "./ConsultantStatusPill";
-import ConsultantEventTimeline from "./ConsultantEventTimeline";
+import AgreementStatusPill from "./AgreementStatusPill";
+import AgreementEventTimeline from "./AgreementEventTimeline";
 import ConsultantForm, { type ConsultantFormValues } from "./ConsultantForm";
 
 interface Props {
@@ -35,6 +35,10 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const [feedback, setFeedback] = useState("");
 
   const isLocked = ["SIGNED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(app.status);
+
+  const lastConsultantView = events
+    .filter((e) => e.eventType === "ACCESSED")
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())[0];
 
   const handleResend = async () => {
     setBusy("resend");
@@ -99,18 +103,15 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <div className="flex items-center gap-2 flex-wrap">
-            <h1 className="text-2xl font-bold text-gray-900">
+            <h2 className="text-2xl font-bold text-gray-900">
               {app.consultantName || app.consultantEmail}
-            </h1>
-            <ConsultantStatusPill status={app.status} />
+            </h2>
+            <AgreementStatusPill status={app.status} />
           </div>
-          <p className="text-xs font-mono text-gray-500 mt-0.5">
-            {app.applicationId}
-          </p>
+          <p className="text-xs font-mono text-gray-500 mt-0.5">{app.applicationId}</p>
           <p className="text-xs text-gray-500 mt-0.5">{app.consultantEmail}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -167,7 +168,6 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         </p>
       )}
 
-      {/* PDF download (only when signed) */}
       {app.signedPdfUrl && (
         <a
           href={app.signedPdfUrl}
@@ -188,18 +188,21 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           value={app.signedAt ? formatDateTime(app.signedAt) : "—"}
         />
         <SmallStat label="Phone" value={app.consultantPhone || "—"} />
-        <SmallStat
-          label="Legal name"
-          value={app.signedLegalName || "—"}
-        />
+        <SmallStat label="Legal name" value={app.signedLegalName || "—"} />
         <SmallStat label="Signed IP" value={app.signedIp || "—"} />
-        <SmallStat
-          label="Revisions"
-          value={String(revisions.length)}
-        />
+        <SmallStat label="Revisions" value={String(revisions.length)} />
       </div>
 
-      {/* Edit form OR payload viewer */}
+      {lastConsultantView && (
+        <div className="rounded-xl border border-sage-navy/20 bg-sage-navy/5 p-3 text-xs text-sage-navy flex items-center gap-2 flex-wrap">
+          <span className="font-bold">Last consultant access:</span>
+          <span>{formatDateTime(lastConsultantView.createdAt)}</span>
+          {lastConsultantView.ipAddress && (
+            <span className="font-mono">from {lastConsultantView.ipAddress}</span>
+          )}
+        </div>
+      )}
+
       {editing ? (
         <Section title="Edit details">
           <ConsultantForm
@@ -235,7 +238,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
       )}
 
       <Section title={`Activity (${events.length})`}>
-        <ConsultantEventTimeline events={events} />
+        <AgreementEventTimeline events={events} />
       </Section>
 
       <Section title={`Revisions (${revisions.length})`}>

@@ -18,7 +18,6 @@ import {
   signConsultantApplication,
   type ConsultantApplication,
 } from "@/lib/api";
-import { getConsultantToken } from "@/lib/consultant-session";
 
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
 
@@ -46,22 +45,16 @@ export default function ConsultantSignPage() {
 
   useEffect(() => {
     if (!appId) return;
-    const token = getConsultantToken(appId);
-    if (!token) {
-      router.replace(`/consultant?app=${encodeURIComponent(appId)}`);
-      return;
-    }
-    getConsultantApplicationView(appId, token)
+    getConsultantApplicationView(appId)
       .then((data) => {
         setApp(data);
         if (data.consultantName) setLegalName(data.consultantName);
         if (data.status !== "VERIFIED") {
-          // Wrong step — push back to review screen.
           router.replace(`/consultant/${encodeURIComponent(appId)}/review`);
         }
       })
       .catch(() => {
-        router.replace(`/consultant?app=${encodeURIComponent(appId)}`);
+        router.replace(`/consultant/${encodeURIComponent(appId)}/review`);
       })
       .finally(() => setLoading(false));
   }, [appId, router]);
@@ -119,20 +112,10 @@ export default function ConsultantSignPage() {
 
   const handleSign = async () => {
     if (!canSign || !signatureData) return;
-    const token = getConsultantToken(appId);
-    if (!token) {
-      router.replace(`/consultant?app=${encodeURIComponent(appId)}`);
-      return;
-    }
     setSigning(true);
     setError("");
     try {
-      await signConsultantApplication(
-        appId,
-        token,
-        legalName.trim(),
-        signatureData,
-      );
+      await signConsultantApplication(appId, legalName.trim(), signatureData);
       router.push(`/consultant/${encodeURIComponent(appId)}/done`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't sign.");
@@ -152,8 +135,8 @@ export default function ConsultantSignPage() {
   return (
     <SplitAuthLayout
       heroTitle={"One last\nstep — sign."}
-      heroSubtitle="Add your full legal name and a digital signature. We email a signed PDF to both you and your ERM immediately."
-      heroFooter="Final step · Sign"
+      heroSubtitle="Add your full legal name and a digital signature. We email a signed PDF to both you and the operator immediately."
+      heroFooter="Step 2 of 2 · Sign"
     >
       <meta name="robots" content="noindex,nofollow" />
       <div className="space-y-4">

@@ -6,9 +6,7 @@ import type { ConsultantApplicationEvent } from "@/lib/api";
 const EVENT_LABELS: Record<string, string> = {
   CREATED: "Created",
   UPDATED: "Updated",
-  OTP_SENT: "OTP sent",
-  OTP_VERIFIED: "OTP verified",
-  OTP_FAILED: "OTP failed",
+  ACCESSED: "Opened by consultant",
   DETAILS_VERIFIED: "Details verified",
   REVISION_REQUESTED: "Revision requested",
   REVISED: "Revised",
@@ -17,10 +15,13 @@ const EVENT_LABELS: Record<string, string> = {
   EMAIL_SENT: "Email sent",
   CANCELLED: "Cancelled",
   EXPIRED: "Expired",
+  OTP_SENT: "OTP sent (legacy)",
+  OTP_VERIFIED: "OTP verified (legacy)",
+  OTP_FAILED: "OTP failed (legacy)",
 };
 
 const ACTOR_LABELS: Record<string, string> = {
-  ERM: "ERM",
+  ERM: "Operator",
   CONSULTANT: "Consultant",
   SYSTEM: "System",
 };
@@ -31,18 +32,15 @@ const ACTOR_COLORS: Record<string, string> = {
   SYSTEM: "bg-gray-100 text-gray-600",
 };
 
-export default function ConsultantEventTimeline({
+export default function AgreementEventTimeline({
   events,
 }: {
   events: ConsultantApplicationEvent[];
 }) {
   if (events.length === 0) {
-    return (
-      <p className="text-xs text-gray-400 italic">No activity yet.</p>
-    );
+    return <p className="text-xs text-gray-400 italic">No activity yet.</p>;
   }
 
-  // Newest first
   const sorted = [...events].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
   );
@@ -73,6 +71,11 @@ export default function ConsultantEventTimeline({
               >
                 {ACTOR_LABELS[e.actorType] ?? e.actorType}
               </span>
+              {e.ipAddress && (
+                <span className="text-[10px] font-mono text-gray-400">
+                  {e.ipAddress}
+                </span>
+              )}
             </div>
             <p className="text-[11px] text-gray-500 inline-flex items-center gap-1 mt-0.5">
               <Clock size={10} />

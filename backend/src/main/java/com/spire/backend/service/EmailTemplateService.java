@@ -672,7 +672,7 @@ public class EmailTemplateService {
      * receive an OTP.
      */
     public void sendConsultantApplicationCreated(ConsultantApplication application) {
-        String url = appUrl + "/consultant?app=" + application.getApplicationId();
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/review";
         String displayName = application.getConsultantName() == null
                 || application.getConsultantName().isBlank()
                 ? "there"
@@ -693,37 +693,6 @@ public class EmailTemplateService {
     }
 
     /**
-     * Six-digit code emailed during the consultant login step. The
-     * code itself is hashed server-side; only the recipient ever sees
-     * the cleartext.
-     */
-    public void sendConsultantOtp(ConsultantApplication application, String otp) {
-        String displayName = application.getConsultantName() == null
-                || application.getConsultantName().isBlank()
-                ? "there"
-                : application.getConsultantName().split(" ")[0];
-        String codeBlock =
-                "<div style=\"text-align:center; margin:24px 0;\">"
-                        + "<span style=\"display:inline-block; font-size:32px; font-weight:bold; "
-                        + "letter-spacing:8px; color:" + brandConfig.getPrimaryColor() + "; background:#f9fafb;"
-                        + "padding:12px 24px; border-radius:8px; "
-                        + "border:1px solid #e5e7eb; font-family:'Courier New',monospace;\">"
-                        + escape(otp)
-                        + "</span>"
-                        + "</div>";
-        String body = p("Hi " + escape(displayName) + ",")
-                + p("Your verification code is:")
-                + codeBlock
-                + p("This code expires in 10 minutes.")
-                + muted("If you didn't request this, ignore this email and consider "
-                        + "letting your contact at " + brandName() + " know.");
-        emailService.sendEmail(
-                application.getConsultantEmail(),
-                "Verification code: " + otp,
-                wrap("Verify your identity", body));
-    }
-
-    /**
      * Sent to the owning ERM when the consultant clicks "request
      * changes" on the review page. The ERM is the actor who edits
      * the application, so this email points them at the detail page
@@ -731,7 +700,7 @@ public class EmailTemplateService {
      */
     public void sendConsultantRevisionRequested(ConsultantApplication application) {
         if (!ermEmail(application).isPresent()) return;
-        String url = appUrl + "/erm-dashboard/consultants/" + application.getApplicationId();
+        String url = appUrl + "/agreement-erm/" + application.getApplicationId();
         String reason = application.getRevisionNotes() == null
                 || application.getRevisionNotes().isBlank()
                 ? "(no reason provided)"
@@ -759,7 +728,7 @@ public class EmailTemplateService {
      * re-review and decide whether to verify or push back again.
      */
     public void sendConsultantApplicationUpdated(ConsultantApplication application) {
-        String url = appUrl + "/consultant?app=" + application.getApplicationId();
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/review";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has updated your engagement details based on "
                         + "the changes you requested.")
@@ -782,7 +751,7 @@ public class EmailTemplateService {
     public void sendConsultantApplicationSigned(ConsultantApplication application) {
         if (!ermEmail(application).isPresent()) return;
         String pdf = application.getSignedPdfUrl();
-        String dashboard = appUrl + "/erm-dashboard/consultants/"
+        String dashboard = appUrl + "/agreement-erm/"
                 + application.getApplicationId();
         String body = p("Hi,")
                 + p("Good news: " + escape(safeName(application))

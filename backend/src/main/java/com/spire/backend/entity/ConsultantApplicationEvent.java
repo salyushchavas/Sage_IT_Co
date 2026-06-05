@@ -62,9 +62,13 @@ public class ConsultantApplicationEvent {
     public enum EventType {
         CREATED,
         UPDATED,
+        // OTP_* values remain in the enum for backward-compat with any
+        // historical event rows; the OTP flow itself was removed when
+        // the consultant surface switched to application-id-as-credential.
         OTP_SENT,
         OTP_VERIFIED,
         OTP_FAILED,
+        ACCESSED,
         DETAILS_VERIFIED,
         REVISION_REQUESTED,
         REVISED,

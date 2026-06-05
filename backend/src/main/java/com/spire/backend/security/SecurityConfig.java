@@ -25,7 +25,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
-    private final ConsultantJwtAuthFilter consultantJwtAuthFilter;
+    private final AgreementErmAuthFilter agreementErmAuthFilter;
     private final AgreementGateFilter agreementGateFilter;
 
     private final CorsConfigurationSource corsConfigurationSource;
@@ -50,21 +50,22 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/agreement/terms").permitAll()
                         .requestMatchers("/api/admin/**")
                                 .hasAnyRole("ADMIN", "OPERATIONS_ADMIN", "SYSTEM_ADMIN")
-                        // Consultant Agreement (hidden internal feature):
-                        // OTP request + verify are public so the consultant
-                        // (who has no User row) can authenticate. The
-                        // remaining /api/consultant/** endpoints require
-                        // ROLE_CONSULTANT, set by ConsultantJwtAuthFilter
-                        // when the short-lived purpose=consultant token
-                        // handed out by verify-otp is presented.
-                        .requestMatchers(
-                                "/api/consultant/applications/*/request-otp",
-                                "/api/consultant/applications/*/verify-otp"
-                        ).permitAll()
-                        .requestMatchers("/api/consultant/**").hasRole("CONSULTANT")
+                        // Agreement-ERM console (hidden, hardcoded
+                        // single-operator login). Login is public;
+                        // every other endpoint requires the JWT
+                        // issued by /login (purpose=agreement_erm),
+                        // validated by AgreementErmAuthFilter.
+                        .requestMatchers(HttpMethod.POST, "/api/agreement-erm/login").permitAll()
+                        .requestMatchers("/api/agreement-erm/applications/**")
+                                .hasRole("AGREEMENT_ERM")
+                        // Consultant-side surface is fully public.
+                        // The UUID applicationId acts as the credential;
+                        // ConsultantRateLimiter caps abuse and every
+                        // request lands in the audit log.
+                        .requestMatchers("/api/consultant/applications/**").permitAll()
                         .anyRequest().authenticated()
                 )
-                .addFilterBefore(consultantJwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterBefore(agreementErmAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 // Agreement gate runs after JWT auth so it can read the
                 // resolved principal. It exempts /api/auth/* and

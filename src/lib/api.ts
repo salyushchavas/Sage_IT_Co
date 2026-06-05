@@ -3208,7 +3208,11 @@ export async function downloadUserRecordsCsv(userId: number | string, fileBaseNa
   URL.revokeObjectURL(url);
 }
 
-// ─── Consultant Agreement (hidden internal feature) ──────────────────
+// ─── Agreement-ERM + Consultant (hidden internal feature) ───────────
+//
+// Two surfaces, completely separate from Sage's /erm-dashboard:
+//   - /agreement-erm/*    — single hardcoded operator, JWT in sessionStorage
+//   - /consultant/*       — public, applicationId acts as the credential
 
 export type ConsultantApplicationStatus =
   | "DRAFT"
@@ -3279,7 +3283,80 @@ export interface ConsultantApplicationsPage {
   hasNext: boolean;
 }
 
-// ── ERM-side ─────────────────────────────────────────────────────
+// ── Agreement-ERM auth ──────────────────────────────────────────
+//
+// Token lives in sessionStorage so a closed tab clears it inside the
+// 8h TTL. Stays out of the global apiFetch Authorization header so
+// it can't bleed into Sage's user-auth flows.
+
+const AGREEMENT_ERM_TOKEN_KEY = "sage_agreement_erm_token";
+
+export function getAgreementErmToken(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(AGREEMENT_ERM_TOKEN_KEY);
+  } catch {
+    return null;
+  }
+}
+
+export function clearAgreementErmToken() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(AGREEMENT_ERM_TOKEN_KEY);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+export async function agreementErmLogin(email: string, password: string) {
+  const res = await fetch(`${BASE_URL}/api/agreement-erm/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const body = (await res.json()) as ApiResponse<{ token: string; email: string }>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || "Login failed.");
+  }
+  if (typeof window !== "undefined") {
+    try {
+      sessionStorage.setItem(AGREEMENT_ERM_TOKEN_KEY, body.data.token);
+    } catch {
+      /* storage disabled */
+    }
+  }
+  return body.data;
+}
+
+async function agreementErmFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const body = (await res.json()) as ApiResponse<T>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Request failed (${res.status})`);
+  }
+  return body.data;
+}
+
+// ── Agreement-ERM operations ────────────────────────────────────
 
 export async function createConsultantApplication(data: {
   consultantEmail: string;
@@ -3287,11 +3364,10 @@ export async function createConsultantApplication(data: {
   consultantPhone?: string;
   payload?: unknown;
 }) {
-  const wrapper = await apiFetch<ApiResponse<ConsultantApplication>>(
-    "/api/internal/consultant-applications",
+  return agreementErmFetch<ConsultantApplication>(
+    "/api/agreement-erm/applications",
     { method: "POST", body: JSON.stringify(data) },
   );
-  return wrapper.data;
 }
 
 export async function listConsultantApplications(
@@ -3302,17 +3378,15 @@ export async function listConsultantApplications(
       .filter(([, v]) => v !== undefined && v !== null && v !== "")
       .map(([k, v]) => [k, String(v)]),
   ).toString();
-  const wrapper = await apiFetch<ApiResponse<ConsultantApplicationsPage>>(
-    `/api/internal/consultant-applications${qs}`,
+  return agreementErmFetch<ConsultantApplicationsPage>(
+    `/api/agreement-erm/applications${qs}`,
   );
-  return wrapper.data;
 }
 
 export async function getConsultantApplication(applicationId: string) {
-  const wrapper = await apiFetch<ApiResponse<ConsultantApplicationDetailEnvelope>>(
-    `/api/internal/consultant-applications/${applicationId}`,
+  return agreementErmFetch<ConsultantApplicationDetailEnvelope>(
+    `/api/agreement-erm/applications/${applicationId}`,
   );
-  return wrapper.data;
 }
 
 export async function updateConsultantApplication(
@@ -3324,74 +3398,35 @@ export async function updateConsultantApplication(
     payload?: unknown;
   },
 ) {
-  const wrapper = await apiFetch<ApiResponse<ConsultantApplication>>(
-    `/api/internal/consultant-applications/${applicationId}`,
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}`,
     { method: "PUT", body: JSON.stringify(data) },
   );
-  return wrapper.data;
 }
 
 export async function cancelConsultantApplication(applicationId: string) {
-  const wrapper = await apiFetch<ApiResponse<ConsultantApplication>>(
-    `/api/internal/consultant-applications/${applicationId}/cancel`,
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/cancel`,
     { method: "POST" },
   );
-  return wrapper.data;
 }
 
 export async function resendConsultantInvite(applicationId: string) {
-  const wrapper = await apiFetch<ApiResponse<{ message: string }>>(
-    `/api/internal/consultant-applications/${applicationId}/resend-invite`,
+  return agreementErmFetch<{ message: string }>(
+    `/api/agreement-erm/applications/${applicationId}/resend-invite`,
     { method: "POST" },
   );
-  return wrapper.data;
 }
 
-// ── Consultant-side ──────────────────────────────────────────────
+// ── Consultant-side (public, applicationId is the credential) ───
 //
-// The consultant token returned by verifyConsultantOtp is *separate*
-// from the user-auth token stored in localStorage. It MUST be passed
-// explicitly on every consultant call -- we don't write it into the
-// shared apiFetch Authorization header so it can't leak across tabs.
-
-export async function requestConsultantOtp(applicationId: string, email: string) {
-  // 200 always (server returns a generic message); we surface it
-  // so the UI can paint a "check your email" panel even for invalid
-  // requests, to avoid leaking which app IDs exist.
-  const res = await fetch(`${BASE_URL}/api/consultant/applications/${applicationId}/request-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
-  if (res.status === 429) {
-    throw new Error("Too many requests. Try again later.");
-  }
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(text || `Request failed (${res.status})`);
-  }
-  return (await res.json()) as ApiResponse<{ message: string }>;
-}
-
-export async function verifyConsultantOtp(applicationId: string, otp: string) {
-  const res = await fetch(`${BASE_URL}/api/consultant/applications/${applicationId}/verify-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ otp }),
-  });
-  if (res.status === 429) {
-    throw new Error("Too many attempts. Try again later.");
-  }
-  const body = (await res.json()) as ApiResponse<{ accessToken: string; applicationId: string }>;
-  if (!res.ok || !body?.success) {
-    throw new Error(body?.message || `Verification failed (${res.status})`);
-  }
-  return body.data;
-}
+// No bearer token, no auth header. Rate-limited server-side; a 429
+// surfaces as a friendly error. The applicationId UUID is the only
+// thing standing between an attacker and an application's payload,
+// so we surface 404 explicitly rather than redirecting silently.
 
 async function consultantFetch<T>(
   applicationId: string,
-  token: string,
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
@@ -3401,11 +3436,13 @@ async function consultantFetch<T>(
       ...init,
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${token}`,
         ...(init.headers ?? {}),
       },
     },
   );
+  if (res.status === 429) {
+    throw new Error("Too many requests. Try again in a minute.");
+  }
   const body = (await res.json()) as ApiResponse<T>;
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || `Request failed (${res.status})`);
@@ -3413,46 +3450,41 @@ async function consultantFetch<T>(
   return body.data;
 }
 
-export async function getConsultantApplicationView(
-  applicationId: string,
-  token: string,
-) {
-  return consultantFetch<ConsultantApplication>(applicationId, token, "");
+export async function getConsultantApplicationView(applicationId: string) {
+  return consultantFetch<ConsultantApplication>(applicationId, "");
 }
 
-export async function verifyConsultantDetails(applicationId: string, token: string) {
+export async function verifyConsultantDetails(applicationId: string) {
   return consultantFetch<ConsultantApplication>(
-    applicationId, token, "/verify-details",
+    applicationId, "/verify-details",
     { method: "POST" },
   );
 }
 
 export async function requestConsultantRevision(
   applicationId: string,
-  token: string,
   reason: string,
 ) {
   return consultantFetch<ConsultantApplication>(
-    applicationId, token, "/request-revision",
+    applicationId, "/request-revision",
     { method: "POST", body: JSON.stringify({ reason }) },
   );
 }
 
 export async function signConsultantApplication(
   applicationId: string,
-  token: string,
   legalName: string,
   signatureImage: string,
 ) {
   return consultantFetch<ConsultantApplication>(
-    applicationId, token, "/sign",
+    applicationId, "/sign",
     { method: "POST", body: JSON.stringify({ legalName, signatureImage }) },
   );
 }
 
-export async function requestConsultantCopy(applicationId: string, token: string) {
+export async function requestConsultantCopy(applicationId: string) {
   return consultantFetch<{ message: string }>(
-    applicationId, token, "/request-copy",
+    applicationId, "/request-copy",
     { method: "POST" },
   );
 }

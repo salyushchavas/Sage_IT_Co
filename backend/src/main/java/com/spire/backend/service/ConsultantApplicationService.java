@@ -6,21 +6,17 @@ import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.ConsultantApplicationEventRepository;
 import com.spire.backend.repository.ConsultantApplicationRepository;
 import com.spire.backend.repository.ConsultantApplicationRevisionRepository;
-import com.spire.backend.security.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -28,17 +24,25 @@ import java.util.Map;
 import java.util.UUID;
 
 /**
- * Core service for the Consultant Agreement feature.
+ * Core service for the Consultant Agreement feature (hidden internal
+ * surface — not exposed via the marketing site).
+ *
+ * Two callers:
+ *
+ *   1. Agreement-ERM console (one hardcoded operator, no DB row).
+ *      Goes through {@link
+ *      com.spire.backend.controller.ConsultantApplicationController}
+ *      under /api/agreement-erm/applications/**, gated by
+ *      ROLE_AGREEMENT_ERM.
+ *
+ *   2. Consultant himself. Goes through /api/consultant/applications/**
+ *      — entirely public + rate-limited. The applicationId (UUID v4)
+ *      is the credential.
  *
  * State machine (see {@link ConsultantApplication.Status}):
  *   DRAFT -> SUBMITTED -> (REVISION_REQUESTED -> UPDATED)*
  *           -> VERIFIED -> SIGNED -> COMPLETED
- * Off-ramps: CANCELLED (ERM) / EXPIRED (cron).
- *
- * Foundation scope: create / read / list / update / cancel / OTP
- * request / OTP verify. Sign + PDF generation + revision-request
- * + ERM-side update emails ship in a follow-up batch once the PDF
- * template + structured field schema are locked.
+ * Off-ramps: CANCELLED (operator) / EXPIRED (cron).
  *
  * JSON payloads are stored as TEXT and parsed with ObjectMapper here
  * rather than via JSONB columns. Keeps the schema portable across
@@ -51,26 +55,26 @@ import java.util.UUID;
 public class ConsultantApplicationService {
 
     private static final int APPLICATION_TTL_DAYS = 7;
-    private static final int OTP_TTL_MINUTES = 10;
-    private static final int OTP_MAX_ATTEMPTS = 5;
-    private static final int OTP_LOCKOUT_HOURS = 1;
+
+    /**
+     * Sentinel ermUserId for applications created via the hardcoded
+     * agreement-erm console. Lets us reuse the existing
+     * {@code erm_user_id} column without a User row.
+     */
+    public static final Long AGREEMENT_ERM_USER_ID = 0L;
 
     private final ConsultantApplicationRepository applicationRepository;
     private final ConsultantApplicationEventRepository eventRepository;
     private final ConsultantApplicationRevisionRepository revisionRepository;
-    private final JwtService jwtService;
     private final EmailTemplateService emailTemplateService;
     private final ConsultantPdfService consultantPdfService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
-    private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
-    private final SecureRandom random = new SecureRandom();
 
-    // ── ERM-side operations ─────────────────────────────────────────
+    // ── Agreement-ERM operations (single operator, no per-ERM scoping) ──
 
     @Transactional
     public ConsultantApplication createApplication(
-            Long ermUserId,
             String consultantEmail,
             String consultantName,
             String consultantPhone,
@@ -85,7 +89,7 @@ public class ConsultantApplicationService {
 
         ConsultantApplication app = ConsultantApplication.builder()
                 .applicationId(applicationId)
-                .ermUserId(ermUserId)
+                .ermUserId(AGREEMENT_ERM_USER_ID)
                 .consultantEmail(consultantEmail.trim().toLowerCase())
                 .consultantName(consultantName)
                 .consultantPhone(consultantPhone)
@@ -95,12 +99,12 @@ public class ConsultantApplicationService {
                 .build();
         app = applicationRepository.save(app);
 
-        saveRevision(app.getId(), 1, payloadJson, "ERM", ermUserId);
+        saveRevision(app.getId(), 1, payloadJson, "ERM", AGREEMENT_ERM_USER_ID);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CREATED,
                 ConsultantApplicationEvent.ActorType.ERM,
-                ermUserId,
+                AGREEMENT_ERM_USER_ID,
                 Map.of("applicationId", applicationId,
                         "consultantEmail", app.getConsultantEmail()),
                 request);
@@ -129,24 +133,24 @@ public class ConsultantApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ConsultantApplication> listForErm(Long ermUserId, String status, Pageable pageable) {
+    public Page<ConsultantApplication> listApplications(String status, Pageable pageable) {
         if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
-            return applicationRepository.findByErmUserId(ermUserId, pageable);
+            return applicationRepository.findByErmUserId(AGREEMENT_ERM_USER_ID, pageable);
         }
-        return applicationRepository.findByErmUserIdAndStatus(ermUserId, status, pageable);
+        return applicationRepository.findByErmUserIdAndStatus(
+                AGREEMENT_ERM_USER_ID, status, pageable);
     }
 
     @Transactional
     public ConsultantApplication updateApplication(
             String applicationId,
-            Long ermUserId,
             String consultantEmail,
             String consultantName,
             String consultantPhone,
             JsonNode payload,
             HttpServletRequest request
     ) {
-        ConsultantApplication app = requireOwned(applicationId, ermUserId);
+        ConsultantApplication app = getByApplicationId(applicationId);
         String status = app.getStatus();
         if (!ConsultantApplication.Status.DRAFT.name().equals(status)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
@@ -169,7 +173,8 @@ public class ConsultantApplicationService {
                     .findFirstByApplicationIdOrderByVersionNumberDesc(app.getId())
                     .map(rev -> rev.getVersionNumber() + 1)
                     .orElse(2);
-            saveRevision(app.getId(), nextVersion, payloadJson, "ERM", ermUserId);
+            saveRevision(app.getId(), nextVersion, payloadJson,
+                    "ERM", AGREEMENT_ERM_USER_ID);
         }
 
         app.setStatus(ConsultantApplication.Status.UPDATED.name());
@@ -177,17 +182,33 @@ public class ConsultantApplicationService {
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.REVISED,
-                ConsultantApplicationEvent.ActorType.ERM, ermUserId,
+                ConsultantApplicationEvent.ActorType.ERM, AGREEMENT_ERM_USER_ID,
                 Map.of("status", app.getStatus()),
                 request);
+
+        // Re-notify the consultant whenever the ERM revises after a
+        // pushback. Best-effort; mirrors the Phase 1 behaviour.
+        if (ConsultantApplication.Status.UPDATED.name().equals(app.getStatus())) {
+            try {
+                emailTemplateService.sendConsultantApplicationUpdated(app);
+                appendEvent(app.getId(),
+                        ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                        ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                        Map.of("template", "application_updated"),
+                        null);
+            } catch (Exception e) {
+                log.warn("Failed to send updated-for-review email for {}: {}",
+                        applicationId, e.getMessage());
+            }
+        }
 
         return app;
     }
 
     @Transactional
     public ConsultantApplication cancel(
-            String applicationId, Long ermUserId, HttpServletRequest request) {
-        ConsultantApplication app = requireOwned(applicationId, ermUserId);
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
         String status = app.getStatus();
         if (ConsultantApplication.Status.SIGNED.name().equals(status)
                 || ConsultantApplication.Status.COMPLETED.name().equals(status)) {
@@ -199,15 +220,14 @@ public class ConsultantApplicationService {
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CANCELLED,
-                ConsultantApplicationEvent.ActorType.ERM, ermUserId,
+                ConsultantApplicationEvent.ActorType.ERM, AGREEMENT_ERM_USER_ID,
                 Map.of(), request);
         return app;
     }
 
     @Transactional
-    public void resendInvite(String applicationId, Long ermUserId,
-                             HttpServletRequest request) {
-        ConsultantApplication app = requireOwned(applicationId, ermUserId);
+    public void resendInvite(String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
         try {
             emailTemplateService.sendConsultantApplicationCreated(app);
             appendEvent(app.getId(),
@@ -223,128 +243,37 @@ public class ConsultantApplicationService {
     }
 
     @Transactional(readOnly = true)
-    public List<ConsultantApplicationEvent> listEvents(String applicationId, Long ermUserId) {
-        ConsultantApplication app = requireOwned(applicationId, ermUserId);
+    public List<ConsultantApplicationEvent> listEvents(String applicationId) {
+        ConsultantApplication app = getByApplicationId(applicationId);
         return eventRepository.findByApplicationIdOrderByCreatedAtDesc(app.getId());
     }
 
     @Transactional(readOnly = true)
-    public List<ConsultantApplicationRevision> listRevisions(String applicationId, Long ermUserId) {
-        ConsultantApplication app = requireOwned(applicationId, ermUserId);
+    public List<ConsultantApplicationRevision> listRevisions(String applicationId) {
+        ConsultantApplication app = getByApplicationId(applicationId);
         return revisionRepository.findByApplicationIdOrderByVersionNumberDesc(app.getId());
     }
 
-    // ── Consultant-side OTP flow ────────────────────────────────────
+    // ── Consultant-side (public, rate-limited at controller) ────────
 
     /**
-     * Always returns silently regardless of whether the email matches
-     * the application -- prevents enumeration of valid (applicationId,
-     * email) pairs. The actual OTP send only happens on a match.
+     * Public read used by the consultant /review page. Appends an
+     * ACCESSED audit event with the caller IP + UA so the operator
+     * can see every view of a sensitive application.
      */
     @Transactional
-    public void requestOtp(String applicationId, String email,
-                           HttpServletRequest request) {
-        if (email == null || email.isBlank()) return;
-        applicationRepository.findByApplicationId(applicationId).ifPresent(app -> {
-            if (!app.getConsultantEmail().equalsIgnoreCase(email.trim())) {
-                log.info("OTP request email mismatch for application {}", applicationId);
-                return;
-            }
-            if (isTerminalStatus(app.getStatus())) {
-                log.info("OTP request for terminal-status application {} ({})",
-                        applicationId, app.getStatus());
-                return;
-            }
-
-            String otp = generateOtp();
-            app.setOtpHash(passwordEncoder.encode(otp));
-            app.setOtpExpiresAt(LocalDateTime.now().plusMinutes(OTP_TTL_MINUTES));
-            app.setOtpFailedAttempts(0);
-            app.setOtpLockedUntil(null);
-            applicationRepository.save(app);
-
-            try {
-                emailTemplateService.sendConsultantOtp(app, otp);
-            } catch (Exception e) {
-                log.warn("Failed to send consultant OTP for {}: {}",
-                        applicationId, e.getMessage());
-            }
-
-            appendEvent(app.getId(),
-                    ConsultantApplicationEvent.EventType.OTP_SENT,
-                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                    Map.of("to", app.getConsultantEmail()),
-                    request);
-        });
-    }
-
-    /**
-     * Returns a short-lived consultant JWT on success. The token's
-     * subject is the public applicationId and it carries
-     * {@code purpose=consultant} so the regular {@link
-     * com.spire.backend.security.JwtAuthFilter} ignores it.
-     */
-    @Transactional
-    public String verifyOtp(String applicationId, String otp,
-                            HttpServletRequest request) {
-        ConsultantApplication app = getByApplicationId(applicationId);
-        LocalDateTime now = LocalDateTime.now();
-
-        if (app.getOtpLockedUntil() != null && app.getOtpLockedUntil().isAfter(now)) {
-            throw new UnauthorizedException(
-                    "Too many failed attempts. Try again after "
-                            + app.getOtpLockedUntil().toString() + ".");
-        }
-        if (app.getOtpHash() == null || app.getOtpExpiresAt() == null
-                || app.getOtpExpiresAt().isBefore(now)) {
-            throw new UnauthorizedException(
-                    "Code has expired. Request a new one.");
-        }
-
-        boolean ok = otp != null && passwordEncoder.matches(otp, app.getOtpHash());
-        if (!ok) {
-            int failed = app.getOtpFailedAttempts() + 1;
-            app.setOtpFailedAttempts(failed);
-            if (failed >= OTP_MAX_ATTEMPTS) {
-                app.setOtpLockedUntil(now.plusHours(OTP_LOCKOUT_HOURS));
-            }
-            applicationRepository.save(app);
-
-            appendEvent(app.getId(),
-                    ConsultantApplicationEvent.EventType.OTP_FAILED,
-                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                    Map.of("failedAttempts", failed),
-                    request);
-            throw new UnauthorizedException("Invalid code.");
-        }
-
-        app.setOtpHash(null);
-        app.setOtpExpiresAt(null);
-        app.setOtpFailedAttempts(0);
-        app.setOtpLockedUntil(null);
-        applicationRepository.save(app);
-
-        appendEvent(app.getId(),
-                ConsultantApplicationEvent.EventType.OTP_VERIFIED,
-                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of(), request);
-
-        return jwtService.generateConsultantToken(applicationId);
-    }
-
-    // ── Consultant-side authenticated actions ───────────────────────
-    //
-    // All of these require the consultant JWT issued by verifyOtp and
-    // enforce the per-application scope at the controller layer
-    // (auth.getName() == applicationId from the URL path).
-
-    @Transactional(readOnly = true)
-    public ConsultantApplication getForConsultant(String applicationId) {
+    public ConsultantApplication getForConsultant(String applicationId,
+                                                  HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         if (isTerminalCancellation(app.getStatus())) {
             throw new IllegalStateException(
                     "This application is no longer accepting consultant actions.");
         }
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.ACCESSED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("status", app.getStatus()),
+                request);
         return app;
     }
 
@@ -448,8 +377,8 @@ public class ConsultantApplicationService {
                 request);
 
         // PDF + completion side-effects. If PDF generation fails we
-        // leave the application in SIGNED so an ERM can retry; the
-        // signature row is already persisted and replayable.
+        // leave the application in SIGNED so an operator can retry;
+        // the signature row is already persisted and replayable.
         try {
             String pdfUrl = consultantPdfService.generateAndUpload(app);
             app.setSignedPdfUrl(pdfUrl);
@@ -548,15 +477,6 @@ public class ConsultantApplicationService {
 
     // ── Internal helpers ────────────────────────────────────────────
 
-    private ConsultantApplication requireOwned(String applicationId, Long ermUserId) {
-        ConsultantApplication app = getByApplicationId(applicationId);
-        if (!app.getErmUserId().equals(ermUserId)) {
-            throw new UnauthorizedException(
-                    "Application " + applicationId + " is owned by another ERM.");
-        }
-        return app;
-    }
-
     private void saveRevision(Long applicationDbId, int version, String payloadJson,
                               String role, Long actorUserId) {
         ConsultantApplicationRevision rev = ConsultantApplicationRevision.builder()
@@ -610,18 +530,6 @@ public class ConsultantApplicationService {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " is required.");
         }
-    }
-
-    private String generateOtp() {
-        int code = 100_000 + random.nextInt(900_000);
-        return String.valueOf(code);
-    }
-
-    private boolean isTerminalStatus(String status) {
-        return ConsultantApplication.Status.SIGNED.name().equals(status)
-                || ConsultantApplication.Status.COMPLETED.name().equals(status)
-                || ConsultantApplication.Status.CANCELLED.name().equals(status)
-                || ConsultantApplication.Status.EXPIRED.name().equals(status);
     }
 
     private static String clientIp(HttpServletRequest request) {

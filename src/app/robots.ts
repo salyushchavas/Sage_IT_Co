@@ -20,8 +20,8 @@ export default function robots(): MetadataRoute.Robots {
           // Consultant Agreement (hidden internal feature):
           "/consultant",
           "/consultant/",
-          "/erm-dashboard/consultants",
-          "/erm-dashboard/consultants/",
+          "/agreement-erm",
+          "/agreement-erm/",
         ],
       },
     ],

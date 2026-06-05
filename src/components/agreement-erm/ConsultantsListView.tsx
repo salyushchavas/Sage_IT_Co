@@ -10,7 +10,7 @@ import {
   type ConsultantApplicationStatus,
   type ConsultantApplicationsPage,
 } from "@/lib/api";
-import ConsultantStatusPill from "./ConsultantStatusPill";
+import AgreementStatusPill from "./AgreementStatusPill";
 
 const FILTERS: ReadonlyArray<{ id: "ALL" | ConsultantApplicationStatus; label: string }> = [
   { id: "ALL",                label: "All" },
@@ -27,7 +27,7 @@ const FILTERS: ReadonlyArray<{ id: "ALL" | ConsultantApplicationStatus; label: s
 
 const PAGE_SIZE = 20;
 
-export default function ConsultantsListTab() {
+export default function ConsultantsListView() {
   const [filter, setFilter] = useState<"ALL" | ConsultantApplicationStatus>("ALL");
   const [page, setPage] = useState(0);
   const [pageData, setPageData] = useState<ConsultantApplicationsPage | null>(null);
@@ -76,16 +76,13 @@ export default function ConsultantsListTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Consultant agreements</h1>
-          <p className="text-sm text-gray-500 mt-0.5">
-            Send, track, and sign consulting agreements. Each application
-            invites the consultant via email to verify and sign on a hidden
-            URL — they never see the marketing site.
-          </p>
-        </div>
+        <p className="text-sm text-gray-500 max-w-xl">
+          Send, track, and sign consulting agreements. Each application
+          invites the consultant via email to review and sign on a hidden
+          URL — the application ID acts as the credential.
+        </p>
         <Link
-          href="/erm-dashboard/consultants/new"
+          href="/agreement-erm/new"
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
         >
           <Plus size={12} /> New agreement
@@ -166,7 +163,7 @@ export default function ConsultantsListTab() {
                 <tr key={r.applicationId} className="hover:bg-gray-50">
                   <td className="px-4 py-2">
                     <Link
-                      href={`/erm-dashboard/consultants/${r.applicationId}`}
+                      href={`/agreement-erm/${r.applicationId}`}
                       className="block"
                     >
                       <div className="font-medium text-gray-900">
@@ -178,12 +175,12 @@ export default function ConsultantsListTab() {
                     </Link>
                   </td>
                   <td className="px-4 py-2 font-mono text-[11px] text-gray-700">
-                    <Link href={`/erm-dashboard/consultants/${r.applicationId}`}>
+                    <Link href={`/agreement-erm/${r.applicationId}`}>
                       {r.applicationId.slice(0, 8)}…
                     </Link>
                   </td>
                   <td className="px-4 py-2">
-                    <ConsultantStatusPill status={r.status} />
+                    <AgreementStatusPill status={r.status} />
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {formatDate(r.createdAt)}

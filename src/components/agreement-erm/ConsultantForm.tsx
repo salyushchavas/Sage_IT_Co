@@ -18,13 +18,6 @@ interface Props {
   onCancel?: () => void;
 }
 
-/**
- * Shared form used by /erm-dashboard/consultants/new and the edit
- * panel in /erm-dashboard/consultants/{appId}. The payload field is
- * a free-form JSON textarea -- a placeholder until the final field
- * schema is decided. The form validates that whatever the ERM types
- * parses as JSON before sending, so we never POST malformed bodies.
- */
 export default function ConsultantForm({
   initial,
   submitLabel = "Save",
@@ -116,7 +109,7 @@ export default function ConsultantForm({
           placeholder='{ "scopeOfWork": "...", "engagementMonths": 6 }'
         />
         <p className="mt-1 text-[11px] text-gray-500">
-          Placeholder schema. The structured form will replace this textarea
+          Placeholder schema. A structured form will replace this textarea
           once the field schema is locked in.
         </p>
       </Field>

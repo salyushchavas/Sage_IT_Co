@@ -18,10 +18,6 @@ import {
   verifyConsultantDetails,
   type ConsultantApplication,
 } from "@/lib/api";
-import {
-  clearConsultantSession,
-  getConsultantToken,
-} from "@/lib/consultant-session";
 
 export default function ConsultantReviewPage() {
   const router = useRouter();
@@ -39,30 +35,14 @@ export default function ConsultantReviewPage() {
 
   const load = useCallback(async () => {
     if (!appId) return;
-    const token = getConsultantToken(appId);
-    if (!token) {
-      router.replace(`/consultant?app=${encodeURIComponent(appId)}`);
-      return;
-    }
     try {
-      const data = await getConsultantApplicationView(appId, token);
+      const data = await getConsultantApplicationView(appId);
       setApp(data);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't load agreement.");
-      // 401 likely → token expired. Send back to entry.
-      if (e instanceof Error && /401|unauthorized|expired/i.test(e.message)) {
-        clearConsultantSession(appId);
-        setTimeout(
-          () =>
-            router.replace(
-              `/consultant?app=${encodeURIComponent(appId)}`,
-            ),
-          1200,
-        );
-      }
     }
-  }, [appId, router]);
+  }, [appId]);
 
   useEffect(() => {
     setLoading(true);
@@ -71,12 +51,10 @@ export default function ConsultantReviewPage() {
 
   const handleVerifyDetails = async () => {
     if (!app) return;
-    const token = getConsultantToken(appId);
-    if (!token) return;
     setBusy("verify");
     setError("");
     try {
-      await verifyConsultantDetails(appId, token);
+      await verifyConsultantDetails(appId);
       router.push(`/consultant/${encodeURIComponent(appId)}/sign`);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't verify.");
@@ -91,14 +69,12 @@ export default function ConsultantReviewPage() {
       setError("Please explain what should change (at least 10 characters).");
       return;
     }
-    const token = getConsultantToken(appId);
-    if (!token) return;
     setBusy("revision");
     setError("");
     try {
-      await requestConsultantRevision(appId, token, revisionReason.trim());
+      await requestConsultantRevision(appId, revisionReason.trim());
       setFeedback(
-        "Revision request sent. We've emailed your ERM — they'll update the agreement and re-invite you.",
+        "Revision request sent. We've emailed the operator — they'll update the agreement and re-invite you.",
       );
       setShowRevision(false);
       setRevisionReason("");
@@ -133,9 +109,7 @@ export default function ConsultantReviewPage() {
   }
 
   const payload = parsePayload(app.payload);
-  const isLocked = ["SIGNED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(
-    app.status,
-  );
+  const isLocked = ["SIGNED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(app.status);
   const canActOn =
     app.status === "SUBMITTED" ||
     app.status === "UPDATED" ||
@@ -144,8 +118,8 @@ export default function ConsultantReviewPage() {
   return (
     <SplitAuthLayout
       heroTitle={"Review the\nagreement details."}
-      heroSubtitle="Confirm everything looks right. If anything is off, request a revision and your ERM will update it and re-invite you."
-      heroFooter="Step 3 of 3 · Review + sign"
+      heroSubtitle="Confirm everything looks right. If anything is off, request a revision and the operator will update it and re-invite you."
+      heroFooter="Step 1 of 2 · Review"
     >
       <meta name="robots" content="noindex,nofollow" />
       <div className="space-y-4">
@@ -210,7 +184,7 @@ export default function ConsultantReviewPage() {
           </div>
         ) : !canActOn ? (
           <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Your ERM is preparing the next revision. We&apos;ll email you the
+            The operator is preparing the next revision. We&apos;ll email you the
             updated invite shortly.
           </div>
         ) : showRevision ? (

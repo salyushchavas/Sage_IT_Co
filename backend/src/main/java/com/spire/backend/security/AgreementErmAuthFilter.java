@@ -19,25 +19,19 @@ import java.util.List;
 
 /**
  * Authenticates the Bearer token handed out by
- * {@code /api/consultant/applications/{appId}/verify-otp}. Only
- * touches tokens with {@code purpose=consultant} -- regular
- * user-auth tokens are left for the existing {@link JwtAuthFilter}.
+ * {@code POST /api/agreement-erm/login}. Only touches tokens with
+ * {@code purpose=agreement_erm} -- regular user-auth tokens are
+ * left for the existing {@link JwtAuthFilter}.
  *
  * On success, sets a Spring Security principal whose name is the
- * public {@code applicationId} (UUID) and authority
- * {@code ROLE_CONSULTANT}. Controllers read the principal via
- * {@code Authentication#getName()} to enforce per-application scope:
- *
- *   if (!auth.getName().equals(pathAppId)) -> 403
- *
- * Filter order: this runs BEFORE {@link JwtAuthFilter} so the latter
- * never sees consultant tokens (it has a defensive purpose-check too
- * but this is the canonical path).
+ * operator email (subject claim) and authority {@code
+ * ROLE_AGREEMENT_ERM}. Filter order: runs BEFORE {@link
+ * JwtAuthFilter} so that filter never sees agreement-erm tokens.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
-public class ConsultantJwtAuthFilter extends OncePerRequestFilter {
+public class AgreementErmAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
 
@@ -63,11 +57,10 @@ public class ConsultantJwtAuthFilter extends OncePerRequestFilter {
         try {
             purpose = jwtService.extractPurpose(token);
         } catch (Exception e) {
-            // Not a consultant token -- defer to JwtAuthFilter.
             filterChain.doFilter(request, response);
             return;
         }
-        if (!"consultant".equals(purpose)) {
+        if (!"agreement_erm".equals(purpose)) {
             filterChain.doFilter(request, response);
             return;
         }
@@ -78,21 +71,16 @@ public class ConsultantJwtAuthFilter extends OncePerRequestFilter {
         }
 
         try {
-            String applicationId = jwtService.extractConsultantApplicationId(token);
-            if (applicationId == null || applicationId.isBlank()) {
-                filterChain.doFilter(request, response);
-                return;
-            }
-
+            String email = jwtService.extractSubject(token);
             List<SimpleGrantedAuthority> authorities = List.of(
-                    new SimpleGrantedAuthority("ROLE_CONSULTANT"));
+                    new SimpleGrantedAuthority("ROLE_AGREEMENT_ERM"));
 
             UsernamePasswordAuthenticationToken authToken =
-                    new UsernamePasswordAuthenticationToken(applicationId, null, authorities);
+                    new UsernamePasswordAuthenticationToken(email, null, authorities);
             authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(authToken);
         } catch (Exception e) {
-            log.warn("Consultant JWT validation failed: {}", e.getMessage());
+            log.warn("Agreement-ERM JWT validation failed: {}", e.getMessage());
         }
 
         filterChain.doFilter(request, response);
