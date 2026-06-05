@@ -681,6 +681,7 @@ public class EmailTemplateService {
                 + p(brandName() + " has prepared engagement details for your review. "
                         + "Please open the secure link below to review and sign.")
                 + button("Review and Sign", url)
+                + ctaFallback(url)
                 + receipt(
                         "Application ID: " + application.getApplicationId(),
                         "Link expires: 7 days from issue")
@@ -710,6 +711,7 @@ public class EmailTemplateService {
                         + "engagement details before signing.")
                 + quote(escape(reason))
                 + button("Open application", url)
+                + ctaFallback(url)
                 + receipt(
                         "Application ID: " + application.getApplicationId(),
                         "Consultant: " + safeName(application),
@@ -733,6 +735,7 @@ public class EmailTemplateService {
                 + p(brandName() + " has updated your engagement details based on "
                         + "the changes you requested.")
                 + button("Review and continue", url)
+                + ctaFallback(url)
                 + receipt(
                         "Application ID: " + application.getApplicationId(),
                         "Link expires: 7 days from issue")
@@ -766,8 +769,9 @@ public class EmailTemplateService {
                 + (pdf == null || pdf.isBlank()
                         ? muted("PDF generation is still in progress -- "
                                 + "the file will appear on the dashboard shortly.")
-                        : button("Download signed PDF", pdf))
-                + secondaryButton("Open application", dashboard);
+                        : button("Download signed PDF", pdf) + ctaFallback(pdf))
+                + secondaryButton("Open application", dashboard)
+                + ctaFallback(dashboard);
         emailService.sendEmail(
                 ermEmail(application).get(),
                 "Signed agreement received from "
@@ -785,7 +789,7 @@ public class EmailTemplateService {
                 + p("Thanks for signing your engagement agreement with " + brandName() + ".")
                 + (pdf == null || pdf.isBlank()
                         ? p("Your copy will be available shortly.")
-                        : button("Download your copy", pdf))
+                        : button("Download your copy", pdf) + ctaFallback(pdf))
                 + receipt(
                         "Application ID: " + application.getApplicationId(),
                         "Signed: " + (application.getSignedAt() == null
@@ -1289,6 +1293,22 @@ public class EmailTemplateService {
           </td></tr>
         </table>
         """.formatted(primary, url, primary, escape(label));
+    }
+
+    /**
+     * Plaintext fallback URL block, rendered directly under a CTA
+     * button so the email is still usable when the styled button
+     * misrenders (Gmail dark mode, Outlook desktop rules engine,
+     * accessibility tools that strip background colors, etc.).
+     * Currently used for consultant-agreement emails -- the only
+     * surface where a missed CTA means the consultant can't complete
+     * the flow at all.
+     */
+    private static String ctaFallback(String url) {
+        return "<p style=\"font-size:12px; color:#666666; margin:-8px 0 16px 0; font-family:Arial,sans-serif; line-height:1.5;\">"
+                + "If the button doesn't work, copy this link into your browser:<br>"
+                + "<span style=\"word-break:break-all; color:#1B2A5C;\">"
+                + escape(url) + "</span></p>";
     }
 
     private String secondaryButton(String label, String url) {
