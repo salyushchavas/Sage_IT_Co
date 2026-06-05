@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
@@ -85,6 +85,24 @@ const VALID_TABS: ReadonlyArray<TabId> = [
 ];
 
 export default function ErmDashboardPage() {
+  // useSearchParams() inside ErmDashboardPageInner forces the page
+  // out of static prerender; wrap it in Suspense so Next.js can
+  // build the shell at build time and hydrate the search params on
+  // the client.
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-gray-50">
+          <Loader2 size={28} className="animate-spin text-sage-navy" />
+        </div>
+      }
+    >
+      <ErmDashboardPageInner />
+    </Suspense>
+  );
+}
+
+function ErmDashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { user, isLoading } = useAuth();
