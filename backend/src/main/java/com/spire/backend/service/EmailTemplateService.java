@@ -2,6 +2,7 @@ package com.spire.backend.service;
 
 import com.spire.backend.config.BrandConfig;
 import com.spire.backend.entity.Certificate;
+import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.Course;
 import com.spire.backend.entity.SessionRequest;
 import com.spire.backend.entity.User;
@@ -659,6 +660,66 @@ public class EmailTemplateService {
                 "Reset your password — " + brandName() + "",
                 wrap("Reset your password", body)
         );
+    }
+
+    // ── Consultant Agreement feature (hidden / internal) ────────────
+
+    /**
+     * Sent to the consultant when an ERM creates (or resends) an
+     * application. The link drops them on the public /consultant
+     * landing where they enter their application ID + email and
+     * receive an OTP.
+     */
+    public void sendConsultantApplicationCreated(ConsultantApplication application) {
+        String url = appUrl + "/consultant?app=" + application.getApplicationId();
+        String displayName = application.getConsultantName() == null
+                || application.getConsultantName().isBlank()
+                ? "there"
+                : application.getConsultantName().split(" ")[0];
+        String body = p("Hi " + escape(displayName) + ",")
+                + p(brandName() + " has prepared engagement details for your review. "
+                        + "Please open the secure link below to review and sign.")
+                + button("Review and Sign", url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Link expires: 7 days from issue")
+                + muted("If you didn't expect this, please ignore. "
+                        + "Your contact details with " + brandName() + " won't change.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Action needed: Review your " + brandName() + " engagement details",
+                wrap("Engagement details ready for review", body));
+    }
+
+    /**
+     * Six-digit code emailed during the consultant login step. The
+     * code itself is hashed server-side; only the recipient ever sees
+     * the cleartext.
+     */
+    public void sendConsultantOtp(ConsultantApplication application, String otp) {
+        String displayName = application.getConsultantName() == null
+                || application.getConsultantName().isBlank()
+                ? "there"
+                : application.getConsultantName().split(" ")[0];
+        String codeBlock =
+                "<div style=\"text-align:center; margin:24px 0;\">"
+                        + "<span style=\"display:inline-block; font-size:32px; font-weight:bold; "
+                        + "letter-spacing:8px; color:" + brandConfig.getPrimaryColor() + "; background:#f9fafb;"
+                        + "padding:12px 24px; border-radius:8px; "
+                        + "border:1px solid #e5e7eb; font-family:'Courier New',monospace;\">"
+                        + escape(otp)
+                        + "</span>"
+                        + "</div>";
+        String body = p("Hi " + escape(displayName) + ",")
+                + p("Your verification code is:")
+                + codeBlock
+                + p("This code expires in 10 minutes.")
+                + muted("If you didn't request this, ignore this email and consider "
+                        + "letting your contact at " + brandName() + " know.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Verification code: " + otp,
+                wrap("Verify your identity", body));
     }
 
     // ── 4. Payment receipt ──────────────────────────────────────────

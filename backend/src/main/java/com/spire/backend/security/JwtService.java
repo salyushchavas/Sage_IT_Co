@@ -33,6 +33,26 @@ public class JwtService {
         return buildToken(Map.of(), String.valueOf(userId), refreshTokenExpiration);
     }
 
+    /**
+     * Consultant Agreement feature: short-lived (1h) token issued after
+     * a successful OTP verification. Subject is the public {@code
+     * applicationId} (UUID); the {@code purpose} claim differentiates
+     * this token from user-auth tokens so the regular JwtAuthFilter
+     * doesn't accidentally accept it as a user login.
+     */
+    public String generateConsultantToken(String applicationId) {
+        long oneHourMs = 60L * 60L * 1000L;
+        return buildToken(Map.of("purpose", "consultant"), applicationId, oneHourMs);
+    }
+
+    public String extractConsultantApplicationId(String token) {
+        return extractClaim(token, Claims::getSubject);
+    }
+
+    public String extractPurpose(String token) {
+        return extractClaim(token, claims -> claims.get("purpose", String.class));
+    }
+
     public Long extractUserId(String token) {
         return Long.parseLong(extractClaim(token, Claims::getSubject));
     }

@@ -40,6 +40,22 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = authHeader.substring(7);
 
         if (jwtService.isTokenValid(token) && SecurityContextHolder.getContext().getAuthentication() == null) {
+            // Consultant Agreement feature: consultant-scoped tokens carry
+            // purpose=consultant and a UUID subject (not a numeric user id).
+            // Skip them so we don't NumberFormatException on extractUserId.
+            // A dedicated ConsultantJwtAuthFilter (next batch) will pick
+            // them up before this filter runs.
+            String purpose = null;
+            try {
+                purpose = jwtService.extractPurpose(token);
+            } catch (Exception ignored) {
+                // Legacy tokens without the claim — fall through.
+            }
+            if ("consultant".equals(purpose)) {
+                filterChain.doFilter(request, response);
+                return;
+            }
+
             Long userId = jwtService.extractUserId(token);
             String role = jwtService.extractRole(token);
 

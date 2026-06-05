@@ -17,6 +17,11 @@ export default function robots(): MetadataRoute.Robots {
           "/dashboard/",
           "/login",
           "/signup",
+          // Consultant Agreement (hidden internal feature):
+          "/consultant",
+          "/consultant/",
+          "/erm-dashboard/consultants",
+          "/erm-dashboard/consultants/",
         ],
       },
     ],

@@ -49,6 +49,17 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/api/agreement/terms").permitAll()
                         .requestMatchers("/api/admin/**")
                                 .hasAnyRole("ADMIN", "OPERATIONS_ADMIN", "SYSTEM_ADMIN")
+                        // Consultant Agreement (hidden internal feature):
+                        // OTP request + verify are public; the consultant
+                        // never has a User row, so we can't gate them on
+                        // the regular JWT filter. The verify-otp endpoint
+                        // hands back a consultant-scoped JWT that the
+                        // remaining /api/consultant/** routes will check
+                        // once those are added in a follow-up batch.
+                        .requestMatchers(
+                                "/api/consultant/applications/*/request-otp",
+                                "/api/consultant/applications/*/verify-otp"
+                        ).permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
