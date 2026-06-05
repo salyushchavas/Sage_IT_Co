@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 
 /**
@@ -57,6 +58,12 @@ public class EmailTemplateService {
 
     @Value("${app.url:https://sageitco.com}")
     private String appUrl;
+
+    /** Single hardcoded agreement-ERM operator email. Used as the
+     *  notification destination for two-stage workflow events the
+     *  ERM needs to act on (consultant submitted, completed PDF). */
+    @Value("${agreement-erm.email:ermuser@sageitco.com}")
+    private String agreementErmEmail;
 
     /**
      * Internal operations mailbox that receives a CC of certain
@@ -800,6 +807,189 @@ public class EmailTemplateService {
                 application.getConsultantEmail(),
                 "Your signed " + brandName() + " engagement agreement",
                 wrap("Your signed agreement", body));
+    }
+
+    // ── Two-stage workflow templates (Phase 3) ──────────────────────
+    //
+    // All five share the standard wrap() chrome + button() / ctaFallback()
+    // / receipt() / muted() helpers introduced earlier so they inherit
+    // the Gmail-safe inline styling without per-template overrides.
+
+    /**
+     * Initial "action required" email sent the moment the ERM creates
+     * an application. Replaces the legacy sendConsultantApplicationCreated
+     * on the new workflow -- the consultant lands on /fill (the new
+     * appendix-driven form) instead of /review.
+     */
+    public void sendConsultantInitialFill(ConsultantApplication application) {
+        String url = appUrl + "/consultant/"
+                + application.getApplicationId() + "/fill";
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p(brandName() + " has prepared your engagement agreement and "
+                        + "needs you to complete a few details so the document "
+                        + "can be finalized.")
+                + button("Complete Your Details", url)
+                + ctaFallback(url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Link expires: 7 days from issue")
+                + muted("Your responses are saved as you go -- you can "
+                        + "close the tab and pick up where you left off.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Action Required: Complete Your " + brandName() + " Agreement",
+                wrap("Complete your agreement", body));
+    }
+
+    /**
+     * Sent to the consultant when the ERM kicks the application back
+     * for revisions after reviewing the signed submission. Includes the
+     * ERM's remarks in a styled blockquote so the consultant knows
+     * exactly what to fix.
+     */
+    public void sendConsultantRevisionRequest(
+            ConsultantApplication application, String remarks) {
+        String url = appUrl + "/consultant/"
+                + application.getApplicationId() + "/fill";
+        String safeRemarks = remarks == null || remarks.isBlank()
+                ? "(no remarks provided)"
+                : remarks;
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p(brandName() + " has reviewed your submission and asked "
+                        + "for a few changes before signing the agreement.")
+                + quote(escape(safeRemarks))
+                + button("Review and Update", url)
+                + ctaFallback(url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Your saved fields remain in place")
+                + muted("Re-open the link, update the highlighted sections, "
+                        + "and submit again.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Revision Requested for Your " + brandName() + " Agreement",
+                wrap("Revision requested", body));
+    }
+
+    /**
+     * Sent to the operator the moment the consultant signs and
+     * submits. Links to the agreement-erm detail page so the operator
+     * can approve-and-sign or send-back-for-revision in one click.
+     */
+    public void sendErmReviewNotification(ConsultantApplication application) {
+        String url = appUrl + "/agreement-erm/" + application.getApplicationId();
+        String body = p("Hi,")
+                + p(escape(safeName(application)) + " has signed and submitted "
+                        + "their consultant agreement. It's now waiting for your "
+                        + "review and countersignature.")
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Consultant: " + safeName(application),
+                        "Email: " + application.getConsultantEmail())
+                + button("Review Now", url)
+                + ctaFallback(url)
+                + muted("Approve to lock and email the signed PDF, or send "
+                        + "the application back with remarks.");
+        emailService.sendEmail(
+                agreementErmEmail,
+                "Consultant Agreement Ready for Review: " + safeName(application),
+                wrap("Ready for your review", body));
+    }
+
+    /**
+     * Sent once the ERM countersigns. Delivers the final PDF as an
+     * attachment to BOTH the consultant and the operator inbox. Two
+     * separate sends -- BCC would expose one recipient to the other.
+     */
+    public void sendCompletedAgreementToParties(ConsultantApplication application) {
+        String pdfUrl = application.getFinalPdfUrl();
+        List<EmailService.Attachment> attachments = buildPdfAttachment(
+                pdfUrl, application);
+        String body = p("Hi,")
+                + p("The " + brandName() + " engagement agreement for "
+                        + escape(safeName(application))
+                        + " has been countersigned and is now complete. "
+                        + "A copy of the signed PDF is attached.")
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Consultant: " + safeName(application),
+                        "Signed: " + (application.getSignatureDate() == null
+                                ? "--"
+                                : application.getSignatureDate().toString()))
+                + muted("Please keep this email for your records.");
+        String subject = "Your Signed " + brandName() + " Agreement";
+        String wrapped = wrap("Your signed agreement", body);
+        emailService.sendEmail(
+                application.getConsultantEmail(), subject, wrapped, attachments);
+        emailService.sendEmail(
+                agreementErmEmail, subject, wrapped, attachments);
+    }
+
+    /**
+     * Sends the signed agreement PDF to an arbitrary recipient with
+     * an optional operator note. Used for forwarding to legal,
+     * payroll, the end client, etc.
+     */
+    public void sendAgreementToCustomRecipient(
+            ConsultantApplication application,
+            String recipientEmail,
+            String note) {
+        String pdfUrl = application.getFinalPdfUrl();
+        List<EmailService.Attachment> attachments = buildPdfAttachment(
+                pdfUrl, application);
+        String safeNote = note == null || note.isBlank()
+                ? "Please find the agreement attached."
+                : note;
+        String body = p("Hi,")
+                + p(escape(safeNote))
+                + receipt(
+                        "Consultant: " + safeName(application),
+                        "Application ID: " + application.getApplicationId())
+                + muted("Forwarded from the " + brandName()
+                        + " agreement console.");
+        emailService.sendEmail(
+                recipientEmail,
+                brandName() + " Agreement: " + safeName(application),
+                wrap("Signed agreement", body),
+                attachments);
+    }
+
+    /**
+     * Downloads the Cloudinary-hosted PDF into a single-attachment
+     * list ready for {@link EmailService#sendEmail(String, String, String, List)}.
+     * Returns an empty list on any failure (missing URL, network error)
+     * so the email still goes through -- without an attachment is
+     * better than not at all when an operator is forwarding.
+     */
+    private List<EmailService.Attachment> buildPdfAttachment(
+            String pdfUrl, ConsultantApplication application) {
+        if (pdfUrl == null || pdfUrl.isBlank()) {
+            return java.util.List.of();
+        }
+        try {
+            byte[] bytes;
+            try (java.io.InputStream in = new java.net.URL(pdfUrl).openStream()) {
+                bytes = in.readAllBytes();
+            }
+            String filename = pdfFilename(application);
+            return java.util.List.of(
+                    new EmailService.Attachment(filename, "application/pdf", bytes));
+        } catch (Exception e) {
+            log.warn("Couldn't fetch PDF for attachment from {}: {}",
+                    pdfUrl, e.getMessage());
+            return java.util.List.of();
+        }
+    }
+
+    private static String pdfFilename(ConsultantApplication application) {
+        String name = application.getConsultantName();
+        String slug = name == null || name.isBlank()
+                ? application.getApplicationId().substring(0, 8)
+                : name.toLowerCase()
+                        .replaceAll("[^a-z0-9]+", "-")
+                        .replaceAll("^-+|-+$", "");
+        if (slug.isBlank()) slug = "agreement";
+        return "SageITCO-Agreement-" + slug + ".pdf";
     }
 
     private static String safeName(ConsultantApplication application) {

@@ -103,12 +103,16 @@ public class GlobalExceptionHandler {
                         .build());
     }
 
-    // 500 — Server config errors (missing role in DB, etc.)
+    // 409 — State-precondition failure. Every IllegalStateException
+    // throw site in the codebase is a "wrong state for this action"
+    // guard (consultant-agreement state machine, payment-plan gates,
+    // etc.). 500 was the original mapping but it's semantically a
+    // 409 Conflict.
     @ExceptionHandler(IllegalStateException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalState(IllegalStateException ex) {
-        log.error("Server configuration error: {}", ex.getMessage(), ex);
-        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.error("Server configuration error: " + ex.getMessage()));
+        log.warn("State precondition failure: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(ex.getMessage()));
     }
 
     // 409 / 400 — Database constraint violation. The mostSpecificCause

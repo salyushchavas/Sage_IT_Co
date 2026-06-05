@@ -56,6 +56,10 @@ public class ConsultantApplicationController {
                 body.consultantEmail,
                 body.consultantName,
                 body.consultantPhone,
+                body.ratePeriod1,
+                body.rateAmount1,
+                body.ratePeriod2,
+                body.rateAmount2,
                 body.payload,
                 request);
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -123,6 +127,63 @@ public class ConsultantApplicationController {
         consultantService.resendInvite(appId, request);
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of("message", "Invite re-sent")));
+    }
+
+    // ── Agreement-ERM side: two-stage workflow (Phase 3) ────────────
+
+    @PostMapping("/api/agreement-erm/applications/{appId}/request-revision")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> ermRequestRevision(
+            @PathVariable String appId,
+            @RequestBody RequestRevisionBody body,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Revision requested",
+                consultantService.ermRequestRevision(appId, body.remarks, request)));
+    }
+
+    @PostMapping("/api/agreement-erm/applications/{appId}/approve-and-sign")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> approveAndSign(
+            @PathVariable String appId,
+            @RequestBody ApproveAndSignBody body,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Approved and signed",
+                consultantService.ermApproveAndSign(
+                        appId, body.ermName, body.ermTitle,
+                        body.ermSignatureBase64, request)));
+    }
+
+    @PostMapping("/api/agreement-erm/applications/{appId}/send-email")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<Void> sendEmail(
+            @PathVariable String appId,
+            @RequestBody SendEmailBody body,
+            HttpServletRequest request) {
+        consultantService.sendPdfToCustomRecipient(
+                appId, body.recipientEmail, body.note, request);
+        return ResponseEntity.noContent().build();
+    }
+
+    /**
+     * 302 redirect to the most relevant PDF URL on the application --
+     * the final countersigned PDF when present, otherwise the
+     * intermediate consultant-signed one. 404 when neither exists.
+     */
+    @GetMapping("/api/agreement-erm/applications/{appId}/download-pdf")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<Void> downloadPdf(@PathVariable String appId) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        String url = app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()
+                ? app.getFinalPdfUrl()
+                : app.getSignedPdfUrl();
+        if (url == null || url.isBlank()) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.status(HttpStatus.FOUND)
+                .header("Location", url)
+                .build();
     }
 
     // ── Consultant-side (public, rate-limited) ──────────────────────
@@ -193,6 +254,50 @@ public class ConsultantApplicationController {
                 Map.of("message", "A copy is on its way to your inbox.")));
     }
 
+    // ── Consultant-side: two-stage workflow (Phase 3) ───────────────
+
+    /**
+     * Partial-save endpoint for the consultant /fill page. Body is any
+     * subset of the 38 fillable fields -- missing keys are left
+     * untouched on the entity. Idempotent: a request with no field
+     * changes returns the unchanged entity and emits no audit event.
+     */
+    @PutMapping("/api/consultant/applications/{appId}/fill")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantFill(
+            @PathVariable String appId,
+            @RequestBody ConsultantApplicationService.ConsultantFillPatch body,
+            HttpServletRequest request) {
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                "Saved",
+                consultantService.consultantFill(appId, body, request)));
+    }
+
+    /**
+     * Consultant signs and submits. Uploads the signature image to
+     * Cloudinary, locks the legal name, and transitions to VERIFIED.
+     * The final PDF is NOT rendered here -- it's produced once when
+     * the ERM countersigns to avoid ~10s of LibreOffice cold start
+     * on the consultant's click.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/submit")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantSubmit(
+            @PathVariable String appId,
+            @RequestBody ConsultantSubmitBody body,
+            HttpServletRequest request) {
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                "Submitted",
+                consultantService.consultantSubmit(
+                        appId, body.signatureBase64, body.signedLegalName, request)));
+    }
+
     private static String clientIp(HttpServletRequest request) {
         if (request == null) return null;
         String xff = request.getHeader("X-Forwarded-For");
@@ -209,7 +314,38 @@ public class ConsultantApplicationController {
         public String consultantEmail;
         public String consultantName;
         public String consultantPhone;
+        // Rate card -- two free-form pairs (e.g. period="hourly",
+        // amount="$60") set by the ERM at create time and rendered
+        // into the Word template's Section 11 + Appendix 1 cells.
+        public String ratePeriod1;
+        public String rateAmount1;
+        public String ratePeriod2;
+        public String rateAmount2;
+        // Legacy free-form payload, preserved for backward compat
+        // with the existing /agreement-erm/new form. New flow ignores it.
         public JsonNode payload;
+    }
+
+    public static class RequestRevisionBody {
+        public String remarks;
+    }
+
+    public static class ApproveAndSignBody {
+        public String ermName;
+        public String ermTitle;
+        /** data:image/png;base64,... */
+        public String ermSignatureBase64;
+    }
+
+    public static class SendEmailBody {
+        public String recipientEmail;
+        public String note;
+    }
+
+    public static class ConsultantSubmitBody {
+        /** data:image/png;base64,... */
+        public String signatureBase64;
+        public String signedLegalName;
     }
 
     public static class UpdateBody {

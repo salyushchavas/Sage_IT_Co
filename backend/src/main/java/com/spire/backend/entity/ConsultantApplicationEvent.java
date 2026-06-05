@@ -70,6 +70,16 @@ public class ConsultantApplicationEvent {
         OTP_FAILED,
         ACCESSED,
         DETAILS_VERIFIED,
+        // Two-stage fill workflow (Phase 3). CONSULTANT_FILLED is
+        // emitted any time the consultant patches non-null values
+        // onto an application; APPROVED_AND_SIGNED is emitted when
+        // the ERM countersigns and the final PDF lands. Other
+        // workflow steps reuse existing values (CREATED for ermCreate,
+        // SIGNED for consultantSubmit, REVISION_REQUESTED with
+        // actorType=ERM for the ERM-side request-revision, EMAIL_SENT
+        // for send-pdf-to-recipient).
+        CONSULTANT_FILLED,
+        APPROVED_AND_SIGNED,
         REVISION_REQUESTED,
         REVISED,
         SIGNED,
