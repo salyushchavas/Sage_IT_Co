@@ -508,6 +508,44 @@ public class ConsultantApplicationService {
                 || ConsultantApplication.Status.EXPIRED.name().equals(status);
     }
 
+    // ── Cron sweep ──────────────────────────────────────────────────
+
+    /**
+     * Flip every in-flight application whose {@code expiresAt} is in
+     * the past to EXPIRED, append an audit event, and return how many
+     * we touched. Called from {@link ConsultantExpiryJob} once daily.
+     *
+     * Idempotent — terminal statuses are filtered out by
+     * {@link ConsultantApplicationRepository#findByStatusInAndExpiresAtBefore}
+     * so re-running the sweep is safe.
+     */
+    @Transactional
+    public int expireStaleApplications() {
+        LocalDateTime now = LocalDateTime.now();
+        List<String> inFlight = List.of(
+                ConsultantApplication.Status.DRAFT.name(),
+                ConsultantApplication.Status.SUBMITTED.name(),
+                ConsultantApplication.Status.REVISION_REQUESTED.name(),
+                ConsultantApplication.Status.UPDATED.name(),
+                ConsultantApplication.Status.VERIFIED.name());
+        List<ConsultantApplication> stale =
+                applicationRepository.findByStatusInAndExpiresAtBefore(inFlight, now);
+        if (stale.isEmpty()) return 0;
+
+        for (ConsultantApplication app : stale) {
+            String previousStatus = app.getStatus();
+            app.setStatus(ConsultantApplication.Status.EXPIRED.name());
+            applicationRepository.save(app);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EXPIRED,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("expiredAt", now.toString(),
+                            "previousStatus", previousStatus),
+                    null);
+        }
+        return stale.size();
+    }
+
     // ── Internal helpers ────────────────────────────────────────────
 
     private ConsultantApplication requireOwned(String applicationId, Long ermUserId) {

@@ -1,12 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import {
   AlertCircle,
   Briefcase,
   CheckCircle2,
   ClipboardList,
+  FileSignature,
   FileText,
   GraduationCap,
   Loader2,
@@ -16,6 +17,8 @@ import {
   Target,
   Users,
 } from "lucide-react";
+
+import ConsultantsListTab from "@/components/dashboard/erm/consultants/ConsultantsListTab";
 
 import {
   RoleDashboardShell,
@@ -61,23 +64,35 @@ type TabId =
   | "employment"
   | "phase1"
   | "coaches"
+  | "consultants"
   | "profile";
 
 const TABS: ReadonlyArray<RoleDashboardTab> = [
-  { id: "home",       label: "My Participants",  Icon: Users },
-  { id: "reports",    label: "Weekly Reports",   Icon: ClipboardList },
-  { id: "comms",      label: "Communications",   Icon: MessageSquare },
-  { id: "interviews", label: "Interviews",       Icon: Target },
-  { id: "employment", label: "Employment",       Icon: Briefcase },
-  { id: "phase1",     label: "Phase 1",          Icon: CheckCircle2 },
-  { id: "coaches",    label: "Coaches",          Icon: GraduationCap },
-  { id: "profile",    label: "Profile",          Icon: Settings },
+  { id: "home",        label: "My Participants",  Icon: Users },
+  { id: "reports",     label: "Weekly Reports",   Icon: ClipboardList },
+  { id: "comms",       label: "Communications",   Icon: MessageSquare },
+  { id: "interviews",  label: "Interviews",       Icon: Target },
+  { id: "employment",  label: "Employment",       Icon: Briefcase },
+  { id: "phase1",      label: "Phase 1",          Icon: CheckCircle2 },
+  { id: "coaches",     label: "Coaches",          Icon: GraduationCap },
+  { id: "consultants", label: "Consultants",      Icon: FileSignature },
+  { id: "profile",     label: "Profile",          Icon: Settings },
+];
+
+const VALID_TABS: ReadonlyArray<TabId> = [
+  "home", "reports", "comms", "interviews",
+  "employment", "phase1", "coaches", "consultants", "profile",
 ];
 
 export default function ErmDashboardPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { user, isLoading } = useAuth();
-  const [active, setActive] = useState<TabId>("home");
+  const initialTab = (() => {
+    const t = searchParams?.get("tab") as TabId | null;
+    return t && VALID_TABS.includes(t) ? t : "home";
+  })();
+  const [active, setActive] = useState<TabId>(initialTab);
   const [roster, setRoster] = useState<ErmRosterRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -136,6 +151,7 @@ export default function ErmDashboardPage() {
       {active === "employment" && <EmploymentTab />}
       {active === "phase1" && <Phase1Tab />}
       {active === "coaches" && <CoachesTab roster={roster} />}
+      {active === "consultants" && <ConsultantsListTab />}
       {active === "profile" && (
         <Placeholder
           title="Profile"
