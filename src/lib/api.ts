@@ -3362,6 +3362,16 @@ export async function createConsultantApplication(data: {
   consultantEmail: string;
   consultantName?: string;
   consultantPhone?: string;
+  // Phase 3: the rate card the ERM seeds at create time. Free-form
+  // strings (e.g. period="Months 1-12", amount="$2,400") rendered
+  // straight into the Word template's Section 11 cells.
+  ratePeriod1?: string;
+  rateAmount1?: string;
+  ratePeriod2?: string;
+  rateAmount2?: string;
+  // Legacy JSON-textarea payload. New /agreement-erm/new form does
+  // not send it; preserved so the detail-view edit panel and any
+  // other in-flight caller keeps compiling.
   payload?: unknown;
 }) {
   return agreementErmFetch<ConsultantApplication>(
