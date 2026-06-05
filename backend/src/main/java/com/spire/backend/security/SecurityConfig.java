@@ -25,6 +25,7 @@ import org.springframework.security.web.authentication.UsernamePasswordAuthentic
 public class SecurityConfig {
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final ConsultantJwtAuthFilter consultantJwtAuthFilter;
     private final AgreementGateFilter agreementGateFilter;
 
     private final CorsConfigurationSource corsConfigurationSource;
@@ -50,18 +51,20 @@ public class SecurityConfig {
                         .requestMatchers("/api/admin/**")
                                 .hasAnyRole("ADMIN", "OPERATIONS_ADMIN", "SYSTEM_ADMIN")
                         // Consultant Agreement (hidden internal feature):
-                        // OTP request + verify are public; the consultant
-                        // never has a User row, so we can't gate them on
-                        // the regular JWT filter. The verify-otp endpoint
-                        // hands back a consultant-scoped JWT that the
-                        // remaining /api/consultant/** routes will check
-                        // once those are added in a follow-up batch.
+                        // OTP request + verify are public so the consultant
+                        // (who has no User row) can authenticate. The
+                        // remaining /api/consultant/** endpoints require
+                        // ROLE_CONSULTANT, set by ConsultantJwtAuthFilter
+                        // when the short-lived purpose=consultant token
+                        // handed out by verify-otp is presented.
                         .requestMatchers(
                                 "/api/consultant/applications/*/request-otp",
                                 "/api/consultant/applications/*/verify-otp"
                         ).permitAll()
+                        .requestMatchers("/api/consultant/**").hasRole("CONSULTANT")
                         .anyRequest().authenticated()
                 )
+                .addFilterBefore(consultantJwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 // Agreement gate runs after JWT auth so it can read the
                 // resolved principal. It exempts /api/auth/* and

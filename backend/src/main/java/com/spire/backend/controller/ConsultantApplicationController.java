@@ -5,6 +5,7 @@ import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
+import com.spire.backend.security.ConsultantOtpRateLimiter;
 import com.spire.backend.service.ConsultantApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -36,6 +37,7 @@ import java.util.Map;
 public class ConsultantApplicationController {
 
     private final ConsultantApplicationService consultantService;
+    private final ConsultantOtpRateLimiter otpRateLimiter;
 
     // ── ERM-side (requires ERM or SYSTEM_ADMIN) ─────────────────────
 
@@ -149,6 +151,10 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody Map<String, String> body,
             HttpServletRequest request) {
+        if (!otpRateLimiter.allowRequestOtp(appId, clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again later."));
+        }
         consultantService.requestOtp(appId, body.get("email"), request);
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of("message", "If that email matches our records, "
@@ -165,9 +171,98 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody Map<String, String> body,
             HttpServletRequest request) {
+        if (!otpRateLimiter.allowVerifyOtp(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many attempts. Try again later."));
+        }
         String token = consultantService.verifyOtp(appId, body.get("otp"), request);
         return ResponseEntity.ok(ApiResponse.success(
                 Map.of("accessToken", token, "applicationId", appId)));
+    }
+
+    // ── Consultant-side (require ROLE_CONSULTANT from the short-lived
+    //    JWT issued by verify-otp). The path appId must match the
+    //    token's subject -- enforced via requireSelf below. ──────────
+
+    @GetMapping("/api/consultant/applications/{appId}")
+    @PreAuthorize("hasRole('CONSULTANT')")
+    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantGet(
+            @PathVariable String appId,
+            Authentication auth) {
+        requireSelf(appId, auth);
+        return ResponseEntity.ok(ApiResponse.success(
+                consultantService.getForConsultant(appId)));
+    }
+
+    @PostMapping("/api/consultant/applications/{appId}/verify-details")
+    @PreAuthorize("hasRole('CONSULTANT')")
+    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantVerifyDetails(
+            @PathVariable String appId,
+            Authentication auth,
+            HttpServletRequest request) {
+        requireSelf(appId, auth);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Details verified",
+                consultantService.verifyDetails(appId, request)));
+    }
+
+    @PostMapping("/api/consultant/applications/{appId}/request-revision")
+    @PreAuthorize("hasRole('CONSULTANT')")
+    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantRequestRevision(
+            @PathVariable String appId,
+            @RequestBody Map<String, String> body,
+            Authentication auth,
+            HttpServletRequest request) {
+        requireSelf(appId, auth);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Revision requested",
+                consultantService.requestRevision(appId, body.get("reason"), request)));
+    }
+
+    @PostMapping("/api/consultant/applications/{appId}/sign")
+    @PreAuthorize("hasRole('CONSULTANT')")
+    public ResponseEntity<ApiResponse<com.spire.backend.entity.ConsultantApplication>> consultantSign(
+            @PathVariable String appId,
+            @RequestBody SignBody body,
+            Authentication auth,
+            HttpServletRequest request) {
+        requireSelf(appId, auth);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Signed",
+                consultantService.sign(appId, body.legalName, body.signatureImage, request)));
+    }
+
+    @PostMapping("/api/consultant/applications/{appId}/request-copy")
+    @PreAuthorize("hasRole('CONSULTANT')")
+    public ResponseEntity<ApiResponse<Map<String, String>>> consultantRequestCopy(
+            @PathVariable String appId,
+            Authentication auth,
+            HttpServletRequest request) {
+        requireSelf(appId, auth);
+        consultantService.requestCopy(appId, request);
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "A copy is on its way to your inbox.")));
+    }
+
+    private static void requireSelf(String pathAppId, Authentication auth) {
+        // ConsultantJwtAuthFilter set the principal to the application
+        // UUID from the token's subject. Reject any cross-application
+        // access attempt.
+        if (auth == null || auth.getName() == null
+                || !auth.getName().equals(pathAppId)) {
+            throw new com.spire.backend.exception.UnauthorizedException(
+                    "Token does not match this application.");
+        }
+    }
+
+    private static String clientIp(HttpServletRequest request) {
+        if (request == null) return null;
+        String xff = request.getHeader("X-Forwarded-For");
+        if (xff != null && !xff.isBlank()) {
+            int comma = xff.indexOf(',');
+            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
+        }
+        return request.getRemoteAddr();
     }
 
     // ── DTOs ────────────────────────────────────────────────────────
@@ -184,6 +279,11 @@ public class ConsultantApplicationController {
         public String consultantName;
         public String consultantPhone;
         public JsonNode payload;
+    }
+
+    public static class SignBody {
+        public String legalName;
+        public String signatureImage;
     }
 
     public static class PageResponse<T> {

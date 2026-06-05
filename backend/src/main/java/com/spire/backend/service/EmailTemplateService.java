@@ -46,6 +46,7 @@ public class EmailTemplateService {
 
     private final EmailService emailService;
     private final BrandConfig brandConfig;
+    private final com.spire.backend.repository.UserRepository userRepository;
 
     /** Short helper — the brand name shows up in dozens of subject /
      *  body strings, so this keeps each call site terse and the
@@ -720,6 +721,133 @@ public class EmailTemplateService {
                 application.getConsultantEmail(),
                 "Verification code: " + otp,
                 wrap("Verify your identity", body));
+    }
+
+    /**
+     * Sent to the owning ERM when the consultant clicks "request
+     * changes" on the review page. The ERM is the actor who edits
+     * the application, so this email points them at the detail page
+     * with the consultant's reason highlighted.
+     */
+    public void sendConsultantRevisionRequested(ConsultantApplication application) {
+        if (!ermEmail(application).isPresent()) return;
+        String url = appUrl + "/erm-dashboard/consultants/" + application.getApplicationId();
+        String reason = application.getRevisionNotes() == null
+                || application.getRevisionNotes().isBlank()
+                ? "(no reason provided)"
+                : application.getRevisionNotes();
+        String body = p("Hi,")
+                + p(escape(safeName(application)) + " has requested changes to the "
+                        + "engagement details before signing.")
+                + quote(escape(reason))
+                + button("Open application", url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Consultant: " + safeName(application),
+                        "Email: " + application.getConsultantEmail())
+                + muted("Edit the details from the link above and the consultant "
+                        + "will be re-notified automatically.");
+        emailService.sendEmail(
+                ermEmail(application).get(),
+                "Consultant requested revisions — Application " + application.getApplicationId(),
+                wrap("Revision requested", body));
+    }
+
+    /**
+     * Sent to the consultant after the ERM revises an application
+     * following a {@code REVISION_REQUESTED} off-ramp. Tells them to
+     * re-review and decide whether to verify or push back again.
+     */
+    public void sendConsultantApplicationUpdated(ConsultantApplication application) {
+        String url = appUrl + "/consultant?app=" + application.getApplicationId();
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p(brandName() + " has updated your engagement details based on "
+                        + "the changes you requested.")
+                + button("Review and continue", url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Link expires: 7 days from issue")
+                + muted("If you didn't expect this, please ignore.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Updated for your review — " + brandName() + " engagement",
+                wrap("Details updated", body));
+    }
+
+    /**
+     * Sent to the ERM once the consultant signs. Embeds the
+     * Cloudinary-hosted signed PDF link. No attachment -- the URL
+     * already gates by Cloudinary's authenticated delivery.
+     */
+    public void sendConsultantApplicationSigned(ConsultantApplication application) {
+        if (!ermEmail(application).isPresent()) return;
+        String pdf = application.getSignedPdfUrl();
+        String dashboard = appUrl + "/erm-dashboard/consultants/"
+                + application.getApplicationId();
+        String body = p("Hi,")
+                + p("Good news: " + escape(safeName(application))
+                        + " just signed the consultant agreement.")
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Consultant: " + safeName(application),
+                        "Signed legal name: "
+                                + (application.getSignedLegalName() == null
+                                        ? "--"
+                                        : application.getSignedLegalName()))
+                + (pdf == null || pdf.isBlank()
+                        ? muted("PDF generation is still in progress -- "
+                                + "the file will appear on the dashboard shortly.")
+                        : button("Download signed PDF", pdf))
+                + secondaryButton("Open application", dashboard);
+        emailService.sendEmail(
+                ermEmail(application).get(),
+                "Signed agreement received from "
+                        + safeName(application),
+                wrap("Signed agreement received", body));
+    }
+
+    /**
+     * Sent to the consultant. Triggered automatically right after
+     * signing and again on request (the /done page exposes a button).
+     */
+    public void sendConsultantApplicationCopy(ConsultantApplication application) {
+        String pdf = application.getSignedPdfUrl();
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p("Thanks for signing your engagement agreement with " + brandName() + ".")
+                + (pdf == null || pdf.isBlank()
+                        ? p("Your copy will be available shortly.")
+                        : button("Download your copy", pdf))
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Signed: " + (application.getSignedAt() == null
+                                ? "--"
+                                : application.getSignedAt().toString()))
+                + muted("Keep this email for your records.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Your signed " + brandName() + " engagement agreement",
+                wrap("Your signed agreement", body));
+    }
+
+    private static String safeName(ConsultantApplication application) {
+        String name = application.getConsultantName();
+        if (name == null || name.isBlank()) {
+            String email = application.getConsultantEmail();
+            return email == null ? "the consultant" : email;
+        }
+        return name;
+    }
+
+    private static String firstName(ConsultantApplication application) {
+        String name = application.getConsultantName();
+        if (name == null || name.isBlank()) return "there";
+        String[] parts = name.trim().split("\\s+");
+        return parts.length == 0 ? "there" : parts[0];
+    }
+
+    private java.util.Optional<String> ermEmail(ConsultantApplication application) {
+        return userRepository.findById(application.getErmUserId())
+                .map(User::getEmail);
     }
 
     // ── 4. Payment receipt ──────────────────────────────────────────

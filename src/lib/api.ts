@@ -3207,3 +3207,252 @@ export async function downloadUserRecordsCsv(userId: number | string, fileBaseNa
   a.remove();
   URL.revokeObjectURL(url);
 }
+
+// ─── Consultant Agreement (hidden internal feature) ──────────────────
+
+export type ConsultantApplicationStatus =
+  | "DRAFT"
+  | "SUBMITTED"
+  | "REVISION_REQUESTED"
+  | "UPDATED"
+  | "VERIFIED"
+  | "SIGNED"
+  | "COMPLETED"
+  | "CANCELLED"
+  | "EXPIRED";
+
+export interface ConsultantApplication {
+  id: number;
+  applicationId: string;
+  ermUserId: number;
+  consultantEmail: string;
+  consultantName: string | null;
+  consultantPhone: string | null;
+  payload: string | null;
+  status: ConsultantApplicationStatus;
+  revisionNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+  expiresAt: string;
+  signedAt: string | null;
+  signatureImage: string | null;
+  signedLegalName: string | null;
+  signedIp: string | null;
+  signedUserAgent: string | null;
+  signedPdfUrl: string | null;
+}
+
+export interface ConsultantApplicationEvent {
+  id: number;
+  applicationId: number;
+  eventType: string;
+  actorType: "ERM" | "CONSULTANT" | "SYSTEM";
+  actorUserId: number | null;
+  metadata: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface ConsultantApplicationRevision {
+  id: number;
+  applicationId: number;
+  versionNumber: number;
+  payloadSnapshot: string | null;
+  createdByRole: "ERM" | "CONSULTANT";
+  createdByUserId: number | null;
+  createdAt: string;
+}
+
+export interface ConsultantApplicationDetailEnvelope {
+  application: ConsultantApplication;
+  events: ConsultantApplicationEvent[];
+  revisions: ConsultantApplicationRevision[];
+}
+
+export interface ConsultantApplicationsPage {
+  content: ConsultantApplication[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+}
+
+// ── ERM-side ─────────────────────────────────────────────────────
+
+export async function createConsultantApplication(data: {
+  consultantEmail: string;
+  consultantName?: string;
+  consultantPhone?: string;
+  payload?: unknown;
+}) {
+  const wrapper = await apiFetch<ApiResponse<ConsultantApplication>>(
+    "/api/internal/consultant-applications",
+    { method: "POST", body: JSON.stringify(data) },
+  );
+  return wrapper.data;
+}
+
+export async function listConsultantApplications(
+  params: { status?: string; page?: number; size?: number } = {},
+) {
+  const qs = "?" + new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => [k, String(v)]),
+  ).toString();
+  const wrapper = await apiFetch<ApiResponse<ConsultantApplicationsPage>>(
+    `/api/internal/consultant-applications${qs}`,
+  );
+  return wrapper.data;
+}
+
+export async function getConsultantApplication(applicationId: string) {
+  const wrapper = await apiFetch<ApiResponse<ConsultantApplicationDetailEnvelope>>(
+    `/api/internal/consultant-applications/${applicationId}`,
+  );
+  return wrapper.data;
+}
+
+export async function updateConsultantApplication(
+  applicationId: string,
+  data: {
+    consultantEmail?: string;
+    consultantName?: string;
+    consultantPhone?: string;
+    payload?: unknown;
+  },
+) {
+  const wrapper = await apiFetch<ApiResponse<ConsultantApplication>>(
+    `/api/internal/consultant-applications/${applicationId}`,
+    { method: "PUT", body: JSON.stringify(data) },
+  );
+  return wrapper.data;
+}
+
+export async function cancelConsultantApplication(applicationId: string) {
+  const wrapper = await apiFetch<ApiResponse<ConsultantApplication>>(
+    `/api/internal/consultant-applications/${applicationId}/cancel`,
+    { method: "POST" },
+  );
+  return wrapper.data;
+}
+
+export async function resendConsultantInvite(applicationId: string) {
+  const wrapper = await apiFetch<ApiResponse<{ message: string }>>(
+    `/api/internal/consultant-applications/${applicationId}/resend-invite`,
+    { method: "POST" },
+  );
+  return wrapper.data;
+}
+
+// ── Consultant-side ──────────────────────────────────────────────
+//
+// The consultant token returned by verifyConsultantOtp is *separate*
+// from the user-auth token stored in localStorage. It MUST be passed
+// explicitly on every consultant call -- we don't write it into the
+// shared apiFetch Authorization header so it can't leak across tabs.
+
+export async function requestConsultantOtp(applicationId: string, email: string) {
+  // 200 always (server returns a generic message); we surface it
+  // so the UI can paint a "check your email" panel even for invalid
+  // requests, to avoid leaking which app IDs exist.
+  const res = await fetch(`${BASE_URL}/api/consultant/applications/${applicationId}/request-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  if (res.status === 429) {
+    throw new Error("Too many requests. Try again later.");
+  }
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `Request failed (${res.status})`);
+  }
+  return (await res.json()) as ApiResponse<{ message: string }>;
+}
+
+export async function verifyConsultantOtp(applicationId: string, otp: string) {
+  const res = await fetch(`${BASE_URL}/api/consultant/applications/${applicationId}/verify-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ otp }),
+  });
+  if (res.status === 429) {
+    throw new Error("Too many attempts. Try again later.");
+  }
+  const body = (await res.json()) as ApiResponse<{ accessToken: string; applicationId: string }>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Verification failed (${res.status})`);
+  }
+  return body.data;
+}
+
+async function consultantFetch<T>(
+  applicationId: string,
+  token: string,
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}${path}`,
+    {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+        ...(init.headers ?? {}),
+      },
+    },
+  );
+  const body = (await res.json()) as ApiResponse<T>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Request failed (${res.status})`);
+  }
+  return body.data;
+}
+
+export async function getConsultantApplicationView(
+  applicationId: string,
+  token: string,
+) {
+  return consultantFetch<ConsultantApplication>(applicationId, token, "");
+}
+
+export async function verifyConsultantDetails(applicationId: string, token: string) {
+  return consultantFetch<ConsultantApplication>(
+    applicationId, token, "/verify-details",
+    { method: "POST" },
+  );
+}
+
+export async function requestConsultantRevision(
+  applicationId: string,
+  token: string,
+  reason: string,
+) {
+  return consultantFetch<ConsultantApplication>(
+    applicationId, token, "/request-revision",
+    { method: "POST", body: JSON.stringify({ reason }) },
+  );
+}
+
+export async function signConsultantApplication(
+  applicationId: string,
+  token: string,
+  legalName: string,
+  signatureImage: string,
+) {
+  return consultantFetch<ConsultantApplication>(
+    applicationId, token, "/sign",
+    { method: "POST", body: JSON.stringify({ legalName, signatureImage }) },
+  );
+}
+
+export async function requestConsultantCopy(applicationId: string, token: string) {
+  return consultantFetch<{ message: string }>(
+    applicationId, token, "/request-copy",
+    { method: "POST" },
+  );
+}

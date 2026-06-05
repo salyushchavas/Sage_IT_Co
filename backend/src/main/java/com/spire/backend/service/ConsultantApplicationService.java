@@ -60,6 +60,7 @@ public class ConsultantApplicationService {
     private final ConsultantApplicationRevisionRepository revisionRepository;
     private final JwtService jwtService;
     private final EmailTemplateService emailTemplateService;
+    private final ConsultantPdfService consultantPdfService;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
@@ -329,6 +330,182 @@ public class ConsultantApplicationService {
                 Map.of(), request);
 
         return jwtService.generateConsultantToken(applicationId);
+    }
+
+    // ── Consultant-side authenticated actions ───────────────────────
+    //
+    // All of these require the consultant JWT issued by verifyOtp and
+    // enforce the per-application scope at the controller layer
+    // (auth.getName() == applicationId from the URL path).
+
+    @Transactional(readOnly = true)
+    public ConsultantApplication getForConsultant(String applicationId) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (isTerminalCancellation(app.getStatus())) {
+            throw new IllegalStateException(
+                    "This application is no longer accepting consultant actions.");
+        }
+        return app;
+    }
+
+    @Transactional
+    public ConsultantApplication verifyDetails(String applicationId,
+                                               HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        String status = app.getStatus();
+        if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
+                && !ConsultantApplication.Status.UPDATED.name().equals(status)
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Application is in status " + status + " and cannot be verified.");
+        }
+        app.setStatus(ConsultantApplication.Status.VERIFIED.name());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.DETAILS_VERIFIED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("from", status, "to", app.getStatus()),
+                request);
+        return app;
+    }
+
+    @Transactional
+    public ConsultantApplication requestRevision(String applicationId, String reason,
+                                                 HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        String status = app.getStatus();
+        if (ConsultantApplication.Status.SIGNED.name().equals(status)
+                || ConsultantApplication.Status.COMPLETED.name().equals(status)
+                || ConsultantApplication.Status.CANCELLED.name().equals(status)
+                || ConsultantApplication.Status.EXPIRED.name().equals(status)) {
+            throw new IllegalStateException(
+                    "Application is in status " + status
+                            + " and cannot be sent back for revision.");
+        }
+        app.setStatus(ConsultantApplication.Status.REVISION_REQUESTED.name());
+        app.setRevisionNotes(reason);
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.REVISION_REQUESTED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("reason", reason == null ? "" : reason,
+                        "from", status),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantRevisionRequested(app);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("template", "revision_requested"),
+                    null);
+        } catch (Exception e) {
+            log.warn("Failed to email ERM about revision request for {}: {}",
+                    applicationId, e.getMessage());
+        }
+        return app;
+    }
+
+    @Transactional
+    public ConsultantApplication sign(String applicationId,
+                                      String legalName,
+                                      String signatureImage,
+                                      HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
+            throw new IllegalStateException(
+                    "Application must be VERIFIED before signing (status="
+                            + app.getStatus() + ").");
+        }
+        if (legalName == null || legalName.trim().split("\\s+").length < 2) {
+            throw new IllegalArgumentException(
+                    "Please enter your full legal name (first and last).");
+        }
+        if (signatureImage == null || signatureImage.isBlank()) {
+            throw new IllegalArgumentException(
+                    "A signature is required to sign the agreement.");
+        }
+        if (!signatureImage.startsWith("data:image/")) {
+            throw new IllegalArgumentException(
+                    "Signature must be an image (PNG / JPG).");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        app.setSignedLegalName(legalName.trim());
+        app.setSignatureImage(signatureImage);
+        app.setSignedAt(now);
+        app.setSignedIp(clientIp(request));
+        app.setSignedUserAgent(request == null ? null : request.getHeader("User-Agent"));
+        app.setStatus(ConsultantApplication.Status.SIGNED.name());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.SIGNED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("legalName", legalName.trim()),
+                request);
+
+        // PDF + completion side-effects. If PDF generation fails we
+        // leave the application in SIGNED so an ERM can retry; the
+        // signature row is already persisted and replayable.
+        try {
+            String pdfUrl = consultantPdfService.generateAndUpload(app);
+            app.setSignedPdfUrl(pdfUrl);
+            app.setStatus(ConsultantApplication.Status.COMPLETED.name());
+            applicationRepository.save(app);
+
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.PDF_GENERATED,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("url", pdfUrl),
+                    null);
+
+            try {
+                emailTemplateService.sendConsultantApplicationSigned(app);
+                emailTemplateService.sendConsultantApplicationCopy(app);
+                appendEvent(app.getId(),
+                        ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                        ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                        Map.of("templates", "signed,copy"),
+                        null);
+            } catch (Exception emailErr) {
+                log.warn("Post-sign emails failed for {}: {}",
+                        applicationId, emailErr.getMessage());
+            }
+        } catch (Exception pdfErr) {
+            log.error("PDF generation failed for {}: {}",
+                    applicationId, pdfErr.getMessage());
+        }
+
+        return app;
+    }
+
+    @Transactional
+    public void requestCopy(String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())
+                || app.getSignedPdfUrl() == null) {
+            throw new IllegalStateException(
+                    "The agreement has not been signed yet.");
+        }
+        try {
+            emailTemplateService.sendConsultantApplicationCopy(app);
+        } catch (Exception e) {
+            throw new IllegalStateException(
+                    "Couldn't email a copy: " + e.getMessage());
+        }
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("template", "copy", "to", app.getConsultantEmail()),
+                request);
+    }
+
+    private boolean isTerminalCancellation(String status) {
+        return ConsultantApplication.Status.CANCELLED.name().equals(status)
+                || ConsultantApplication.Status.EXPIRED.name().equals(status);
     }
 
     // ── Internal helpers ────────────────────────────────────────────
