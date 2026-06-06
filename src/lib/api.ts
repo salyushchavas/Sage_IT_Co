@@ -3599,19 +3599,36 @@ export async function ermSendPdfToEmail(
 }
 
 /**
- * Returns the agreement-erm download endpoint as a string so the
- * caller can attach it to a window.open() (View Inline) or an
- * <a href download> (Download PDF). Browsers won't follow a 302
- * unless the request includes the Bearer token, so we instead
- * embed the token as a query param when present -- the backend
- * accepts either header or query auth on this endpoint.
+ * Streams the final PDF through the backend so the Cloudinary URL
+ * never reaches the client. Returns the raw {@link Response} so the
+ * caller can decide between {@code .blob()} (view inline / download
+ * via blob URL) and any other binary handling.
  *
- * Note: this is a best-effort affordance; the safest path is for
- * the caller to use the finalPdfUrl on the application object
- * directly (Cloudinary secure_url), which doesn't require auth.
+ * {@code disposition="inline"} (default) lets the browser render the
+ * PDF in-tab; {@code "attachment"} forces a save dialog at the
+ * backend layer (the frontend can also do this client-side by
+ * triggering an anchor download against the blob URL).
+ *
+ * Throws when the session is dead; the caller surfaces other 4xx /
+ * 5xx via {@link Response#ok}.
  */
-export function agreementErmDownloadPdfUrl(applicationId: string): string {
-  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/download-pdf`;
+export async function fetchAgreementPdfBlob(
+  applicationId: string,
+  disposition: "inline" | "attachment" = "inline",
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-erm/applications/${applicationId}/download-pdf?disposition=${disposition}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
 }
 
 // ── Consultant-side (public, applicationId is the credential) ───

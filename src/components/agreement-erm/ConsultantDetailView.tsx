@@ -24,6 +24,7 @@ import {
   ermApproveAndSign,
   ermRequestRevision,
   ermSendPdfToEmail,
+  fetchAgreementPdfBlob,
   resendConsultantInvite,
   type ConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
@@ -384,45 +385,7 @@ function StateActionBar({
   }
 
   if (status === "COMPLETED") {
-    const pdf = app.finalPdfUrl || app.signedPdfUrl;
-    return (
-      <BarShell badge="Completed" tone="emerald">
-        <p className="text-xs text-gray-600 max-w-md">
-          Final PDF generated and emailed to both parties.
-        </p>
-        <div className="flex items-center gap-2 flex-wrap">
-          {pdf ? (
-            <>
-              <a
-                href={pdf}
-                download
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer shadow-sm"
-              >
-                <Download size={12} /> Download PDF
-              </a>
-              <a
-                href={pdf}
-                target="_blank"
-                rel="noreferrer"
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
-              >
-                <ExternalLink size={12} /> View inline
-              </a>
-            </>
-          ) : (
-            <span className="text-[11px] text-gray-400 italic">PDF pending…</span>
-          )}
-          <button
-            type="button"
-            onClick={onSendEmail}
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-navy/40 text-sage-navy hover:bg-sage-navy/5 cursor-pointer"
-          >
-            <Mail size={12} /> Send to email…
-          </button>
-        </div>
-      </BarShell>
-    );
+    return <CompletedActions app={app} onSendEmail={onSendEmail} />;
   }
 
   if (status === "CANCELLED" || status === "EXPIRED") {
@@ -515,6 +478,138 @@ function DangerButton({
       {children}
     </button>
   );
+}
+
+// ── COMPLETED action set (View Inline / Download / Send to email) ──
+//
+// Cloudinary URLs never reach the DOM. Both buttons stream the PDF
+// through the backend via fetchAgreementPdfBlob, then mint a
+// session-local blob: URL via URL.createObjectURL. Blob URLs aren't
+// network resources -- copying one into a different tab / browser /
+// account produces a "can't open file" error, which is exactly the
+// previously-leaky vector the redesign closed.
+
+function CompletedActions({
+  app,
+  onSendEmail,
+}: {
+  app: ConsultantApplication;
+  onSendEmail: () => void;
+}) {
+  const [busy, setBusy] = useState<"view" | "download" | null>(null);
+  const [error, setError] = useState("");
+
+  const handleAction = async (mode: "view" | "download") => {
+    setBusy(mode);
+    setError("");
+    try {
+      const res = await fetchAgreementPdfBlob(
+        app.applicationId,
+        mode === "download" ? "attachment" : "inline",
+      );
+      if (!res.ok) {
+        throw new Error(`Couldn't fetch the PDF (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (mode === "view") {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = buildClientPdfFilename(app);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      // Revoke after a minute -- long enough for the opened tab to
+      // load the bytes, then the blob URL stops working entirely so
+      // someone shoulder-surfing the address bar after the fact gets
+      // nothing reusable.
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't fetch the PDF.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <BarShell badge="Completed" tone="emerald">
+      <p className="text-xs text-gray-600 max-w-md">
+        Final PDF generated and emailed to both parties.
+      </p>
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => handleAction("download")}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+        >
+          {busy === "download" ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            <Download size={12} />
+          )}
+          Download PDF
+        </button>
+        <button
+          type="button"
+          onClick={() => handleAction("view")}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          {busy === "view" ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            <ExternalLink size={12} />
+          )}
+          View inline
+        </button>
+        <button
+          type="button"
+          onClick={onSendEmail}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-navy/40 text-sage-navy hover:bg-sage-navy/5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <Mail size={12} /> Send to email…
+        </button>
+      </div>
+      {error && (
+        <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
+          <AlertCircle size={11} /> {error}
+        </p>
+      )}
+    </BarShell>
+  );
+}
+
+/**
+ * Mirrors AgreementDocumentService.buildPdfFilename so the
+ * download anchor's `download` attribute saves the same name the
+ * backend's Content-Disposition would have set. Slug rule matches:
+ * whitespace -> "-", strip [^A-Za-z0-9_-], collapse repeats, trim.
+ */
+function buildClientPdfFilename(app: ConsultantApplication): string {
+  const rawName =
+    app.signedLegalName?.trim() ||
+    app.consultantName?.trim() ||
+    app.applicationId;
+  const nameSlug = slugify(rawName) || slugify(app.applicationId);
+  const trackSlug = slugify(app.technologyTrack ?? "");
+  const base =
+    "SageITCO-Agreement_" + nameSlug + (trackSlug ? "_" + trackSlug : "");
+  return base + ".pdf";
+}
+
+function slugify(input: string): string {
+  if (!input) return "";
+  return input
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .replace(/[-_]+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
 }
 
 // ── ERM-filled summary card ────────────────────────────────────

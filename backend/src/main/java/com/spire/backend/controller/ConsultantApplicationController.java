@@ -14,7 +14,9 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -169,48 +171,70 @@ public class ConsultantApplicationController {
     }
 
     /**
-     * 302 redirect to the most relevant PDF URL on the application.
+     * Streams the PDF bytes through the backend. The Cloudinary URL
+     * never leaves the server, so View Inline / Download buttons can't
+     * leak a token-in-URL to anyone watching the operator's browser
+     * (right-click "Copy link", history scrape, address-bar copy,
+     * shoulder-surf).
      *
-     * For the final countersigned PDF we re-sign on demand against
-     * {@code finalPdfPublicId} -- the stored {@code finalPdfUrl}
-     * carries a signature minted at upload time, but routing through
-     * the signer here lets us tighten the TTL later (Auth Token
-     * upgrade) without changing the endpoint contract.
+     * Disposition default is {@code inline} -- browsers render the PDF
+     * in-tab. Pass {@code ?disposition=attachment} to force a save
+     * dialog. Either way the filename is the human-readable
+     * {@code SageITCO-Agreement_Name_Track.pdf} pattern.
      *
-     * Falls back to the legacy {@code signedPdfUrl} (consultant-only
-     * intermediate from the old single-stage flow, uploaded as
-     * {@code type=upload}, still publicly fetchable) when no final PDF
-     * exists. 404 when neither is set.
+     * Falls back to the pre-Phase-7 {@code finalPdfUrl} when no
+     * {@code finalPdfPublicId} is on the row, and to the legacy
+     * single-stage {@code signedPdfUrl} when neither final field is
+     * set. 404 when nothing's available.
      */
     @GetMapping("/api/agreement-erm/applications/{appId}/download-pdf")
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
-    public ResponseEntity<Void> downloadPdf(@PathVariable String appId) {
+    public ResponseEntity<byte[]> downloadPdf(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition) {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
-        String url;
+
+        String sourceUrl;
         String publicId = app.getFinalPdfPublicId();
         if (publicId != null && !publicId.isBlank()) {
-            // Bake the human-readable filename into the URL via
-            // fl_attachment so the browser save dialog suggests
-            // "SageITCO-Agreement_Name_Track.pdf" instead of the
-            // public_id's UUID tail.
-            url = agreementDocumentService.signedPdfUrl(
-                    publicId, java.time.Duration.ofMinutes(5),
-                    AgreementDocumentService.buildPdfFilename(app));
+            // Server-side fetch URL -- still signed via the API
+            // secret, but it's used only inside this JVM and never
+            // returned to the client.
+            sourceUrl = agreementDocumentService.signedPdfUrl(
+                    publicId, java.time.Duration.ofMinutes(5));
         } else if (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()) {
-            // Pre-Phase-7 row -- public_id wasn't persisted, fall back
-            // to the URL Cloudinary returned at upload time. Will still
-            // serve as long as the upload row predates the
-            // type=authenticated switch.
-            url = app.getFinalPdfUrl();
+            sourceUrl = app.getFinalPdfUrl();
+        } else if (app.getSignedPdfUrl() != null && !app.getSignedPdfUrl().isBlank()) {
+            sourceUrl = app.getSignedPdfUrl();
         } else {
-            url = app.getSignedPdfUrl();
-        }
-        if (url == null || url.isBlank()) {
             return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.status(HttpStatus.FOUND)
-                .header("Location", url)
-                .build();
+
+        byte[] bytes;
+        try {
+            java.net.URLConnection conn = new java.net.URL(sourceUrl).openConnection();
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(30_000);
+            try (java.io.InputStream in = conn.getInputStream()) {
+                bytes = in.readAllBytes();
+            }
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+
+        String filename = AgreementDocumentService.buildPdfFilename(app);
+        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
+                ? "attachment"
+                : "inline";
+        // Cache-Control: private,no-store -- corporate proxies and
+        // shared-browser histories don't retain the bytes.
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        dispositionMode + "; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(bytes);
     }
 
     // ── Consultant-side (public, rate-limited) ──────────────────────
