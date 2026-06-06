@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
+import org.springframework.context.expression.MapAccessor;
 import pro.verron.officestamper.api.OfficeStamperConfiguration;
 import pro.verron.officestamper.api.StreamStamper;
 import pro.verron.officestamper.preset.Image;
@@ -204,10 +205,26 @@ public class AgreementDocumentService {
         // standard() -- includes the default preprocessors + comment
         // processors so the template's table-repeat / display-if
         // comments behave as expected.
+        // setEvaluationContextConfigurer + MapAccessor -- docx-stamper
+        //                       2.x ships a StandardEvaluationContext
+        //                       without MapAccessor registered, so
+        //                       SpEL can't read ${key} expressions
+        //                       against the Map<String,Object> we
+        //                       pass to stamp(). Without this every
+        //                       placeholder gets EL1008E and the
+        //                       unresolved-default replacement quietly
+        //                       blanks the field -- structurally
+        //                       correct PDF with no data. Registering
+        //                       MapAccessor flips the full set of
+        //                       placeholder substitutions back on
+        //                       without touching the template or the
+        //                       context-building code.
         // nullToEmpty()      -- any null context value renders as "".
         // image()            -- map preset.Image values into the doc
         //                       at the placeholder position.
         OfficeStamperConfiguration cfg = OfficeStamperConfigurations.standard()
+                .setEvaluationContextConfigurer(
+                        spelCtx -> spelCtx.addPropertyAccessor(new MapAccessor()))
                 .addResolver(Resolvers.image())
                 .addResolver(Resolvers.nullToEmpty())
                 .replaceUnresolvedExpressions(true)
