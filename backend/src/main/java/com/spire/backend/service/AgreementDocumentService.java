@@ -17,12 +17,20 @@ import pro.verron.officestamper.preset.OfficeStamperConfigurations;
 import pro.verron.officestamper.preset.OfficeStampers;
 import pro.verron.officestamper.preset.Resolvers;
 
+import javax.imageio.ImageIO;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URL;
+import java.net.URLConnection;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
@@ -74,7 +82,15 @@ public class AgreementDocumentService {
     @Value("${agreement-erm.email}")
     private String agreementErmEmail;
 
-    public String generateAgreementPdf(ConsultantApplication app) throws Exception {
+    /**
+     * Carries both the Cloudinary {@code secure_url} (for display /
+     * email attachment fetch) and the {@code public_id} (for re-signing
+     * short-lived download URLs later). Two pieces of state pulled out
+     * of the upload response so callers can persist both atomically.
+     */
+    public record PdfUploadResult(String secureUrl, String publicId) {}
+
+    public PdfUploadResult generateAgreementPdf(ConsultantApplication app) throws Exception {
         Map<String, Object> ctx = buildContext(app);
         Path filledDocx = null;
         Path pdf = null;
@@ -86,6 +102,36 @@ public class AgreementDocumentService {
             safeDelete(filledDocx);
             safeDelete(pdf);
         }
+    }
+
+    /**
+     * Builds a Cloudinary signed URL for the given final-PDF public_id.
+     *
+     * The {@code Url.signed(true) + type("authenticated")} chain blocks
+     * bare URL guessing -- requests without a valid {@code ?s=...}
+     * signature get 401 from Cloudinary's edge.
+     *
+     * Note on the {@code ttl} parameter: the cloudinary-http44 v1.38.0
+     * {@code Url} class does not expose an {@code expiresAt} method;
+     * true time-limited URLs need an account-side Auth Token key
+     * (enterprise Cloudinary feature). Until that's configured, the
+     * signature is valid as long as the API secret is. The TTL is
+     * accepted here so call sites can express intent ("5-minute
+     * download link") and a future Auth Token upgrade is a single-
+     * method-body change with no signature churn.
+     */
+    public String signedPdfUrl(String publicId, Duration ttl) {
+        if (publicId == null || publicId.isBlank()) return null;
+        // ttl is intentionally not wired into the URL yet -- see note
+        // above. Logged at debug so future debug sessions can see the
+        // intended expiry the caller passed in.
+        log.debug("Signing final PDF URL for {} with intended ttl {}", publicId, ttl);
+        return cloudinary.url()
+                .resourceType("raw")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
     }
 
     // ── Context build ───────────────────────────────────────────────
@@ -178,24 +224,90 @@ public class AgreementDocumentService {
         return c;
     }
 
+    /** Target signature width in pixels (~1.4" at 144 DPI in Word).
+     *  The canvas pads on the consultant + ERM sign screens emit
+     *  ~300-500px PNGs at native pen scale, which docx-stamper then
+     *  embeds at full pixel size -- the signature dwarfs the rest of
+     *  the signature block. Down-scaling here keeps the rendered
+     *  signature proportional to a real hand-written contract sig. */
+    private static final int SIGNATURE_TARGET_WIDTH_PX = 200;
+
     /**
      * Returns an {@link Image} object for docx-stamper to embed, or an
      * empty string when the URL is missing / unreachable so the
      * placeholder renders blank instead of crashing the run.
+     *
+     * Downloads with explicit timeouts (Cloudinary egress can hang on
+     * a default URLConnection), then re-scales to a sensible signature
+     * footprint before handing off to docx-stamper. Pre-resizing the
+     * byte[] in Java is more reliable than relying on the
+     * {@code Image(bytes, maxWidth)} overload because the unit
+     * interpretation (EMU vs pixel vs DXA) varies between stamper
+     * versions.
      */
     private Object buildImage(String url) {
         if (url == null || url.isBlank()) return "";
         try {
             byte[] bytes;
-            try (InputStream in = new URL(url).openStream()) {
+            URLConnection conn = new URL(url).openConnection();
+            conn.setConnectTimeout(15_000);
+            conn.setReadTimeout(15_000);
+            try (InputStream in = conn.getInputStream()) {
                 bytes = in.readAllBytes();
             }
-            return new Image(bytes);
+            byte[] resized = resizeSignaturePng(bytes);
+            return new Image(resized);
         } catch (Exception e) {
             log.warn("Failed loading signature image from {}: {}",
                     url, e.getMessage());
             return "";
         }
+    }
+
+    /**
+     * Re-encodes {@code source} as a PNG no wider than
+     * {@link #SIGNATURE_TARGET_WIDTH_PX}, preserving aspect ratio and
+     * alpha. If the source is narrower than the target, returns the
+     * original bytes unchanged -- no upscaling.
+     *
+     * Bilinear interpolation + ARGB target buffer keeps signature
+     * strokes smooth on the shrink path. {@link ImageIO} silently
+     * normalises the input format; we always write PNG out so the
+     * embedded image carries transparency.
+     */
+    private static byte[] resizeSignaturePng(byte[] source) throws IOException {
+        BufferedImage original = ImageIO.read(new ByteArrayInputStream(source));
+        if (original == null) {
+            // Not a decodable image. Pass the original bytes through;
+            // docx-stamper will either render or skip.
+            return source;
+        }
+        int srcWidth = original.getWidth();
+        int srcHeight = original.getHeight();
+        if (srcWidth <= SIGNATURE_TARGET_WIDTH_PX) {
+            return source;
+        }
+        double scale = (double) SIGNATURE_TARGET_WIDTH_PX / srcWidth;
+        int targetWidth = SIGNATURE_TARGET_WIDTH_PX;
+        int targetHeight = Math.max(1, (int) Math.round(srcHeight * scale));
+
+        BufferedImage resized = new BufferedImage(
+                targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = resized.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
+        } finally {
+            g.dispose();
+        }
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        ImageIO.write(resized, "png", out);
+        return out.toByteArray();
     }
 
     // ── Template fill ───────────────────────────────────────────────
@@ -271,17 +383,26 @@ public class AgreementDocumentService {
 
     // ── Cloudinary upload ───────────────────────────────────────────
 
-    private String uploadToCloudinary(Path pdf, String appId) throws IOException {
+    private PdfUploadResult uploadToCloudinary(Path pdf, String appId) throws IOException {
+        // type=authenticated: bare /raw/upload/agreements/{id} URLs
+        // return 401. Re-fetching requires a signature minted with the
+        // API secret (see signedPdfUrl()). The secure_url returned at
+        // upload time IS pre-signed -- safe to persist on the entity as
+        // the canonical URL for the operator's existing browser tab
+        // (no second sign() round trip), but anyone who only knows the
+        // public_id can't construct it.
+        String publicId = "agreements/" + appId;
         Map<?, ?> result = cloudinary.uploader().upload(pdf.toFile(),
                 ObjectUtils.asMap(
-                        "public_id", "agreements/" + appId,
+                        "public_id", publicId,
                         "resource_type", "raw",
+                        "type", "authenticated",
                         "overwrite", true));
         Object url = result.get("secure_url");
         if (url == null) {
             throw new IOException("Cloudinary upload returned no secure_url");
         }
-        return url.toString();
+        return new PdfUploadResult(url.toString(), publicId);
     }
 
     private static void safeDelete(Path p) {

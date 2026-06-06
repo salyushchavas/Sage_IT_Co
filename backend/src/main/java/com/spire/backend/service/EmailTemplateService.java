@@ -48,6 +48,11 @@ public class EmailTemplateService {
     private final EmailService emailService;
     private final BrandConfig brandConfig;
     private final com.spire.backend.repository.UserRepository userRepository;
+    /** Lazy to break a potential cycle with AgreementDocumentService
+     *  (which doesn't currently inject EmailTemplateService, but might
+     *  in a future batch -- @Lazy makes the wiring safe regardless). */
+    @org.springframework.context.annotation.Lazy
+    private final AgreementDocumentService agreementDocumentService;
 
     /** Short helper — the brand name shows up in dozens of subject /
      *  body strings, so this keeps each call site terse and the
@@ -902,7 +907,7 @@ public class EmailTemplateService {
      * separate sends -- BCC would expose one recipient to the other.
      */
     public void sendCompletedAgreementToParties(ConsultantApplication application) {
-        String pdfUrl = application.getFinalPdfUrl();
+        String pdfUrl = resolveFinalPdfFetchUrl(application);
         List<EmailService.Attachment> attachments = buildPdfAttachment(
                 pdfUrl, application);
         String body = p("Hi,")
@@ -934,7 +939,7 @@ public class EmailTemplateService {
             ConsultantApplication application,
             String recipientEmail,
             String note) {
-        String pdfUrl = application.getFinalPdfUrl();
+        String pdfUrl = resolveFinalPdfFetchUrl(application);
         List<EmailService.Attachment> attachments = buildPdfAttachment(
                 pdfUrl, application);
         String safeNote = note == null || note.isBlank()
@@ -961,6 +966,23 @@ public class EmailTemplateService {
      * so the email still goes through -- without an attachment is
      * better than not at all when an operator is forwarding.
      */
+    /**
+     * Picks the right URL to GET when fetching the final PDF for an
+     * email attachment. Prefers a freshly-signed URL minted from
+     * {@code finalPdfPublicId} (so it survives the
+     * {@code type=authenticated} cutover), falling back to the
+     * pre-signed {@code finalPdfUrl} stored at upload time for rows
+     * persisted before public_id capture landed.
+     */
+    private String resolveFinalPdfFetchUrl(ConsultantApplication application) {
+        String publicId = application.getFinalPdfPublicId();
+        if (publicId != null && !publicId.isBlank()) {
+            return agreementDocumentService.signedPdfUrl(
+                    publicId, java.time.Duration.ofMinutes(5));
+        }
+        return application.getFinalPdfUrl();
+    }
+
     private List<EmailService.Attachment> buildPdfAttachment(
             String pdfUrl, ConsultantApplication application) {
         if (pdfUrl == null || pdfUrl.isBlank()) {

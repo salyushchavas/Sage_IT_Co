@@ -1127,6 +1127,11 @@ public class DataSeeder implements CommandLineRunner {
                 {"revision_count INTEGER DEFAULT 0", "revision_count"},
                 // Final post-countersignature PDF.
                 {"final_pdf_url TEXT", "final_pdf_url"},
+                // Cloudinary public_id for the final PDF. Required so
+                // the signed-URL helper can re-mint short-lived URLs
+                // for download/view-inline when delivery switches to
+                // type=authenticated.
+                {"final_pdf_public_id VARCHAR(255)", "final_pdf_public_id"},
         };
         for (String[] col : columns) {
             try {

@@ -227,6 +227,19 @@ public class ConsultantApplication {
     @Column(name = "final_pdf_url", columnDefinition = "TEXT")
     private String finalPdfUrl;
 
+    /**
+     * Cloudinary public_id for the final PDF (e.g.
+     * {@code agreements/abc12345-...}). Stored separately from the
+     * full {@code secure_url} so the signed-URL helper doesn't have
+     * to parse it out of an arbitrary Cloudinary URL shape -- the
+     * SDK takes a public_id + type + resource_type directly. When
+     * Cloudinary delivery is switched to {@code type=authenticated},
+     * the raw {@code finalPdfUrl} 401s without a signature; the
+     * controller re-signs from this public_id on demand.
+     */
+    @Column(name = "final_pdf_public_id")
+    private String finalPdfPublicId;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 

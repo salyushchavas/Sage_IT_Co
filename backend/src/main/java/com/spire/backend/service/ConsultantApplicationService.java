@@ -703,13 +703,17 @@ public class ConsultantApplicationService {
         // with a null finalPdfUrl that an operator can backfill via
         // send-email (which re-renders if missing).
         try {
-            String pdfUrl = agreementDocumentService.generateAgreementPdf(app);
-            app.setFinalPdfUrl(pdfUrl);
+            AgreementDocumentService.PdfUploadResult pdf =
+                    agreementDocumentService.generateAgreementPdf(app);
+            app.setFinalPdfUrl(pdf.secureUrl());
+            app.setFinalPdfPublicId(pdf.publicId());
             applicationRepository.save(app);
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.PDF_GENERATED,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
-                    Map.of("url", pdfUrl, "kind", "final"),
+                    Map.of("url", pdf.secureUrl(),
+                            "publicId", pdf.publicId(),
+                            "kind", "final"),
                     null);
             try {
                 emailTemplateService.sendCompletedAgreementToParties(app);

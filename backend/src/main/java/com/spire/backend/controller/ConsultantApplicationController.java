@@ -6,6 +6,7 @@ import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
 import com.spire.backend.security.ConsultantRateLimiter;
+import com.spire.backend.service.AgreementDocumentService;
 import com.spire.backend.service.ConsultantApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -44,6 +45,7 @@ public class ConsultantApplicationController {
 
     private final ConsultantApplicationService consultantService;
     private final ConsultantRateLimiter rateLimiter;
+    private final AgreementDocumentService agreementDocumentService;
 
     // ── Agreement-ERM-side (requires ROLE_AGREEMENT_ERM) ────────────
 
@@ -167,17 +169,37 @@ public class ConsultantApplicationController {
     }
 
     /**
-     * 302 redirect to the most relevant PDF URL on the application --
-     * the final countersigned PDF when present, otherwise the
-     * intermediate consultant-signed one. 404 when neither exists.
+     * 302 redirect to the most relevant PDF URL on the application.
+     *
+     * For the final countersigned PDF we re-sign on demand against
+     * {@code finalPdfPublicId} -- the stored {@code finalPdfUrl}
+     * carries a signature minted at upload time, but routing through
+     * the signer here lets us tighten the TTL later (Auth Token
+     * upgrade) without changing the endpoint contract.
+     *
+     * Falls back to the legacy {@code signedPdfUrl} (consultant-only
+     * intermediate from the old single-stage flow, uploaded as
+     * {@code type=upload}, still publicly fetchable) when no final PDF
+     * exists. 404 when neither is set.
      */
     @GetMapping("/api/agreement-erm/applications/{appId}/download-pdf")
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<Void> downloadPdf(@PathVariable String appId) {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
-        String url = app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()
-                ? app.getFinalPdfUrl()
-                : app.getSignedPdfUrl();
+        String url;
+        String publicId = app.getFinalPdfPublicId();
+        if (publicId != null && !publicId.isBlank()) {
+            url = agreementDocumentService.signedPdfUrl(
+                    publicId, java.time.Duration.ofMinutes(5));
+        } else if (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()) {
+            // Pre-Phase-7 row -- public_id wasn't persisted, fall back
+            // to the URL Cloudinary returned at upload time. Will still
+            // serve as long as the upload row predates the
+            // type=authenticated switch.
+            url = app.getFinalPdfUrl();
+        } else {
+            url = app.getSignedPdfUrl();
+        }
         if (url == null || url.isBlank()) {
             return ResponseEntity.notFound().build();
         }
