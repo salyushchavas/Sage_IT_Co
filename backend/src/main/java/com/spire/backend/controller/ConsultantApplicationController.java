@@ -189,8 +189,13 @@ public class ConsultantApplicationController {
         String url;
         String publicId = app.getFinalPdfPublicId();
         if (publicId != null && !publicId.isBlank()) {
+            // Bake the human-readable filename into the URL via
+            // fl_attachment so the browser save dialog suggests
+            // "SageITCO-Agreement_Name_Track.pdf" instead of the
+            // public_id's UUID tail.
             url = agreementDocumentService.signedPdfUrl(
-                    publicId, java.time.Duration.ofMinutes(5));
+                    publicId, java.time.Duration.ofMinutes(5),
+                    AgreementDocumentService.buildPdfFilename(app));
         } else if (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()) {
             // Pre-Phase-7 row -- public_id wasn't persisted, fall back
             // to the URL Cloudinary returned at upload time. Will still

@@ -1000,7 +1000,7 @@ public class EmailTemplateService {
             try (java.io.InputStream in = conn.getInputStream()) {
                 bytes = in.readAllBytes();
             }
-            String filename = pdfFilename(application);
+            String filename = AgreementDocumentService.buildPdfFilename(application);
             return java.util.List.of(
                     new EmailService.Attachment(filename, "application/pdf", bytes));
         } catch (Exception e) {
@@ -1008,17 +1008,6 @@ public class EmailTemplateService {
                     pdfUrl, e.getMessage());
             return java.util.List.of();
         }
-    }
-
-    private static String pdfFilename(ConsultantApplication application) {
-        String name = application.getConsultantName();
-        String slug = name == null || name.isBlank()
-                ? application.getApplicationId().substring(0, 8)
-                : name.toLowerCase()
-                        .replaceAll("[^a-z0-9]+", "-")
-                        .replaceAll("^-+|-+$", "");
-        if (slug.isBlank()) slug = "agreement";
-        return "SageITCO-Agreement-" + slug + ".pdf";
     }
 
     private static String safeName(ConsultantApplication application) {

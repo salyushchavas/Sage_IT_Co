@@ -121,17 +121,96 @@ public class AgreementDocumentService {
      * method-body change with no signature churn.
      */
     public String signedPdfUrl(String publicId, Duration ttl) {
+        return signedPdfUrl(publicId, ttl, null);
+    }
+
+    /**
+     * Overload that bakes a human-readable download filename into the
+     * URL via Cloudinary's {@code fl_attachment:<filename>} flag.
+     * Causes the edge to respond with {@code Content-Disposition:
+     * attachment; filename="<filename>"} so the browser save dialog
+     * suggests the readable name instead of the public_id's UUID tail.
+     *
+     * Pass {@code null} (or use the two-arg overload) when fetching
+     * for server-side use (email attachment bytes) where the
+     * Content-Disposition header is set on the email by the
+     * MimeMessageHelper anyway.
+     */
+    public String signedPdfUrl(String publicId, Duration ttl, String downloadFilename) {
         if (publicId == null || publicId.isBlank()) return null;
-        // ttl is intentionally not wired into the URL yet -- see note
-        // above. Logged at debug so future debug sessions can see the
-        // intended expiry the caller passed in.
-        log.debug("Signing final PDF URL for {} with intended ttl {}", publicId, ttl);
-        return cloudinary.url()
+        log.debug("Signing final PDF URL for {} with intended ttl {} download={}",
+                publicId, ttl, downloadFilename);
+        com.cloudinary.Url url = cloudinary.url()
                 .resourceType("raw")
                 .type("authenticated")
                 .signed(true)
-                .secure(true)
-                .generate(publicId);
+                .secure(true);
+        if (downloadFilename != null && !downloadFilename.isBlank()) {
+            // fl_attachment is signature-stable per filename: Cloudinary
+            // computes the signature over the transformation string, so
+            // the URL is valid for exactly this filename.
+            url = url.transformation(
+                    new com.cloudinary.Transformation<>()
+                            .flags("attachment:" + downloadFilename));
+        }
+        return url.generate(publicId);
+    }
+
+    // ── Filename helpers ────────────────────────────────────────────
+
+    /**
+     * Slug rule (per the agreement-PDF naming spec):
+     *
+     *   * replace whitespace runs with a single hyphen
+     *   * strip everything outside {@code [A-Za-z0-9_-]}
+     *   * collapse repeated hyphens / underscores
+     *   * trim leading/trailing separators
+     *
+     * Case is preserved -- the spec called out human-readable names
+     * (e.g. "Maria-OBrien"), not the lowercased URL-slug convention.
+     * Returns {@code ""} for null or blank input.
+     */
+    public static String slugify(String input) {
+        if (input == null) return "";
+        String trimmed = input.trim();
+        if (trimmed.isEmpty()) return "";
+        String hyphenated = trimmed.replaceAll("\\s+", "-");
+        String stripped = hyphenated.replaceAll("[^A-Za-z0-9_-]", "");
+        String collapsed = stripped.replaceAll("[-_]+", "-");
+        return collapsed.replaceAll("^[-_]+|[-_]+$", "");
+    }
+
+    /**
+     * Composes the download / email-attachment filename for an
+     * application's final PDF. Spec:
+     *
+     *   SageITCO-Agreement_{slug(name)}_{slug(track)}.pdf
+     *
+     * Fallback chain:
+     *   name  -> signedLegalName, then consultantName, then applicationId
+     *   track -> technologyTrack; omit the segment entirely when null /
+     *            blank (so the filename ends with the name slot)
+     *   if a slug comes out empty after stripping (e.g. "!!!"), fall
+     *   back to applicationId for that slot
+     *
+     * Examples:
+     *   "Abhi G" + "React"                -> SageITCO-Agreement_Abhi-G_React.pdf
+     *   "Maria O'Brien" + "Java Full Stack" -> SageITCO-Agreement_Maria-OBrien_Java-Full-Stack.pdf
+     *   "Abhi G" + null                   -> SageITCO-Agreement_Abhi-G.pdf
+     *   null + null                       -> SageITCO-Agreement_{applicationId}.pdf
+     */
+    public static String buildPdfFilename(ConsultantApplication app) {
+        String rawName = app.getSignedLegalName();
+        if (rawName == null || rawName.isBlank()) rawName = app.getConsultantName();
+        if (rawName == null || rawName.isBlank()) rawName = app.getApplicationId();
+        String nameSlug = slugify(rawName);
+        if (nameSlug.isEmpty()) nameSlug = slugify(app.getApplicationId());
+
+        String trackSlug = slugify(app.getTechnologyTrack());
+
+        String base = "SageITCO-Agreement_" + nameSlug;
+        if (!trackSlug.isEmpty()) base = base + "_" + trackSlug;
+        return base + ".pdf";
     }
 
     // ── Context build ───────────────────────────────────────────────
