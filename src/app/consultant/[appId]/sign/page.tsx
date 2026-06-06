@@ -49,12 +49,22 @@ export default function ConsultantSignPage() {
       .then((data) => {
         setApp(data);
         if (data.consultantName) setLegalName(data.consultantName);
-        if (data.status !== "VERIFIED") {
-          router.replace(`/consultant/${encodeURIComponent(appId)}/review`);
+        // Phase 5 state machine: consultant arrives at /sign from
+        // /fill (state still SUBMITTED or REVISION_REQUESTED), signs
+        // here -> POST /submit -> state becomes VERIFIED. If they
+        // revisit /sign post-submit (state=VERIFIED) we keep them on
+        // this page but the render branch switches to a "submitted,
+        // waiting on ERM" view. SIGNED + COMPLETED land on /done.
+        if (data.status === "SIGNED" || data.status === "COMPLETED") {
+          router.replace(`/consultant/${encodeURIComponent(appId)}/done`);
+          return;
+        }
+        if (data.status === "CANCELLED" || data.status === "EXPIRED") {
+          router.replace("/consultant");
         }
       })
       .catch(() => {
-        router.replace(`/consultant/${encodeURIComponent(appId)}/review`);
+        router.replace("/consultant");
       })
       .finally(() => setLoading(false));
   }, [appId, router]);
@@ -129,6 +139,31 @@ export default function ConsultantSignPage() {
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <Loader2 size={28} className="animate-spin text-sage-navy" />
       </div>
+    );
+  }
+
+  // Already submitted -- consultant pressed back or revisited the URL
+  // after signing. Render a waiting-state instead of letting them
+  // re-sign (which the backend would 409 anyway).
+  if (app?.status === "VERIFIED") {
+    return (
+      <SplitAuthLayout
+        heroTitle={"Submitted.\nWaiting on review."}
+        heroSubtitle="Your signed submission is with the operator. We'll email you the countersigned PDF the moment they approve."
+        heroFooter="Done from your side"
+      >
+        <meta name="robots" content="noindex,nofollow" />
+        <div className="space-y-3 text-center">
+          <p className="text-sm text-gray-600 max-w-md mx-auto">
+            You signed and submitted this agreement. Nothing more to do --
+            the operator will countersign and your copy will arrive in
+            your inbox.
+          </p>
+          <p className="text-[11px] text-gray-400">
+            You can safely close this tab.
+          </p>
+        </div>
+      </SplitAuthLayout>
     );
   }
 

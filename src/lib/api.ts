@@ -3244,6 +3244,112 @@ export interface ConsultantApplication {
   signedIp: string | null;
   signedUserAgent: string | null;
   signedPdfUrl: string | null;
+  // Phase 1 / Phase 3 additions. Every field nullable -- the consultant
+  // fills these via PUT /fill (partial body), and the ERM seeds
+  // rate*1/2 + revision tracking from the agreement-erm console.
+  ratePeriod1: string | null;
+  rateAmount1: string | null;
+  ratePeriod2: string | null;
+  rateAmount2: string | null;
+  // Consultant personal block (required at fill-in time)
+  primaryPhone: string | null;
+  workAuthorizationCategory: string | null;
+  residenceAddress: string | null;
+  effectiveDate: string | null; // ISO yyyy-MM-dd
+  // Exhibit A
+  technologyTrack: string | null;
+  customScopeNotes: string | null;
+  // Appendix 1 -- employment
+  employerPayrollEntity: string | null;
+  implementationPartner: string | null;
+  endClient: string | null;
+  roleTitle: string | null;
+  verifiedStartDate: string | null;
+  payrollCycle: string | null;
+  // Appendix 2 -- ACH (optional)
+  achAccountType: string | null;
+  achBankName: string | null;
+  achAccountHolderName: string | null;
+  achRoutingNumber: string | null;
+  achAccountNumber: string | null;
+  achNoticeEmail: string | null;
+  achDebitDates: string | null;
+  achDebitAmounts: string | null;
+  // Appendix 3 -- background check (sensitive PII)
+  bgFullLegalName: string | null;
+  bgOtherNamesUsed: string | null;
+  bgCurrentAddress: string | null;
+  bgDateOfBirth: string | null;
+  bgFullSsn: string | null;
+  bgDriverLicense: string | null;
+  // Appendix 4 -- portal access
+  portalPlatform: string | null;
+  portalUsername: string | null;
+  portalAuthorizedActions: string | null;
+  portalEffectiveDate: string | null;
+  portalRevocationContact: string | null;
+  // Appendix 5 -- security check
+  securityCheckCount: string | null;
+  securityCheckNumbers: string | null;
+  securityCheckBank: string | null;
+  securityCheckHolderName: string | null;
+  securityCheckAmount: string | null;
+  securityCheckDates: string | null;
+  // ERM countersignature
+  ermName: string | null;
+  ermTitle: string | null;
+  ermSignatureUrl: string | null;
+  signatureDate: string | null;
+  // Revision tracking
+  currentRevisionRemarks: string | null;
+  revisionCount: number | null;
+  // Final post-countersignature PDF
+  finalPdfUrl: string | null;
+}
+
+/**
+ * Shape of the body accepted by PUT /api/consultant/applications/{appId}/fill.
+ * Any subset of these 37 fields; absent keys are left untouched on the
+ * entity (idempotent partial save).
+ */
+export interface ConsultantFillPayload {
+  primaryPhone?: string;
+  workAuthorizationCategory?: string;
+  residenceAddress?: string;
+  effectiveDate?: string;
+  technologyTrack?: string;
+  customScopeNotes?: string;
+  employerPayrollEntity?: string;
+  implementationPartner?: string;
+  endClient?: string;
+  roleTitle?: string;
+  verifiedStartDate?: string;
+  payrollCycle?: string;
+  achAccountType?: string;
+  achBankName?: string;
+  achAccountHolderName?: string;
+  achRoutingNumber?: string;
+  achAccountNumber?: string;
+  achNoticeEmail?: string;
+  achDebitDates?: string;
+  achDebitAmounts?: string;
+  bgFullLegalName?: string;
+  bgOtherNamesUsed?: string;
+  bgCurrentAddress?: string;
+  bgDateOfBirth?: string;
+  bgFullSsn?: string;
+  bgDriverLicense?: string;
+  portalPlatform?: string;
+  portalUsername?: string;
+  portalAuthorizedActions?: string;
+  portalEffectiveDate?: string;
+  portalRevocationContact?: string;
+  securityCheckCount?: string;
+  securityCheckNumbers?: string;
+  securityCheckBank?: string;
+  securityCheckHolderName?: string;
+  securityCheckAmount?: string;
+  securityCheckDates?: string;
 }
 
 export interface ConsultantApplicationEvent {
@@ -3481,14 +3587,46 @@ export async function requestConsultantRevision(
   );
 }
 
-export async function signConsultantApplication(
+/**
+ * Phase 3 endpoint: PUT /api/consultant/applications/{appId}/fill.
+ * Partial save; the backend stores only the non-null fields supplied
+ * here. AbortController signal is forwarded through so the caller can
+ * cancel in-flight saves when a fresher payload is ready.
+ *
+ * 429 surfaces as a "Too many requests" Error -- callers should pause
+ * auto-save and back off (see the /fill page's retry logic).
+ */
+export async function saveConsultantFill(
   applicationId: string,
-  legalName: string,
-  signatureImage: string,
+  patch: ConsultantFillPayload,
+  signal?: AbortSignal,
 ) {
   return consultantFetch<ConsultantApplication>(
-    applicationId, "/sign",
-    { method: "POST", body: JSON.stringify({ legalName, signatureImage }) },
+    applicationId, "/fill",
+    { method: "PUT", body: JSON.stringify(patch), signal },
+  );
+}
+
+/**
+ * Phase 3: POST /api/consultant/applications/{appId}/submit.
+ *
+ * Previously called the legacy /sign endpoint which combined sign +
+ * PDF + complete in one shot. The new two-stage flow transitions
+ * SUBMITTED|REVISION_REQUESTED -> VERIFIED here and waits for the ERM
+ * countersignature before the final PDF is rendered. Body shape also
+ * changed: { signatureBase64, signedLegalName } (new) vs the old
+ * { legalName, signatureImage }. Argument order on this helper is
+ * preserved (appId, legalName, signature) so the sign page's call
+ * site compiles without churn.
+ */
+export async function signConsultantApplication(
+  applicationId: string,
+  signedLegalName: string,
+  signatureBase64: string,
+) {
+  return consultantFetch<ConsultantApplication>(
+    applicationId, "/submit",
+    { method: "POST", body: JSON.stringify({ signedLegalName, signatureBase64 }) },
   );
 }
 
