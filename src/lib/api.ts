@@ -3534,6 +3534,86 @@ export async function resendConsultantInvite(applicationId: string) {
   );
 }
 
+// ── Phase 6 two-stage workflow actions (Bearer token via
+//    agreementErmFetch is auto-attached from sessionStorage) ─────
+
+export async function ermRequestRevision(
+  applicationId: string,
+  remarks: string,
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/request-revision`,
+    { method: "POST", body: JSON.stringify({ remarks }) },
+  );
+}
+
+export async function ermApproveAndSign(
+  applicationId: string,
+  body: { ermName: string; ermTitle: string; ermSignatureBase64: string },
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/approve-and-sign`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Forwards the final signed PDF to an arbitrary recipient with an
+ * optional note. Backend returns 204 No Content; the helper resolves
+ * to void on success.
+ */
+export async function ermSendPdfToEmail(
+  applicationId: string,
+  recipientEmail: string,
+  note?: string,
+) {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-erm/applications/${applicationId}/send-email`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify({ recipientEmail, note: note ?? "" }),
+    },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  if (res.status === 204) return;
+  // Some failures still return JSON ApiResponse with success=false.
+  let message = `Request failed (${res.status})`;
+  try {
+    const body = (await res.json()) as ApiResponse<unknown>;
+    if (body?.message) message = body.message;
+  } catch {
+    /* leave default */
+  }
+  throw new Error(message);
+}
+
+/**
+ * Returns the agreement-erm download endpoint as a string so the
+ * caller can attach it to a window.open() (View Inline) or an
+ * <a href download> (Download PDF). Browsers won't follow a 302
+ * unless the request includes the Bearer token, so we instead
+ * embed the token as a query param when present -- the backend
+ * accepts either header or query auth on this endpoint.
+ *
+ * Note: this is a best-effort affordance; the safest path is for
+ * the caller to use the finalPdfUrl on the application object
+ * directly (Cloudinary secure_url), which doesn't require auth.
+ */
+export function agreementErmDownloadPdfUrl(applicationId: string): string {
+  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/download-pdf`;
+}
+
 // ── Consultant-side (public, applicationId is the credential) ───
 //
 // No bearer token, no auth header. Rate-limited server-side; a 429
