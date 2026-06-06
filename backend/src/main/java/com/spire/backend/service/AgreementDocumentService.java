@@ -303,13 +303,19 @@ public class AgreementDocumentService {
         return c;
     }
 
-    /** Target signature width in pixels (~1.4" at 144 DPI in Word).
+    /** Target signature width in pixels (~1.35" at 96 DPI).
      *  The canvas pads on the consultant + ERM sign screens emit
      *  ~300-500px PNGs at native pen scale, which docx-stamper then
      *  embeds at full pixel size -- the signature dwarfs the rest of
      *  the signature block. Down-scaling here keeps the rendered
-     *  signature proportional to a real hand-written contract sig. */
-    private static final int SIGNATURE_TARGET_WIDTH_PX = 200;
+     *  signature proportional to a real hand-written contract sig
+     *  (about as wide as the printed name underneath it).
+     *
+     *  Was 200px in the prior pass; first prod render still showed
+     *  signatures running ~3" wide, so dropped to 130px. If that's
+     *  still too wide / narrow, tweak this constant -- single
+     *  literal change is intentional, no config-isation. */
+    private static final int SIGNATURE_TARGET_WIDTH_PX = 130;
 
     /**
      * Returns an {@link Image} object for docx-stamper to embed, or an
@@ -359,11 +365,15 @@ public class AgreementDocumentService {
         if (original == null) {
             // Not a decodable image. Pass the original bytes through;
             // docx-stamper will either render or skip.
+            log.info("Signature resize: undecodable bytes ({}B), passing through",
+                    source.length);
             return source;
         }
         int srcWidth = original.getWidth();
         int srcHeight = original.getHeight();
         if (srcWidth <= SIGNATURE_TARGET_WIDTH_PX) {
+            log.info("Signature resize: src {}x{} <= target {}, passing through ({}B)",
+                    srcWidth, srcHeight, SIGNATURE_TARGET_WIDTH_PX, source.length);
             return source;
         }
         double scale = (double) SIGNATURE_TARGET_WIDTH_PX / srcWidth;
@@ -386,6 +396,14 @@ public class AgreementDocumentService {
         }
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         ImageIO.write(resized, "png", out);
+        // Temporary diagnostic -- confirms the resize is actually firing
+        // on the production build and surfaces the source / target
+        // dimensions so we can tune SIGNATURE_TARGET_WIDTH_PX from a
+        // single observation. Remove this log once visual verification
+        // confirms the 130px target lands in the right ballpark.
+        log.info("Signature resized: src {}x{} ({}B) -> {}x{} ({}B)",
+                srcWidth, srcHeight, source.length,
+                targetWidth, targetHeight, out.size());
         return out.toByteArray();
     }
 
