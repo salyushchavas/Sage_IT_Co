@@ -3710,6 +3710,23 @@ export async function signConsultantApplication(
   );
 }
 
+/**
+ * TODO: orphaned helper.
+ *
+ * Backed the legacy single-stage flow's "Email me another copy"
+ * button on /consultant/[appId]/done. Removed from the UI when the
+ * two-stage workflow started emailing the signed PDF automatically
+ * via {@code sendCompletedAgreementToParties} on countersign. No
+ * frontend caller remains.
+ *
+ * Kept around so the backend endpoint
+ * {@code POST /api/consultant/applications/{appId}/request-copy}
+ * doesn't become "live but unreachable from any client" -- if some
+ * future surface wants to ask the consultant-side to re-email the
+ * PDF, this is the helper. Safe to delete (along with the backend
+ * endpoint + service method + email template) once we've confirmed
+ * nothing else depends on it.
+ */
 export async function requestConsultantCopy(applicationId: string) {
   return consultantFetch<{ message: string }>(
     applicationId, "/request-copy",

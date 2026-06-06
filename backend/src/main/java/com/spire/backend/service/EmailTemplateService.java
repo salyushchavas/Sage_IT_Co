@@ -967,8 +967,15 @@ public class EmailTemplateService {
             return java.util.List.of();
         }
         try {
+            // Explicit timeouts. URL.openStream() defaults to no read
+            // timeout, so a slow Cloudinary egress can hang the whole
+            // email path indefinitely. 30s on each side is well above
+            // the observed P99 for a ~1-2 MB PDF download.
+            java.net.URLConnection conn = new java.net.URL(pdfUrl).openConnection();
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(30_000);
             byte[] bytes;
-            try (java.io.InputStream in = new java.net.URL(pdfUrl).openStream()) {
+            try (java.io.InputStream in = conn.getInputStream()) {
                 bytes = in.readAllBytes();
             }
             String filename = pdfFilename(application);
