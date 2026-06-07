@@ -7,7 +7,6 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 
-import java.util.Arrays;
 import java.util.List;
 
 @Configuration
@@ -23,7 +22,24 @@ public class CorsConfig {
         // entries like https://*.vercel.app work alongside allow-credentials.
         // Spring forbids setAllowedOrigins("*") + allowCredentials(true),
         // but the *Patterns variant is the supported escape hatch.
-        config.setAllowedOriginPatterns(Arrays.asList(allowedOrigins.split(",")));
+        //
+        // Origins from CORS_ALLOWED_ORIGINS PLUS the canonical Sage IT
+        // domains, always included so a missing/partial env var can't lock
+        // the real site out of its own API (this bit the consultant portal:
+        // www.sageitco.com wasn't in the env list -> preflight 403). The
+        // apex is listed explicitly because https://*.sageitco.com does
+        // NOT match a bare apex.
+        java.util.LinkedHashSet<String> origins = new java.util.LinkedHashSet<>();
+        if (allowedOrigins != null) {
+            for (String o : allowedOrigins.split(",")) {
+                String trimmed = o.trim();
+                if (!trimmed.isEmpty()) origins.add(trimmed);
+            }
+        }
+        origins.add("https://sageitco.com");
+        origins.add("https://www.sageitco.com");
+        origins.add("https://*.sageitco.com");
+        config.setAllowedOriginPatterns(new java.util.ArrayList<>(origins));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
         config.setExposedHeaders(List.of("Authorization", "Content-Type"));
