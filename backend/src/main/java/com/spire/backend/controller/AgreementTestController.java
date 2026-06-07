@@ -54,7 +54,10 @@ public class AgreementTestController {
                 .findByApplicationId(appId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Application not found: " + appId));
-        String url = documentService.generateAgreementPdf(app);
+        // generateAgreementPdf returns a PdfUploadResult(secureUrl, publicId)
+        // since the signed-URL Cloudinary work; this temp endpoint only
+        // needs the URL for a quick eyeball check.
+        String url = documentService.generateAgreementPdf(app).secureUrl();
         log.info("Test-generated agreement PDF for {}: {}", appId, url);
         return ResponseEntity.ok(Map.of("pdfUrl", url, "applicationId", appId));
     }
