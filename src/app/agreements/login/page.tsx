@@ -7,7 +7,7 @@ import { AlertCircle, Loader2, LogIn } from "lucide-react";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import { agreementErmLogin, getAgreementErmToken } from "@/lib/api";
 
-export default function AgreementErmLoginPage() {
+export default function AgreementsLoginPage() {
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -16,7 +16,7 @@ export default function AgreementErmLoginPage() {
 
   useEffect(() => {
     // Already signed in -> go straight to the dashboard.
-    if (getAgreementErmToken()) router.replace("/agreement-erm");
+    if (getAgreementErmToken()) router.replace("/agreements");
   }, [router]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -25,7 +25,7 @@ export default function AgreementErmLoginPage() {
     setSubmitting(true);
     try {
       await agreementErmLogin(email.trim(), password);
-      router.replace("/agreement-erm");
+      router.replace("/agreements");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
     } finally {
@@ -39,7 +39,9 @@ export default function AgreementErmLoginPage() {
       heroSubtitle="Operator console for sending, tracking, and signing consultant engagement agreements. Hidden internal surface — separate from the regular ERM dashboard."
       heroFooter="Hidden internal console · Sage IT Co"
     >
-      <meta name="robots" content="noindex,nofollow" />
+      {/* noindex is handled effectively by the route's layout metadata
+          export + robots.ts; a client-side <meta> would render into
+          <body> and do nothing, so it's intentionally omitted here. */}
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <h1 className="font-serif text-2xl font-bold text-gray-900">Sign in</h1>
@@ -58,7 +60,7 @@ export default function AgreementErmLoginPage() {
             onChange={(e) => setEmail(e.target.value)}
             autoComplete="email"
             disabled={submitting}
-            placeholder="ermuser@sageitco.com"
+            placeholder="you@sageitco.com"
             className="w-full px-3 py-2.5 text-sm rounded-lg border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
           />
         </div>

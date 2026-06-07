@@ -3462,6 +3462,115 @@ async function agreementErmFetch<T>(
   return body.data;
 }
 
+// ── Agreement-ERM identity + admin console ──────────────────────
+//
+// /me lets the frontend render role-aware UI without decoding the JWT
+// client-side. The admin endpoints are SUPER_ADMIN-only server-side;
+// the console page also guards on the role from /me as a UX layer.
+
+export type AgreementUserRole = "SUPER_ADMIN" | "ERM";
+
+export interface AgreementMe {
+  userId: string | null;
+  email: string | null;
+  fullName: string | null;
+  title: string | null;
+  role: AgreementUserRole | null;
+}
+
+export interface AgreementUserDto {
+  id: string;
+  email: string;
+  fullName: string;
+  title: string;
+  role: AgreementUserRole;
+  active: boolean;
+  createdAt: string | null;
+  lastLoginAt: string | null;
+}
+
+/**
+ * Error carrying the HTTP status so the admin UI can branch on it
+ * (e.g. 409 -> "Email already in use" inline). Unlike
+ * {@link agreementErmFetch}, the admin fetch does NOT treat 403 as a
+ * dead session -- a 403 here means "not the super-admin", not "token
+ * expired", so it must not nuke the session.
+ */
+export class AdminApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "AdminApiError";
+    this.status = status;
+  }
+}
+
+async function agreementAdminFetch<T>(
+  path: string,
+  init: RequestInit = {},
+): Promise<T> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new AdminApiError(401, "Session expired. Please sign in again.");
+  }
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...init,
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${token}`,
+      ...(init.headers ?? {}),
+    },
+  });
+  if (res.status === 401) {
+    clearAgreementErmToken();
+    throw new AdminApiError(401, "Session expired. Please sign in again.");
+  }
+  let body: ApiResponse<T> | null = null;
+  try {
+    body = (await res.json()) as ApiResponse<T>;
+  } catch {
+    /* non-JSON error body */
+  }
+  if (!res.ok || !body?.success) {
+    throw new AdminApiError(res.status, body?.message || `Request failed (${res.status})`);
+  }
+  return body.data as T;
+}
+
+export async function fetchMe() {
+  return agreementErmFetch<AgreementMe>("/api/agreement-erm/me");
+}
+
+export async function adminListUsers() {
+  return agreementAdminFetch<AgreementUserDto[]>("/api/agreements/admin/users");
+}
+
+export async function adminCreateUser(body: {
+  email: string;
+  fullName: string;
+  title: string;
+  temporaryPassword: string;
+}) {
+  return agreementAdminFetch<AgreementUserDto>("/api/agreements/admin/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+export async function adminSetUserStatus(id: string, active: boolean) {
+  return agreementAdminFetch<AgreementUserDto>(
+    `/api/agreements/admin/users/${id}/status`,
+    { method: "PATCH", body: JSON.stringify({ active }) },
+  );
+}
+
+export async function adminResetUserPassword(id: string, newPassword: string) {
+  return agreementAdminFetch<AgreementUserDto>(
+    `/api/agreements/admin/users/${id}/password`,
+    { method: "PATCH", body: JSON.stringify({ newPassword }) },
+  );
+}
+
 // ── Agreement-ERM operations ────────────────────────────────────
 
 export async function createConsultantApplication(data: {

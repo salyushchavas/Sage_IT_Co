@@ -82,7 +82,7 @@ export default function ConsultantsListView() {
           URL — the application ID acts as the credential.
         </p>
         <Link
-          href="/agreement-erm/new"
+          href="/agreements/new"
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
         >
           <Plus size={12} /> New agreement
@@ -163,7 +163,7 @@ export default function ConsultantsListView() {
                 <tr key={r.applicationId} className="hover:bg-gray-50">
                   <td className="px-4 py-2">
                     <Link
-                      href={`/agreement-erm/${r.applicationId}`}
+                      href={`/agreements/${r.applicationId}`}
                       className="block"
                     >
                       <div className="font-medium text-gray-900">
@@ -175,7 +175,7 @@ export default function ConsultantsListView() {
                     </Link>
                   </td>
                   <td className="px-4 py-2 font-mono text-[11px] text-gray-700">
-                    <Link href={`/agreement-erm/${r.applicationId}`}>
+                    <Link href={`/agreements/${r.applicationId}`}>
                       {r.applicationId.slice(0, 8)}…
                     </Link>
                   </td>

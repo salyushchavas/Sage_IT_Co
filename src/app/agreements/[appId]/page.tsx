@@ -34,7 +34,7 @@ export default function ConsultantApplicationDetailPage() {
 
   useEffect(() => {
     if (!getAgreementErmToken()) {
-      router.replace("/agreement-erm/login");
+      router.replace("/agreements/login");
       return;
     }
     if (!appId) return;
@@ -56,7 +56,7 @@ export default function ConsultantApplicationDetailPage() {
       Icon={FileText}
       toolbar={
         <Link
-          href="/agreement-erm"
+          href="/agreements"
           className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-sage-navy"
         >
           <ArrowLeft size={12} /> Back to list

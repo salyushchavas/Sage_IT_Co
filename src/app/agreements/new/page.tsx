@@ -36,8 +36,7 @@ const EMPTY: FormState = {
 };
 
 /**
- * Phase 4 -- structured 6-field create form (replaces the previous
- * JSON textarea on this page). Submits to the Phase 3 endpoint
+ * Structured 6-field create form. Submits to
  * POST /api/agreement-erm/applications, which transitions the
  * application to SUBMITTED and fires the "complete your details"
  * email to the consultant.
@@ -56,7 +55,7 @@ export default function NewConsultantApplicationPage() {
 
   useEffect(() => {
     if (!getAgreementErmToken()) {
-      router.replace("/agreement-erm/login");
+      router.replace("/agreements/login");
       return;
     }
     setChecked(true);
@@ -100,7 +99,7 @@ export default function NewConsultantApplicationPage() {
     setIsSubmitting(true);
     try {
       const app = await createConsultantApplication(trimmed);
-      router.replace(`/agreement-erm/${app.applicationId}`);
+      router.replace(`/agreements/${app.applicationId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create application.");
       setIsSubmitting(false);
@@ -125,7 +124,7 @@ export default function NewConsultantApplicationPage() {
       Icon={FilePlus2}
       toolbar={
         <Link
-          href="/agreement-erm"
+          href="/agreements"
           className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-sage-navy"
         >
           <ArrowLeft size={12} /> Back
@@ -233,7 +232,7 @@ export default function NewConsultantApplicationPage() {
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-2 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => router.push("/agreement-erm")}
+              onClick={() => router.push("/agreements")}
               disabled={isSubmitting}
               className="w-full sm:w-auto px-4 py-2 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer disabled:opacity-50"
             >

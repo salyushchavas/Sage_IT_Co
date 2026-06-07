@@ -7,6 +7,6 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false, nocache: true },
 };
 
-export default function AgreementErmLayout({ children }: { children: ReactNode }) {
+export default function AgreementsLayout({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }

@@ -58,6 +58,15 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.POST, "/api/agreement-erm/login").permitAll()
                         .requestMatchers("/api/agreement-erm/applications/**")
                                 .hasRole("AGREEMENT_ERM")
+                        // Identity endpoint + super-admin console. Both
+                        // require a valid agreement-console token
+                        // (ROLE_AGREEMENT_ERM, granted to SUPER_ADMIN +
+                        // ERM alike); AgreementAdminController narrows the
+                        // /admin surface to the super-admin and 403s ERMs.
+                        .requestMatchers("/api/agreement-erm/me")
+                                .hasRole("AGREEMENT_ERM")
+                        .requestMatchers("/api/agreements/admin/**")
+                                .hasRole("AGREEMENT_ERM")
                         // Consultant-side surface is fully public.
                         // The UUID applicationId acts as the credential;
                         // ConsultantRateLimiter caps abuse and every

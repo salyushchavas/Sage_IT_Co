@@ -27,6 +27,15 @@ import java.util.List;
  * operator email (subject claim) and authority {@code
  * ROLE_AGREEMENT_ERM}. Filter order: runs BEFORE {@link
  * JwtAuthFilter} so that filter never sees agreement-erm tokens.
+ *
+ * Multi-user phase: this filter now authenticates ALL agreement-console
+ * users (the bootstrapped SUPER_ADMIN and every ERM minted through the
+ * admin console), not just the single hardcoded operator -- the class
+ * name is kept for surgicality. Both roles still receive {@code
+ * ROLE_AGREEMENT_ERM} so the existing application endpoints keep working
+ * unchanged; the finer role (SUPER_ADMIN | ERM) plus the user id are
+ * exposed downstream via request attributes (see {@link AgreementAuthz})
+ * for the admin guard and owner stamping.
  */
 @Component
 @RequiredArgsConstructor
@@ -79,6 +88,16 @@ public class AgreementErmAuthFilter extends OncePerRequestFilter {
                     new UsernamePasswordAuthenticationToken(email, null, authorities);
             authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
             SecurityContextHolder.getContext().setAuthentication(authToken);
+
+            // Expose the authenticated agreement user's identity to
+            // controllers (admin guard, owner stamping, /me). Claims may
+            // be null on legacy tokens issued before the multi-user
+            // phase -- downstream code treats a null role as non-admin.
+            request.setAttribute(AgreementAuthz.ATTR_USER_ID, jwtService.extractAgreementUserId(token));
+            request.setAttribute(AgreementAuthz.ATTR_ROLE, jwtService.extractAgreementRole(token));
+            request.setAttribute(AgreementAuthz.ATTR_EMAIL, email);
+            request.setAttribute(AgreementAuthz.ATTR_FULL_NAME, jwtService.extractAgreementFullName(token));
+            request.setAttribute(AgreementAuthz.ATTR_TITLE, jwtService.extractAgreementTitle(token));
         } catch (Exception e) {
             log.warn("Agreement-ERM JWT validation failed: {}", e.getMessage());
         }

@@ -8,13 +8,13 @@ import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
 import ConsultantsListView from "@/components/agreement-erm/ConsultantsListView";
 import { getAgreementErmToken } from "@/lib/api";
 
-export default function AgreementErmDashboardPage() {
+export default function AgreementsDashboardPage() {
   const router = useRouter();
   const [checked, setChecked] = useState(false);
 
   useEffect(() => {
     if (!getAgreementErmToken()) {
-      router.replace("/agreement-erm/login");
+      router.replace("/agreements/login");
       return;
     }
     setChecked(true);

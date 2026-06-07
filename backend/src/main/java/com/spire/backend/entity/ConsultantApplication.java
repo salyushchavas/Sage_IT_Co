@@ -50,6 +50,19 @@ public class ConsultantApplication {
     @Column(name = "erm_user_id", nullable = false)
     private Long ermUserId;
 
+    /**
+     * Id of the {@link AgreementUser} (SUPER_ADMIN | ERM) who created
+     * this application. Stamped at create time; nullable so legacy rows
+     * (and the transient window of pre-multi-user tokens) stay valid.
+     *
+     * Phase note: this column is populated but NOT yet used to gate
+     * reads -- the list/detail endpoints still return all applications
+     * to any authenticated agreement user. Per-ERM filtering is the next
+     * phase.
+     */
+    @Column(name = "owner_erm_id", length = 36)
+    private String ownerErmId;
+
     @Column(name = "consultant_email", nullable = false, length = 255)
     private String consultantEmail;
 

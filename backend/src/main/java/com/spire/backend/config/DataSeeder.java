@@ -6,6 +6,7 @@ import com.spire.backend.repository.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.CommandLineRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
@@ -43,6 +44,21 @@ public class DataSeeder implements CommandLineRunner {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private AgreementUserRepository agreementUserRepository;
+
+    // Super-admin bootstrap for the consultant-agreement console. The
+    // single SUPER_ADMIN is provisioned from these env vars, never
+    // through the UI. Blank defaults => bootstrap is skipped (logged).
+    @Value("${agreement.super-admin.email:}")
+    private String superAdminEmail;
+
+    @Value("${agreement.super-admin.password:}")
+    private String superAdminPassword;
+
+    @Value("${agreement.super-admin.name:}")
+    private String superAdminName;
 
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
@@ -211,6 +227,15 @@ public class DataSeeder implements CommandLineRunner {
         // Hibernate's ddl-auto=update so existing rows have the new
         // columns when JPA boots; idempotent on reruns.
         addConsultantApplicationColumnsIfMissing();
+
+        // Consultant-agreement console multi-user bootstrap. The
+        // agreement_user table is auto-created by ddl-auto=update before
+        // this CommandLineRunner runs, so the repository is safe to use
+        // here. ensureSuperAdmin() is idempotent; the owner backfill
+        // assigns pre-existing applications to the super-admin so they
+        // stay visible (and only touches NULLs, so reruns are no-ops).
+        AgreementUser superAdmin = ensureSuperAdmin();
+        backfillConsultantApplicationOwner(superAdmin);
 
         // Catalog repair -- if a previous deploy ran the full seed block
         // before /enroll signups existed (so users count was already > 0
@@ -1125,6 +1150,11 @@ public class DataSeeder implements CommandLineRunner {
                 // Revision tracking.
                 {"current_revision_remarks TEXT", "current_revision_remarks"},
                 {"revision_count INTEGER DEFAULT 0", "revision_count"},
+                // Multi-user phase: owner (creating AgreementUser).
+                // VARCHAR(36) matches the agreement_user UUID PK.
+                // Populated at create time + backfilled below; NOT yet
+                // used to filter reads (next phase).
+                {"owner_erm_id VARCHAR(36)", "owner_erm_id"},
                 // Final post-countersignature PDF.
                 {"final_pdf_url TEXT", "final_pdf_url"},
                 // Cloudinary public_id for the final PDF. Required so
@@ -1143,6 +1173,75 @@ public class DataSeeder implements CommandLineRunner {
                         + "(likely already present or unsupported dialect): {}",
                         col[1], e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Bootstraps the single consultant-agreement-console SUPER_ADMIN
+     * from {@code AGREEMENT_SUPER_ADMIN_EMAIL / _PASSWORD / _NAME}.
+     *
+     * Idempotent: if a user with that email already exists it is left
+     * untouched (password is NOT re-hashed / overwritten) and returned.
+     * Skips with a warning if the email/password env vars are blank.
+     * Never logs the password.
+     *
+     * @return the super-admin row (existing or freshly created), or null
+     *         if the bootstrap was skipped.
+     */
+    private AgreementUser ensureSuperAdmin() {
+        if (superAdminEmail == null || superAdminEmail.isBlank()
+                || superAdminPassword == null || superAdminPassword.isBlank()) {
+            log.warn("Super-admin bootstrap skipped: AGREEMENT_SUPER_ADMIN_EMAIL / "
+                    + "_PASSWORD not set.");
+            return null;
+        }
+
+        String email = superAdminEmail.trim();
+        AgreementUser existing = agreementUserRepository.findByEmailIgnoreCase(email).orElse(null);
+        if (existing != null) {
+            log.info("Super-admin ensured: {}", existing.getEmail());
+            return existing;
+        }
+
+        String name = (superAdminName == null || superAdminName.isBlank())
+                ? "Super Admin"
+                : superAdminName.trim();
+        AgreementUser created = agreementUserRepository.save(AgreementUser.builder()
+                .email(email.toLowerCase())
+                .passwordHash(passwordEncoder.encode(superAdminPassword))
+                .fullName(name)
+                .title("Administrator")
+                .role(AgreementUserRole.SUPER_ADMIN)
+                .active(true)
+                .build());
+        log.info("Super-admin ensured: {}", created.getEmail());
+        return created;
+    }
+
+    /**
+     * Assigns pre-existing consultant applications (those with a NULL
+     * owner) to the super-admin so they remain visible after ownership
+     * stamping ships. Idempotent -- only touches NULLs, so reruns and
+     * applications created post-deploy (already stamped) are no-ops.
+     * Runs only when the super-admin exists.
+     */
+    private void backfillConsultantApplicationOwner(AgreementUser superAdmin) {
+        if (superAdmin == null || superAdmin.getId() == null) {
+            log.debug("Owner backfill skipped: no super-admin to assign to.");
+            return;
+        }
+        try {
+            int updated = jdbcTemplate.update(
+                    "UPDATE consultant_applications SET owner_erm_id = ? "
+                            + "WHERE owner_erm_id IS NULL",
+                    superAdmin.getId());
+            if (updated > 0) {
+                log.info("Backfilled owner_erm_id on {} pre-existing application(s) "
+                        + "to the super-admin.", updated);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't backfill consultant_applications.owner_erm_id "
+                    + "(likely column not yet present): {}", e.getMessage());
         }
     }
 

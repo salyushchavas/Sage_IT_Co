@@ -20,6 +20,9 @@ export default function robots(): MetadataRoute.Robots {
           // Consultant Agreement (hidden internal feature):
           "/consultant",
           "/consultant/",
+          "/agreements",
+          "/agreements/",
+          // Legacy route (now 308-redirects to /agreements):
           "/agreement-erm",
           "/agreement-erm/",
         ],

@@ -37,6 +37,7 @@ const FULLSCREEN_PREFIXES = [
   "/instructor",
   "/quiz",
   "/consultant",
+  "/agreements",
   "/agreement-erm",
 ] as const;
 

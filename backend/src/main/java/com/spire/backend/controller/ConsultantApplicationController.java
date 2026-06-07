@@ -5,6 +5,7 @@ import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
+import com.spire.backend.security.AgreementAuthz;
 import com.spire.backend.security.ConsultantRateLimiter;
 import com.spire.backend.service.AgreementDocumentService;
 import com.spire.backend.service.ConsultantApplicationService;
@@ -65,6 +66,8 @@ public class ConsultantApplicationController {
                 body.ratePeriod2,
                 body.rateAmount2,
                 body.payload,
+                // Authenticated agreement user, stamped as the owner.
+                AgreementAuthz.userId(request),
                 request);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success("Consultant application created", app));

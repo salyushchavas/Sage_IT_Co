@@ -34,15 +34,47 @@ public class JwtService {
     }
 
     /**
-     * Agreement-ERM console: 8h session token issued by the hardcoded
-     * {@code /api/agreement-erm/login} endpoint. Subject is the fixed
-     * operator email; {@code purpose=agreement_erm} keeps the regular
-     * {@link JwtAuthFilter} from trying to parse the subject as a
-     * numeric user id.
+     * Agreement-ERM console: 8h session token issued by
+     * {@code /api/agreement-erm/login}. Subject is the operator email;
+     * {@code purpose=agreement_erm} keeps the regular {@link
+     * JwtAuthFilter} from trying to parse the subject as a numeric user
+     * id and routes the token to {@link AgreementErmAuthFilter}.
+     *
+     * <p>Multi-user phase: the token now also carries the authenticated
+     * agreement user's {@code userId}, {@code role} (SUPER_ADMIN | ERM),
+     * {@code fullName} and {@code title} so the filter can expose
+     * identity downstream without a DB round-trip. Subject stays the
+     * email (unchanged) for backward compatibility.
      */
-    public String generateAgreementErmToken(String email) {
+    public String generateAgreementUserToken(
+            String userId, String email, String role, String fullName, String title) {
         long eightHoursMs = 8L * 60L * 60L * 1000L;
-        return buildToken(Map.of("purpose", "agreement_erm"), email, eightHoursMs);
+        Map<String, Object> claims = new java.util.HashMap<>();
+        claims.put("purpose", "agreement_erm");
+        claims.put("userId", userId);
+        claims.put("role", role);
+        claims.put("email", email);
+        claims.put("fullName", fullName);
+        claims.put("title", title);
+        return buildToken(claims, email, eightHoursMs);
+    }
+
+    /** UUID of the agreement user; null on legacy pre-multi-user tokens. */
+    public String extractAgreementUserId(String token) {
+        return extractClaim(token, claims -> claims.get("userId", String.class));
+    }
+
+    /** "SUPER_ADMIN" | "ERM"; null on legacy pre-multi-user tokens. */
+    public String extractAgreementRole(String token) {
+        return extractClaim(token, claims -> claims.get("role", String.class));
+    }
+
+    public String extractAgreementFullName(String token) {
+        return extractClaim(token, claims -> claims.get("fullName", String.class));
+    }
+
+    public String extractAgreementTitle(String token) {
+        return extractClaim(token, claims -> claims.get("title", String.class));
     }
 
     public String extractSubject(String token) {

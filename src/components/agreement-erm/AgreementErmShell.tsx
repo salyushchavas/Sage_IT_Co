@@ -3,10 +3,10 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { LogOut, type LucideIcon } from "lucide-react";
-import { type ReactNode } from "react";
+import { LogOut, ShieldCheck, type LucideIcon } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
 
-import { clearAgreementErmToken } from "@/lib/api";
+import { clearAgreementErmToken, fetchMe } from "@/lib/api";
 
 interface Props {
   /** Optional toolbar items rendered on the right of the header. */
@@ -26,6 +26,10 @@ interface Props {
  * working area. Branding stays Sage navy + copper so the look matches
  * the rest of the platform, but the wordmark reads "Sage Agreements"
  * to make the surface distinct from the participant ERM dashboard.
+ *
+ * Multi-user: on mount it calls /me and shows an "Admin" link in the
+ * header ONLY when the signed-in user is the SUPER_ADMIN. ERMs never
+ * see it. Both roles otherwise share this exact chrome.
  */
 export default function AgreementErmShell({
   toolbar,
@@ -35,17 +39,34 @@ export default function AgreementErmShell({
   children,
 }: Props) {
   const router = useRouter();
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchMe()
+      .then((me) => {
+        if (!cancelled) setIsSuperAdmin(me.role === "SUPER_ADMIN");
+      })
+      .catch(() => {
+        // Non-fatal: a dead session is handled by each page's auth
+        // gate; the Admin link simply stays hidden.
+        if (!cancelled) setIsSuperAdmin(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const handleSignOut = () => {
     clearAgreementErmToken();
-    router.replace("/agreement-erm/login");
+    router.replace("/agreements/login");
   };
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col">
       <header className="bg-white border-b border-gray-100 sticky top-0 z-30">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-3">
-          <Link href="/agreement-erm" className="inline-flex items-center gap-2">
+          <Link href="/agreements" className="inline-flex items-center gap-2">
             <Image
               src="/sage_logo.png"
               alt="Sage IT Co"
@@ -59,6 +80,14 @@ export default function AgreementErmShell({
             </span>
           </Link>
           <div className="ml-auto flex items-center gap-3">
+            {isSuperAdmin && (
+              <Link
+                href="/agreements/admin"
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-bold border border-sage-navy/20 bg-sage-navy/5 hover:bg-sage-navy/10 text-sage-navy cursor-pointer"
+              >
+                <ShieldCheck size={11} /> Admin
+              </Link>
+            )}
             {toolbar}
             <button
               type="button"

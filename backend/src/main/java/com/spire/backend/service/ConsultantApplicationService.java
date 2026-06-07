@@ -98,6 +98,7 @@ public class ConsultantApplicationService {
             String ratePeriod2,
             String rateAmount2,
             JsonNode payload,
+            String ownerErmId,
             HttpServletRequest request
     ) {
         validateRequired("consultantEmail", consultantEmail);
@@ -109,6 +110,9 @@ public class ConsultantApplicationService {
         ConsultantApplication app = ConsultantApplication.builder()
                 .applicationId(applicationId)
                 .ermUserId(AGREEMENT_ERM_USER_ID)
+                // Stamp the authenticated agreement user as the owner.
+                // Not yet used to filter reads (next phase).
+                .ownerErmId(ownerErmId)
                 .consultantEmail(consultantEmail.trim().toLowerCase())
                 .consultantName(consultantName)
                 .consultantPhone(consultantPhone)
