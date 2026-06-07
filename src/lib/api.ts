@@ -4066,6 +4066,40 @@ export async function fetchAgreementTemplatePdfBlob(): Promise<Response> {
   });
 }
 
+// ── F-3: full inline agreement clauses (parsed from the master template) ──
+
+export interface AgreementSegment {
+  kind: "text" | "ph";
+  text?: string | null;
+  /** Placeholder name when kind === "ph". */
+  name?: string | null;
+}
+
+export interface AgreementBlock {
+  kind: "heading" | "paragraph" | "table";
+  level?: number | null;
+  segments?: AgreementSegment[] | null;
+  /** rows -> cells -> segments (kind === "table"). */
+  rows?: AgreementSegment[][][] | null;
+}
+
+export interface AgreementContent {
+  /** sectionId -> ordered blocks for that wizard section. */
+  sections: Record<string, AgreementBlock[]>;
+  /** Non-editable placeholder values for THIS app (editable ones are
+   *  filled live by the wizard from form state). */
+  values: Record<string, string>;
+}
+
+/**
+ * GET /api/consultant/applications/{appId}/agreement-content — the real
+ * clauses partitioned per wizard section (from the binding template) plus
+ * this app's non-editable values. Token-gated + email-matched.
+ */
+export async function fetchAgreementContent(applicationId: string) {
+  return consultantFetch<AgreementContent>(applicationId, "/agreement-content");
+}
+
 /**
  * GET /api/consultant/applications/{appId}/pdf — backend-streamed PDF.
  * Returns the raw {@link Response} so the caller can call {@code .blob()}

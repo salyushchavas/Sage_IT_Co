@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 
 import SignaturePad from "@/components/common/SignaturePad";
+import AgreementClauseView from "@/components/consultant/AgreementClauseView";
 import {
   AGREEMENT_SECTIONS,
   AFFIRMATION_FLAGS,
@@ -34,11 +35,13 @@ import {
   type SectionField,
 } from "@/lib/agreement-sections";
 import {
+  fetchAgreementContent,
   fetchAgreementTemplatePdfBlob,
   getConsultantApplicationView,
   getConsultantToken,
   saveConsultantFill,
   signConsultantApplication,
+  type AgreementContent,
   type ConsultantApplication,
   type ConsultantFillPayload,
 } from "@/lib/api";
@@ -162,6 +165,10 @@ export default function ConsultantWizardPage() {
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [templateOpen, setTemplateOpen] = useState(false);
+  // F-3 — full clause content (parsed from the master template), fetched
+  // once. Non-fatal: the read pane falls back to the plain summary if it
+  // can't load.
+  const [content, setContent] = useState<AgreementContent | null>(null);
 
   const lastSavedRef = useRef<FormState>(buildInitialState(null));
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -177,6 +184,14 @@ export default function ConsultantWizardPage() {
     }
     let cancelled = false;
     setLoading(true);
+    // F-3 — load the real clauses once (non-fatal).
+    fetchAgreementContent(appId)
+      .then((c) => {
+        if (!cancelled) setContent(c);
+      })
+      .catch(() => {
+        /* read pane falls back to the plain summary */
+      });
     getConsultantApplicationView(appId)
       .then((data) => {
         if (cancelled) return;
@@ -492,27 +507,22 @@ export default function ConsultantWizardPage() {
 
       <header className="bg-sage-navy text-white">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div>
-              <p className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-sage-copper">
-                Sage IT Consultant Portal
-              </p>
-              <h1 className="font-serif text-2xl sm:text-3xl mt-1">
-                Complete your agreement
-              </h1>
-              <p className="text-xs sm:text-sm text-white/80 mt-1.5 max-w-xl">
-                Read each section, fill the details, check the
-                affirmation, and continue. We auto-save as you go.
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => setTemplateOpen(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-white/30 hover:bg-white/10 transition-colors shrink-0"
-            >
-              <FileText size={12} /> View full agreement
-            </button>
+          <div>
+            <p className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-sage-copper">
+              Sage IT Consultant Portal
+            </p>
+            <h1 className="font-serif text-2xl sm:text-3xl mt-1">
+              Complete your agreement
+            </h1>
+            <p className="text-xs sm:text-sm text-white/80 mt-1.5 max-w-xl">
+              Read the full clauses in each section, fill the details
+              (they appear in the text as you type), check the
+              affirmation, and continue. We auto-save as you go.
+            </p>
           </div>
+          {/* "View full agreement" is demoted: the real clauses now render
+              inline per section. A small "View as formatted PDF" link
+              remains in each section's read pane. */}
         </div>
       </header>
 
@@ -547,6 +557,7 @@ export default function ConsultantWizardPage() {
         ) : (
           <SectionStep
             section={section}
+            content={content}
             form={form}
             touched={touched}
             revealed={revealed}
@@ -660,6 +671,7 @@ function Stepper({
 
 function SectionStep({
   section,
+  content,
   form,
   touched,
   revealed,
@@ -674,6 +686,7 @@ function SectionStep({
   onOpenTemplate,
 }: {
   section: AgreementSection;
+  content: AgreementContent | null;
   form: FormState;
   touched: Set<string>;
   revealed: Set<string>;
@@ -699,16 +712,48 @@ function SectionStep({
           <h2 className="font-serif text-xl sm:text-2xl text-sage-navy mt-1">
             {section.title}
           </h2>
-          <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-            {section.summary}
-          </p>
-          <button
-            type="button"
-            onClick={onOpenTemplate}
-            className="mt-4 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
-          >
-            <FileText size={11} /> View the full agreement
-          </button>
+          {(() => {
+            const blocks = content?.sections?.[section.id];
+            if (blocks && blocks.length > 0) {
+              return (
+                <>
+                  <p className="text-xs text-gray-500 mt-2 mb-3 leading-relaxed">
+                    {section.summary}
+                  </p>
+                  <div className="border-t border-stone-100 pt-3">
+                    <AgreementClauseView
+                      blocks={blocks}
+                      values={content.values}
+                      fields={form.fields}
+                      signature={form.signature}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={onOpenTemplate}
+                    className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-sage-navy underline underline-offset-2"
+                  >
+                    <FileText size={10} /> View as formatted PDF
+                  </button>
+                </>
+              );
+            }
+            // Fallback (content not loaded): the plain-language summary.
+            return (
+              <>
+                <p className="text-sm text-gray-700 mt-3 leading-relaxed">
+                  {section.summary}
+                </p>
+                <button
+                  type="button"
+                  onClick={onOpenTemplate}
+                  className="mt-4 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
+                >
+                  <FileText size={11} /> View the full agreement
+                </button>
+              </>
+            );
+          })()}
         </div>
         <div className="bg-orange-50 rounded-2xl border border-sage-copper/30 p-4">
           <p className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
