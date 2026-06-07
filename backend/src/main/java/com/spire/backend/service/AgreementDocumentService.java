@@ -17,7 +17,14 @@ import pro.verron.officestamper.preset.OfficeStamperConfigurations;
 import pro.verron.officestamper.preset.OfficeStampers;
 import pro.verron.officestamper.preset.Resolvers;
 
+import javax.imageio.IIOImage;
 import javax.imageio.ImageIO;
+import javax.imageio.ImageTypeSpecifier;
+import javax.imageio.ImageWriteParam;
+import javax.imageio.ImageWriter;
+import javax.imageio.metadata.IIOMetadata;
+import javax.imageio.metadata.IIOMetadataNode;
+import javax.imageio.stream.ImageOutputStream;
 import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.image.BufferedImage;
@@ -327,19 +334,16 @@ public class AgreementDocumentService {
         return c;
     }
 
-    /** Target signature width in pixels (~1.35" at 96 DPI).
-     *  The canvas pads on the consultant + ERM sign screens emit
-     *  ~300-500px PNGs at native pen scale, which docx-stamper then
-     *  embeds at full pixel size -- the signature dwarfs the rest of
-     *  the signature block. Down-scaling here keeps the rendered
-     *  signature proportional to a real hand-written contract sig
-     *  (about as wide as the printed name underneath it).
-     *
-     *  Was 200px in the prior pass; first prod render still showed
-     *  signatures running ~3" wide, so dropped to 130px. If that's
-     *  still too wide / narrow, tweak this constant -- single
-     *  literal change is intentional, no config-isation. */
-    private static final int SIGNATURE_TARGET_WIDTH_PX = 130;
+    // Signature bounding box + density. Word/LibreOffice display size =
+    // pixelWidth / horizontalDPI, so a pixel-only resize (the prior bug)
+    // left physical size at the mercy of the source's DPI. We now control
+    // BOTH: fit inside a 190x76 px box AND force a 96-DPI pHYs chunk, so
+    // the render is deterministic: 190px/96dpi = 5.03cm wide,
+    // 76px/96dpi = 2.01cm tall -- the professional contract-signature target.
+    private static final int SIGNATURE_BOX_WIDTH_PX = 190;
+    private static final int SIGNATURE_BOX_HEIGHT_PX = 76;
+    /** 96 DPI expressed as PNG pHYs pixels-per-meter: 96 / 0.0254 ≈ 3780. */
+    private static final int SIGNATURE_PHYS_PPM = 3780;
 
     /**
      * Returns an {@link Image} object for docx-stamper to embed, or an
@@ -364,8 +368,8 @@ public class AgreementDocumentService {
             try (InputStream in = conn.getInputStream()) {
                 bytes = in.readAllBytes();
             }
-            byte[] resized = resizeSignaturePng(bytes);
-            return new Image(resized);
+            byte[] normalized = normalizeSignaturePng(bytes);
+            return new Image(normalized);
         } catch (Exception e) {
             log.warn("Failed loading signature image from {}: {}",
                     url, e.getMessage());
@@ -374,61 +378,99 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Re-encodes {@code source} as a PNG no wider than
-     * {@link #SIGNATURE_TARGET_WIDTH_PX}, preserving aspect ratio and
-     * alpha. If the source is narrower than the target, returns the
-     * original bytes unchanged -- no upscaling.
+     * Deterministic signature sizing. Fits {@code input} inside a
+     * {@link #SIGNATURE_BOX_WIDTH_PX} x {@link #SIGNATURE_BOX_HEIGHT_PX}
+     * box (aspect preserved, downscale only) AND re-encodes the PNG with
+     * an explicit 96-DPI {@code pHYs} density chunk. Controlling both the
+     * pixel box and the density is what makes Word/LibreOffice render the
+     * signature at the intended physical size (~5cm x ~2cm max) -- a
+     * pixel-only resize left the source's DPI intact, so the physical
+     * size stayed large.
      *
-     * Bilinear interpolation + ARGB target buffer keeps signature
-     * strokes smooth on the shrink path. {@link ImageIO} silently
-     * normalises the input format; we always write PNG out so the
-     * embedded image carries transparency.
+     * Bilinear interpolation + ARGB buffer keep strokes smooth and
+     * transparent. On any decode/encode failure the original bytes are
+     * returned so PDF generation never breaks.
      */
-    private static byte[] resizeSignaturePng(byte[] source) throws IOException {
-        BufferedImage original = ImageIO.read(new ByteArrayInputStream(source));
-        if (original == null) {
-            // Not a decodable image. Pass the original bytes through;
-            // docx-stamper will either render or skip.
-            log.info("Signature resize: undecodable bytes ({}B), passing through",
-                    source.length);
-            return source;
-        }
-        int srcWidth = original.getWidth();
-        int srcHeight = original.getHeight();
-        if (srcWidth <= SIGNATURE_TARGET_WIDTH_PX) {
-            log.info("Signature resize: src {}x{} <= target {}, passing through ({}B)",
-                    srcWidth, srcHeight, SIGNATURE_TARGET_WIDTH_PX, source.length);
-            return source;
-        }
-        double scale = (double) SIGNATURE_TARGET_WIDTH_PX / srcWidth;
-        int targetWidth = SIGNATURE_TARGET_WIDTH_PX;
-        int targetHeight = Math.max(1, (int) Math.round(srcHeight * scale));
-
-        BufferedImage resized = new BufferedImage(
-                targetWidth, targetHeight, BufferedImage.TYPE_INT_ARGB);
-        Graphics2D g = resized.createGraphics();
+    private static byte[] normalizeSignaturePng(byte[] input) {
         try {
-            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-            g.setRenderingHint(RenderingHints.KEY_RENDERING,
-                    RenderingHints.VALUE_RENDER_QUALITY);
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            g.drawImage(original, 0, 0, targetWidth, targetHeight, null);
-        } finally {
-            g.dispose();
+            BufferedImage original = ImageIO.read(new ByteArrayInputStream(input));
+            if (original == null) {
+                log.warn("Signature normalize: undecodable bytes ({}B), passing through",
+                        input.length);
+                return input;
+            }
+            int srcW = original.getWidth();
+            int srcH = original.getHeight();
+
+            // Fit inside the box, preserve aspect, never upscale.
+            double scale = Math.min(
+                    Math.min((double) SIGNATURE_BOX_WIDTH_PX / srcW,
+                             (double) SIGNATURE_BOX_HEIGHT_PX / srcH),
+                    1.0);
+            int targetW = Math.max(1, (int) Math.round(srcW * scale));
+            int targetH = Math.max(1, (int) Math.round(srcH * scale));
+
+            BufferedImage resized = new BufferedImage(
+                    targetW, targetH, BufferedImage.TYPE_INT_ARGB);
+            Graphics2D g = resized.createGraphics();
+            try {
+                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                        RenderingHints.VALUE_RENDER_QUALITY);
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                        RenderingHints.VALUE_ANTIALIAS_ON);
+                g.drawImage(original, 0, 0, targetW, targetH, null);
+            } finally {
+                g.dispose();
+            }
+
+            byte[] out = encodePngWithDensity(resized);
+            // Operational evidence that the normalize fired on the real
+            // embedding path with the expected box + density.
+            log.info("Signature normalized: in {}x{} -> out {}x{} px, density=96dpi, bytes {}->{}",
+                    srcW, srcH, targetW, targetH, input.length, out.length);
+            return out;
+        } catch (Exception e) {
+            log.warn("Signature normalize failed ({}); using original bytes",
+                    e.getMessage());
+            return input;
         }
-        ByteArrayOutputStream out = new ByteArrayOutputStream();
-        ImageIO.write(resized, "png", out);
-        // Temporary diagnostic -- confirms the resize is actually firing
-        // on the production build and surfaces the source / target
-        // dimensions so we can tune SIGNATURE_TARGET_WIDTH_PX from a
-        // single observation. Remove this log once visual verification
-        // confirms the 130px target lands in the right ballpark.
-        log.info("Signature resized: src {}x{} ({}B) -> {}x{} ({}B)",
-                srcWidth, srcHeight, source.length,
-                targetWidth, targetHeight, out.size());
-        return out.toByteArray();
+    }
+
+    /**
+     * Encodes {@code image} as a PNG carrying an explicit
+     * {@link #SIGNATURE_PHYS_PPM}-pixels-per-meter (96 DPI) {@code pHYs}
+     * density chunk via the PNG native metadata format. This is the piece
+     * a plain {@code ImageIO.write(img, "png", out)} omits.
+     */
+    private static byte[] encodePngWithDensity(BufferedImage image) throws IOException {
+        ImageWriter writer = ImageIO.getImageWritersByFormatName("png").next();
+        try {
+            ImageWriteParam param = writer.getDefaultWriteParam();
+            ImageTypeSpecifier type = ImageTypeSpecifier
+                    .createFromBufferedImageType(BufferedImage.TYPE_INT_ARGB);
+            IIOMetadata metadata = writer.getDefaultImageMetadata(type, param);
+
+            String nativeFormat = "javax_imageio_png_1.0";
+            IIOMetadataNode pHYs = new IIOMetadataNode("pHYs");
+            pHYs.setAttribute("pixelsPerUnitXAxis", String.valueOf(SIGNATURE_PHYS_PPM));
+            pHYs.setAttribute("pixelsPerUnitYAxis", String.valueOf(SIGNATURE_PHYS_PPM));
+            pHYs.setAttribute("unitSpecifier", "meter");
+
+            IIOMetadataNode root = new IIOMetadataNode(nativeFormat);
+            root.appendChild(pHYs);
+            metadata.mergeTree(nativeFormat, root);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            try (ImageOutputStream ios = ImageIO.createImageOutputStream(baos)) {
+                writer.setOutput(ios);
+                writer.write(metadata, new IIOImage(image, null, metadata), param);
+            }
+            return baos.toByteArray();
+        } finally {
+            writer.dispose();
+        }
     }
 
     // ── Template fill ───────────────────────────────────────────────
