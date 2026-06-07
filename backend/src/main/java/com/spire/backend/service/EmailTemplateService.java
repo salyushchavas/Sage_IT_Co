@@ -687,7 +687,7 @@ public class EmailTemplateService {
      * receive an OTP.
      */
     public void sendConsultantApplicationCreated(ConsultantApplication application) {
-        String url = appUrl + "/consultant/" + application.getApplicationId() + "/verify";
+        String url = appUrl + "/consultant";
         String displayName = application.getConsultantName() == null
                 || application.getConsultantName().isBlank()
                 ? "there"
@@ -745,7 +745,7 @@ public class EmailTemplateService {
      * re-review and decide whether to verify or push back again.
      */
     public void sendConsultantApplicationUpdated(ConsultantApplication application) {
-        String url = appUrl + "/consultant/" + application.getApplicationId() + "/verify";
+        String url = appUrl + "/consultant";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has updated your engagement details based on "
                         + "the changes you requested.")
@@ -830,8 +830,7 @@ public class EmailTemplateService {
      * appendix-driven form) instead of /review.
      */
     public void sendConsultantInitialFill(ConsultantApplication application) {
-        String url = appUrl + "/consultant/"
-                + application.getApplicationId() + "/verify";
+        String url = appUrl + "/consultant";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has prepared your engagement agreement and "
                         + "needs you to complete a few details so the document "
@@ -884,8 +883,7 @@ public class EmailTemplateService {
      */
     public void sendConsultantRevisionRequest(
             ConsultantApplication application, String remarks) {
-        String url = appUrl + "/consultant/"
-                + application.getApplicationId() + "/verify";
+        String url = appUrl + "/consultant";
         String safeRemarks = remarks == null || remarks.isBlank()
                 ? "(no remarks provided)"
                 : remarks;

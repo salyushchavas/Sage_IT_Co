@@ -78,20 +78,24 @@ public class JwtService {
     }
 
     /**
-     * Consultant session token issued after the email-OTP gate. Claims
-     * {@code type=consultant}, {@code appId}, {@code email}; subject is
-     * the consultant email. ~2h expiry -- comfortably covers a fill+sign
-     * session, and server-side autosave lets a re-verify resume.
+     * Consultant portal session token issued after the email-OTP gate.
+     * Claims {@code type=consultant}, {@code email}; subject is the
+     * consultant email (lowercase). ~2h expiry -- comfortably covers a
+     * fill+sign session, and server-side autosave lets a re-verify
+     * resume.
+     *
+     * Portal phase: the token authorizes access to every agreement
+     * where {@code consultantEmail} equals this claim. Controllers
+     * enforce email-match per-request, not a per-appId claim.
      *
      * Deliberately NOT carrying {@code purpose=agreement_erm}, so the
      * {@link AgreementErmAuthFilter} ignores it and an ERM token can't
      * satisfy the consultant gate (and vice-versa).
      */
-    public String generateConsultantToken(String appId, String email) {
+    public String generateConsultantToken(String email) {
         long twoHoursMs = 2L * 60L * 60L * 1000L;
         Map<String, Object> claims = new java.util.HashMap<>();
         claims.put("type", "consultant");
-        claims.put("appId", appId);
         claims.put("email", email);
         return buildToken(claims, email, twoHoursMs);
     }
@@ -101,9 +105,16 @@ public class JwtService {
         return extractClaim(token, claims -> claims.get("type", String.class));
     }
 
-    /** The appId a consultant token is scoped to; null otherwise. */
-    public String extractAppId(String token) {
-        return extractClaim(token, claims -> claims.get("appId", String.class));
+    /**
+     * The email a consultant portal token is scoped to. Reads the
+     * {@code email} claim with a fallback to the {@code sub} (subject)
+     * so legacy Phase D tokens that didn't carry the claim still
+     * authenticate during the rollover window.
+     */
+    public String extractConsultantEmail(String token) {
+        String emailClaim = extractClaim(token, claims -> claims.get("email", String.class));
+        if (emailClaim != null && !emailClaim.isBlank()) return emailClaim;
+        return extractClaim(token, Claims::getSubject);
     }
 
     public String extractSubject(String token) {

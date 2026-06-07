@@ -54,25 +54,41 @@ public class ConsultantApplicationController {
     private final JwtService jwtService;
 
     /**
-     * Phase D — consultant session gate. Every consultant-side endpoint
-     * EXCEPT the public request-otp / verify-otp requires a Bearer token
-     * with {@code type=consultant} whose {@code appId} claim equals the
-     * path appId; else 401. Kept separate from AgreementErmAuthFilter: an
-     * ERM token has no {@code type/appId} claim, so it can't satisfy this
-     * (and a consultant token has no {@code purpose=agreement_erm}, so it
-     * can't satisfy the ERM filter).
+     * Portal-phase consultant gate. The token represents the verified
+     * PERSON (email), not a single appId. Authorization is per-request:
+     * the token's email claim must match the addressed application's
+     * {@code consultantEmail} (case-insensitive). Mismatch is treated
+     * as "agreement does not exist" -- 404, not 403 -- so a token
+     * holder can't probe for other consultants' agreement IDs.
+     *
+     * Returns the verified, lower-cased email so the caller can also
+     * stamp audit / access metadata against it.
      */
-    private void requireConsultantToken(String appId, HttpServletRequest request) {
+    private String requireConsultantToken(String appId, HttpServletRequest request) {
         String auth = request.getHeader("Authorization");
         if (auth == null || !auth.startsWith("Bearer ")) {
             throw new UnauthorizedException("Verification required.");
         }
         String token = auth.substring(7);
         if (!jwtService.isTokenValid(token)
-                || !"consultant".equals(jwtService.extractTokenType(token))
-                || !appId.equals(jwtService.extractAppId(token))) {
+                || !"consultant".equals(jwtService.extractTokenType(token))) {
             throw new UnauthorizedException("Verification required.");
         }
+        String tokenEmail = jwtService.extractConsultantEmail(token);
+        if (tokenEmail == null || tokenEmail.isBlank()) {
+            throw new UnauthorizedException("Verification required.");
+        }
+        String normalised = tokenEmail.trim().toLowerCase();
+        // Email-match guard: an agreement addressed to a different
+        // consultant looks like it doesn't exist to this token holder.
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        String onRecord = app.getConsultantEmail();
+        if (onRecord == null
+                || !onRecord.trim().toLowerCase().equals(normalised)) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", appId);
+        }
+        return normalised;
     }
 
     // ── Agreement-ERM-side (requires ROLE_AGREEMENT_ERM) ────────────
@@ -296,47 +312,141 @@ public class ConsultantApplicationController {
                 .body(bytes);
     }
 
-    // ── Consultant email-OTP gate (PUBLIC — no session token) ───────
+    // ── Consultant portal auth (PUBLIC — no session token) ──────────
 
     /**
-     * Step 1 of the gate. Generic response either way (no enumeration);
-     * a code is sent only when the typed email matches the on-record
-     * consultant email. Tight per-appId+IP rate limit.
+     * Step 1 of the portal gate. Email-only body; generic response
+     * either way (no enumeration). Backend sends an OTP only when the
+     * email matches the {@code consultantEmail} of at least one
+     * actionable agreement. Rate-limited per IP because the email is
+     * the only other input and shouldn't be keyable directly.
      */
-    @PostMapping("/api/consultant/applications/{appId}/request-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> requestOtp(
-            @PathVariable String appId,
-            @RequestBody(required = false) OtpRequestBody body,
+    @PostMapping("/api/consultant/auth/request-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> portalRequestOtp(
+            @RequestBody(required = false) PortalOtpRequestBody body,
             HttpServletRequest request) {
-        if (!rateLimiter.allowOtpRequest(appId + "|" + clientIp(request))) {
+        if (!rateLimiter.allowOtpRequest("portal|" + clientIp(request))) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
-        String message = consultantService.requestOtp(
-                appId, body == null ? null : body.email, request);
+        String message = consultantService.requestPortalOtp(
+                body == null ? null : body.email, request);
         return ResponseEntity.ok(ApiResponse.success(Map.of("message", message)));
     }
 
     /**
-     * Step 2 of the gate. On success returns a consultant session token
-     * (type=consultant, appId-scoped, ~2h). Generic 400 on any failure;
-     * 5 wrong attempts invalidate the code.
+     * Step 2 of the portal gate. On success returns an email-scoped
+     * consultant session token (type=consultant, email, ~2h). Generic
+     * 400 on any failure; 5 wrong attempts invalidate the code.
      */
-    @PostMapping("/api/consultant/applications/{appId}/verify-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> verifyOtp(
-            @PathVariable String appId,
-            @RequestBody(required = false) OtpVerifyBody body,
+    @PostMapping("/api/consultant/auth/verify-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> portalVerifyOtp(
+            @RequestBody(required = false) PortalOtpVerifyBody body,
             HttpServletRequest request) {
-        if (!rateLimiter.allowOtpVerify(appId + "|" + clientIp(request))) {
+        if (!rateLimiter.allowOtpVerify("portal|" + clientIp(request))) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
-        String token = consultantService.verifyOtp(
-                appId,
+        String token = consultantService.verifyPortalOtp(
                 body == null ? null : body.email,
                 body == null ? null : body.otp,
                 request);
         return ResponseEntity.ok(ApiResponse.success(Map.of("token", token)));
+    }
+
+    /**
+     * Portal dashboard list. Returns every actionable / in-flight /
+     * completed agreement addressed to the verified email. Sorted so
+     * the action items surface first.
+     */
+    @GetMapping("/api/consultant/agreements")
+    public ResponseEntity<ApiResponse<List<ConsultantAgreementSummary>>> portalDashboard(
+            HttpServletRequest request) {
+        String email = requireConsultantEmail(request);
+        if (!rateLimiter.allowRead(clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        List<ConsultantAgreementSummary> items = consultantService.listForConsultant(email)
+                .stream()
+                .map(ConsultantAgreementSummary::from)
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success(items));
+    }
+
+    /**
+     * Validate a portal token and return the verified email. Used by
+     * the dashboard endpoint (no appId in path so it can't use the
+     * email-match guard).
+     */
+    private String requireConsultantEmail(HttpServletRequest request) {
+        String auth = request.getHeader("Authorization");
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            throw new UnauthorizedException("Verification required.");
+        }
+        String token = auth.substring(7);
+        if (!jwtService.isTokenValid(token)
+                || !"consultant".equals(jwtService.extractTokenType(token))) {
+            throw new UnauthorizedException("Verification required.");
+        }
+        String emailClaim = jwtService.extractConsultantEmail(token);
+        if (emailClaim == null || emailClaim.isBlank()) {
+            throw new UnauthorizedException("Verification required.");
+        }
+        return emailClaim.trim().toLowerCase();
+    }
+
+    /**
+     * Stream the final signed PDF to the verified consultant. Mirrors
+     * the ERM streaming endpoint -- backend fetches from Cloudinary with
+     * credentials, the Cloudinary URL never reaches the client; frontend
+     * wraps the bytes in a blob URL. Only available for COMPLETED.
+     */
+    @GetMapping("/api/consultant/applications/{appId}/pdf")
+    public ResponseEntity<byte[]> consultantDownloadPdf(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+
+        String sourceUrl;
+        String publicId = app.getFinalPdfPublicId();
+        if (publicId != null && !publicId.isBlank()) {
+            sourceUrl = agreementDocumentService.signedPdfUrl(
+                    publicId, java.time.Duration.ofMinutes(5));
+        } else if (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()) {
+            sourceUrl = app.getFinalPdfUrl();
+        } else {
+            return ResponseEntity.notFound().build();
+        }
+
+        byte[] bytes;
+        try {
+            java.net.URLConnection conn = new java.net.URL(sourceUrl).openConnection();
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(30_000);
+            try (java.io.InputStream in = conn.getInputStream()) {
+                bytes = in.readAllBytes();
+            }
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+
+        String filename = AgreementDocumentService.buildPdfFilename(app);
+        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
+                ? "attachment"
+                : "inline";
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        dispositionMode + "; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(bytes);
     }
 
     // ── Consultant-side (consultant-token gated, rate-limited) ──────
@@ -525,13 +635,61 @@ public class ConsultantApplicationController {
         public String signatureImage;
     }
 
-    public static class OtpRequestBody {
+    public static class PortalOtpRequestBody {
         public String email;
     }
 
-    public static class OtpVerifyBody {
+    public static class PortalOtpVerifyBody {
         public String email;
         public String otp;
+    }
+
+    /**
+     * Dashboard row served to the verified consultant. Each item carries
+     * the raw status (drives PDF download eligibility) plus a
+     * consultant-friendly label + an action enum the frontend switches
+     * on to render the right button.
+     */
+    public static class ConsultantAgreementSummary {
+        public String appId;
+        public String agreementTitle;
+        public String technologyTrack;
+        public String status;
+        public String statusLabel;
+        public String action;
+        public String createdAt;
+        public String updatedAt;
+
+        public static ConsultantAgreementSummary from(ConsultantApplication app) {
+            ConsultantAgreementSummary r = new ConsultantAgreementSummary();
+            r.appId = app.getApplicationId();
+            r.agreementTitle =
+                    "Integrated Two-Phase Coaching & Post-Offer Support Agreement";
+            r.technologyTrack = app.getTechnologyTrack();
+            r.status = app.getStatus();
+            String s = app.getStatus();
+            if (ConsultantApplication.Status.SUBMITTED.name().equals(s)) {
+                r.statusLabel = "Awaiting your signature";
+                r.action = "SIGN";
+            } else if (ConsultantApplication.Status.REVISION_REQUESTED.name().equals(s)) {
+                r.statusLabel = "Changes requested — review & re-sign";
+                r.action = "REVIEW_AND_SIGN";
+            } else if (ConsultantApplication.Status.UPDATED.name().equals(s)
+                    || ConsultantApplication.Status.VERIFIED.name().equals(s)
+                    || ConsultantApplication.Status.SIGNED.name().equals(s)) {
+                r.statusLabel = "Submitted — under review by Sage IT";
+                r.action = "VIEW";
+            } else if (ConsultantApplication.Status.COMPLETED.name().equals(s)) {
+                r.statusLabel = "Completed";
+                r.action = "DOWNLOAD";
+            } else {
+                r.statusLabel = s;
+                r.action = "VIEW";
+            }
+            r.createdAt = app.getCreatedAt() == null ? null : app.getCreatedAt().toString();
+            r.updatedAt = app.getUpdatedAt() == null ? null : app.getUpdatedAt().toString();
+            return r;
+        }
     }
 
     public static class PageResponse<T> {

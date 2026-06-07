@@ -13,6 +13,8 @@ import java.util.Optional;
 public interface ConsultantVerificationRepository
         extends JpaRepository<ConsultantVerification, String> {
 
+    // ── Legacy per-app finders (Phase D rows) ───────────────────────
+
     /** The current active (unconsumed) challenge for an application, if any. */
     Optional<ConsultantVerification>
             findFirstByApplicationIdAndConsumedAtIsNullOrderByCreatedAtDesc(String applicationId);
@@ -26,4 +28,20 @@ public interface ConsultantVerificationRepository
 
     /** Hourly resend cap: how many OTPs were sent for this app recently. */
     long countByApplicationIdAndLastSentAtAfter(String applicationId, LocalDateTime since);
+
+    // ── Portal email finders ────────────────────────────────────────
+
+    /** The current active (unconsumed) challenge for an email, if any. */
+    Optional<ConsultantVerification>
+            findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(String email);
+
+    /** Most recent challenge for an email regardless of state (resend cooldown). */
+    Optional<ConsultantVerification>
+            findFirstByEmailOrderByCreatedAtDesc(String email);
+
+    /** All unconsumed challenges for an email (to supersede them on resend). */
+    List<ConsultantVerification> findByEmailAndConsumedAtIsNull(String email);
+
+    /** Hourly resend cap: OTPs sent for this email recently. */
+    long countByEmailAndLastSentAtAfter(String email, LocalDateTime since);
 }

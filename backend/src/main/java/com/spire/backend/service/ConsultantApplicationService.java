@@ -196,52 +196,56 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Public request-otp. NON-ENUMERATING: returns a generic message
-     * either way. Sends a code ONLY when the typed email matches the
-     * on-record consultant email, the agreement is consultant-actionable,
-     * and the 60s cooldown + hourly cap allow it. The prior active
-     * challenge is superseded so only one code is ever live per app.
+     * Portal request-otp. NON-ENUMERATING: the response copy is the
+     * same whether the email is on record or not. A code is sent ONLY
+     * when {@code email} matches the on-record {@code consultantEmail}
+     * of at least one non-deleted, consultant-actionable agreement
+     * (SUBMITTED or REVISION_REQUESTED), and only when the 60s cooldown
+     * + hourly cap allow it. Any prior active challenge for the email
+     * is superseded so just one code is ever live per consultant.
+     *
+     * Audit OTP_SENT is recorded against every matching agreement so
+     * the per-ERM detail timeline still reflects the consultant's
+     * activity.
      */
     @Transactional
-    public String requestOtp(String applicationId, String email, HttpServletRequest request) {
-        ConsultantApplication app =
-                applicationRepository.findByApplicationId(applicationId).orElse(null);
-        if (app == null) {
-            return OTP_GENERIC_SENT_MSG; // never reveal whether the app exists
-        }
-        if (!isConsultantActionable(app)) {
-            return "This agreement is not available for signing.";
-        }
-        String onRecord = app.getConsultantEmail();
-        String typed = email == null ? "" : email.trim();
-        if (onRecord == null || !onRecord.equalsIgnoreCase(typed)) {
-            return OTP_GENERIC_SENT_MSG; // email mismatch -> send nothing
+    public String requestPortalOtp(String email, HttpServletRequest request) {
+        String normalised = email == null ? "" : email.trim().toLowerCase();
+        if (normalised.isEmpty()) return OTP_GENERIC_SENT_MSG;
+
+        List<ConsultantApplication> matches = applicationRepository
+                .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
+                        normalised);
+        boolean anyActionable = matches.stream().anyMatch(
+                ConsultantApplicationService::isConsultantActionable);
+        if (matches.isEmpty() || !anyActionable) {
+            return OTP_GENERIC_SENT_MSG;
         }
 
         LocalDateTime now = LocalDateTime.now();
         Optional<ConsultantVerification> latest =
-                verificationRepository.findFirstByApplicationIdOrderByCreatedAtDesc(applicationId);
+                verificationRepository.findFirstByEmailOrderByCreatedAtDesc(normalised);
         if (latest.isPresent() && latest.get().getLastSentAt() != null
                 && latest.get().getLastSentAt()
                         .isAfter(now.minusSeconds(OTP_RESEND_COOLDOWN_SECONDS))) {
-            return OTP_GENERIC_SENT_MSG; // within cooldown -> silent no-op
+            return OTP_GENERIC_SENT_MSG;
         }
-        long lastHour = verificationRepository.countByApplicationIdAndLastSentAtAfter(
-                applicationId, now.minusHours(1));
+        long lastHour = verificationRepository.countByEmailAndLastSentAtAfter(
+                normalised, now.minusHours(1));
         if (lastHour >= OTP_MAX_PER_HOUR) {
-            return OTP_GENERIC_SENT_MSG; // hourly cap -> silent no-op
+            return OTP_GENERIC_SENT_MSG;
         }
 
-        // Supersede any prior active challenge, then issue a fresh one.
         for (ConsultantVerification prior :
-                verificationRepository.findByApplicationIdAndConsumedAtIsNull(applicationId)) {
+                verificationRepository.findByEmailAndConsumedAtIsNull(normalised)) {
             prior.setConsumedAt(now);
             verificationRepository.save(prior);
         }
+
         String code = generateOtp();
         String ip = clientIp(request);
         verificationRepository.save(ConsultantVerification.builder()
-                .applicationId(applicationId)
+                .email(normalised)
                 .otpHash(passwordEncoder.encode(code))
                 .expiresAt(now.plusMinutes(OTP_TTL_MINUTES))
                 .attempts(0)
@@ -250,56 +254,67 @@ public class ConsultantApplicationService {
                 .requestIp(ip)
                 .build());
 
-        appendEvent(app.getId(),
-                ConsultantApplicationEvent.EventType.OTP_SENT,
-                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("ip", ip == null ? "" : ip),
-                request);
-
+        // Pick a representative actionable agreement to drive the email
+        // template + audit event. Falls back to any match.
+        ConsultantApplication primary = matches.stream()
+                .filter(ConsultantApplicationService::isConsultantActionable)
+                .findFirst()
+                .orElse(matches.get(0));
+        for (ConsultantApplication match : matches) {
+            appendEvent(match.getId(),
+                    ConsultantApplicationEvent.EventType.OTP_SENT,
+                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                    Map.of("ip", ip == null ? "" : ip,
+                            "email", normalised),
+                    request);
+        }
         try {
-            emailTemplateService.sendConsultantOtp(app, code);
+            emailTemplateService.sendConsultantOtp(primary, code);
         } catch (Exception e) {
-            log.warn("Failed to send consultant OTP for {}: {}", applicationId, e.getMessage());
+            log.warn("Failed to send consultant portal OTP to {}: {}",
+                    normalised, e.getMessage());
         }
         return OTP_GENERIC_SENT_MSG;
     }
 
     /**
-     * Public verify-otp. On success: consume the challenge, stamp the
-     * access IP/time, mint a ~2h consultant session token (returned). On
-     * any failure: generic IllegalArgumentException -> 400 (no detail on
-     * which check failed). The 5th wrong attempt invalidates the challenge.
+     * Portal verify-otp. On success: consume the challenge, audit on
+     * every agreement for this email, mint an email-scoped consultant
+     * token (no appId claim). On any failure: generic
+     * IllegalArgumentException -> 400. The 5th wrong attempt
+     * invalidates the challenge.
      */
     @Transactional
-    public String verifyOtp(String applicationId, String email, String otp,
-                            HttpServletRequest request) {
-        ConsultantApplication app =
-                applicationRepository.findByApplicationId(applicationId).orElse(null);
+    public String verifyPortalOtp(String email, String otp, HttpServletRequest request) {
+        String normalised = email == null ? "" : email.trim().toLowerCase();
         ConsultantVerification cv = verificationRepository
-                .findFirstByApplicationIdAndConsumedAtIsNullOrderByCreatedAtDesc(applicationId)
+                .findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(normalised)
                 .orElse(null);
 
-        if (app == null || cv == null
+        if (cv == null
                 || cv.getExpiresAt().isBefore(LocalDateTime.now())
                 || cv.getAttempts() >= OTP_MAX_ATTEMPTS) {
-            throw new IllegalArgumentException("Invalid or expired code.");
-        }
-        String onRecord = app.getConsultantEmail();
-        String typed = email == null ? "" : email.trim();
-        if (onRecord == null || !onRecord.equalsIgnoreCase(typed)) {
             throw new IllegalArgumentException("Invalid or expired code.");
         }
         if (otp == null || !passwordEncoder.matches(otp.trim(), cv.getOtpHash())) {
             cv.setAttempts(cv.getAttempts() + 1);
             if (cv.getAttempts() >= OTP_MAX_ATTEMPTS) {
-                cv.setConsumedAt(LocalDateTime.now()); // lock the challenge
+                cv.setConsumedAt(LocalDateTime.now());
             }
             verificationRepository.save(cv);
-            appendEvent(app.getId(),
-                    ConsultantApplicationEvent.EventType.OTP_FAILED,
-                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                    Map.of("attempts", String.valueOf(cv.getAttempts())),
-                    request);
+            // No app context on a wrong attempt -- audit OTP_FAILED on
+            // every agreement for this email so the operator can see
+            // the failed attempts in the timeline.
+            List<ConsultantApplication> matches = applicationRepository
+                    .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
+                            normalised);
+            for (ConsultantApplication match : matches) {
+                appendEvent(match.getId(),
+                        ConsultantApplicationEvent.EventType.OTP_FAILED,
+                        ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                        Map.of("attempts", String.valueOf(cv.getAttempts())),
+                        request);
+            }
             throw new IllegalArgumentException("Invalid or expired code.");
         }
 
@@ -308,17 +323,60 @@ public class ConsultantApplicationService {
         verificationRepository.save(cv);
 
         String ip = clientIp(request);
-        app.setAccessIp(ip);
-        app.setAccessAt(now);
-        applicationRepository.save(app);
+        // Stamp access on every agreement this consultant can act on so
+        // the ERM detail page reflects "consultant signed in" once,
+        // regardless of which agreement they open first.
+        List<ConsultantApplication> matches = applicationRepository
+                .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
+                        normalised);
+        for (ConsultantApplication match : matches) {
+            if (match.getAccessAt() == null) {
+                match.setAccessIp(ip);
+                match.setAccessAt(now);
+                applicationRepository.save(match);
+            }
+            appendEvent(match.getId(),
+                    ConsultantApplicationEvent.EventType.OTP_VERIFIED,
+                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                    Map.of("ip", ip == null ? "" : ip),
+                    request);
+        }
+        return jwtService.generateConsultantToken(normalised);
+    }
 
-        appendEvent(app.getId(),
-                ConsultantApplicationEvent.EventType.OTP_VERIFIED,
-                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("ip", ip == null ? "" : ip),
-                request);
+    /**
+     * Portal dashboard list. Returns every non-deleted agreement
+     * addressed to {@code email}, EXCLUDING CANCELLED and EXPIRED.
+     * Sorted: actionable first (SUBMITTED, REVISION_REQUESTED),
+     * then VERIFIED (waiting on ERM), then COMPLETED.
+     */
+    @Transactional(readOnly = true)
+    public List<ConsultantApplication> listForConsultant(String email) {
+        String normalised = email == null ? "" : email.trim().toLowerCase();
+        if (normalised.isEmpty()) return List.of();
+        return applicationRepository
+                .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
+                        normalised)
+                .stream()
+                .filter(app -> {
+                    String s = app.getStatus();
+                    return !ConsultantApplication.Status.CANCELLED.name().equals(s)
+                            && !ConsultantApplication.Status.EXPIRED.name().equals(s);
+                })
+                .sorted((a, b) -> Integer.compare(
+                        dashboardRank(a.getStatus()),
+                        dashboardRank(b.getStatus())))
+                .toList();
+    }
 
-        return jwtService.generateConsultantToken(applicationId, app.getConsultantEmail());
+    private static int dashboardRank(String status) {
+        if (ConsultantApplication.Status.SUBMITTED.name().equals(status)) return 0;
+        if (ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) return 0;
+        if (ConsultantApplication.Status.UPDATED.name().equals(status)) return 1;
+        if (ConsultantApplication.Status.VERIFIED.name().equals(status)) return 1;
+        if (ConsultantApplication.Status.SIGNED.name().equals(status)) return 2;
+        if (ConsultantApplication.Status.COMPLETED.name().equals(status)) return 3;
+        return 4;
     }
 
     /**

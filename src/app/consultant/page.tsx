@@ -1,145 +1,280 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AlertCircle, Loader2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import {
+  AlertCircle,
+  KeyRound,
+  Loader2,
+  Mail,
+  ShieldCheck,
+} from "lucide-react";
 
-const STEPS = [
-  { num: 1, title: "Enter ID",       desc: "Click the link in your email or paste your application ID below." },
-  { num: 2, title: "Review Details", desc: "Check the information your ERM has prepared." },
-  { num: 3, title: "Sign",           desc: "Draw your signature or upload an image." },
-  { num: 4, title: "Receive Copy",   desc: "Get the signed agreement emailed to you." },
-] as const;
+import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
+import {
+  getConsultantToken,
+  requestConsultantPortalOtp,
+  verifyConsultantPortalOtp,
+} from "@/lib/api";
 
-function ConsultantEntryInner() {
+const RESEND_SECONDS = 60;
+
+/**
+ * Consultant portal login. The email invite lands here (no per-app
+ * URL). The consultant proves control of their email with a 6-digit
+ * OTP and gets an email-scoped session token that unlocks the
+ * dashboard listing every agreement addressed to them, across every
+ * ERM.
+ */
+export default function ConsultantPortalLoginPage() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const appFromUrl = searchParams?.get("app") ?? "";
-
-  const [appId, setAppId] = useState(appFromUrl);
-  const [redirecting, setRedirecting] = useState(false);
+  const [step, setStep] = useState<"email" | "otp">("email");
+  const [email, setEmail] = useState("");
+  const [otp, setOtp] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [info, setInfo] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+
+  // Already-verified consultants land straight on the dashboard.
+  useEffect(() => {
+    if (getConsultantToken()) {
+      router.replace("/consultant/dashboard");
+    }
+  }, [router]);
 
   useEffect(() => {
-    // Email link with ?app=<uuid> sends the consultant straight to the
-    // verification gate -- they confirm their email before the form.
-    if (appFromUrl && isValidUuidLike(appFromUrl)) {
-      setRedirecting(true);
-      router.replace(`/consultant/${encodeURIComponent(appFromUrl)}/verify`);
-    }
-  }, [appFromUrl, router]);
+    if (cooldown <= 0) return;
+    const t = setTimeout(() => setCooldown((s) => s - 1), 1000);
+    return () => clearTimeout(t);
+  }, [cooldown]);
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const otpValid = /^\d{6}$/.test(otp.trim());
+
+  const sendCode = async () => {
+    if (!emailValid || submitting) return;
+    setSubmitting(true);
     setError("");
-    const trimmed = appId.trim();
-    if (!isValidUuidLike(trimmed)) {
-      setError("That doesn't look like a valid application ID.");
-      return;
+    setInfo("");
+    try {
+      const res = await requestConsultantPortalOtp(email.trim());
+      setInfo(res.message);
+      setStep("otp");
+      setCooldown(RESEND_SECONDS);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't send the code.");
+    } finally {
+      setSubmitting(false);
     }
-    setRedirecting(true);
-    router.push(`/consultant/${encodeURIComponent(trimmed)}/verify`);
   };
 
-  if (redirecting) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 size={28} className="animate-spin text-sage-navy" />
-      </div>
-    );
-  }
+  const resend = async () => {
+    if (cooldown > 0 || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      const res = await requestConsultantPortalOtp(email.trim());
+      setInfo(res.message);
+      setCooldown(RESEND_SECONDS);
+      setOtp("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't resend the code.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const verify = async () => {
+    if (!otpValid || submitting) return;
+    setSubmitting(true);
+    setError("");
+    try {
+      await verifyConsultantPortalOtp(email.trim(), otp.trim());
+      router.push("/consultant/dashboard");
+    } catch (e) {
+      setError(
+        e instanceof Error
+          ? e.message
+          : "That code is incorrect or expired — try again or resend.",
+      );
+      setSubmitting(false);
+    }
+    // On success the push unmounts this page; don't reset submitting.
+  };
 
   return (
-    <main className="min-h-screen bg-stone-50">
+    <SplitAuthLayout
+      heroTitle={"Sage IT\nConsultant Portal."}
+      heroSubtitle="Sign in with the email on your agreement. We'll send a 6-digit code to confirm it's you, then you'll see every agreement waiting for your signature."
+      heroFooter="Secure access · Sage IT Co"
+    >
       <meta name="robots" content="noindex,nofollow" />
-
-      {/* Hero */}
-      <section className="bg-sage-navy text-white">
-        <div className="max-w-3xl mx-auto px-4 py-16 text-center">
-          <h1 className="font-serif text-4xl md:text-5xl mb-4">
-            Welcome to Your Agreement Portal
-          </h1>
-          <p className="text-lg text-white/80 max-w-xl mx-auto">
-            Enter your application ID to review and sign your agreement.
-          </p>
+      <div className="max-w-md mx-auto py-12 px-6">
+        <div className="mb-6 inline-flex items-center gap-2 text-sage-copper">
+          <ShieldCheck size={18} />
+          <span className="text-xs font-bold uppercase tracking-wider">
+            Portal sign-in
+          </span>
         </div>
-      </section>
 
-      {/* Process steps */}
-      <section className="max-w-5xl mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-          {STEPS.map((s) => (
-            <div key={s.num} className="text-center">
-              <div className="w-12 h-12 rounded-full bg-sage-copper text-white flex items-center justify-center text-xl font-semibold mx-auto mb-3">
-                {s.num}
+        {step === "email" ? (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void sendCode();
+            }}
+            className="space-y-4"
+          >
+            <h1 className="text-2xl font-serif text-sage-navy">
+              Welcome back
+            </h1>
+            <p className="text-sm text-gray-600">
+              Enter the email Sage IT used to address your agreement.
+              We'll text a verification code there.
+            </p>
+
+            <label className="block">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1.5">
+                Email
+              </span>
+              <div className="relative">
+                <Mail
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+                <input
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  placeholder="you@example.com"
+                  className="w-full pl-9 pr-3 py-2.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  disabled={submitting}
+                  required
+                />
               </div>
-              <h3 className="font-semibold text-sage-navy mb-1">{s.title}</h3>
-              <p className="text-sm text-gray-600">{s.desc}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Input card */}
-      <section className="max-w-md mx-auto px-4 pb-20">
-        <div className="bg-white rounded-lg shadow-md border border-gray-100 p-8">
-          <form onSubmit={handleSubmit}>
-            <label
-              htmlFor="appId"
-              className="block text-sm font-semibold text-sage-navy mb-2"
-            >
-              Application ID
             </label>
-            <input
-              id="appId"
-              type="text"
-              value={appId}
-              onChange={(e) => setAppId(e.target.value)}
-              placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890"
-              autoComplete="off"
-              autoCapitalize="off"
-              autoCorrect="off"
-              spellCheck={false}
-              className="w-full px-4 py-3 border border-gray-300 rounded-md focus:ring-2 focus:ring-sage-navy focus:border-sage-navy outline-none font-mono text-sm"
-            />
+
             {error && (
-              <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-red-600">
-                <AlertCircle size={14} /> {error}
+              <p className="text-xs text-red-600 inline-flex items-center gap-1.5">
+                <AlertCircle size={12} /> {error}
               </p>
             )}
+
             <button
               type="submit"
-              disabled={!appId.trim()}
-              className="w-full mt-4 bg-sage-navy hover:bg-sage-navy-deep text-white font-semibold py-3 rounded-md transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={!emailValid || submitting}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              Continue →
+              {submitting ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Mail size={14} />
+              )}
+              Send verification code
             </button>
+
+            <p className="text-[11px] text-gray-500 text-center pt-2">
+              We never reveal whether an email is on file. If your email
+              isn't on an agreement, no code is sent.
+            </p>
           </form>
-          <p className="text-xs text-gray-500 mt-4 text-center">
-            Don&apos;t have an ID? Check your email or contact your ERM.
-          </p>
-        </div>
-      </section>
-    </main>
-  );
-}
+        ) : (
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void verify();
+            }}
+            className="space-y-4"
+          >
+            <h1 className="text-2xl font-serif text-sage-navy">
+              Enter the code
+            </h1>
+            <p className="text-sm text-gray-600">
+              If the email is on file, we sent a 6-digit code to{" "}
+              <span className="font-semibold">{email.trim()}</span>.
+              The code expires in 10 minutes.
+            </p>
 
-function isValidUuidLike(value: string) {
-  // Loose UUID check -- backend is the source of truth, this is
-  // just a frontend sanity gate to catch typos.
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-}
+            <label className="block">
+              <span className="block text-[11px] font-bold uppercase tracking-wider text-gray-600 mb-1.5">
+                Verification code
+              </span>
+              <div className="relative">
+                <KeyRound
+                  size={16}
+                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+                />
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  pattern="\d{6}"
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                  placeholder="123456"
+                  className="w-full pl-9 pr-3 py-2.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy font-mono tracking-widest"
+                  value={otp}
+                  onChange={(e) =>
+                    setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))
+                  }
+                  disabled={submitting}
+                  autoFocus
+                  required
+                />
+              </div>
+            </label>
 
-export default function ConsultantEntryPage() {
-  return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center bg-gray-50">
-          <Loader2 size={28} className="animate-spin text-sage-navy" />
-        </div>
-      }
-    >
-      <ConsultantEntryInner />
-    </Suspense>
+            {info && (
+              <p className="text-xs text-sage-navy/80">{info}</p>
+            )}
+            {error && (
+              <p className="text-xs text-red-600 inline-flex items-center gap-1.5">
+                <AlertCircle size={12} /> {error}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={!otpValid || submitting}
+              className="w-full inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {submitting ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <ShieldCheck size={14} />
+              )}
+              Verify and open portal
+            </button>
+
+            <div className="flex items-center justify-between text-xs pt-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setStep("email");
+                  setOtp("");
+                  setError("");
+                  setInfo("");
+                  setCooldown(0);
+                }}
+                disabled={submitting}
+                className="text-gray-500 hover:text-sage-navy disabled:opacity-50"
+              >
+                Use a different email
+              </button>
+              <button
+                type="button"
+                onClick={() => void resend()}
+                disabled={cooldown > 0 || submitting}
+                className="text-sage-navy hover:text-sage-navy-deep font-semibold disabled:opacity-50"
+              >
+                {cooldown > 0 ? `Resend in ${cooldown}s` : "Resend code"}
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+    </SplitAuthLayout>
   );
 }

@@ -427,9 +427,9 @@ export default function ConsultantFillPage() {
   // Hydrate from server ──────────────────────────────────────────
   useEffect(() => {
     if (!appId) return;
-    // Phase D — must pass the OTP gate first.
-    if (!getConsultantToken(appId)) {
-      router.replace(`/consultant/${encodeURIComponent(appId)}/verify`);
+    // Portal phase — email-scoped token; missing -> portal login.
+    if (!getConsultantToken()) {
+      router.replace("/consultant");
       return;
     }
     let cancelled = false;

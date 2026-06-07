@@ -71,7 +71,11 @@ public class SecurityConfig {
                         // The UUID applicationId acts as the credential;
                         // ConsultantRateLimiter caps abuse and every
                         // request lands in the audit log.
-                        .requestMatchers("/api/consultant/applications/**").permitAll()
+                        // Consultant-side surface (portal phase): all
+                        // routes permitAll at the security layer; the
+                        // controller enforces its own portal-OTP /
+                        // email-scoped token + rate limiter.
+                        .requestMatchers("/api/consultant/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .addFilterBefore(agreementErmAuthFilter, UsernamePasswordAuthenticationFilter.class)

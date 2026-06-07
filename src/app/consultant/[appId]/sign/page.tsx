@@ -29,23 +29,20 @@ export default function ConsultantSignPage() {
 
   useEffect(() => {
     if (!appId) return;
-    // Phase D — must pass the OTP gate first.
-    if (!getConsultantToken(appId)) {
-      router.replace(`/consultant/${encodeURIComponent(appId)}/verify`);
+    // Portal phase — email-scoped token; missing -> portal login.
+    if (!getConsultantToken()) {
+      router.replace("/consultant");
       return;
     }
     getConsultantApplicationView(appId)
       .then((data) => {
         setApp(data);
         if (data.consultantName) setLegalName(data.consultantName);
-        // Phase 5 state machine: consultant arrives at /sign from
-        // /fill (state still SUBMITTED or REVISION_REQUESTED), signs
-        // here -> POST /submit -> state becomes VERIFIED. If they
-        // revisit /sign post-submit (state=VERIFIED) we keep them on
-        // this page but the render branch switches to a "submitted,
-        // waiting on ERM" view. SIGNED + COMPLETED land on /done.
+        // Portal phase state machine: after signing the consultant
+        // returns to /consultant/dashboard so they see the updated
+        // status across all their agreements.
         if (data.status === "SIGNED" || data.status === "COMPLETED") {
-          router.replace(`/consultant/${encodeURIComponent(appId)}/done`);
+          router.replace("/consultant/dashboard");
           return;
         }
         if (data.status === "CANCELLED" || data.status === "EXPIRED") {
@@ -68,7 +65,10 @@ export default function ConsultantSignPage() {
     setError("");
     try {
       await signConsultantApplication(appId, legalName.trim(), signatureData);
-      router.push(`/consultant/${encodeURIComponent(appId)}/done`);
+      // Portal phase: back to dashboard so the consultant sees the
+      // updated status across all their agreements (and can act on
+      // any other pending ones).
+      router.push("/consultant/dashboard");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't sign.");
     } finally {

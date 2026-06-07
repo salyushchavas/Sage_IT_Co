@@ -228,6 +228,12 @@ public class DataSeeder implements CommandLineRunner {
         // columns when JPA boots; idempotent on reruns.
         addConsultantApplicationColumnsIfMissing();
 
+        // Portal phase: consultant_verification was keyed by
+        // application_id; the portal keys it by email instead. Add the
+        // email column + relax the legacy NOT NULL on application_id so
+        // portal-phase rows can leave it null. Idempotent on reruns.
+        addConsultantVerificationPortalColumnsIfMissing();
+
         // Consultant-agreement console multi-user bootstrap. The
         // agreement_user table is auto-created by ddl-auto=update before
         // this CommandLineRunner runs, so the repository is safe to use
@@ -1220,6 +1226,46 @@ public class DataSeeder implements CommandLineRunner {
                 log.debug("Couldn't create index {} (likely already present or "
                         + "unsupported dialect): {}", idx[0], e.getMessage());
             }
+        }
+    }
+
+    /**
+     * Portal-phase migration for {@code consultant_verification}. Adds
+     * the {@code email} column (the new identity key) idempotently and
+     * relaxes the legacy {@code application_id NOT NULL} constraint so
+     * portal rows can leave it null. Both wrapped so an already-applied
+     * state or unsupported dialect no-ops at debug rather than crashing
+     * boot. Mirrors the same idempotent ALTER pattern used elsewhere
+     * in this file.
+     */
+    private void addConsultantVerificationPortalColumnsIfMissing() {
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE consultant_verification "
+                            + "ADD COLUMN IF NOT EXISTS email VARCHAR(255)");
+            log.info("Ensured consultant_verification.email exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add consultant_verification.email "
+                    + "(likely already present or unsupported dialect): {}",
+                    e.getMessage());
+        }
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE consultant_verification "
+                            + "ALTER COLUMN application_id DROP NOT NULL");
+            log.info("Relaxed NOT NULL on consultant_verification.application_id");
+        } catch (Exception e) {
+            log.debug("Couldn't relax consultant_verification.application_id NOT NULL "
+                    + "(likely already nullable or unsupported dialect): {}",
+                    e.getMessage());
+        }
+        try {
+            jdbcTemplate.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_consultant_verif_email "
+                            + "ON consultant_verification(email)");
+            log.info("Ensured index idx_consultant_verif_email");
+        } catch (Exception e) {
+            log.debug("Couldn't create idx_consultant_verif_email: {}", e.getMessage());
         }
     }
 

@@ -48,6 +48,13 @@ public interface ConsultantApplicationRepository
     /** Admin "Agreements by ERM" grouped view — all live rows, newest first. */
     List<ConsultantApplication> findByDeletedFalseOrderByCreatedAtDesc();
 
+    // Portal phase — every live agreement addressed to a given consultant
+    // email (case-insensitive). Backs the dashboard list endpoint + the
+    // request-otp probe that decides whether to send a code.
+    List<ConsultantApplication>
+            findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
+                    String consultantEmail);
+
     /** Cron sweep — find apps past their expiry that are still in flight. */
     List<ConsultantApplication> findByStatusInAndExpiresAtBefore(
             List<String> statuses, LocalDateTime cutoff);

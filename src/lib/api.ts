@@ -3809,58 +3809,58 @@ export async function fetchAgreementPdfBlob(
   return res;
 }
 
-// ── Consultant-side (Phase D: email-OTP gate) ───────────────────
+// ── Consultant portal (email-scoped session) ───────────────────
 //
-// The fill/submit/view endpoints now require a consultant SESSION TOKEN
-// minted by the OTP gate (request-otp -> verify-otp). The token is
-// per-appId, kept in sessionStorage so closing the tab clears it within
-// its ~2h life. The two OTP endpoints themselves are PUBLIC (no token).
+// The portal phase replaces the per-appId Phase D gate. A single
+// email-scoped session token authorises every agreement addressed to
+// the verified email. Token lives in sessionStorage under one global
+// key so it survives navigation between dashboard / fill / sign but
+// clears when the tab closes (within its ~2h life).
+//
+// The two portal-auth endpoints (/auth/request-otp, /auth/verify-otp)
+// are PUBLIC; everything else requires Authorization: Bearer <token>.
 
-function consultantTokenKey(applicationId: string): string {
-  return `sage_consultant_token_${applicationId}`;
-}
+const CONSULTANT_TOKEN_KEY = "sage_consultant_token";
 
-export function getConsultantToken(applicationId: string): string | null {
+export function getConsultantToken(): string | null {
   if (typeof window === "undefined") return null;
   try {
-    return sessionStorage.getItem(consultantTokenKey(applicationId));
+    return sessionStorage.getItem(CONSULTANT_TOKEN_KEY);
   } catch {
     return null;
   }
 }
 
-export function setConsultantToken(applicationId: string, token: string) {
+export function setConsultantToken(token: string) {
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.setItem(consultantTokenKey(applicationId), token);
+    sessionStorage.setItem(CONSULTANT_TOKEN_KEY, token);
   } catch {
     /* storage disabled */
   }
 }
 
-export function clearConsultantToken(applicationId: string) {
+export function clearConsultantToken() {
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.removeItem(consultantTokenKey(applicationId));
+    sessionStorage.removeItem(CONSULTANT_TOKEN_KEY);
   } catch {
     /* storage disabled */
   }
 }
 
 /**
- * Step 1 of the gate — PUBLIC, no token. Always resolves to a generic
- * message (no enumeration); the backend sends a code only when the
- * typed email matches the on-record consultant email.
+ * Portal Step 1 — PUBLIC, no token. The backend response is generic
+ * either way (no enumeration); a code is sent only when the typed
+ * email matches the {@code consultantEmail} on at least one actionable
+ * agreement.
  */
-export async function requestConsultantOtp(applicationId: string, email: string) {
-  const res = await fetch(
-    `${BASE_URL}/api/consultant/applications/${applicationId}/request-otp`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email }),
-    },
-  );
+export async function requestConsultantPortalOtp(email: string) {
+  const res = await fetch(`${BASE_URL}/api/consultant/auth/request-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
@@ -3872,23 +3872,16 @@ export async function requestConsultantOtp(applicationId: string, email: string)
 }
 
 /**
- * Step 2 of the gate — PUBLIC, no token. On success stores the returned
- * consultant session token under the per-appId key and returns it.
- * Generic error on any failure (invalid/expired/locked).
+ * Portal Step 2 — PUBLIC, no token. On success stores the email-scoped
+ * session token under the global key and returns it. Generic error on
+ * any failure (invalid / expired / locked).
  */
-export async function verifyConsultantOtp(
-  applicationId: string,
-  email: string,
-  otp: string,
-) {
-  const res = await fetch(
-    `${BASE_URL}/api/consultant/applications/${applicationId}/verify-otp`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email, otp }),
-    },
-  );
+export async function verifyConsultantPortalOtp(email: string, otp: string) {
+  const res = await fetch(`${BASE_URL}/api/consultant/auth/verify-otp`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, otp }),
+  });
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
@@ -3896,19 +3889,19 @@ export async function verifyConsultantOtp(
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || "Invalid or expired code.");
   }
-  setConsultantToken(applicationId, body.data.token);
+  setConsultantToken(body.data.token);
   return body.data;
 }
 
-// Token-gated consultant calls. Attaches the per-appId session token; on
-// 401 (missing/expired/wrong-app token) it clears the token and bounces
-// to the verify gate — server-side autosave means progress is preserved.
+// Token-gated consultant calls. Attaches the email-scoped portal token;
+// on 401 (missing/expired/wrong-email) it clears the token and bounces
+// to /consultant — server-side autosave means progress is preserved.
 async function consultantFetch<T>(
   applicationId: string,
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
-  const token = getConsultantToken(applicationId);
+  const token = getConsultantToken();
   const res = await fetch(
     `${BASE_URL}/api/consultant/applications/${applicationId}${path}`,
     {
@@ -3921,9 +3914,9 @@ async function consultantFetch<T>(
     },
   );
   if (res.status === 401) {
-    clearConsultantToken(applicationId);
+    clearConsultantToken();
     if (typeof window !== "undefined") {
-      window.location.assign(`/consultant/${applicationId}/verify`);
+      window.location.assign("/consultant");
     }
     throw new Error("Verification required.");
   }
@@ -3935,6 +3928,71 @@ async function consultantFetch<T>(
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
   return body.data;
+}
+
+// ── Portal dashboard + PDF download ────────────────────────────
+
+export type ConsultantPortalAction =
+  | "SIGN"
+  | "REVIEW_AND_SIGN"
+  | "VIEW"
+  | "DOWNLOAD";
+
+export interface ConsultantAgreementSummary {
+  appId: string;
+  agreementTitle: string;
+  technologyTrack: string | null;
+  status: string;
+  statusLabel: string;
+  action: ConsultantPortalAction;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
+/**
+ * GET /api/consultant/agreements — email-scoped list of agreements the
+ * verified consultant can act on (excludes CANCELLED + EXPIRED). 401
+ * bounces back to /consultant per the standard 401 path.
+ */
+export async function fetchConsultantAgreements(): Promise<
+  ConsultantAgreementSummary[]
+> {
+  const token = getConsultantToken();
+  const res = await fetch(`${BASE_URL}/api/consultant/agreements`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (res.status === 401) {
+    clearConsultantToken();
+    if (typeof window !== "undefined") {
+      window.location.assign("/consultant");
+    }
+    throw new Error("Verification required.");
+  }
+  const body = (await res.json()) as ApiResponse<ConsultantAgreementSummary[]>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Request failed (${res.status})`);
+  }
+  return body.data;
+}
+
+/**
+ * GET /api/consultant/applications/{appId}/pdf — backend-streamed PDF.
+ * Returns the raw {@link Response} so the caller can call {@code .blob()}
+ * and wrap it in a {@code URL.createObjectURL} blob URL (leak-proof
+ * download / view). Only valid for COMPLETED applications.
+ */
+export async function fetchConsultantPdfBlob(
+  applicationId: string,
+  disposition: "inline" | "attachment" = "attachment",
+): Promise<Response> {
+  const token = getConsultantToken();
+  if (!token) {
+    throw new Error("Verification required.");
+  }
+  return fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/pdf?disposition=${disposition}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
 }
 
 export async function getConsultantApplicationView(applicationId: string) {
