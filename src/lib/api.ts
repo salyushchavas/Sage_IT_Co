@@ -3872,6 +3872,29 @@ export function clearConsultantToken() {
 }
 
 /**
+ * Parse an ApiResponse body defensively. A cold-starting backend or a
+ * proxy 502 can return an EMPTY or non-JSON body; calling res.json() on
+ * that throws the opaque "Unexpected end of JSON input". Instead we read
+ * the text and surface the real HTTP status so the failure is actionable
+ * (and retryable) rather than mystifying.
+ */
+async function readApiResponse<T>(res: Response): Promise<ApiResponse<T>> {
+  const text = await res.text();
+  if (!text.trim()) {
+    throw new Error(
+      `The portal didn't respond (HTTP ${res.status || "network"}). It may be waking up — please try again in a moment.`,
+    );
+  }
+  try {
+    return JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    throw new Error(
+      `Unexpected response from the portal (HTTP ${res.status}). Please try again in a moment.`,
+    );
+  }
+}
+
+/**
  * Portal Step 1 — PUBLIC, no token. The backend response is generic
  * either way (no enumeration); a code is sent only when the typed
  * email matches the {@code consultantEmail} on at least one actionable
@@ -3886,7 +3909,7 @@ export async function requestConsultantPortalOtp(email: string) {
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
-  const body = (await res.json()) as ApiResponse<{ message: string }>;
+  const body = await readApiResponse<{ message: string }>(res);
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
@@ -3907,7 +3930,7 @@ export async function verifyConsultantPortalOtp(email: string, otp: string) {
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
-  const body = (await res.json()) as ApiResponse<{ token: string }>;
+  const body = await readApiResponse<{ token: string }>(res);
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || "Invalid or expired code.");
   }
@@ -3945,7 +3968,7 @@ async function consultantFetch<T>(
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
-  const body = (await res.json()) as ApiResponse<T>;
+  const body = await readApiResponse<T>(res);
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
@@ -3980,17 +4003,42 @@ export async function fetchConsultantAgreements(): Promise<
   ConsultantAgreementSummary[]
 > {
   const token = getConsultantToken();
-  const res = await fetch(`${BASE_URL}/api/consultant/agreements`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (res.status === 401) {
-    clearConsultantToken();
-    if (typeof window !== "undefined") {
-      window.location.assign("/consultant");
+  // This GET is idempotent, so a single retry safely rides out a backend
+  // cold start / transient 5xx / empty-body proxy blip (the recurring
+  // "Unexpected end of JSON input" symptom) instead of surfacing it.
+  let res: Response | null = null;
+  let lastErr: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1200));
+    try {
+      res = await fetch(`${BASE_URL}/api/consultant/agreements`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        cache: "no-store",
+      });
+    } catch (e) {
+      lastErr = e; // network error — retry once
+      res = null;
+      continue;
     }
-    throw new Error("Verification required.");
+    if (res.status === 401) {
+      clearConsultantToken();
+      if (typeof window !== "undefined") {
+        window.location.assign("/consultant");
+      }
+      throw new Error("Verification required.");
+    }
+    // Retry transient server states; let 2xx/4xx fall through to parse.
+    if (res.status >= 500 || res.status === 0) continue;
+    break;
   }
-  const body = (await res.json()) as ApiResponse<ConsultantAgreementSummary[]>;
+  if (!res) {
+    throw new Error(
+      lastErr instanceof Error
+        ? `Couldn't reach the portal (${lastErr.message}). Please try again.`
+        : "Couldn't reach the portal. Please try again.",
+    );
+  }
+  const body = await readApiResponse<ConsultantAgreementSummary[]>(res);
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
