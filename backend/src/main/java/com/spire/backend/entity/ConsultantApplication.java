@@ -296,6 +296,50 @@ public class ConsultantApplication {
     @Column(name = "final_pdf_public_id")
     private String finalPdfPublicId;
 
+    // ── Section-by-section affirmation flags (guided signing) ────────
+    //
+    // The consultant ticks an "I understand" checkbox at the end of
+    // every signing section. Each maps to one flag here; submit-time
+    // validation requires all eight to be true alongside every
+    // consultant-fillable field + the signature. Phase 1 (additive
+    // foundation) -- the wizard UI that sets them is the next batch.
+    //
+    // Booleans (object) so the partial-save patch can distinguish
+    // "not sent" from "explicitly false". DataSeeder backfills
+    // existing rows to false via DEFAULT FALSE on the column.
+
+    @Column(name = "affirmed_main_agreement", nullable = false)
+    @Builder.Default
+    private Boolean affirmedMainAgreement = false;
+
+    @Column(name = "affirmed_exhibit_a", nullable = false)
+    @Builder.Default
+    private Boolean affirmedExhibitA = false;
+
+    @Column(name = "affirmed_exhibit_b", nullable = false)
+    @Builder.Default
+    private Boolean affirmedExhibitB = false;
+
+    @Column(name = "affirmed_appendix1", nullable = false)
+    @Builder.Default
+    private Boolean affirmedAppendix1 = false;
+
+    @Column(name = "affirmed_appendix2", nullable = false)
+    @Builder.Default
+    private Boolean affirmedAppendix2 = false;
+
+    @Column(name = "affirmed_appendix3", nullable = false)
+    @Builder.Default
+    private Boolean affirmedAppendix3 = false;
+
+    @Column(name = "affirmed_appendix4", nullable = false)
+    @Builder.Default
+    private Boolean affirmedAppendix4 = false;
+
+    @Column(name = "affirmed_appendix5", nullable = false)
+    @Builder.Default
+    private Boolean affirmedAppendix5 = false;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 

@@ -946,10 +946,21 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "Please enter your full legal name (first and last).");
         }
-        if (signatureBase64 == null || signatureBase64.isBlank()
-                || !signatureBase64.startsWith("data:image/")) {
-            throw new IllegalArgumentException(
-                    "A signature image is required (data:image/...).");
+
+        // F-1 guided-signing all-required gate. Every consultant-fillable
+        // field across cover, Exhibit A, Appendix 1, and all four
+        // appendices must be non-blank; every section affirmation must
+        // be true; the signature payload must be present. On failure we
+        // raise a structured exception carrying the offending keys so
+        // the wizard can route the consultant back to the right section
+        // without a second round-trip.
+        boolean missingSig = signatureBase64 == null || signatureBase64.isBlank()
+                || !signatureBase64.startsWith("data:image/");
+        java.util.List<String> missingFields = collectMissingConsultantFields(app);
+        java.util.List<String> missingAffs = collectMissingAffirmations(app);
+        if (!missingFields.isEmpty() || !missingAffs.isEmpty() || missingSig) {
+            throw new com.spire.backend.exception.IncompleteSubmissionException(
+                    missingFields, missingAffs, missingSig);
         }
 
         String signatureUrl;
@@ -1234,6 +1245,19 @@ public class ConsultantApplicationService {
         public String securityCheckAmount;
         public String securityCheckDates;
 
+        // F-1 (guided signing foundation): per-section affirmations.
+        // Boolean (object) so null = "not sent in this partial save"
+        // and false = "explicitly unchecked" -- only non-null values
+        // are written through applyTo, preserving partial-save semantics.
+        public Boolean affirmedMainAgreement;
+        public Boolean affirmedExhibitA;
+        public Boolean affirmedExhibitB;
+        public Boolean affirmedAppendix1;
+        public Boolean affirmedAppendix2;
+        public Boolean affirmedAppendix3;
+        public Boolean affirmedAppendix4;
+        public Boolean affirmedAppendix5;
+
         /** Returns true iff at least one non-null field was applied. */
         boolean applyTo(ConsultantApplication app) {
             boolean changed = false;
@@ -1274,6 +1298,15 @@ public class ConsultantApplicationService {
             if (securityCheckHolderName != null)  { app.setSecurityCheckHolderName(securityCheckHolderName); changed = true; }
             if (securityCheckAmount != null)      { app.setSecurityCheckAmount(securityCheckAmount); changed = true; }
             if (securityCheckDates != null)       { app.setSecurityCheckDates(securityCheckDates); changed = true; }
+            // F-1 affirmation flags. Null skips, anything else writes through.
+            if (affirmedMainAgreement != null)    { app.setAffirmedMainAgreement(affirmedMainAgreement); changed = true; }
+            if (affirmedExhibitA != null)         { app.setAffirmedExhibitA(affirmedExhibitA); changed = true; }
+            if (affirmedExhibitB != null)         { app.setAffirmedExhibitB(affirmedExhibitB); changed = true; }
+            if (affirmedAppendix1 != null)        { app.setAffirmedAppendix1(affirmedAppendix1); changed = true; }
+            if (affirmedAppendix2 != null)        { app.setAffirmedAppendix2(affirmedAppendix2); changed = true; }
+            if (affirmedAppendix3 != null)        { app.setAffirmedAppendix3(affirmedAppendix3); changed = true; }
+            if (affirmedAppendix4 != null)        { app.setAffirmedAppendix4(affirmedAppendix4); changed = true; }
+            if (affirmedAppendix5 != null)        { app.setAffirmedAppendix5(affirmedAppendix5); changed = true; }
             return changed;
         }
 
@@ -1317,6 +1350,14 @@ public class ConsultantApplicationService {
             if (securityCheckHolderName != null) names.add("securityCheckHolderName");
             if (securityCheckAmount != null) names.add("securityCheckAmount");
             if (securityCheckDates != null) names.add("securityCheckDates");
+            if (affirmedMainAgreement != null) names.add("affirmedMainAgreement");
+            if (affirmedExhibitA != null) names.add("affirmedExhibitA");
+            if (affirmedExhibitB != null) names.add("affirmedExhibitB");
+            if (affirmedAppendix1 != null) names.add("affirmedAppendix1");
+            if (affirmedAppendix2 != null) names.add("affirmedAppendix2");
+            if (affirmedAppendix3 != null) names.add("affirmedAppendix3");
+            if (affirmedAppendix4 != null) names.add("affirmedAppendix4");
+            if (affirmedAppendix5 != null) names.add("affirmedAppendix5");
             return names;
         }
     }
@@ -1452,5 +1493,92 @@ public class ConsultantApplicationService {
             return (comma > 0 ? xff.substring(0, comma) : xff).trim();
         }
         return request.getRemoteAddr();
+    }
+
+    // ── F-1 guided-signing all-required gate ─────────────────────────
+    //
+    // The set of required consultant-fillable fields IS the union of:
+    //   * cover (personal block, plus consultantName + consultantEmail
+    //     which the ERM seeded but the consultant still confirms)
+    //   * Exhibit A
+    //   * Appendix 1 (employment)
+    //   * Appendix 2 ACH         -- mandatory now (was optional)
+    //   * Appendix 3 background  -- mandatory now (was optional)
+    //   * Appendix 4 portal      -- mandatory now (was optional)
+    //   * Appendix 5 security    -- mandatory now (was optional)
+    //
+    // Keys are the entity field names (camelCase). The wizard UI keys
+    // its sections off the same names via src/lib/agreement-sections.ts,
+    // so a missing key surfaces directly to the right step.
+
+    /** Returns the keys of every required consultant field that's blank. */
+    private static java.util.List<String> collectMissingConsultantFields(
+            ConsultantApplication app) {
+        java.util.List<String> missing = new java.util.ArrayList<>();
+        // Cover (identity confirms, prefilled but required at submit).
+        addIfBlank(missing, "consultantName", app.getConsultantName());
+        addIfBlank(missing, "consultantEmail", app.getConsultantEmail());
+        addIfBlank(missing, "primaryPhone", app.getPrimaryPhone());
+        addIfBlank(missing, "workAuthorizationCategory", app.getWorkAuthorizationCategory());
+        addIfBlank(missing, "residenceAddress", app.getResidenceAddress());
+        // Exhibit A.
+        addIfBlank(missing, "technologyTrack", app.getTechnologyTrack());
+        addIfBlank(missing, "customScopeNotes", app.getCustomScopeNotes());
+        // Appendix 1 -- employment.
+        addIfBlank(missing, "employerPayrollEntity", app.getEmployerPayrollEntity());
+        addIfBlank(missing, "implementationPartner", app.getImplementationPartner());
+        addIfBlank(missing, "endClient", app.getEndClient());
+        addIfBlank(missing, "roleTitle", app.getRoleTitle());
+        if (app.getVerifiedStartDate() == null) missing.add("verifiedStartDate");
+        addIfBlank(missing, "payrollCycle", app.getPayrollCycle());
+        // Appendix 2 -- ACH (now mandatory).
+        addIfBlank(missing, "achAccountType", app.getAchAccountType());
+        addIfBlank(missing, "achBankName", app.getAchBankName());
+        addIfBlank(missing, "achAccountHolderName", app.getAchAccountHolderName());
+        addIfBlank(missing, "achRoutingNumber", app.getAchRoutingNumber());
+        addIfBlank(missing, "achAccountNumber", app.getAchAccountNumber());
+        addIfBlank(missing, "achNoticeEmail", app.getAchNoticeEmail());
+        addIfBlank(missing, "achDebitDates", app.getAchDebitDates());
+        addIfBlank(missing, "achDebitAmounts", app.getAchDebitAmounts());
+        // Appendix 3 -- background check (now mandatory).
+        addIfBlank(missing, "bgFullLegalName", app.getBgFullLegalName());
+        addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
+        addIfBlank(missing, "bgCurrentAddress", app.getBgCurrentAddress());
+        if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
+        addIfBlank(missing, "bgFullSsn", app.getBgFullSsn());
+        addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
+        // Appendix 4 -- portal (now mandatory).
+        addIfBlank(missing, "portalPlatform", app.getPortalPlatform());
+        addIfBlank(missing, "portalUsername", app.getPortalUsername());
+        addIfBlank(missing, "portalAuthorizedActions", app.getPortalAuthorizedActions());
+        if (app.getPortalEffectiveDate() == null) missing.add("portalEffectiveDate");
+        addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());
+        // Appendix 5 -- security check (now mandatory).
+        addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
+        addIfBlank(missing, "securityCheckNumbers", app.getSecurityCheckNumbers());
+        addIfBlank(missing, "securityCheckBank", app.getSecurityCheckBank());
+        addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
+        addIfBlank(missing, "securityCheckAmount", app.getSecurityCheckAmount());
+        addIfBlank(missing, "securityCheckDates", app.getSecurityCheckDates());
+        return missing;
+    }
+
+    /** Returns the keys of every section affirmation flag still false / null. */
+    private static java.util.List<String> collectMissingAffirmations(
+            ConsultantApplication app) {
+        java.util.List<String> missing = new java.util.ArrayList<>();
+        if (!Boolean.TRUE.equals(app.getAffirmedMainAgreement())) missing.add("affirmedMainAgreement");
+        if (!Boolean.TRUE.equals(app.getAffirmedExhibitA())) missing.add("affirmedExhibitA");
+        if (!Boolean.TRUE.equals(app.getAffirmedExhibitB())) missing.add("affirmedExhibitB");
+        if (!Boolean.TRUE.equals(app.getAffirmedAppendix1())) missing.add("affirmedAppendix1");
+        if (!Boolean.TRUE.equals(app.getAffirmedAppendix2())) missing.add("affirmedAppendix2");
+        if (!Boolean.TRUE.equals(app.getAffirmedAppendix3())) missing.add("affirmedAppendix3");
+        if (!Boolean.TRUE.equals(app.getAffirmedAppendix4())) missing.add("affirmedAppendix4");
+        if (!Boolean.TRUE.equals(app.getAffirmedAppendix5())) missing.add("affirmedAppendix5");
+        return missing;
+    }
+
+    private static void addIfBlank(java.util.List<String> out, String key, String value) {
+        if (value == null || value.trim().isEmpty()) out.add(key);
     }
 }

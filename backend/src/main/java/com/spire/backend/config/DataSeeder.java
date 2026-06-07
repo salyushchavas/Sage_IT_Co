@@ -1179,6 +1179,29 @@ public class DataSeeder implements CommandLineRunner {
                 {"access_at TIMESTAMP", "access_at"},
                 {"signing_ip VARCHAR(64)", "signing_ip"},
                 {"signing_at TIMESTAMP", "signing_at"},
+                // F-1 (guided signing foundation) -- one affirmation
+                // flag per signing section. DEFAULT FALSE so existing
+                // rows backfill to "not yet affirmed" automatically;
+                // the entity field defaults match. Submit-time
+                // validation in ConsultantApplicationService requires
+                // all eight to be true before the SUBMITTED ->
+                // VERIFIED transition lands.
+                {"affirmed_main_agreement BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_main_agreement"},
+                {"affirmed_exhibit_a BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_exhibit_a"},
+                {"affirmed_exhibit_b BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_exhibit_b"},
+                {"affirmed_appendix1 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_appendix1"},
+                {"affirmed_appendix2 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_appendix2"},
+                {"affirmed_appendix3 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_appendix3"},
+                {"affirmed_appendix4 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_appendix4"},
+                {"affirmed_appendix5 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "affirmed_appendix5"},
         };
         for (String[] col : columns) {
             try {

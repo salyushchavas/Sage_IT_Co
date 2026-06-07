@@ -85,6 +85,24 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(ex.getMessage()));
     }
 
+    // 400 — Consultant submission is missing required content. Returns a
+    // structured payload so the wizard UI can route back to the offending
+    // section without a second round-trip. See IncompleteSubmissionException.
+    @ExceptionHandler(IncompleteSubmissionException.class)
+    public ResponseEntity<ApiResponse<Map<String, Object>>> handleIncompleteSubmission(
+            IncompleteSubmissionException ex) {
+        Map<String, Object> details = new HashMap<>();
+        details.put("missingFields", ex.getMissingFields());
+        details.put("missingAffirmations", ex.getMissingAffirmations());
+        details.put("missingSignature", ex.isMissingSignature());
+        log.warn("Incomplete consultant submission: {} field(s), {} affirmation(s), sig missing={}",
+                ex.getMissingFields().size(),
+                ex.getMissingAffirmations().size(),
+                ex.isMissingSignature());
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ApiResponse.error(ex.getMessage(), details));
+    }
+
     // 400 — Validation errors (@Valid)
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<ApiResponse<Map<String, String>>> handleValidation(MethodArgumentNotValidException ex) {
