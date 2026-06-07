@@ -78,21 +78,28 @@ public class ConsultantApplicationController {
     public ResponseEntity<ApiResponse<PageResponse<ConsultantApplication>>> list(
             @RequestParam(value = "status", required = false) String status,
             @RequestParam(value = "page", defaultValue = "0") int page,
-            @RequestParam(value = "size", defaultValue = "20") int size) {
+            @RequestParam(value = "size", defaultValue = "20") int size,
+            HttpServletRequest request) {
         Pageable pageable = PageRequest.of(
                 Math.max(0, page),
                 Math.min(100, Math.max(1, size)),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
-        Page<ConsultantApplication> result =
-                consultantService.listApplications(status, pageable);
+        // Phase B — per-ERM isolation: an ERM gets only their own rows;
+        // the super-admin gets all.
+        Page<ConsultantApplication> result = consultantService.listApplications(
+                status, pageable,
+                AgreementAuthz.userId(request), AgreementAuthz.roleEnum(request));
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(result)));
     }
 
     @GetMapping("/api/agreement-erm/applications/{appId}")
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> get(
-            @PathVariable String appId) {
+            @PathVariable String appId,
+            HttpServletRequest request) {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
+        // Non-owner ERM is treated as if the application doesn't exist (404).
+        consultantService.assertErmCanAccess(app, request);
         List<ConsultantApplicationEvent> events = consultantService.listEvents(appId);
         List<ConsultantApplicationRevision> revisions =
                 consultantService.listRevisions(appId);
@@ -194,8 +201,13 @@ public class ConsultantApplicationController {
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<byte[]> downloadPdf(
             @PathVariable String appId,
-            @RequestParam(value = "disposition", required = false) String disposition) {
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
+        // Phase B — the critical ownership check: an authenticated ERM-B
+        // streaming ERM-A's appId must get 404 (treated as nonexistent),
+        // even though the bytes are backend-streamed.
+        consultantService.assertErmCanAccess(app, request);
 
         String sourceUrl;
         String publicId = app.getFinalPdfPublicId();

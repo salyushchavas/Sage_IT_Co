@@ -25,6 +25,7 @@ import {
   ermRequestRevision,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
+  fetchMe,
   resendConsultantInvite,
   type ConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
@@ -151,6 +152,26 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const [busy, setBusy] = useState<"resend" | "cancel" | null>(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
+  // Phase B nicety — pre-fill the Approve & Sign name/title from the
+  // signed-in user's profile so they don't retype each time.
+  const [me, setMe] = useState<{ fullName: string | null; title: string | null }>({
+    fullName: null,
+    title: null,
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchMe()
+      .then((identity) => {
+        if (!cancelled) setMe({ fullName: identity.fullName, title: identity.title });
+      })
+      .catch(() => {
+        /* non-fatal: fields just start blank */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const status = app.status;
   const isLocked = ["SIGNED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(status);
@@ -245,6 +266,8 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
       {modal === "approve" && (
         <ApproveAndSignModal
           appId={app.applicationId}
+          defaultName={me.fullName ?? ""}
+          defaultTitle={me.title ?? ""}
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
@@ -995,18 +1018,31 @@ function RequestRevisionModal({
 
 function ApproveAndSignModal({
   appId,
+  defaultName = "",
+  defaultTitle = "",
   onClose,
   onDone,
 }: {
   appId: string;
+  defaultName?: string;
+  defaultTitle?: string;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
-  const [ermName, setErmName] = useState("");
-  const [ermTitle, setErmTitle] = useState("");
+  // Pre-filled from /me (Phase B); both stay fully editable.
+  const [ermName, setErmName] = useState(defaultName);
+  const [ermTitle, setErmTitle] = useState(defaultTitle);
   const [signature, setSignature] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+
+  // /me may resolve AFTER this modal has opened (useState only takes the
+  // initial value at mount). Backfill the prefill into any field the
+  // signer hasn't already typed into — never clobber their input.
+  useEffect(() => {
+    if (defaultName) setErmName((v) => v || defaultName);
+    if (defaultTitle) setErmTitle((v) => v || defaultTitle);
+  }, [defaultName, defaultTitle]);
 
   const canSubmit =
     ermName.trim().length > 0 &&

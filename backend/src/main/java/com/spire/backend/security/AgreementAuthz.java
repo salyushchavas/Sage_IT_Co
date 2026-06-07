@@ -1,5 +1,6 @@
 package com.spire.backend.security;
 
+import com.spire.backend.entity.AgreementUserRole;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.access.AccessDeniedException;
 
@@ -33,6 +34,21 @@ public final class AgreementAuthz {
     public static String role(HttpServletRequest request) {
         Object v = request.getAttribute(ATTR_ROLE);
         return v == null ? null : v.toString();
+    }
+
+    /**
+     * The caller's role as an enum, or null if absent/unrecognized
+     * (e.g. a legacy pre-multi-user token). A null role is treated as
+     * non-super-admin by the ownership checks.
+     */
+    public static AgreementUserRole roleEnum(HttpServletRequest request) {
+        String r = role(request);
+        if (r == null) return null;
+        try {
+            return AgreementUserRole.valueOf(r);
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     /** Throws 403 unless the caller is the SUPER_ADMIN. */

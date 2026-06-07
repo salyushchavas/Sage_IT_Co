@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertCircle, Loader2, Plus, Search } from "lucide-react";
 
 import {
+  fetchMe,
   listConsultantApplications,
   type ConsultantApplication,
   type ConsultantApplicationStatus,
@@ -34,6 +35,25 @@ export default function ConsultantsListView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  // Phase B — super-admin oversight: an "Owner" column + an owner
+  // filter, both shown only to the super-admin (an ERM's list is all
+  // theirs, so the column would be redundant).
+  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [ownerFilter, setOwnerFilter] = useState("ALL");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchMe()
+      .then((me) => {
+        if (!cancelled) setIsSuperAdmin(me.role === "SUPER_ADMIN");
+      })
+      .catch(() => {
+        /* non-fatal: column simply stays hidden */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -63,15 +83,30 @@ export default function ConsultantsListView() {
     };
   }, [filter, page]);
 
+  // Distinct owner names in the current page, for the super-admin's
+  // "View" dropdown (client-side filter at this data volume).
+  const ownerOptions = useMemo<string[]>(() => {
+    const names = new Set<string>();
+    (pageData?.content ?? []).forEach((r) => {
+      if (r.ownerName) names.add(r.ownerName);
+    });
+    return Array.from(names).sort();
+  }, [pageData]);
+
   const filtered = useMemo<ConsultantApplication[]>(() => {
-    const rows = pageData?.content ?? [];
+    let rows = pageData?.content ?? [];
+    if (isSuperAdmin && ownerFilter !== "ALL") {
+      rows = rows.filter((r) => (r.ownerName ?? "") === ownerFilter);
+    }
     const q = search.trim().toLowerCase();
     if (!q) return rows;
     return rows.filter((r) =>
-      [r.consultantEmail, r.consultantName ?? "", r.applicationId]
+      [r.consultantEmail, r.consultantName ?? "", r.applicationId, r.ownerName ?? ""]
         .some((v) => v.toLowerCase().includes(q)),
     );
-  }, [pageData, search]);
+  }, [pageData, search, isSuperAdmin, ownerFilter]);
+
+  const colCount = isSuperAdmin ? 6 : 5;
 
   return (
     <div className="space-y-4">
@@ -110,18 +145,35 @@ export default function ConsultantsListView() {
             </button>
           ))}
         </div>
-        <div className="relative">
-          <Search
-            size={13}
-            className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
-          />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search email, name, ID…"
-            className="pl-8 pr-3 py-1.5 text-xs rounded-md border border-gray-200 w-56 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
-          />
+        <div className="flex items-center gap-2">
+          {isSuperAdmin && ownerOptions.length > 0 && (
+            <select
+              value={ownerFilter}
+              onChange={(e) => setOwnerFilter(e.target.value)}
+              title="Filter by owning ERM"
+              className="py-1.5 pl-2.5 pr-7 text-xs rounded-md border border-gray-200 bg-white text-gray-700 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy cursor-pointer"
+            >
+              <option value="ALL">All ERMs</option>
+              {ownerOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          )}
+          <div className="relative">
+            <Search
+              size={13}
+              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400"
+            />
+            <input
+              type="search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search email, name, ID…"
+              className="pl-8 pr-3 py-1.5 text-xs rounded-md border border-gray-200 w-56 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </div>
         </div>
       </div>
 
@@ -136,6 +188,7 @@ export default function ConsultantsListView() {
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
               <th className="text-left px-4 py-2">Consultant</th>
+              {isSuperAdmin && <th className="text-left px-4 py-2">Owner</th>}
               <th className="text-left px-4 py-2">Application ID</th>
               <th className="text-left px-4 py-2">Status</th>
               <th className="text-left px-4 py-2">Created</th>
@@ -145,14 +198,14 @@ export default function ConsultantsListView() {
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={5} className="text-center py-8">
+                <td colSpan={colCount} className="text-center py-8">
                   <Loader2 size={18} className="animate-spin text-sage-navy inline" />
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={colCount}
                   className="px-4 py-6 text-center text-sm text-gray-400 italic"
                 >
                   No applications match this view.
@@ -174,6 +227,11 @@ export default function ConsultantsListView() {
                       </div>
                     </Link>
                   </td>
+                  {isSuperAdmin && (
+                    <td className="px-4 py-2 text-xs text-gray-700">
+                      {r.ownerName || "—"}
+                    </td>
+                  )}
                   <td className="px-4 py-2 font-mono text-[11px] text-gray-700">
                     <Link href={`/agreements/${r.applicationId}`}>
                       {r.applicationId.slice(0, 8)}…

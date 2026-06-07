@@ -3229,6 +3229,11 @@ export interface ConsultantApplication {
   id: number;
   applicationId: string;
   ermUserId: number;
+  // Phase B — per-ERM ownership. ownerErmId is the owning AgreementUser
+  // id; ownerName is the resolved display name (present on list rows for
+  // the super-admin's oversight column, null otherwise).
+  ownerErmId?: string | null;
+  ownerName?: string | null;
   consultantEmail: string;
   consultantName: string | null;
   consultantPhone: string | null;

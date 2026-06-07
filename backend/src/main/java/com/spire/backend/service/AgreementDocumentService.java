@@ -73,12 +73,17 @@ public class AgreementDocumentService {
     private static final long LIBREOFFICE_TIMEOUT_SECONDS = 60L;
 
     private final Cloudinary cloudinary;
+    /** Phase B — resolve the owning ERM's email for the ${ermEmail}
+     *  placeholder, replacing the global env value. */
+    private final com.spire.backend.repository.AgreementUserRepository agreementUserRepository;
 
     @Value("classpath:templates/SageITCO_Master_Agreement_TEMPLATE.docx")
     private Resource templateResource;
 
-    /** Single hardcoded operator. Same property as the
-     *  agreement-erm login. */
+    /** Legacy global agreement-ERM operator email. Phase B no longer
+     *  uses this for the ${ermEmail} placeholder (now owner-resolved);
+     *  kept only as a fallback when the owner can't be resolved, and to
+     *  avoid a startup change to the @Value injection. */
     @Value("${agreement-erm.email}")
     private String agreementErmEmail;
 
@@ -215,6 +220,23 @@ public class AgreementDocumentService {
 
     // ── Context build ───────────────────────────────────────────────
 
+    /**
+     * Phase B — resolve the ${ermEmail} placeholder from the owning ERM
+     * ({@code owner_erm_id} → agreement_user). Falls back to the legacy
+     * global env value when the owner can't be resolved (e.g. a legacy
+     * row with no owner).
+     */
+    private String resolveOwnerEmail(ConsultantApplication app) {
+        String ownerId = app.getOwnerErmId();
+        if (ownerId != null) {
+            var owner = agreementUserRepository.findById(ownerId);
+            if (owner.isPresent()) {
+                return owner.get().getEmail();
+            }
+        }
+        return agreementErmEmail;
+    }
+
     private Map<String, Object> buildContext(ConsultantApplication app) {
         Map<String, Object> c = new HashMap<>();
         Function<String, String> nz = s -> s == null ? "" : s;
@@ -289,10 +311,12 @@ public class AgreementDocumentService {
         c.put("securityCheckAmount", nz.apply(app.getSecurityCheckAmount()));
         c.put("securityCheckDates", nz.apply(app.getSecurityCheckDates()));
 
-        // ERM signature block.
+        // ERM signature block. ermName/ermTitle come from the Approve &
+        // Sign input (the signer confirms them); ermEmail is resolved
+        // from the OWNING ERM (Phase B), falling back to the global env.
         c.put("ermName", nz.apply(app.getErmName()));
         c.put("ermTitle", nz.apply(app.getErmTitle()));
-        c.put("ermEmail", agreementErmEmail);
+        c.put("ermEmail", resolveOwnerEmail(app));
         c.put("signatureDate", fdt.apply(app.getSignatureDate()));
 
         // Image placeholders -- separate entity fields. Each renders as

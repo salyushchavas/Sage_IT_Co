@@ -55,13 +55,20 @@ public class ConsultantApplication {
      * this application. Stamped at create time; nullable so legacy rows
      * (and the transient window of pre-multi-user tokens) stay valid.
      *
-     * Phase note: this column is populated but NOT yet used to gate
-     * reads -- the list/detail endpoints still return all applications
-     * to any authenticated agreement user. Per-ERM filtering is the next
-     * phase.
+     * Phase B uses this for per-ERM data isolation: an ERM sees/acts on
+     * only their own applications; the super-admin sees all.
      */
     @Column(name = "owner_erm_id", length = 36)
     private String ownerErmId;
+
+    /**
+     * Display name of the owning ERM, resolved from {@link AgreementUser}
+     * for the super-admin's list view. Not persisted; populated by the
+     * list service. Null on detail responses and for ERM lists (an ERM's
+     * list is all theirs).
+     */
+    @Transient
+    private String ownerName;
 
     @Column(name = "consultant_email", nullable = false, length = 255)
     private String consultantEmail;

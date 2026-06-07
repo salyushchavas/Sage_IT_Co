@@ -2,13 +2,18 @@ package com.spire.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.spire.backend.entity.AgreementUser;
+import com.spire.backend.entity.AgreementUserRole;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
 import com.spire.backend.exception.ResourceNotFoundException;
+import com.spire.backend.repository.AgreementUserRepository;
 import com.spire.backend.repository.ConsultantApplicationEventRepository;
 import com.spire.backend.repository.ConsultantApplicationRepository;
 import com.spire.backend.repository.ConsultantApplicationRevisionRepository;
+import com.spire.backend.security.AgreementAuthz;
+import com.spire.backend.security.AgreementOwnership;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -69,6 +74,7 @@ public class ConsultantApplicationService {
     private final EmailTemplateService emailTemplateService;
     private final ConsultantPdfService consultantPdfService;
     private final AgreementDocumentService agreementDocumentService;
+    private final AgreementUserRepository agreementUserRepository;
     private final com.cloudinary.Cloudinary cloudinary;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -159,13 +165,69 @@ public class ConsultantApplicationService {
                         "ConsultantApplication", "applicationId", applicationId));
     }
 
+    /**
+     * Phase B ownership guard for ERM-authenticated calls: the caller
+     * must own the application (or be the super-admin), else 404. Reads
+     * the authenticated identity off the request attributes stamped by
+     * AgreementErmAuthFilter. Call immediately after loading, before any
+     * read or mutation. NOT applied to the consultant-side flow (those
+     * endpoints are appId-only and stay open).
+     */
+    public void assertErmCanAccess(ConsultantApplication app, HttpServletRequest request) {
+        AgreementOwnership.assertCanAccess(
+                app, AgreementAuthz.userId(request), AgreementAuthz.roleEnum(request));
+    }
+
+    /**
+     * Phase B — per-ERM data isolation. The super-admin sees every
+     * application; an ERM sees only ones they own ({@code
+     * owner_erm_id == userId}). The owner-scoped query keeps non-owned
+     * rows in the DB, never serialized to the wrong ERM. Owner names are
+     * resolved for the super-admin's oversight column.
+     */
     @Transactional(readOnly = true)
-    public Page<ConsultantApplication> listApplications(String status, Pageable pageable) {
-        if (status == null || status.isBlank() || "ALL".equalsIgnoreCase(status)) {
-            return applicationRepository.findByErmUserId(AGREEMENT_ERM_USER_ID, pageable);
+    public Page<ConsultantApplication> listApplications(
+            String status, Pageable pageable, String userId, AgreementUserRole role) {
+        boolean all = status == null || status.isBlank() || "ALL".equalsIgnoreCase(status);
+        Page<ConsultantApplication> page;
+        if (role == AgreementUserRole.SUPER_ADMIN) {
+            page = all
+                    ? applicationRepository.findAll(pageable)
+                    : applicationRepository.findByStatus(status, pageable);
+        } else {
+            // ERM (or null role): only their own. A null/empty userId
+            // matches nothing, so an unauthenticated/legacy token sees
+            // an empty list rather than everyone's data.
+            String owner = userId == null ? "" : userId;
+            page = all
+                    ? applicationRepository.findByOwnerErmId(owner, pageable)
+                    : applicationRepository.findByOwnerErmIdAndStatus(owner, status, pageable);
         }
-        return applicationRepository.findByErmUserIdAndStatus(
-                AGREEMENT_ERM_USER_ID, status, pageable);
+        populateOwnerNames(page.getContent());
+        return page;
+    }
+
+    /**
+     * Batch-resolves the owning ERM's display name onto the transient
+     * {@code ownerName} field for the super-admin's list column. One
+     * query for the whole page rather than per-row lookups.
+     */
+    private void populateOwnerNames(List<ConsultantApplication> apps) {
+        if (apps == null || apps.isEmpty()) return;
+        java.util.Set<String> ownerIds = apps.stream()
+                .map(ConsultantApplication::getOwnerErmId)
+                .filter(java.util.Objects::nonNull)
+                .collect(java.util.stream.Collectors.toSet());
+        if (ownerIds.isEmpty()) return;
+        Map<String, String> idToName = new java.util.HashMap<>();
+        for (AgreementUser u : agreementUserRepository.findAllById(ownerIds)) {
+            idToName.put(u.getId(), u.getFullName());
+        }
+        for (ConsultantApplication app : apps) {
+            if (app.getOwnerErmId() != null) {
+                app.setOwnerName(idToName.get(app.getOwnerErmId()));
+            }
+        }
     }
 
     @Transactional
@@ -178,6 +240,7 @@ public class ConsultantApplicationService {
             HttpServletRequest request
     ) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
         String status = app.getStatus();
         if (!ConsultantApplication.Status.DRAFT.name().equals(status)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
@@ -236,6 +299,7 @@ public class ConsultantApplicationService {
     public ConsultantApplication cancel(
             String applicationId, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
         String status = app.getStatus();
         if (ConsultantApplication.Status.SIGNED.name().equals(status)
                 || ConsultantApplication.Status.COMPLETED.name().equals(status)) {
@@ -255,6 +319,7 @@ public class ConsultantApplicationService {
     @Transactional
     public void resendInvite(String applicationId, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
         try {
             emailTemplateService.sendConsultantApplicationCreated(app);
             appendEvent(app.getId(),
@@ -603,6 +668,7 @@ public class ConsultantApplicationService {
     public ConsultantApplication ermRequestRevision(
             String applicationId, String remarks, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
         if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
             throw new IllegalStateException(
                     "Only VERIFIED applications can be sent back for revision "
@@ -660,6 +726,7 @@ public class ConsultantApplicationService {
             String ermSignatureBase64,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
         if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
             throw new IllegalStateException(
                     "Only VERIFIED applications can be approved + signed "
@@ -747,12 +814,15 @@ public class ConsultantApplicationService {
     public void sendPdfToCustomRecipient(
             String applicationId, String recipientEmail, String note,
             HttpServletRequest request) {
+        // Load + ownership check first: a non-owner ERM must get 404
+        // before any input validation reveals anything.
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
         if (recipientEmail == null || recipientEmail.isBlank()
                 || !recipientEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
             throw new IllegalArgumentException(
                     "A valid recipient email is required.");
         }
-        ConsultantApplication app = getByApplicationId(applicationId);
         if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())
                 || app.getFinalPdfUrl() == null) {
             throw new IllegalStateException(

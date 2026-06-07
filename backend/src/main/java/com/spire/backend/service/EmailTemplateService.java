@@ -48,6 +48,9 @@ public class EmailTemplateService {
     private final EmailService emailService;
     private final BrandConfig brandConfig;
     private final com.spire.backend.repository.UserRepository userRepository;
+    /** Phase B — resolve the owning ERM (and super-admin fallback) for
+     *  the owner-routed consultant-submit review notification. */
+    private final com.spire.backend.repository.AgreementUserRepository agreementUserRepository;
     /** Lazy to break a potential cycle with AgreementDocumentService
      *  (which doesn't currently inject EmailTemplateService, but might
      *  in a future batch -- @Lazy makes the wiring safe regardless). */
@@ -895,10 +898,36 @@ public class EmailTemplateService {
                 + ctaFallback(url)
                 + muted("Approve to lock and email the signed PDF, or send "
                         + "the application back with remarks.");
+        // Phase B — route to the OWNING ERM, not the global address.
+        String recipient = resolveErmNotificationRecipient(application);
+        log.info("ERM review notification for {} routed to {}",
+                application.getApplicationId(), recipient);
         emailService.sendEmail(
-                agreementErmEmail,
+                recipient,
                 "Consultant Agreement Ready for Review: " + safeName(application),
                 wrap("Ready for your review", body));
+    }
+
+    /**
+     * Phase B — resolve the recipient for the consultant-submit "review
+     * needed" notification: the owning ERM's email. Falls back to the
+     * super-admin (so a notification is never silently dropped if the
+     * owner can't be resolved), and finally to the legacy global address.
+     */
+    private String resolveErmNotificationRecipient(ConsultantApplication application) {
+        String ownerId = application.getOwnerErmId();
+        if (ownerId != null) {
+            var owner = agreementUserRepository.findById(ownerId);
+            if (owner.isPresent()) {
+                return owner.get().getEmail();
+            }
+        }
+        var admins = agreementUserRepository.findByRole(
+                com.spire.backend.entity.AgreementUserRole.SUPER_ADMIN);
+        if (!admins.isEmpty()) {
+            return admins.get(0).getEmail();
+        }
+        return agreementErmEmail;
     }
 
     /**

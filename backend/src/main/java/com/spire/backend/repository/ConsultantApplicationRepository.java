@@ -21,6 +21,17 @@ public interface ConsultantApplicationRepository
     Page<ConsultantApplication> findByErmUserIdAndStatus(
             Long ermUserId, String status, Pageable pageable);
 
+    // Phase B — per-ERM data isolation. Owner-scoped list queries; the
+    // {@code = ?} predicate naturally excludes null-owner rows, so an
+    // ERM never sees an unowned (super-admin-only) application.
+    Page<ConsultantApplication> findByOwnerErmId(String ownerErmId, Pageable pageable);
+
+    Page<ConsultantApplication> findByOwnerErmIdAndStatus(
+            String ownerErmId, String status, Pageable pageable);
+
+    // Super-admin status filter (sees all owners).
+    Page<ConsultantApplication> findByStatus(String status, Pageable pageable);
+
     /** Cron sweep — find apps past their expiry that are still in flight. */
     List<ConsultantApplication> findByStatusInAndExpiresAtBefore(
             List<String> statuses, LocalDateTime cutoff);
