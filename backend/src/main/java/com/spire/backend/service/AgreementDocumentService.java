@@ -117,6 +117,54 @@ public class AgreementDocumentService {
     }
 
     /**
+     * In-memory cache of the consultant-independent BLANK preview PDF
+     * (the master template rendered with empty values + underscore
+     * placeholders + no signatures). Built lazily on first request and
+     * served from memory thereafter -- the bytes are identical for
+     * every consultant, so generating it per-consultant would just
+     * burn LibreOffice cycles.
+     *
+     * Volatile so the double-checked-locking-style write in
+     * {@link #getBlankPreviewPdfBytes()} publishes safely under the
+     * Spring container's worker threads.
+     */
+    private volatile byte[] blankPreviewPdfCache;
+
+    /**
+     * Returns the bytes of the blank-form preview PDF (the agreement
+     * template rendered with empty values + underscore placeholders).
+     * Cached after the first generation -- subsequent calls are an
+     * in-memory return.
+     *
+     * Used by the consultant wizard's "View full agreement" reference:
+     * the consultant reads the real document with their data NOT in it,
+     * paired with the plain-language section summaries.
+     */
+    public byte[] getBlankPreviewPdfBytes() throws Exception {
+        byte[] cached = blankPreviewPdfCache;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = blankPreviewPdfCache;
+            if (cached != null) return cached;
+            Path docx = null;
+            Path pdf = null;
+            try {
+                Map<String, Object> ctx = buildBlankContext();
+                docx = fillTemplate(ctx);
+                pdf = convertToPdf(docx);
+                cached = Files.readAllBytes(pdf);
+                blankPreviewPdfCache = cached;
+                log.info("Cached blank-form preview PDF ({} bytes) on first request",
+                        cached.length);
+                return cached;
+            } finally {
+                safeDelete(docx);
+                safeDelete(pdf);
+            }
+        }
+    }
+
+    /**
      * Builds a Cloudinary signed URL for the given final-PDF public_id.
      *
      * The {@code Url.signed(true) + type("authenticated")} chain blocks
@@ -331,6 +379,59 @@ public class AgreementDocumentService {
         c.put("signatureImage", buildImage(app.getSignatureImage()));
         c.put("ermSignatureImage", buildImage(app.getErmSignatureUrl()));
 
+        return c;
+    }
+
+    /**
+     * Builds the same placeholder map as {@link #buildContext} but
+     * with underscore-line placeholders ("________________") for every
+     * text field and empty strings for signature images. The result is
+     * consultant-INDEPENDENT (constant) so the rendered PDF can be
+     * cached and reused across every consultant request.
+     *
+     * Keys list must stay in sync with {@link #buildContext}: any
+     * placeholder added there should be added here too so the master
+     * template doesn't show a literal "${var}" in the preview.
+     */
+    private Map<String, Object> buildBlankContext() {
+        Map<String, Object> c = new HashMap<>();
+        // 30 underscores -- visually obvious "fill here" guide; safe
+        // width inside narrow cells (the template has both wide and
+        // narrow blanks; this is a compromise that reads well on both).
+        final String LINE = "______________________________";
+        String[] textKeys = {
+                // Header / cover
+                "participantFullLegalName", "primaryEmail", "primaryPhone",
+                "workAuthorizationCategory", "residenceAddress",
+                "effectiveDate",
+                // Rate card
+                "ratePeriod1", "rateAmount1", "ratePeriod2", "rateAmount2",
+                // Exhibit A
+                "technologyTrack", "customScopeNotes",
+                // Appendix 1 -- employment
+                "employerPayrollEntity", "implementationPartner", "endClient",
+                "roleTitle", "verifiedStartDate", "payrollCycle",
+                // Appendix 2 -- ACH
+                "achAccountType", "achBankName", "achAccountHolderName",
+                "achRoutingNumber", "achAccountNumber", "achNoticeEmail",
+                "achDebitDates", "achDebitAmounts",
+                // Appendix 3 -- background check
+                "bgFullLegalName", "bgOtherNamesUsed", "bgCurrentAddress",
+                "bgDateOfBirth", "bgFullSsn", "bgDriverLicense",
+                // Appendix 4 -- portal
+                "portalPlatform", "portalUsername", "portalAuthorizedActions",
+                "portalEffectiveDate", "portalRevocationContact",
+                // Appendix 5 -- security check
+                "securityCheckCount", "securityCheckNumbers", "securityCheckBank",
+                "securityCheckHolderName", "securityCheckAmount", "securityCheckDates",
+                // ERM signature block (text -- the images themselves are
+                // signatureImage / ermSignatureImage below).
+                "ermName", "ermTitle", "ermEmail", "signatureDate",
+        };
+        for (String k : textKeys) c.put(k, LINE);
+        // Signature images render as empty boxes in the preview.
+        c.put("signatureImage", "");
+        c.put("ermSignatureImage", "");
         return c;
     }
 

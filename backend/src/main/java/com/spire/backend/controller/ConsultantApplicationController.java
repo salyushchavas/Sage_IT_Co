@@ -355,6 +355,38 @@ public class ConsultantApplicationController {
     }
 
     /**
+     * The blank-form preview of the master agreement -- the real
+     * document with underscore placeholders where the consultant's
+     * data will eventually land. Consumed by the wizard's "View full
+     * agreement" reference button so the consultant can read the
+     * binding text alongside the plain-language section summaries.
+     *
+     * The bytes are consultant-independent and cached in memory after
+     * the first render (see
+     * {@link AgreementDocumentService#getBlankPreviewPdfBytes()}).
+     */
+    @GetMapping("/api/consultant/agreement-template-pdf")
+    public ResponseEntity<byte[]> agreementTemplatePdf(HttpServletRequest request) {
+        // Re-uses the portal token guard: any verified consultant can
+        // read the template, not just the one whose appId would gate
+        // the per-agreement download endpoint.
+        requireConsultantEmail(request);
+        byte[] bytes;
+        try {
+            bytes = agreementDocumentService.getBlankPreviewPdfBytes();
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"SageITCO-Agreement-Template.pdf\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, max-age=0, no-store")
+                .body(bytes);
+    }
+
+    /**
      * Portal dashboard list. Returns every actionable / in-flight /
      * completed agreement addressed to the verified email. Sorted so
      * the action items surface first.

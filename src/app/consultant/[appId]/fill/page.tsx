@@ -6,389 +6,57 @@ import {
   useMemo,
   useRef,
   useState,
-  type ChangeEvent,
+  type ReactNode,
 } from "react";
-import Image from "next/image";
 import { useParams, useRouter } from "next/navigation";
 import {
   AlertCircle,
-  Check,
+  ArrowLeft,
+  ArrowRight,
   CheckCircle2,
-  ChevronRight,
   Eye,
   EyeOff,
+  FileText,
   Loader2,
   Lock,
   PauseCircle,
-  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  X,
 } from "lucide-react";
 
+import SignaturePad from "@/components/common/SignaturePad";
 import {
+  AGREEMENT_SECTIONS,
+  AFFIRMATION_FLAGS,
+  type AffirmationFlag,
+  type AgreementSection,
+  type SectionField,
+} from "@/lib/agreement-sections";
+import {
+  fetchAgreementTemplatePdfBlob,
   getConsultantApplicationView,
   getConsultantToken,
   saveConsultantFill,
+  signConsultantApplication,
   type ConsultantApplication,
   type ConsultantFillPayload,
 } from "@/lib/api";
 
-// ── Field metadata ──────────────────────────────────────────────
+/**
+ * Guided, document-paired signing wizard. Iterates the F-1 section
+ * config; every section gets a read pane (plain-language summary +
+ * "why we need this" + a "View full agreement" button) and a fields/
+ * affirmation pane. The signature is drawn ONCE on the main-agreement
+ * step and reused for every downstream signature block via the
+ * existing $signatureImage stamping. Auto-save mirrors the Phase 5
+ * pattern: 1500ms debounce, AbortController, 429 -> 30s pause.
+ *
+ * Adding or reordering a section means editing agreement-sections.ts
+ * ONLY; this page does not enumerate sections by name anywhere.
+ */
 
-type FillKey = keyof FillState;
-
-type FieldType =
-  | "text"
-  | "tel"
-  | "email"
-  | "date"
-  | "textarea"
-  | "select"
-  | "password";
-
-interface FieldDef {
-  key: FillKey;
-  label: string;
-  type: FieldType;
-  options?: readonly string[];
-  placeholder?: string;
-  rows?: number;
-  optional?: boolean;
-  /** Returns error message or null. Runs on blur + on the final
-   *  Continue-click validation pass. Per-field; section-level
-   *  required gating is handled by the progress / continue logic. */
-  validate?: (value: string) => string | null;
-  /** Wider field that spans both columns on md+. */
-  wide?: boolean;
-}
-
-type SectionId =
-  | "personal"
-  | "service"
-  | "employment"
-  | "ach"
-  | "bg"
-  | "portal"
-  | "security";
-
-type ToggleId = Exclude<SectionId, "personal" | "service" | "employment">;
-
-interface SectionDef {
-  id: SectionId;
-  title: string;
-  subtitle?: string;
-  /** True when this section is one of the four toggleable appendices. */
-  optional?: boolean;
-  /** Sensitive-PII banner shown when expanded. */
-  warning?: string;
-  fields: FieldDef[];
-}
-
-const WORK_AUTH_OPTIONS = [
-  "F-1 OPT",
-  "F-1 STEM OPT",
-  "H-1B",
-  "H-4 EAD",
-  "L-2 EAD",
-  "GC",
-  "USC",
-  "Other",
-] as const;
-
-const PAYROLL_CYCLE_OPTIONS = [
-  "Weekly",
-  "Biweekly",
-  "Monthly",
-  "Other",
-] as const;
-
-const ACH_ACCOUNT_TYPE_OPTIONS = ["Checking", "Savings"] as const;
-
-const phoneRegex = /^\+?[0-9 ()\-.]{7,}$/;
-const required = (msg: string) => (v: string) =>
-  v.trim().length === 0 ? msg : null;
-const minLen = (n: number, msg: string) => (v: string) =>
-  v.trim().length < n ? msg : null;
-const mustPattern = (re: RegExp, msg: string) => (v: string) =>
-  v.trim().length > 0 && !re.test(v.trim()) ? msg : null;
-const compose =
-  (...checks: Array<(v: string) => string | null>) =>
-  (v: string) => {
-    for (const c of checks) {
-      const e = c(v);
-      if (e) return e;
-    }
-    return null;
-  };
-
-const SECTIONS: readonly SectionDef[] = [
-  {
-    id: "personal",
-    title: "Personal information",
-    subtitle: "Tell us where you live, how to reach you, and your work-auth basis.",
-    fields: [
-      {
-        key: "effectiveDate",
-        label: "Effective date",
-        type: "date",
-        validate: required("Required"),
-      },
-      {
-        key: "primaryPhone",
-        label: "Primary phone",
-        type: "tel",
-        placeholder: "+1 555 123 4567",
-        validate: compose(
-          required("Required"),
-          mustPattern(phoneRegex, "Doesn't look like a phone number."),
-        ),
-      },
-      {
-        key: "workAuthorizationCategory",
-        label: "Work authorization category",
-        type: "select",
-        options: WORK_AUTH_OPTIONS,
-        validate: required("Required"),
-      },
-      {
-        key: "residenceAddress",
-        label: "Residence address",
-        type: "textarea",
-        rows: 3,
-        placeholder: "Street, city, state, ZIP",
-        validate: compose(
-          required("Required"),
-          minLen(10, "Add street + city + state."),
-        ),
-        wide: true,
-      },
-    ],
-  },
-  {
-    id: "service",
-    title: "Service track",
-    subtitle: "Which technology or skill track applies to this engagement?",
-    fields: [
-      {
-        key: "technologyTrack",
-        label: "Technology / skill track",
-        type: "text",
-        placeholder: "e.g. Salesforce, Snowflake, React, Data Engineering",
-        validate: compose(required("Required"), minLen(2, "Too short.")),
-      },
-      {
-        key: "customScopeNotes",
-        label: "Custom scope / notes",
-        type: "textarea",
-        rows: 2,
-        placeholder: "Anything specific about the engagement scope (optional)",
-        optional: true,
-        wide: true,
-      },
-    ],
-  },
-  {
-    id: "employment",
-    title: "Phase 2 employment",
-    subtitle: "Where you'll be placed and how payroll runs.",
-    fields: [
-      {
-        key: "employerPayrollEntity",
-        label: "Employer / payroll entity",
-        type: "text",
-        validate: required("Required"),
-      },
-      {
-        key: "implementationPartner",
-        label: "Implementation partner",
-        type: "text",
-        placeholder: "N/A if not applicable",
-        validate: required("Required (use N/A if none)"),
-      },
-      {
-        key: "endClient",
-        label: "End client",
-        type: "text",
-        placeholder: "N/A if not applicable",
-        validate: required("Required (use N/A if none)"),
-      },
-      {
-        key: "roleTitle",
-        label: "Role / position",
-        type: "text",
-        validate: required("Required"),
-      },
-      {
-        key: "verifiedStartDate",
-        label: "Verified start date",
-        type: "date",
-        validate: required("Required"),
-      },
-      {
-        key: "payrollCycle",
-        label: "Payroll cycle",
-        type: "select",
-        options: PAYROLL_CYCLE_OPTIONS,
-        validate: required("Required"),
-      },
-    ],
-  },
-  {
-    id: "ach",
-    title: "ACH payment authorization",
-    subtitle: "Authorize Sage IT Co to debit your account for fees.",
-    optional: true,
-    fields: [
-      {
-        key: "achAccountType",
-        label: "Account type",
-        type: "select",
-        options: ACH_ACCOUNT_TYPE_OPTIONS,
-      },
-      { key: "achBankName", label: "Bank name", type: "text" },
-      {
-        key: "achAccountHolderName",
-        label: "Account holder name",
-        type: "text",
-      },
-      { key: "achRoutingNumber", label: "Routing number", type: "text" },
-      { key: "achAccountNumber", label: "Account number", type: "text" },
-      {
-        key: "achNoticeEmail",
-        label: "Notice email",
-        type: "email",
-        placeholder: "Where ACH notices should land",
-      },
-      {
-        key: "achDebitDates",
-        label: "Debit dates",
-        type: "text",
-        placeholder: "e.g. 1st & 15th of each month",
-      },
-      { key: "achDebitAmounts", label: "Debit amounts", type: "text" },
-    ],
-  },
-  {
-    id: "bg",
-    title: "Background check",
-    subtitle: "Authorization for the background check vendor.",
-    optional: true,
-    warning:
-      "This section collects sensitive personal information (SSN, DOB, driver's license). Only fill it if your ERM has confirmed it's required for this engagement.",
-    fields: [
-      { key: "bgFullLegalName", label: "Full legal name", type: "text" },
-      { key: "bgOtherNamesUsed", label: "Other names used", type: "text" },
-      {
-        key: "bgCurrentAddress",
-        label: "Current address",
-        type: "textarea",
-        rows: 3,
-        wide: true,
-      },
-      { key: "bgDateOfBirth", label: "Date of birth", type: "date" },
-      {
-        key: "bgFullSsn",
-        label: "Full SSN",
-        type: "password",
-        placeholder: "XXX-XX-XXXX",
-      },
-      {
-        key: "bgDriverLicense",
-        label: "Driver's license",
-        type: "password",
-        placeholder: "State + number",
-      },
-    ],
-  },
-  {
-    id: "portal",
-    title: "Portal access",
-    subtitle: "Grant the operator a limited window into a client portal.",
-    optional: true,
-    fields: [
-      { key: "portalPlatform", label: "Platform", type: "text" },
-      { key: "portalUsername", label: "Username", type: "text" },
-      {
-        key: "portalAuthorizedActions",
-        label: "Authorized actions",
-        type: "textarea",
-        rows: 3,
-        wide: true,
-      },
-      { key: "portalEffectiveDate", label: "Effective date", type: "date" },
-      {
-        key: "portalRevocationContact",
-        label: "Revocation contact",
-        type: "text",
-      },
-    ],
-  },
-  {
-    id: "security",
-    title: "Security check",
-    subtitle: "Hold-on-file check details (refunded at engagement end).",
-    optional: true,
-    fields: [
-      {
-        key: "securityCheckCount",
-        label: "Check count",
-        type: "text",
-        placeholder: "How many checks",
-      },
-      { key: "securityCheckNumbers", label: "Check numbers", type: "text" },
-      { key: "securityCheckBank", label: "Bank", type: "text" },
-      { key: "securityCheckHolderName", label: "Holder name", type: "text" },
-      { key: "securityCheckAmount", label: "Amount", type: "text" },
-      { key: "securityCheckDates", label: "Date(s)", type: "text" },
-    ],
-  },
-];
-
-const TOGGLE_FIELDS: Record<ToggleId, FillKey[]> = {
-  ach: SECTIONS.find((s) => s.id === "ach")!.fields.map((f) => f.key),
-  bg: SECTIONS.find((s) => s.id === "bg")!.fields.map((f) => f.key),
-  portal: SECTIONS.find((s) => s.id === "portal")!.fields.map((f) => f.key),
-  security: SECTIONS.find((s) => s.id === "security")!.fields.map((f) => f.key),
-};
-
-const REQUIRED_SECTION_IDS: SectionId[] = ["personal", "service", "employment"];
-
-// ── Local form state ────────────────────────────────────────────
-
-type FillState = {
-  [K in keyof Required<ConsultantFillPayload>]: string;
-};
-
-const ALL_FILL_KEYS = SECTIONS.flatMap((s) => s.fields.map((f) => f.key));
-
-function buildInitialState(app: ConsultantApplication | null): FillState {
-  const state = {} as FillState;
-  for (const key of ALL_FILL_KEYS) {
-    const value = app?.[key as keyof ConsultantApplication] as
-      | string
-      | null
-      | undefined;
-    state[key] = value == null ? "" : String(value);
-  }
-  // Effective date: default to today if the ERM hasn't seeded it.
-  if (!state.effectiveDate) {
-    state.effectiveDate = new Date().toISOString().slice(0, 10);
-  }
-  return state;
-}
-
-function detectToggleState(app: ConsultantApplication | null): Set<ToggleId> {
-  const enabled = new Set<ToggleId>();
-  if (!app) return enabled;
-  (Object.keys(TOGGLE_FIELDS) as ToggleId[]).forEach((toggle) => {
-    const hasAny = TOGGLE_FIELDS[toggle].some((k) => {
-      const v = app[k as keyof ConsultantApplication];
-      return typeof v === "string" && v.length > 0;
-    });
-    if (hasAny) enabled.add(toggle);
-  });
-  return enabled;
-}
-
-// ── Page ─────────────────────────────────────────────────────────
+// ── State + types ─────────────────────────────────────────────
 
 type SaveStatus =
   | { kind: "idle" }
@@ -397,7 +65,86 @@ type SaveStatus =
   | { kind: "paused" }
   | { kind: "error"; message: string };
 
-export default function ConsultantFillPage() {
+interface FormState {
+  fields: Record<string, string>;
+  affirmations: Record<AffirmationFlag, boolean>;
+  signature: string | null;
+  signedLegalName: string;
+}
+
+const ALL_FIELD_KEYS: readonly string[] = Array.from(
+  new Set(
+    AGREEMENT_SECTIONS.flatMap((s) =>
+      s.fields.map((f) => f.key),
+    ),
+  ),
+);
+
+function emptyAffirmations(): Record<AffirmationFlag, boolean> {
+  const out = {} as Record<AffirmationFlag, boolean>;
+  for (const flag of AFFIRMATION_FLAGS) out[flag] = false;
+  return out;
+}
+
+function buildInitialState(app: ConsultantApplication | null): FormState {
+  const fields: Record<string, string> = {};
+  for (const key of ALL_FIELD_KEYS) {
+    const v = app?.[key as keyof ConsultantApplication];
+    fields[key] = v == null ? "" : String(v);
+  }
+  const affirmations = emptyAffirmations();
+  if (app) {
+    for (const flag of AFFIRMATION_FLAGS) {
+      affirmations[flag] = Boolean(app[flag as keyof ConsultantApplication]);
+    }
+  }
+  return {
+    fields,
+    affirmations,
+    signature: app?.signatureImage ?? null,
+    signedLegalName:
+      app?.signedLegalName?.trim() || app?.consultantName?.trim() || "",
+  };
+}
+
+// ── Section completeness ──────────────────────────────────────
+
+function isFieldValueValid(field: SectionField, value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0) return false;
+  if (field.type === "email") {
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  }
+  return true;
+}
+
+function isSectionComplete(
+  section: AgreementSection,
+  state: FormState,
+): boolean {
+  for (const field of section.fields) {
+    if (field.readOnly) continue;
+    if (!isFieldValueValid(field, state.fields[field.key] ?? "")) {
+      return false;
+    }
+  }
+  if (section.requiresSignature && !state.signature) return false;
+  if (section.requiresAffirmation && section.affirmationFlag) {
+    if (!state.affirmations[section.affirmationFlag]) return false;
+  }
+  return true;
+}
+
+function firstIncompleteIndex(state: FormState): number {
+  for (let i = 0; i < AGREEMENT_SECTIONS.length - 1; i++) {
+    if (!isSectionComplete(AGREEMENT_SECTIONS[i], state)) return i;
+  }
+  return AGREEMENT_SECTIONS.length - 1;
+}
+
+// ── Page ───────────────────────────────────────────────────────
+
+export default function ConsultantWizardPage() {
   const router = useRouter();
   const params = useParams<{ appId: string }>();
   const appId = params?.appId ?? "";
@@ -406,28 +153,24 @@ export default function ConsultantFillPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
 
-  const [form, setForm] = useState<FillState>(() => buildInitialState(null));
-  const [enabledToggles, setEnabledToggles] = useState<Set<ToggleId>>(
-    () => new Set(),
-  );
-  const [touched, setTouched] = useState<Set<FillKey>>(() => new Set());
-  const [revealed, setRevealed] = useState<Set<FillKey>>(() => new Set());
+  const [form, setForm] = useState<FormState>(() => buildInitialState(null));
+  const [currentStep, setCurrentStep] = useState(0);
+  const [touched, setTouched] = useState<Set<string>>(() => new Set());
+  const [revealed, setRevealed] = useState<Set<string>>(() => new Set());
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  const [templateOpen, setTemplateOpen] = useState(false);
 
-  /** Server-side snapshot of every field. Used to compute the delta
-   *  payload on each debounced PUT so we only send what changed. */
-  const lastSavedRef = useRef<FillState>(buildInitialState(null));
+  const lastSavedRef = useRef<FormState>(buildInitialState(null));
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const pauseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Hydrate from server ──────────────────────────────────────────
+  // Token + load ───────────────────────────────────────────────
   useEffect(() => {
     if (!appId) return;
-    // Portal phase — email-scoped token; missing -> portal login.
     if (!getConsultantToken()) {
       router.replace("/consultant");
       return;
@@ -437,30 +180,32 @@ export default function ConsultantFillPage() {
     getConsultantApplicationView(appId)
       .then((data) => {
         if (cancelled) return;
-        // State-machine routing -- mirror the spec.
         if (data.status === "COMPLETED") {
-          router.replace(`/consultant/${encodeURIComponent(appId)}/done`);
+          router.replace("/consultant/dashboard");
           return;
         }
         if (data.status === "VERIFIED" || data.status === "SIGNED") {
-          router.replace(`/consultant/${encodeURIComponent(appId)}/sign`);
+          router.replace("/consultant/dashboard");
           return;
         }
         if (data.status === "CANCELLED" || data.status === "EXPIRED") {
-          router.replace("/consultant");
+          router.replace("/consultant/dashboard");
           return;
         }
         const initial = buildInitialState(data);
         setApp(data);
         setForm(initial);
         lastSavedRef.current = { ...initial };
-        setEnabledToggles(detectToggleState(data));
+        // Resume at the first incomplete section (or step 0 for a
+        // brand-new application). REVISION_REQUESTED also resumes
+        // from whichever section still has gaps after the ERM kick.
+        setCurrentStep(firstIncompleteIndex(initial));
       })
       .catch((e) => {
         if (cancelled) return;
-        const msg = e instanceof Error ? e.message : "Couldn't load this application.";
+        const msg = e instanceof Error ? e.message : "Couldn't load this agreement.";
         if (/404|not found/i.test(msg)) {
-          router.replace("/consultant");
+          router.replace("/consultant/dashboard");
         } else {
           setLoadError(msg);
         }
@@ -473,7 +218,7 @@ export default function ConsultantFillPage() {
     };
   }, [appId, router]);
 
-  // Cleanup on unmount ────────────────────────────────────────────
+  // Cleanup ────────────────────────────────────────────────────
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -482,14 +227,19 @@ export default function ConsultantFillPage() {
     };
   }, []);
 
-  // Helpers ───────────────────────────────────────────────────────
+  // Auto-save (reuses Phase 5 internals) ───────────────────────
   const computeDelta = useCallback(
-    (current: FillState): ConsultantFillPayload => {
+    (current: FormState): ConsultantFillPayload => {
       const delta: ConsultantFillPayload = {};
-      const snapshot = lastSavedRef.current;
-      for (const key of ALL_FILL_KEYS) {
-        if (current[key] !== snapshot[key]) {
-          (delta as Record<string, string>)[key] = current[key];
+      const snap = lastSavedRef.current;
+      for (const key of ALL_FIELD_KEYS) {
+        if (current.fields[key] !== snap.fields[key]) {
+          (delta as Record<string, string>)[key] = current.fields[key];
+        }
+      }
+      for (const flag of AFFIRMATION_FLAGS) {
+        if (current.affirmations[flag] !== snap.affirmations[flag]) {
+          (delta as Record<string, boolean>)[flag] = current.affirmations[flag];
         }
       }
       return delta;
@@ -498,14 +248,13 @@ export default function ConsultantFillPage() {
   );
 
   const fireSave = useCallback(
-    async (current: FillState) => {
+    async (current: FormState) => {
       if (!appId) return;
       const patch = computeDelta(current);
       if (Object.keys(patch).length === 0) {
         setSaveStatus({ kind: "saved", at: Date.now() });
         return;
       }
-      // Cancel any in-flight save and start a new one.
       abortRef.current?.abort();
       const controller = new AbortController();
       abortRef.current = controller;
@@ -513,28 +262,35 @@ export default function ConsultantFillPage() {
       try {
         await saveConsultantFill(appId, patch, controller.signal);
         if (controller.signal.aborted) return;
-        // Update snapshot with the values we just sent. Any further
-        // user typing during the flight stays in `form` and will be
-        // captured by the next debounce cycle.
-        const next = { ...lastSavedRef.current };
-        for (const k of Object.keys(patch) as FillKey[]) {
-          next[k] = (patch as Record<string, string>)[k] ?? "";
+        const nextFields = { ...lastSavedRef.current.fields };
+        const nextAff = { ...lastSavedRef.current.affirmations };
+        for (const k of Object.keys(patch)) {
+          if (k in nextFields) {
+            nextFields[k] =
+              (patch as Record<string, string>)[k] ?? "";
+          } else if ((AFFIRMATION_FLAGS as readonly string[]).includes(k)) {
+            nextAff[k as AffirmationFlag] = Boolean(
+              (patch as Record<string, boolean>)[k],
+            );
+          }
         }
-        lastSavedRef.current = next;
+        lastSavedRef.current = {
+          ...lastSavedRef.current,
+          fields: nextFields,
+          affirmations: nextAff,
+        };
         setSaveStatus({ kind: "saved", at: Date.now() });
       } catch (e) {
-        // AbortError manifests as a DOMException; the user kept typing,
-        // a fresher save is already in flight -- don't surface anything.
         if (e instanceof DOMException && e.name === "AbortError") return;
         if (controller.signal.aborted) return;
         const msg = e instanceof Error ? e.message : "Couldn't save.";
         if (/too many|429/i.test(msg)) {
           setSaveStatus({ kind: "paused" });
-          // Back off 30s before allowing another debounce cycle to fire.
           if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
-          pauseTimerRef.current = setTimeout(() => {
-            setSaveStatus({ kind: "idle" });
-          }, 30_000);
+          pauseTimerRef.current = setTimeout(
+            () => setSaveStatus({ kind: "idle" }),
+            30_000,
+          );
         } else {
           setSaveStatus({ kind: "error", message: msg });
         }
@@ -544,24 +300,23 @@ export default function ConsultantFillPage() {
   );
 
   const scheduleSave = useCallback(
-    (current: FillState) => {
-      // Paused (429) -- don't reset debounce; the back-off timer will
-      // flip status back to idle and a future keystroke will resume.
+    (current: FormState) => {
       if (saveStatus.kind === "paused") return;
       if (debounceRef.current) clearTimeout(debounceRef.current);
-      debounceRef.current = setTimeout(() => {
-        void fireSave(current);
-      }, 1500);
+      debounceRef.current = setTimeout(() => void fireSave(current), 1500);
     },
     [fireSave, saveStatus.kind],
   );
 
-  // Field change handler ──────────────────────────────────────────
+  // Field / affirmation / signature setters ────────────────────
   const setField = useCallback(
-    (key: FillKey, value: string) => {
+    (key: string, value: string) => {
       setForm((prev) => {
-        if (prev[key] === value) return prev;
-        const next = { ...prev, [key]: value };
+        if (prev.fields[key] === value) return prev;
+        const next = {
+          ...prev,
+          fields: { ...prev.fields, [key]: value },
+        };
         scheduleSave(next);
         return next;
       });
@@ -569,7 +324,7 @@ export default function ConsultantFillPage() {
     [scheduleSave],
   );
 
-  const markTouched = useCallback((key: FillKey) => {
+  const markTouched = useCallback((key: string) => {
     setTouched((prev) => {
       if (prev.has(key)) return prev;
       const next = new Set(prev);
@@ -578,95 +333,137 @@ export default function ConsultantFillPage() {
     });
   }, []);
 
-  // Toggle on/off for the four optional sections ─────────────────
-  const setToggle = useCallback(
-    (toggle: ToggleId, enabled: boolean) => {
-      setEnabledToggles((prev) => {
-        const next = new Set(prev);
-        if (enabled) next.add(toggle);
-        else next.delete(toggle);
+  const setAffirmation = useCallback(
+    (flag: AffirmationFlag, value: boolean) => {
+      setForm((prev) => {
+        if (prev.affirmations[flag] === value) return prev;
+        const next = {
+          ...prev,
+          affirmations: { ...prev.affirmations, [flag]: value },
+        };
+        scheduleSave(next);
         return next;
       });
-      if (!enabled) {
-        // Clearing -- send "" for every field so the backend wipes
-        // any previously-stored value (rate-limit-safe via the debounce).
-        setForm((prev) => {
-          const cleared = { ...prev };
-          for (const k of TOGGLE_FIELDS[toggle]) cleared[k] = "";
-          scheduleSave(cleared);
-          return cleared;
-        });
-      }
     },
     [scheduleSave],
   );
 
-  // Validation surface ────────────────────────────────────────────
-  const errors = useMemo(() => {
-    const out: Partial<Record<FillKey, string>> = {};
-    for (const section of SECTIONS) {
-      const isOptional = section.optional ?? false;
-      const sectionEnabled =
-        !isOptional || enabledToggles.has(section.id as ToggleId);
-      if (!sectionEnabled) continue;
-      for (const field of section.fields) {
-        if (!field.validate) continue;
-        const message = field.validate(form[field.key]);
-        if (message) out[field.key] = message;
-      }
-    }
-    return out;
-  }, [form, enabledToggles]);
-
-  const requiredOk = useMemo(() => {
-    for (const id of REQUIRED_SECTION_IDS) {
-      const section = SECTIONS.find((s) => s.id === id);
-      if (!section) continue;
-      for (const field of section.fields) {
-        if (field.optional) continue;
-        if (errors[field.key]) return false;
-        if (!form[field.key].trim()) return false;
-      }
-    }
-    return true;
-  }, [errors, form]);
-
-  const sectionCompletion = useMemo(() => {
-    return SECTIONS.map((section) => {
-      const isOptional = section.optional ?? false;
-      const enabled = !isOptional || enabledToggles.has(section.id as ToggleId);
-      if (!enabled) return { id: section.id, complete: true };
-      const allFilled = section.fields.every((f) => {
-        if (f.optional) return true;
-        return form[f.key].trim().length > 0 && !errors[f.key];
+  const setSignature = useCallback(
+    (dataUrl: string | null) => {
+      setForm((prev) => {
+        if (prev.signature === dataUrl) return prev;
+        const next = { ...prev, signature: dataUrl };
+        scheduleSave(next);
+        return next;
       });
-      return { id: section.id, complete: allFilled };
-    });
-  }, [enabledToggles, form, errors]);
+    },
+    [scheduleSave],
+  );
 
-  const sectionsCompleteCount = sectionCompletion.filter((s) => s.complete).length;
+  const setLegalName = useCallback(
+    (value: string) => {
+      setForm((prev) => {
+        if (prev.signedLegalName === value) return prev;
+        return { ...prev, signedLegalName: value };
+      });
+    },
+    [],
+  );
 
-  // Continue: final synchronous save then route to /sign ────────
-  const handleContinue = useCallback(async () => {
-    if (!appId || !requiredOk) return;
+  // Submit ─────────────────────────────────────────────────────
+  const handleSubmit = useCallback(async () => {
+    if (!appId) return;
     setSubmitError("");
     setSubmitting(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
     try {
+      // Final flush of any pending delta.
       const patch = computeDelta(form);
       if (Object.keys(patch).length > 0) {
         await saveConsultantFill(appId, patch);
+        const nextFields = { ...lastSavedRef.current.fields };
+        const nextAff = { ...lastSavedRef.current.affirmations };
+        for (const k of Object.keys(patch)) {
+          if (k in nextFields)
+            nextFields[k] = (patch as Record<string, string>)[k] ?? "";
+          else if ((AFFIRMATION_FLAGS as readonly string[]).includes(k))
+            nextAff[k as AffirmationFlag] = Boolean(
+              (patch as Record<string, boolean>)[k],
+            );
+        }
+        lastSavedRef.current = {
+          ...lastSavedRef.current,
+          fields: nextFields,
+          affirmations: nextAff,
+        };
       }
-      router.push(`/consultant/${encodeURIComponent(appId)}/sign`);
+      if (!form.signature) {
+        throw new Error("Your signature is required before you can submit.");
+      }
+      await signConsultantApplication(
+        appId,
+        form.signedLegalName.trim(),
+        form.signature,
+      );
+      router.push("/consultant/dashboard");
     } catch (e) {
-      const msg = e instanceof Error ? e.message : "Couldn't save before continuing.";
+      // Parse the structured backend payload when present so we can
+      // route back to the first incomplete section.
+      let msg = e instanceof Error ? e.message : "Couldn't submit.";
+      let routed = false;
+      try {
+        const obj = JSON.parse(msg) as {
+          data?: {
+            missingFields?: string[];
+            missingAffirmations?: string[];
+            missingSignature?: boolean;
+          };
+          message?: string;
+        };
+        if (obj?.data) {
+          msg = obj.message || "Some items are still missing.";
+          const incompleteIdx = firstIncompleteIndex(form);
+          setCurrentStep(incompleteIdx);
+          routed = true;
+        }
+      } catch {
+        /* not JSON; fall through with the original message */
+      }
+      if (!routed) {
+        // Best-effort: also try to find which section is incomplete
+        // from local state so the consultant lands somewhere sensible.
+        setCurrentStep(firstIncompleteIndex(form));
+      }
       setSubmitError(msg);
       setSubmitting(false);
     }
-  }, [appId, computeDelta, form, requiredOk, router]);
+  }, [appId, computeDelta, form, router]);
 
-  // Render ────────────────────────────────────────────────────────
+  // Step accessors ──────────────────────────────────────────────
+  const section = AGREEMENT_SECTIONS[currentStep];
+  const sectionStatus = useMemo(
+    () =>
+      AGREEMENT_SECTIONS.map((s, i) => {
+        const complete =
+          i === AGREEMENT_SECTIONS.length - 1
+            ? AGREEMENT_SECTIONS.slice(0, -1).every((sec) =>
+                isSectionComplete(sec, form),
+              )
+            : isSectionComplete(s, form);
+        return { id: s.id, title: s.title, step: s.step, complete };
+      }),
+    [form],
+  );
+  const canAdvance = isSectionComplete(section, form);
+  const isReviewStep = currentStep === AGREEMENT_SECTIONS.length - 1;
+  const allComplete = useMemo(
+    () =>
+      AGREEMENT_SECTIONS.slice(0, -1).every((s) => isSectionComplete(s, form)),
+    [form],
+  );
+
+  // Render ─────────────────────────────────────────────────────
 
   if (loading) {
     return (
@@ -682,7 +479,7 @@ export default function ConsultantFillPage() {
         <div className="text-center max-w-sm">
           <AlertCircle size={28} className="text-red-600 inline" />
           <p className="text-sm text-red-700 mt-2">
-            {loadError || "We couldn't load this application."}
+            {loadError || "We couldn't load this agreement."}
           </p>
         </div>
       </div>
@@ -690,371 +487,364 @@ export default function ConsultantFillPage() {
   }
 
   return (
-    <main className="min-h-screen bg-stone-50 pb-32">
+    <main className="min-h-screen bg-stone-50 pb-40">
       <meta name="robots" content="noindex,nofollow" />
 
-      {/* Header strip */}
       <header className="bg-sage-navy text-white">
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-12">
-          <div className="flex items-center gap-3">
-            <Image
-              src="/sage_logo.png"
-              alt="Sage IT Co"
-              width={32}
-              height={32}
-              priority
-              className="rounded-md object-contain"
-            />
-            <span className="text-sm font-bold tracking-tight">Sage IT Co</span>
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <div>
+              <p className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-sage-copper">
+                Sage IT Consultant Portal
+              </p>
+              <h1 className="font-serif text-2xl sm:text-3xl mt-1">
+                Complete your agreement
+              </h1>
+              <p className="text-xs sm:text-sm text-white/80 mt-1.5 max-w-xl">
+                Read each section, fill the details, check the
+                affirmation, and continue. We auto-save as you go.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setTemplateOpen(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-md border border-white/30 hover:bg-white/10 transition-colors shrink-0"
+            >
+              <FileText size={12} /> View full agreement
+            </button>
           </div>
-          <h1 className="font-serif text-3xl sm:text-4xl mt-5">
-            Complete your agreement
-          </h1>
-          <p className="text-sm sm:text-base text-white/80 mt-2 max-w-xl">
-            Fill in the details below. Your progress saves automatically as
-            you type.
-          </p>
         </div>
       </header>
 
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 space-y-6 -mt-6">
-        {/* Revision banner */}
-        {app.status === "REVISION_REQUESTED" && (
-          <div className="rounded-xl border-l-4 border-sage-copper-deep bg-orange-50/70 p-4">
-            <p className="text-sm font-bold text-sage-copper-deep">
-              Revision requested
-            </p>
-            <p className="mt-1 text-xs text-gray-500">
-              Revision #{app.revisionCount ?? 1}
-            </p>
-            {app.currentRevisionRemarks && (
-              <blockquote className="mt-2 text-sm text-gray-700 italic border-l-2 border-sage-copper-deep/40 pl-3">
-                {app.currentRevisionRemarks}
-              </blockquote>
-            )}
-          </div>
-        )}
-
-        {/* Read-only ERM-filled card */}
-        <section className="bg-stone-100 rounded-xl border border-stone-200 p-4 sm:p-5">
-          <h2 className="font-serif text-lg text-sage-navy">
-            From your ERM
-          </h2>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            Filled by your ERM. Contact them if anything needs correcting.
-          </p>
-          <dl className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 text-sm">
-            <ReadOnlyRow label="Consultant name" value={app.consultantName} />
-            <ReadOnlyRow label="Email" value={app.consultantEmail} />
-            <ReadOnlyRow label="Rate period 1" value={app.ratePeriod1} />
-            <ReadOnlyRow label="Amount 1" value={app.rateAmount1} />
-            <ReadOnlyRow label="Rate period 2" value={app.ratePeriod2} />
-            <ReadOnlyRow label="Amount 2" value={app.rateAmount2} />
-          </dl>
-        </section>
-
-        {/* Progress strip */}
-        <section className="sticky top-0 z-20 bg-stone-50/95 backdrop-blur py-3 -mx-4 sm:-mx-6 px-4 sm:px-6 border-b border-stone-200">
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-sage-navy">
-                {sectionsCompleteCount} / {SECTIONS.length} sections complete
-              </span>
-              <div className="flex items-center gap-1">
-                {sectionCompletion.map((s) => (
-                  <span
-                    key={s.id}
-                    aria-label={`${s.id} ${s.complete ? "complete" : "in progress"}`}
-                    className={
-                      "inline-block w-2.5 h-2.5 rounded-full transition " +
-                      (s.complete
-                        ? "bg-sage-navy"
-                        : "border border-sage-navy/40 bg-transparent")
-                    }
-                  />
-                ))}
-              </div>
-            </div>
-            <SaveStatusBadge status={saveStatus} />
-          </div>
-        </section>
-
-        {/* Form sections */}
-        <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
-          {SECTIONS.map((section) => (
-            <SectionCard
-              key={section.id}
-              section={section}
-              enabled={
-                !section.optional ||
-                enabledToggles.has(section.id as ToggleId)
-              }
-              onToggle={
-                section.optional
-                  ? (v) => setToggle(section.id as ToggleId, v)
-                  : undefined
-              }
-              form={form}
-              setField={setField}
-              touched={touched}
-              markTouched={markTouched}
-              errors={errors}
-              revealed={revealed}
-              setRevealed={(k, v) =>
-                setRevealed((prev) => {
-                  const next = new Set(prev);
-                  if (v) next.add(k);
-                  else next.delete(k);
-                  return next;
-                })
-              }
-            />
-          ))}
-        </form>
-
-        {submitError && (
-          <p className="inline-flex items-center gap-1.5 text-sm text-red-600">
-            <AlertCircle size={14} /> {submitError}
-          </p>
-        )}
-      </div>
-
-      {/* Sticky bottom bar */}
-      <nav
-        aria-label="Form actions"
-        className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-30"
-      >
-        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
-          <div className="text-xs text-gray-500">
-            <span className="font-bold text-sage-navy">
-              {sectionsCompleteCount} / {SECTIONS.length}
-            </span>{" "}
-            sections complete
-          </div>
-          <button
-            type="button"
-            onClick={handleContinue}
-            disabled={!requiredOk || submitting || saveStatus.kind === "saving"}
-            className={
-              "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-lg text-sm font-bold transition " +
-              (requiredOk && !submitting && saveStatus.kind !== "saving"
-                ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-md hover:shadow-lg cursor-pointer"
-                : "bg-gray-200 text-gray-500 cursor-not-allowed")
+      <Stepper
+        sections={sectionStatus}
+        currentStep={currentStep}
+        onJump={(i) => {
+          // Allow jumping to any earlier (complete) section, or to the
+          // current/next-incomplete; block forward leaps over gaps so
+          // the consultant can't skip a required affirmation.
+          if (i < currentStep) {
+            setCurrentStep(i);
+            return;
+          }
+          for (let j = 0; j <= i; j++) {
+            if (j !== AGREEMENT_SECTIONS.length - 1 && !sectionStatus[j].complete) {
+              setCurrentStep(j);
+              return;
             }
-          >
-            {submitting ? (
-              <Loader2 size={14} className="animate-spin" />
-            ) : (
-              <ChevronRight size={14} />
-            )}
-            {submitting ? "Saving…" : "Continue to sign"}
-          </button>
-        </div>
-      </nav>
+          }
+          setCurrentStep(i);
+        }}
+      />
+
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+        {isReviewStep ? (
+          <ReviewStep
+            form={form}
+            onJumpToSection={(idx) => setCurrentStep(idx)}
+            allComplete={allComplete}
+          />
+        ) : (
+          <SectionStep
+            section={section}
+            form={form}
+            touched={touched}
+            revealed={revealed}
+            onField={setField}
+            onTouched={markTouched}
+            onRevealed={(key, on) => {
+              setRevealed((prev) => {
+                const next = new Set(prev);
+                if (on) next.add(key);
+                else next.delete(key);
+                return next;
+              });
+            }}
+            onAffirm={setAffirmation}
+            onSignature={setSignature}
+            onLegalName={setLegalName}
+            consultantEmail={app.consultantEmail}
+            effectiveDateText={
+              app.effectiveDate
+                ? new Date(app.effectiveDate).toLocaleDateString()
+                : "Will be set by Sage IT"
+            }
+            onOpenTemplate={() => setTemplateOpen(true)}
+          />
+        )}
+        {submitError && (
+          <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 inline-flex items-start gap-2">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+            <span>{submitError}</span>
+          </div>
+        )}
+      </section>
+
+      <FooterNav
+        currentStep={currentStep}
+        total={AGREEMENT_SECTIONS.length}
+        canAdvance={isReviewStep ? allComplete : canAdvance}
+        saveStatus={saveStatus}
+        submitting={submitting}
+        onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
+        onNext={() =>
+          setCurrentStep((s) =>
+            Math.min(AGREEMENT_SECTIONS.length - 1, s + 1),
+          )
+        }
+        onSubmit={() => void handleSubmit()}
+        isReviewStep={isReviewStep}
+      />
+
+      {templateOpen && (
+        <AgreementTemplateModal onClose={() => setTemplateOpen(false)} />
+      )}
     </main>
   );
 }
 
-// ── Sub-components ──────────────────────────────────────────────
+// ── Stepper ──────────────────────────────────────────────────
 
-function ReadOnlyRow({
-  label,
-  value,
+function Stepper({
+  sections,
+  currentStep,
+  onJump,
 }: {
-  label: string;
-  value: string | null | undefined;
+  sections: { id: string; title: string; step: number; complete: boolean }[];
+  currentStep: number;
+  onJump: (i: number) => void;
 }) {
   return (
-    <div>
-      <dt className="text-[10px] uppercase tracking-wider font-semibold text-gray-500">
-        {label}
-      </dt>
-      <dd className="text-sm text-gray-800 font-medium mt-0.5">
-        {value && value.length > 0 ? value : <span className="text-gray-400">—</span>}
-      </dd>
+    <nav
+      aria-label="Sections"
+      className="sticky top-0 z-20 bg-stone-50/95 backdrop-blur border-b border-stone-200"
+    >
+      <div className="max-w-5xl mx-auto px-2 sm:px-6 py-3 overflow-x-auto">
+        <ol className="flex items-center gap-1.5 sm:gap-2 min-w-max">
+          {sections.map((s, i) => {
+            const active = i === currentStep;
+            const past = i < currentStep;
+            return (
+              <li key={s.id}>
+                <button
+                  type="button"
+                  onClick={() => onJump(i)}
+                  className={
+                    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-[10px] sm:text-[11px] font-semibold transition-colors whitespace-nowrap " +
+                    (active
+                      ? "bg-sage-navy text-white"
+                      : s.complete
+                        ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
+                        : past
+                          ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
+                          : "bg-stone-200 text-gray-600 hover:bg-stone-300")
+                  }
+                >
+                  {s.complete && !active ? (
+                    <CheckCircle2 size={11} />
+                  ) : (
+                    <span className="font-mono">{s.step}</span>
+                  )}
+                  <span className="hidden sm:inline">{s.title}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ol>
+      </div>
+    </nav>
+  );
+}
+
+// ── Section step ─────────────────────────────────────────────
+
+function SectionStep({
+  section,
+  form,
+  touched,
+  revealed,
+  onField,
+  onTouched,
+  onRevealed,
+  onAffirm,
+  onSignature,
+  onLegalName,
+  consultantEmail,
+  effectiveDateText,
+  onOpenTemplate,
+}: {
+  section: AgreementSection;
+  form: FormState;
+  touched: Set<string>;
+  revealed: Set<string>;
+  onField: (key: string, value: string) => void;
+  onTouched: (key: string) => void;
+  onRevealed: (key: string, on: boolean) => void;
+  onAffirm: (flag: AffirmationFlag, value: boolean) => void;
+  onSignature: (dataUrl: string | null) => void;
+  onLegalName: (value: string) => void;
+  consultantEmail: string;
+  effectiveDateText: string;
+  onOpenTemplate: () => void;
+}) {
+  const isCoverStep = section.id === "cover";
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 lg:gap-6">
+      {/* Read pane */}
+      <aside className="lg:col-span-2 space-y-4">
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
+            Step {section.step} of {AGREEMENT_SECTIONS.length}
+          </p>
+          <h2 className="font-serif text-xl sm:text-2xl text-sage-navy mt-1">
+            {section.title}
+          </h2>
+          <p className="text-sm text-gray-700 mt-3 leading-relaxed">
+            {section.summary}
+          </p>
+          <button
+            type="button"
+            onClick={onOpenTemplate}
+            className="mt-4 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
+          >
+            <FileText size={11} /> View the full agreement
+          </button>
+        </div>
+        <div className="bg-orange-50 rounded-2xl border border-sage-copper/30 p-4">
+          <p className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
+            <Sparkles size={11} /> Why we need this
+          </p>
+          <p className="text-xs sm:text-sm text-gray-700 mt-2 leading-relaxed">
+            {section.why}
+          </p>
+        </div>
+      </aside>
+
+      {/* Fields / signature / affirmation pane */}
+      <div className="lg:col-span-3 space-y-4">
+        {isCoverStep && (
+          <div className="bg-stone-100 rounded-xl border border-stone-200 px-4 py-3 text-xs text-gray-700 inline-flex items-start gap-2">
+            <Lock size={12} className="mt-0.5 shrink-0 text-gray-500" />
+            <span>
+              <span className="font-semibold">Agreement effective date:</span>{" "}
+              {effectiveDateText} (set by Sage IT — not editable).
+            </span>
+          </div>
+        )}
+
+        {section.fields.length > 0 && (
+          <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
+              {section.fields.map((field) => (
+                <FieldInput
+                  key={field.key}
+                  field={field}
+                  value={
+                    field.key === "consultantEmail"
+                      ? consultantEmail
+                      : form.fields[field.key] ?? ""
+                  }
+                  onChange={(v) => onField(field.key, v)}
+                  onBlur={() => onTouched(field.key)}
+                  touched={touched.has(field.key)}
+                  revealed={revealed.has(field.key)}
+                  onRevealToggle={(on) => onRevealed(field.key, on)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {section.requiresSignature && (
+          <SignatureBlock
+            signature={form.signature}
+            legalName={form.signedLegalName}
+            onSignature={onSignature}
+            onLegalName={onLegalName}
+          />
+        )}
+
+        {section.requiresAffirmation && !section.requiresSignature && (
+          <SignaturePreviewBlock signature={form.signature} />
+        )}
+
+        {section.requiresAffirmation && section.affirmationFlag && (
+          <AffirmationBlock
+            flag={section.affirmationFlag}
+            checked={form.affirmations[section.affirmationFlag]}
+            onChange={(v) => onAffirm(section.affirmationFlag!, v)}
+          />
+        )}
+      </div>
     </div>
   );
 }
 
-function SaveStatusBadge({ status }: { status: SaveStatus }) {
-  if (status.kind === "idle") return null;
-  if (status.kind === "saving") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-gray-500">
-        <Loader2 size={11} className="animate-spin" /> Saving…
-      </span>
-    );
-  }
-  if (status.kind === "saved") {
-    const seconds = Math.floor((Date.now() - status.at) / 1000);
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-emerald-700">
-        <CheckCircle2 size={11} />
-        Saved{seconds > 0 ? ` · ${seconds}s ago` : ""}
-      </span>
-    );
-  }
-  if (status.kind === "paused") {
-    return (
-      <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-sage-copper-deep">
-        <PauseCircle size={11} /> Saving paused — retrying soon
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-red-600">
-      <AlertCircle size={11} /> {status.message || "Save failed"}
-    </span>
-  );
-}
+// ── Field input ──────────────────────────────────────────────
 
-function SectionCard({
-  section,
-  enabled,
-  onToggle,
-  form,
-  setField,
-  touched,
-  markTouched,
-  errors,
-  revealed,
-  setRevealed,
-}: {
-  section: SectionDef;
-  enabled: boolean;
-  onToggle?: (v: boolean) => void;
-  form: FillState;
-  setField: (key: FillKey, value: string) => void;
-  touched: Set<FillKey>;
-  markTouched: (key: FillKey) => void;
-  errors: Partial<Record<FillKey, string>>;
-  revealed: Set<FillKey>;
-  setRevealed: (key: FillKey, v: boolean) => void;
-}) {
-  const collapsed = section.optional && !enabled;
-
-  return (
-    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
-      <header className="px-5 sm:px-6 pt-5 pb-4 border-b border-stone-100">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h2 className="font-serif text-lg text-gray-900">
-              {section.title}{" "}
-              {section.optional && (
-                <span className="text-[11px] font-sans uppercase tracking-wider text-sage-copper-deep ml-1 align-middle">
-                  Optional
-                </span>
-              )}
-            </h2>
-            {section.subtitle && (
-              <p className="text-xs text-gray-500 mt-0.5">{section.subtitle}</p>
-            )}
-          </div>
-          {section.optional && onToggle && (
-            <label className="inline-flex items-center gap-2 text-xs font-semibold text-gray-700 cursor-pointer shrink-0">
-              <input
-                type="checkbox"
-                checked={enabled}
-                onChange={(e) => onToggle(e.target.checked)}
-                className="w-4 h-4 rounded border-gray-300 text-sage-navy focus:ring-sage-copper cursor-pointer"
-              />
-              Include this section
-            </label>
-          )}
-        </div>
-        {section.warning && enabled && (
-          <div className="mt-3 rounded-md bg-orange-50 border-l-2 border-sage-copper-deep px-3 py-2 inline-flex items-start gap-2 text-[11px] text-sage-copper-deep">
-            <ShieldAlert size={12} className="mt-0.5 shrink-0" />
-            <span>{section.warning}</span>
-          </div>
-        )}
-      </header>
-
-      {!collapsed && (
-        <div className="px-5 sm:px-6 py-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3">
-            {section.fields.map((field) => (
-              <FieldRow
-                key={field.key}
-                field={field}
-                value={form[field.key]}
-                onChange={(v) => setField(field.key, v)}
-                onBlur={() => markTouched(field.key)}
-                error={
-                  touched.has(field.key) ? errors[field.key] ?? null : null
-                }
-                revealed={revealed.has(field.key)}
-                onToggleReveal={(v) => setRevealed(field.key, v)}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function FieldRow({
+function FieldInput({
   field,
   value,
   onChange,
   onBlur,
-  error,
+  touched,
   revealed,
-  onToggleReveal,
+  onRevealToggle,
 }: {
-  field: FieldDef;
+  field: SectionField;
   value: string;
-  onChange: (v: string) => void;
+  onChange: (value: string) => void;
   onBlur: () => void;
-  error: string | null;
+  touched: boolean;
   revealed: boolean;
-  onToggleReveal: (v: boolean) => void;
+  onRevealToggle: (on: boolean) => void;
 }) {
-  const spanClass = field.wide ? "md:col-span-2" : "";
-  const inputBase =
-    "w-full px-3 py-2 text-sm rounded-md border focus:outline-none focus:ring-1 " +
-    (error
-      ? "border-red-300 focus:border-red-400 focus:ring-red-200"
-      : "border-stone-200 focus:border-sage-navy focus:ring-sage-navy");
+  const wide =
+    field.type === "textarea" ||
+    field.key === "residenceAddress" ||
+    field.key === "bgCurrentAddress" ||
+    field.key === "portalAuthorizedActions" ||
+    field.key === "customScopeNotes";
 
-  const labelEl = (
-    <label className="block text-[11px] font-semibold text-gray-600 mb-1 inline-flex items-center gap-1">
-      {field.label}
-      {field.optional && (
-        <span className="text-[10px] text-gray-400 font-normal">
-          (optional)
-        </span>
-      )}
-      {field.type === "password" && <Lock size={10} className="text-gray-400" />}
-    </label>
-  );
+  const invalid = touched && !field.readOnly && !isFieldValueValid(field, value);
+  const errorMsg =
+    invalid && field.type === "email"
+      ? "Enter a valid email address."
+      : invalid
+        ? "This field is required."
+        : "";
 
-  const onTextChange = (
-    e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>,
-  ) => onChange(e.target.value);
+  const baseInputClasses =
+    "w-full px-3 py-2 text-sm rounded-md border bg-white focus:outline-none focus:ring-1 focus:ring-sage-navy focus:border-sage-navy " +
+    (invalid
+      ? "border-red-300 bg-red-50/40"
+      : field.readOnly
+        ? "border-stone-200 bg-stone-100 cursor-not-allowed"
+        : "border-stone-300");
 
-  let control: React.ReactNode;
+  let control: ReactNode;
   if (field.type === "textarea") {
     control = (
       <textarea
+        rows={3}
         value={value}
-        onChange={onTextChange}
+        onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        rows={field.rows ?? 3}
         placeholder={field.placeholder}
-        className={inputBase}
+        readOnly={field.readOnly}
+        className={baseInputClasses + " min-h-[80px]"}
       />
     );
   } else if (field.type === "select") {
     control = (
       <select
         value={value}
-        onChange={onTextChange}
+        onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        className={inputBase + " bg-white"}
+        disabled={field.readOnly}
+        className={baseInputClasses}
       >
-        <option value="">— Select —</option>
+        <option value="">Select…</option>
         {field.options?.map((opt) => (
           <option key={opt} value={opt}>
             {opt}
@@ -1062,23 +852,41 @@ function FieldRow({
         ))}
       </select>
     );
-  } else if (field.type === "password") {
+  } else if (field.type === "date") {
+    control = (
+      <input
+        type="date"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={onBlur}
+        readOnly={field.readOnly}
+        className={baseInputClasses}
+      />
+    );
+  } else if (field.sensitive) {
+    const inputType = revealed ? "text" : "password";
     control = (
       <div className="relative">
         <input
-          type={revealed ? "text" : "password"}
+          type={inputType}
+          inputMode={
+            field.type === "routing" || field.type === "account"
+              ? "numeric"
+              : undefined
+          }
+          autoComplete="off"
           value={value}
-          onChange={onTextChange}
+          onChange={(e) => onChange(e.target.value)}
           onBlur={onBlur}
           placeholder={field.placeholder}
-          autoComplete="off"
-          className={inputBase + " pr-10 font-mono"}
+          readOnly={field.readOnly}
+          className={baseInputClasses + " pr-9"}
         />
         <button
           type="button"
-          onClick={() => onToggleReveal(!revealed)}
-          aria-label={revealed ? "Hide value" : "Show value"}
-          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-sage-navy cursor-pointer"
+          onClick={() => onRevealToggle(!revealed)}
+          aria-label={revealed ? "Hide value" : "Reveal value"}
+          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-sage-navy"
         >
           {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
         </button>
@@ -1087,30 +895,552 @@ function FieldRow({
   } else {
     control = (
       <input
-        type={field.type}
+        type={
+          field.type === "email"
+            ? "email"
+            : field.type === "tel"
+              ? "tel"
+              : "text"
+        }
         value={value}
-        onChange={onTextChange}
+        onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={field.placeholder}
-        autoComplete="off"
-        className={inputBase}
+        readOnly={field.readOnly}
+        className={baseInputClasses}
       />
     );
   }
 
   return (
-    <div className={spanClass}>
-      {labelEl}
+    <div className={wide ? "md:col-span-2" : ""}>
+      <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
+        {field.label}
+        {!field.readOnly && (
+          <span className="text-red-500 ml-1">*</span>
+        )}
+        {field.sensitive && (
+          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] font-medium normal-case text-sage-copper-deep">
+            <ShieldCheck size={10} /> sensitive
+          </span>
+        )}
+      </label>
       {control}
-      {error ? (
+      {field.help && !errorMsg && (
+        <p className="mt-1 text-[11px] text-gray-500">{field.help}</p>
+      )}
+      {errorMsg && (
         <p className="mt-1 text-[11px] text-red-600 inline-flex items-center gap-1">
-          <AlertCircle size={10} /> {error}
+          <AlertCircle size={11} /> {errorMsg}
         </p>
-      ) : field.optional && value.length === 0 ? (
-        <p className="mt-1 text-[11px] text-gray-400 inline-flex items-center gap-1">
-          <Check size={10} /> Optional — leave blank to skip
+      )}
+    </div>
+  );
+}
+
+// ── Signature blocks ─────────────────────────────────────────
+
+function SignatureBlock({
+  signature,
+  legalName,
+  onSignature,
+  onLegalName,
+}: {
+  signature: string | null;
+  legalName: string;
+  onSignature: (dataUrl: string | null) => void;
+  onLegalName: (value: string) => void;
+}) {
+  const [redrawing, setRedrawing] = useState(false);
+  const captured = Boolean(signature);
+  const shouldShowPad = !captured || redrawing;
+
+  return (
+    <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5 space-y-4">
+      <div>
+        <p className="text-[11px] font-bold uppercase tracking-widest text-sage-navy">
+          Sign once — applied everywhere
         </p>
-      ) : null}
+        <p className="text-sm text-gray-700 mt-1">
+          Draw your signature below. We&apos;ll apply it to every
+          signature block in the agreement — you won&apos;t be asked to
+          re-draw it on later sections.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
+          Your full legal name <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={legalName}
+          onChange={(e) => onLegalName(e.target.value)}
+          className="w-full px-3 py-2 text-sm rounded-md border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-sage-navy focus:border-sage-navy"
+          placeholder="First Middle Last"
+        />
+      </div>
+
+      {shouldShowPad ? (
+        <div>
+          <SignaturePad
+            onChange={(data) => {
+              onSignature(data);
+              if (data) setRedrawing(false);
+            }}
+            fileInputId="consultant-wizard-sig"
+          />
+          {redrawing && (
+            <button
+              type="button"
+              onClick={() => setRedrawing(false)}
+              className="mt-2 text-[11px] font-semibold text-gray-500 hover:text-sage-navy"
+            >
+              Cancel re-draw
+            </button>
+          )}
+        </div>
+      ) : (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1.5">
+            Captured signature
+          </p>
+          <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={signature!}
+              alt="Captured signature"
+              style={{ maxHeight: 70, maxWidth: 240 }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRedrawing(true);
+              onSignature(null);
+            }}
+            className="ml-3 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
+          >
+            Re-draw
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignaturePreviewBlock({ signature }: { signature: string | null }) {
+  if (!signature) {
+    return (
+      <div className="bg-orange-50 rounded-xl border border-sage-copper/30 p-4 text-xs text-sage-copper-deep inline-flex items-start gap-2">
+        <AlertCircle size={14} className="mt-0.5 shrink-0" />
+        <span>
+          Please draw your signature on the main agreement step before
+          continuing -- we&apos;ll reuse it here.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="bg-stone-100 rounded-xl border border-stone-200 p-4">
+      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+        Your signature will be applied to this section
+      </p>
+      <div className="mt-2 inline-block rounded-md border border-dashed border-stone-300 bg-white p-2">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={signature}
+          alt="Signature preview"
+          style={{ maxHeight: 50, maxWidth: 180 }}
+        />
+      </div>
+    </div>
+  );
+}
+
+// ── Affirmation ──────────────────────────────────────────────
+
+function AffirmationBlock({
+  flag,
+  checked,
+  onChange,
+}: {
+  flag: AffirmationFlag;
+  checked: boolean;
+  onChange: (value: boolean) => void;
+}) {
+  return (
+    <label
+      htmlFor={`affirm-${flag}`}
+      className={
+        "flex items-start gap-3 p-4 rounded-2xl border cursor-pointer transition-colors " +
+        (checked
+          ? "bg-emerald-50 border-emerald-200"
+          : "bg-white border-stone-300 hover:bg-stone-50")
+      }
+    >
+      <input
+        id={`affirm-${flag}`}
+        type="checkbox"
+        checked={checked}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 h-4 w-4 accent-sage-navy"
+      />
+      <span className="text-sm text-gray-800">
+        I have read and understood this section and agree to its terms.
+      </span>
+    </label>
+  );
+}
+
+// ── Review step ──────────────────────────────────────────────
+
+function ReviewStep({
+  form,
+  onJumpToSection,
+  allComplete,
+}: {
+  form: FormState;
+  onJumpToSection: (idx: number) => void;
+  allComplete: boolean;
+}) {
+  return (
+    <div className="space-y-5">
+      <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
+          Final step
+        </p>
+        <h2 className="font-serif text-2xl text-sage-navy mt-1">
+          Review and submit
+        </h2>
+        <p className="text-sm text-gray-700 mt-2">
+          Confirm everything below matches what you intended. Click any
+          section to edit it. When you submit, the agreement moves to
+          Sage IT for review.
+        </p>
+      </div>
+
+      {AGREEMENT_SECTIONS.slice(0, -1).map((section, idx) => {
+        const complete = isSectionComplete(section, form);
+        return (
+          <section
+            key={section.id}
+            className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5"
+          >
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+                  Step {section.step}
+                </p>
+                <h3 className="font-serif text-lg text-sage-navy mt-0.5">
+                  {section.title}
+                </h3>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span
+                  className={
+                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
+                    (complete
+                      ? "bg-emerald-100 text-emerald-800"
+                      : "bg-amber-100 text-amber-800")
+                  }
+                >
+                  {complete ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
+                  {complete ? "Complete" : "Needs attention"}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => onJumpToSection(idx)}
+                  className="text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
+                >
+                  Edit
+                </button>
+              </div>
+            </div>
+
+            {section.fields.length > 0 && (
+              <dl className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+                {section.fields.map((field) => {
+                  const raw = form.fields[field.key] ?? "";
+                  const masked =
+                    field.sensitive && raw.length > 0
+                      ? maskValue(raw)
+                      : raw || "—";
+                  return (
+                    <div key={field.key}>
+                      <dt className="text-[10px] uppercase tracking-wider font-semibold text-gray-500">
+                        {field.label}
+                      </dt>
+                      <dd className="text-sm text-gray-900 break-words">
+                        {masked}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            )}
+
+            {section.requiresAffirmation && section.affirmationFlag && (
+              <p className="mt-3 text-xs text-gray-700 inline-flex items-center gap-1.5">
+                {form.affirmations[section.affirmationFlag] ? (
+                  <CheckCircle2 size={12} className="text-emerald-700" />
+                ) : (
+                  <AlertCircle size={12} className="text-amber-700" />
+                )}
+                Affirmation{" "}
+                {form.affirmations[section.affirmationFlag]
+                  ? "confirmed"
+                  : "still required"}
+              </p>
+            )}
+          </section>
+        );
+      })}
+
+      <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
+        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
+          Signature
+        </p>
+        <h3 className="font-serif text-lg text-sage-navy mt-0.5">
+          Your signature
+        </h3>
+        {form.signature ? (
+          <div className="mt-3 inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={form.signature}
+              alt="Captured signature"
+              style={{ maxHeight: 70, maxWidth: 260 }}
+            />
+          </div>
+        ) : (
+          <p className="mt-2 text-xs text-amber-700 inline-flex items-center gap-1">
+            <AlertCircle size={12} /> Not yet captured — go back to the
+            main agreement step.
+          </p>
+        )}
+        {form.signedLegalName && (
+          <p className="mt-2 text-xs text-gray-600">
+            Signed legal name:{" "}
+            <span className="font-semibold text-gray-900">
+              {form.signedLegalName}
+            </span>
+          </p>
+        )}
+      </section>
+
+      {!allComplete && (
+        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 inline-flex items-start gap-2">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span>
+            Some sections still need attention. Use the section pills
+            above (or the Edit links) to jump to them.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function maskValue(value: string): string {
+  const last = value.slice(-4);
+  return "•".repeat(Math.max(0, value.length - 4)) + last;
+}
+
+// ── Footer nav ───────────────────────────────────────────────
+
+function FooterNav({
+  currentStep,
+  total,
+  canAdvance,
+  saveStatus,
+  submitting,
+  onBack,
+  onNext,
+  onSubmit,
+  isReviewStep,
+}: {
+  currentStep: number;
+  total: number;
+  canAdvance: boolean;
+  saveStatus: SaveStatus;
+  submitting: boolean;
+  onBack: () => void;
+  onNext: () => void;
+  onSubmit: () => void;
+  isReviewStep: boolean;
+}) {
+  return (
+    <nav
+      aria-label="Wizard navigation"
+      className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-30"
+    >
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={currentStep === 0 || submitting}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-stone-200 bg-white hover:bg-stone-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ArrowLeft size={12} /> Back
+        </button>
+        <div className="hidden sm:flex items-center gap-3 text-[11px] text-gray-500">
+          <span className="font-mono">
+            {currentStep + 1} / {total}
+          </span>
+          <SaveStatusBadge status={saveStatus} />
+        </div>
+        {isReviewStep ? (
+          <button
+            type="button"
+            onClick={onSubmit}
+            disabled={!canAdvance || submitting}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            {submitting ? (
+              <Loader2 size={12} className="animate-spin" />
+            ) : (
+              <CheckCircle2 size={12} />
+            )}
+            Submit agreement
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={onNext}
+            disabled={!canAdvance || submitting}
+            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+          >
+            Next <ArrowRight size={12} />
+          </button>
+        )}
+      </div>
+      <div className="sm:hidden px-4 pb-2 text-[10px] text-gray-500 flex items-center justify-between">
+        <span className="font-mono">
+          Step {currentStep + 1} / {total}
+        </span>
+        <SaveStatusBadge status={saveStatus} />
+      </div>
+    </nav>
+  );
+}
+
+function SaveStatusBadge({ status }: { status: SaveStatus }) {
+  if (status.kind === "saving") {
+    return (
+      <span className="inline-flex items-center gap-1 text-gray-500">
+        <Loader2 size={11} className="animate-spin" /> Saving…
+      </span>
+    );
+  }
+  if (status.kind === "saved") {
+    return (
+      <span className="inline-flex items-center gap-1 text-emerald-700">
+        <CheckCircle2 size={11} /> Saved
+      </span>
+    );
+  }
+  if (status.kind === "paused") {
+    return (
+      <span className="inline-flex items-center gap-1 text-amber-700">
+        <PauseCircle size={11} /> Saving paused — will retry
+      </span>
+    );
+  }
+  if (status.kind === "error") {
+    return (
+      <span className="inline-flex items-center gap-1 text-red-700">
+        <AlertCircle size={11} /> {status.message}
+      </span>
+    );
+  }
+  return null;
+}
+
+// ── Template viewer modal ────────────────────────────────────
+
+function AgreementTemplateModal({ onClose }: { onClose: () => void }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setLoading(true);
+    fetchAgreementTemplatePdfBlob()
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(`Couldn't load the agreement (${res.status})`);
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Couldn't load the agreement.");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, []);
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-label="Agreement template"
+      className="fixed inset-0 z-50 bg-black/60 flex items-stretch sm:items-center justify-center p-0 sm:p-6"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full sm:max-w-4xl sm:rounded-2xl shadow-xl flex flex-col h-full sm:h-[88vh] overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="px-4 sm:px-5 py-3 border-b border-stone-200 flex items-center justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
+              Reference document
+            </p>
+            <h3 className="font-serif text-lg text-sage-navy">
+              The full Sage IT agreement
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="p-1.5 rounded-md hover:bg-stone-100 text-gray-600"
+          >
+            <X size={16} />
+          </button>
+        </header>
+        <div className="flex-1 bg-stone-100">
+          {loading ? (
+            <div className="flex items-center justify-center h-full">
+              <Loader2 size={28} className="animate-spin text-sage-navy" />
+            </div>
+          ) : error ? (
+            <div className="flex items-center justify-center h-full px-6 text-center">
+              <p className="text-sm text-red-700 inline-flex items-center gap-1.5">
+                <AlertCircle size={14} /> {error}
+              </p>
+            </div>
+          ) : blobUrl ? (
+            <iframe
+              title="Sage IT agreement template"
+              src={blobUrl}
+              className="w-full h-full"
+            />
+          ) : null}
+        </div>
+      </div>
     </div>
   );
 }

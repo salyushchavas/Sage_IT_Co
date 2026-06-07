@@ -3316,6 +3316,17 @@ export interface ConsultantApplication {
   accessAt?: string | null;
   signingIp?: string | null;
   signingAt?: string | null;
+  // F-1 — per-section affirmation flags. Eight booleans the wizard
+  // toggles per section; the backend's submit-time gate requires all
+  // eight to be true alongside every required field + the signature.
+  affirmedMainAgreement?: boolean | null;
+  affirmedExhibitA?: boolean | null;
+  affirmedExhibitB?: boolean | null;
+  affirmedAppendix1?: boolean | null;
+  affirmedAppendix2?: boolean | null;
+  affirmedAppendix3?: boolean | null;
+  affirmedAppendix4?: boolean | null;
+  affirmedAppendix5?: boolean | null;
 }
 
 /**
@@ -3361,6 +3372,17 @@ export interface ConsultantFillPayload {
   securityCheckHolderName?: string;
   securityCheckAmount?: string;
   securityCheckDates?: string;
+  // F-1 affirmation booleans -- the wizard sends these as the
+  // consultant ticks each section's "I have read and understood"
+  // checkbox. Backend treats null as "not sent" (partial save).
+  affirmedMainAgreement?: boolean;
+  affirmedExhibitA?: boolean;
+  affirmedExhibitB?: boolean;
+  affirmedAppendix1?: boolean;
+  affirmedAppendix2?: boolean;
+  affirmedAppendix3?: boolean;
+  affirmedAppendix4?: boolean;
+  affirmedAppendix5?: boolean;
 }
 
 export interface ConsultantApplicationEvent {
@@ -3973,6 +3995,27 @@ export async function fetchConsultantAgreements(): Promise<
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
   return body.data;
+}
+
+/**
+ * GET /api/consultant/agreement-template-pdf — the blank-form preview
+ * of the master agreement (underscore placeholders where the
+ * consultant's data will eventually land). Used by the wizard's "View
+ * full agreement" reference button. Bytes are consultant-independent
+ * and cached server-side; subsequent calls are an in-memory return.
+ *
+ * Returns the raw Response; caller calls .blob() + URL.createObjectURL
+ * + revokeObjectURL on close (same leak-proof pattern as the per-app
+ * download endpoint).
+ */
+export async function fetchAgreementTemplatePdfBlob(): Promise<Response> {
+  const token = getConsultantToken();
+  if (!token) {
+    throw new Error("Verification required.");
+  }
+  return fetch(`${BASE_URL}/api/consultant/agreement-template-pdf`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
 }
 
 /**
