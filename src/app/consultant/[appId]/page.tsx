@@ -6,8 +6,9 @@ import { Loader2 } from "lucide-react";
 
 /**
  * Bare /consultant/{appId} route -- typically reached only when the
- * email invitation link drops without the /review suffix. Forwards
- * to the review screen, which is the actual entry point.
+ * email invitation link drops without the /verify suffix. Forwards to
+ * the verification gate, which is the actual entry point (the consultant
+ * must pass the email-OTP gate before reaching the form).
  */
 export default function ConsultantAppRootPage() {
   const router = useRouter();
@@ -19,7 +20,7 @@ export default function ConsultantAppRootPage() {
       router.replace("/consultant");
       return;
     }
-    router.replace(`/consultant/${encodeURIComponent(appId)}/review`);
+    router.replace(`/consultant/${encodeURIComponent(appId)}/verify`);
   }, [appId, router]);
 
   return (

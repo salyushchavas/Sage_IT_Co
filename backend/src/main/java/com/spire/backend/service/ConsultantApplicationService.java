@@ -7,25 +7,31 @@ import com.spire.backend.entity.AgreementUserRole;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
+import com.spire.backend.entity.ConsultantVerification;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.AgreementUserRepository;
 import com.spire.backend.repository.ConsultantApplicationEventRepository;
 import com.spire.backend.repository.ConsultantApplicationRepository;
 import com.spire.backend.repository.ConsultantApplicationRevisionRepository;
+import com.spire.backend.repository.ConsultantVerificationRepository;
 import com.spire.backend.security.AgreementAuthz;
 import com.spire.backend.security.AgreementOwnership;
+import com.spire.backend.security.JwtService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -75,9 +81,21 @@ public class ConsultantApplicationService {
     private final ConsultantPdfService consultantPdfService;
     private final AgreementDocumentService agreementDocumentService;
     private final AgreementUserRepository agreementUserRepository;
+    private final ConsultantVerificationRepository verificationRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
     private final com.cloudinary.Cloudinary cloudinary;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final SecureRandom secureRandom = new SecureRandom();
+
+    // Consultant OTP gate tunables.
+    private static final int OTP_TTL_MINUTES = 10;
+    private static final int OTP_MAX_ATTEMPTS = 5;
+    private static final int OTP_RESEND_COOLDOWN_SECONDS = 60;
+    private static final int OTP_MAX_PER_HOUR = 5;
+    private static final String OTP_GENERIC_SENT_MSG =
+            "If that email matches this agreement, a 6-digit code has been sent.";
 
     // ── Agreement-ERM operations (single operator, no per-ERM scoping) ──
 
@@ -163,6 +181,144 @@ public class ConsultantApplicationService {
         return applicationRepository.findByApplicationId(applicationId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "ConsultantApplication", "applicationId", applicationId));
+    }
+
+    // ── Consultant email-OTP gate (Phase D) ──────────────────────────
+
+    private static boolean isConsultantActionable(ConsultantApplication app) {
+        String s = app.getStatus();
+        return ConsultantApplication.Status.SUBMITTED.name().equals(s)
+                || ConsultantApplication.Status.REVISION_REQUESTED.name().equals(s);
+    }
+
+    private String generateOtp() {
+        return String.format("%06d", secureRandom.nextInt(1_000_000));
+    }
+
+    /**
+     * Public request-otp. NON-ENUMERATING: returns a generic message
+     * either way. Sends a code ONLY when the typed email matches the
+     * on-record consultant email, the agreement is consultant-actionable,
+     * and the 60s cooldown + hourly cap allow it. The prior active
+     * challenge is superseded so only one code is ever live per app.
+     */
+    @Transactional
+    public String requestOtp(String applicationId, String email, HttpServletRequest request) {
+        ConsultantApplication app =
+                applicationRepository.findByApplicationId(applicationId).orElse(null);
+        if (app == null) {
+            return OTP_GENERIC_SENT_MSG; // never reveal whether the app exists
+        }
+        if (!isConsultantActionable(app)) {
+            return "This agreement is not available for signing.";
+        }
+        String onRecord = app.getConsultantEmail();
+        String typed = email == null ? "" : email.trim();
+        if (onRecord == null || !onRecord.equalsIgnoreCase(typed)) {
+            return OTP_GENERIC_SENT_MSG; // email mismatch -> send nothing
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        Optional<ConsultantVerification> latest =
+                verificationRepository.findFirstByApplicationIdOrderByCreatedAtDesc(applicationId);
+        if (latest.isPresent() && latest.get().getLastSentAt() != null
+                && latest.get().getLastSentAt()
+                        .isAfter(now.minusSeconds(OTP_RESEND_COOLDOWN_SECONDS))) {
+            return OTP_GENERIC_SENT_MSG; // within cooldown -> silent no-op
+        }
+        long lastHour = verificationRepository.countByApplicationIdAndLastSentAtAfter(
+                applicationId, now.minusHours(1));
+        if (lastHour >= OTP_MAX_PER_HOUR) {
+            return OTP_GENERIC_SENT_MSG; // hourly cap -> silent no-op
+        }
+
+        // Supersede any prior active challenge, then issue a fresh one.
+        for (ConsultantVerification prior :
+                verificationRepository.findByApplicationIdAndConsumedAtIsNull(applicationId)) {
+            prior.setConsumedAt(now);
+            verificationRepository.save(prior);
+        }
+        String code = generateOtp();
+        String ip = clientIp(request);
+        verificationRepository.save(ConsultantVerification.builder()
+                .applicationId(applicationId)
+                .otpHash(passwordEncoder.encode(code))
+                .expiresAt(now.plusMinutes(OTP_TTL_MINUTES))
+                .attempts(0)
+                .lastSentAt(now)
+                .resendCount((int) lastHour + 1)
+                .requestIp(ip)
+                .build());
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.OTP_SENT,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("ip", ip == null ? "" : ip),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantOtp(app, code);
+        } catch (Exception e) {
+            log.warn("Failed to send consultant OTP for {}: {}", applicationId, e.getMessage());
+        }
+        return OTP_GENERIC_SENT_MSG;
+    }
+
+    /**
+     * Public verify-otp. On success: consume the challenge, stamp the
+     * access IP/time, mint a ~2h consultant session token (returned). On
+     * any failure: generic IllegalArgumentException -> 400 (no detail on
+     * which check failed). The 5th wrong attempt invalidates the challenge.
+     */
+    @Transactional
+    public String verifyOtp(String applicationId, String email, String otp,
+                            HttpServletRequest request) {
+        ConsultantApplication app =
+                applicationRepository.findByApplicationId(applicationId).orElse(null);
+        ConsultantVerification cv = verificationRepository
+                .findFirstByApplicationIdAndConsumedAtIsNullOrderByCreatedAtDesc(applicationId)
+                .orElse(null);
+
+        if (app == null || cv == null
+                || cv.getExpiresAt().isBefore(LocalDateTime.now())
+                || cv.getAttempts() >= OTP_MAX_ATTEMPTS) {
+            throw new IllegalArgumentException("Invalid or expired code.");
+        }
+        String onRecord = app.getConsultantEmail();
+        String typed = email == null ? "" : email.trim();
+        if (onRecord == null || !onRecord.equalsIgnoreCase(typed)) {
+            throw new IllegalArgumentException("Invalid or expired code.");
+        }
+        if (otp == null || !passwordEncoder.matches(otp.trim(), cv.getOtpHash())) {
+            cv.setAttempts(cv.getAttempts() + 1);
+            if (cv.getAttempts() >= OTP_MAX_ATTEMPTS) {
+                cv.setConsumedAt(LocalDateTime.now()); // lock the challenge
+            }
+            verificationRepository.save(cv);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.OTP_FAILED,
+                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                    Map.of("attempts", String.valueOf(cv.getAttempts())),
+                    request);
+            throw new IllegalArgumentException("Invalid or expired code.");
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        cv.setConsumedAt(now);
+        verificationRepository.save(cv);
+
+        String ip = clientIp(request);
+        app.setAccessIp(ip);
+        app.setAccessAt(now);
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.OTP_VERIFIED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("ip", ip == null ? "" : ip),
+                request);
+
+        return jwtService.generateConsultantToken(applicationId, app.getConsultantEmail());
     }
 
     /**
@@ -572,18 +728,23 @@ public class ConsultantApplicationService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        String ip = clientIp(request);
         app.setSignedLegalName(legalName.trim());
         app.setSignatureImage(signatureImage);
         app.setSignedAt(now);
-        app.setSignedIp(clientIp(request));
+        app.setSignedIp(ip);
         app.setSignedUserAgent(request == null ? null : request.getHeader("User-Agent"));
+        // Phase D — dedicated consultant signing record, surfaced to the ERM.
+        app.setSigningIp(ip);
+        app.setSigningAt(now);
         app.setStatus(ConsultantApplication.Status.SIGNED.name());
         applicationRepository.save(app);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.SIGNED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("legalName", legalName.trim()),
+                Map.of("legalName", legalName.trim(),
+                        "ip", ip == null ? "" : ip),
                 request);
 
         // PDF + completion side-effects. If PDF generation fails we
@@ -743,11 +904,15 @@ public class ConsultantApplicationService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        String ip = clientIp(request);
         app.setSignedLegalName(signedLegalName.trim());
         app.setSignatureImage(signatureUrl);
         app.setSignedAt(now);
-        app.setSignedIp(clientIp(request));
+        app.setSignedIp(ip);
         app.setSignedUserAgent(request == null ? null : request.getHeader("User-Agent"));
+        // Phase D — dedicated consultant signing record, surfaced to the ERM.
+        app.setSigningIp(ip);
+        app.setSigningAt(now);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
 
@@ -756,7 +921,8 @@ public class ConsultantApplicationService {
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
                 Map.of("legalName", signedLegalName.trim(),
                         "from", fromStatus,
-                        "to", app.getStatus()),
+                        "to", app.getStatus(),
+                        "ip", ip == null ? "" : ip),
                 request);
 
         try {

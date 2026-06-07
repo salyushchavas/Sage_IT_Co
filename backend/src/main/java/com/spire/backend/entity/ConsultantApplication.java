@@ -145,6 +145,24 @@ public class ConsultantApplication {
     @Column(name = "signed_pdf_url", columnDefinition = "TEXT")
     private String signedPdfUrl;
 
+    // ── Consultant access record (email-OTP gate) ─────────────────────
+    //
+    // access* is captured when the consultant passes the OTP gate;
+    // signing* when they submit/sign. Real client IP via X-Forwarded-For
+    // (first hop). Surfaced to the ERM/admin; NOT embedded in the PDF.
+
+    @Column(name = "access_ip", length = 64)
+    private String accessIp;
+
+    @Column(name = "access_at")
+    private LocalDateTime accessAt;
+
+    @Column(name = "signing_ip", length = 64)
+    private String signingIp;
+
+    @Column(name = "signing_at")
+    private LocalDateTime signingAt;
+
     // ── Consultant OTP state ─────────────────────────────────────────
 
     @Column(name = "otp_hash", length = 255)

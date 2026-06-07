@@ -14,6 +14,7 @@ import {
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import {
   getConsultantApplicationView,
+  getConsultantToken,
   requestConsultantRevision,
   verifyConsultantDetails,
   type ConsultantApplication,
@@ -45,9 +46,15 @@ export default function ConsultantReviewPage() {
   }, [appId]);
 
   useEffect(() => {
+    if (!appId) return;
+    // Phase D — must pass the OTP gate first.
+    if (!getConsultantToken(appId)) {
+      router.replace(`/consultant/${encodeURIComponent(appId)}/verify`);
+      return;
+    }
     setLoading(true);
     load().finally(() => setLoading(false));
-  }, [load]);
+  }, [appId, load, router]);
 
   const handleVerifyDetails = async () => {
     if (!app) return;

@@ -1167,6 +1167,12 @@ public class DataSeeder implements CommandLineRunner {
                 {"deleted BOOLEAN DEFAULT FALSE", "deleted"},
                 {"deleted_at TIMESTAMP", "deleted_at"},
                 {"deleted_by VARCHAR(36)", "deleted_by"},
+                // Consultant access record (email-OTP gate). Real client
+                // IP (X-Forwarded-For first hop) at OTP verify + at sign.
+                {"access_ip VARCHAR(64)", "access_ip"},
+                {"access_at TIMESTAMP", "access_at"},
+                {"signing_ip VARCHAR(64)", "signing_ip"},
+                {"signing_at TIMESTAMP", "signing_at"},
         };
         for (String[] col : columns) {
             try {

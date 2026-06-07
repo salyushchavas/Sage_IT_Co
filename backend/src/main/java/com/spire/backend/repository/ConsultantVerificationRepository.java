@@ -1,0 +1,29 @@
+package com.spire.backend.repository;
+
+import com.spire.backend.entity.ConsultantVerification;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.time.LocalDateTime;
+import java.util.List;
+import java.util.Optional;
+
+/**
+ * Repository for consultant email-OTP challenges. PK is a String UUID.
+ */
+public interface ConsultantVerificationRepository
+        extends JpaRepository<ConsultantVerification, String> {
+
+    /** The current active (unconsumed) challenge for an application, if any. */
+    Optional<ConsultantVerification>
+            findFirstByApplicationIdAndConsumedAtIsNullOrderByCreatedAtDesc(String applicationId);
+
+    /** Most recent challenge regardless of state (for resend cooldown). */
+    Optional<ConsultantVerification>
+            findFirstByApplicationIdOrderByCreatedAtDesc(String applicationId);
+
+    /** All unconsumed challenges for an application (to supersede them). */
+    List<ConsultantVerification> findByApplicationIdAndConsumedAtIsNull(String applicationId);
+
+    /** Hourly resend cap: how many OTPs were sent for this app recently. */
+    long countByApplicationIdAndLastSentAtAfter(String applicationId, LocalDateTime since);
+}

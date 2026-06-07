@@ -3310,6 +3310,12 @@ export interface ConsultantApplication {
   revisionCount: number | null;
   // Final post-countersignature PDF
   finalPdfUrl: string | null;
+  // Phase D — consultant access record (real client IP via X-Forwarded-For).
+  // access* captured at OTP verify; signing* at submit. Surfaced to ERM/admin.
+  accessIp?: string | null;
+  accessAt?: string | null;
+  signingIp?: string | null;
+  signingAt?: string | null;
 }
 
 /**
@@ -3803,28 +3809,124 @@ export async function fetchAgreementPdfBlob(
   return res;
 }
 
-// ── Consultant-side (public, applicationId is the credential) ───
+// ── Consultant-side (Phase D: email-OTP gate) ───────────────────
 //
-// No bearer token, no auth header. Rate-limited server-side; a 429
-// surfaces as a friendly error. The applicationId UUID is the only
-// thing standing between an attacker and an application's payload,
-// so we surface 404 explicitly rather than redirecting silently.
+// The fill/submit/view endpoints now require a consultant SESSION TOKEN
+// minted by the OTP gate (request-otp -> verify-otp). The token is
+// per-appId, kept in sessionStorage so closing the tab clears it within
+// its ~2h life. The two OTP endpoints themselves are PUBLIC (no token).
 
+function consultantTokenKey(applicationId: string): string {
+  return `sage_consultant_token_${applicationId}`;
+}
+
+export function getConsultantToken(applicationId: string): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return sessionStorage.getItem(consultantTokenKey(applicationId));
+  } catch {
+    return null;
+  }
+}
+
+export function setConsultantToken(applicationId: string, token: string) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(consultantTokenKey(applicationId), token);
+  } catch {
+    /* storage disabled */
+  }
+}
+
+export function clearConsultantToken(applicationId: string) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(consultantTokenKey(applicationId));
+  } catch {
+    /* storage disabled */
+  }
+}
+
+/**
+ * Step 1 of the gate — PUBLIC, no token. Always resolves to a generic
+ * message (no enumeration); the backend sends a code only when the
+ * typed email matches the on-record consultant email.
+ */
+export async function requestConsultantOtp(applicationId: string, email: string) {
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/request-otp`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email }),
+    },
+  );
+  if (res.status === 429) {
+    throw new Error("Too many requests. Try again in a minute.");
+  }
+  const body = (await res.json()) as ApiResponse<{ message: string }>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Request failed (${res.status})`);
+  }
+  return body.data;
+}
+
+/**
+ * Step 2 of the gate — PUBLIC, no token. On success stores the returned
+ * consultant session token under the per-appId key and returns it.
+ * Generic error on any failure (invalid/expired/locked).
+ */
+export async function verifyConsultantOtp(
+  applicationId: string,
+  email: string,
+  otp: string,
+) {
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/verify-otp`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, otp }),
+    },
+  );
+  if (res.status === 429) {
+    throw new Error("Too many requests. Try again in a minute.");
+  }
+  const body = (await res.json()) as ApiResponse<{ token: string }>;
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || "Invalid or expired code.");
+  }
+  setConsultantToken(applicationId, body.data.token);
+  return body.data;
+}
+
+// Token-gated consultant calls. Attaches the per-appId session token; on
+// 401 (missing/expired/wrong-app token) it clears the token and bounces
+// to the verify gate — server-side autosave means progress is preserved.
 async function consultantFetch<T>(
   applicationId: string,
   path: string,
   init: RequestInit = {},
 ): Promise<T> {
+  const token = getConsultantToken(applicationId);
   const res = await fetch(
     `${BASE_URL}/api/consultant/applications/${applicationId}${path}`,
     {
       ...init,
       headers: {
         "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(init.headers ?? {}),
       },
     },
   );
+  if (res.status === 401) {
+    clearConsultantToken(applicationId);
+    if (typeof window !== "undefined") {
+      window.location.assign(`/consultant/${applicationId}/verify`);
+    }
+    throw new Error("Verification required.");
+  }
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }

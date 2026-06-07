@@ -11,6 +11,7 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  Globe,
   Link2,
   Loader2,
   Mail,
@@ -274,6 +275,8 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
 
       <SignaturesPreview app={app} />
 
+      <AccessRecord app={app} />
+
       <Section title={`Activity (${events.length})`}>
         <AgreementEventTimeline events={events} />
       </Section>
@@ -529,6 +532,45 @@ function EditContactModal({
         )}
       </div>
     </ModalShell>
+  );
+}
+
+// ── Access record (Phase D — consultant IP/time) ───────────────
+
+function AccessRecord({ app }: { app: ConsultantApplication }) {
+  // Nothing to show until the consultant has at least passed the gate.
+  if (!app.accessIp && !app.accessAt && !app.signingIp && !app.signingAt) {
+    return null;
+  }
+  const fmt = (iso: string | null | undefined) =>
+    iso
+      ? new Date(iso).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : "—";
+  return (
+    <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
+      <p className="text-[11px] font-bold uppercase tracking-wider text-sage-navy inline-flex items-center gap-1.5">
+        <Globe size={12} /> Access record
+      </p>
+      <p className="text-xs text-gray-600 mt-1.5">
+        Accessed from{" "}
+        <span className="font-mono text-gray-900">{app.accessIp || "—"}</span>{" "}
+        on {fmt(app.accessAt)}
+        {(app.signingIp || app.signingAt) && (
+          <>
+            {" · "}signed from{" "}
+            <span className="font-mono text-gray-900">{app.signingIp || "—"}</span>{" "}
+            on {fmt(app.signingAt)}
+          </>
+        )}
+      </p>
+      <p className="text-[10px] text-gray-400 mt-1">
+        Client IP captured at email-OTP verification and at signing.
+      </p>
+    </div>
   );
 }
 

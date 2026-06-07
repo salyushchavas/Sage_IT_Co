@@ -5,8 +5,10 @@ import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.entity.ConsultantApplicationRevision;
+import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.security.AgreementAuthz;
 import com.spire.backend.security.ConsultantRateLimiter;
+import com.spire.backend.security.JwtService;
 import com.spire.backend.service.AgreementDocumentService;
 import com.spire.backend.service.ConsultantApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -49,6 +51,29 @@ public class ConsultantApplicationController {
     private final ConsultantApplicationService consultantService;
     private final ConsultantRateLimiter rateLimiter;
     private final AgreementDocumentService agreementDocumentService;
+    private final JwtService jwtService;
+
+    /**
+     * Phase D — consultant session gate. Every consultant-side endpoint
+     * EXCEPT the public request-otp / verify-otp requires a Bearer token
+     * with {@code type=consultant} whose {@code appId} claim equals the
+     * path appId; else 401. Kept separate from AgreementErmAuthFilter: an
+     * ERM token has no {@code type/appId} claim, so it can't satisfy this
+     * (and a consultant token has no {@code purpose=agreement_erm}, so it
+     * can't satisfy the ERM filter).
+     */
+    private void requireConsultantToken(String appId, HttpServletRequest request) {
+        String auth = request.getHeader("Authorization");
+        if (auth == null || !auth.startsWith("Bearer ")) {
+            throw new UnauthorizedException("Verification required.");
+        }
+        String token = auth.substring(7);
+        if (!jwtService.isTokenValid(token)
+                || !"consultant".equals(jwtService.extractTokenType(token))
+                || !appId.equals(jwtService.extractAppId(token))) {
+            throw new UnauthorizedException("Verification required.");
+        }
+    }
 
     // ── Agreement-ERM-side (requires ROLE_AGREEMENT_ERM) ────────────
 
@@ -271,12 +296,56 @@ public class ConsultantApplicationController {
                 .body(bytes);
     }
 
-    // ── Consultant-side (public, rate-limited) ──────────────────────
+    // ── Consultant email-OTP gate (PUBLIC — no session token) ───────
+
+    /**
+     * Step 1 of the gate. Generic response either way (no enumeration);
+     * a code is sent only when the typed email matches the on-record
+     * consultant email. Tight per-appId+IP rate limit.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/request-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> requestOtp(
+            @PathVariable String appId,
+            @RequestBody(required = false) OtpRequestBody body,
+            HttpServletRequest request) {
+        if (!rateLimiter.allowOtpRequest(appId + "|" + clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        String message = consultantService.requestOtp(
+                appId, body == null ? null : body.email, request);
+        return ResponseEntity.ok(ApiResponse.success(Map.of("message", message)));
+    }
+
+    /**
+     * Step 2 of the gate. On success returns a consultant session token
+     * (type=consultant, appId-scoped, ~2h). Generic 400 on any failure;
+     * 5 wrong attempts invalidate the code.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/verify-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> verifyOtp(
+            @PathVariable String appId,
+            @RequestBody(required = false) OtpVerifyBody body,
+            HttpServletRequest request) {
+        if (!rateLimiter.allowOtpVerify(appId + "|" + clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        String token = consultantService.verifyOtp(
+                appId,
+                body == null ? null : body.email,
+                body == null ? null : body.otp,
+                request);
+        return ResponseEntity.ok(ApiResponse.success(Map.of("token", token)));
+    }
+
+    // ── Consultant-side (consultant-token gated, rate-limited) ──────
 
     @GetMapping("/api/consultant/applications/{appId}")
     public ResponseEntity<ApiResponse<ConsultantApplication>> consultantGet(
             @PathVariable String appId,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowRead(clientIp(request))) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -289,6 +358,7 @@ public class ConsultantApplicationController {
     public ResponseEntity<ApiResponse<ConsultantApplication>> consultantVerifyDetails(
             @PathVariable String appId,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -303,6 +373,7 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody Map<String, String> body,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -317,6 +388,7 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody SignBody body,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -330,6 +402,7 @@ public class ConsultantApplicationController {
     public ResponseEntity<ApiResponse<Map<String, String>>> consultantRequestCopy(
             @PathVariable String appId,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -352,6 +425,7 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody ConsultantApplicationService.ConsultantFillPatch body,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -373,6 +447,7 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody ConsultantSubmitBody body,
             HttpServletRequest request) {
+        requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
@@ -448,6 +523,15 @@ public class ConsultantApplicationController {
     public static class SignBody {
         public String legalName;
         public String signatureImage;
+    }
+
+    public static class OtpRequestBody {
+        public String email;
+    }
+
+    public static class OtpVerifyBody {
+        public String email;
+        public String otp;
     }
 
     public static class PageResponse<T> {

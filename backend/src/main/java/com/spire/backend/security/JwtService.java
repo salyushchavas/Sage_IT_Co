@@ -77,6 +77,35 @@ public class JwtService {
         return extractClaim(token, claims -> claims.get("title", String.class));
     }
 
+    /**
+     * Consultant session token issued after the email-OTP gate. Claims
+     * {@code type=consultant}, {@code appId}, {@code email}; subject is
+     * the consultant email. ~2h expiry -- comfortably covers a fill+sign
+     * session, and server-side autosave lets a re-verify resume.
+     *
+     * Deliberately NOT carrying {@code purpose=agreement_erm}, so the
+     * {@link AgreementErmAuthFilter} ignores it and an ERM token can't
+     * satisfy the consultant gate (and vice-versa).
+     */
+    public String generateConsultantToken(String appId, String email) {
+        long twoHoursMs = 2L * 60L * 60L * 1000L;
+        Map<String, Object> claims = new java.util.HashMap<>();
+        claims.put("type", "consultant");
+        claims.put("appId", appId);
+        claims.put("email", email);
+        return buildToken(claims, email, twoHoursMs);
+    }
+
+    /** "consultant" for consultant session tokens; null otherwise. */
+    public String extractTokenType(String token) {
+        return extractClaim(token, claims -> claims.get("type", String.class));
+    }
+
+    /** The appId a consultant token is scoped to; null otherwise. */
+    public String extractAppId(String token) {
+        return extractClaim(token, claims -> claims.get("appId", String.class));
+    }
+
     public String extractSubject(String token) {
         return extractClaim(token, Claims::getSubject);
     }

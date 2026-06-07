@@ -25,6 +25,7 @@ import {
 
 import {
   getConsultantApplicationView,
+  getConsultantToken,
   saveConsultantFill,
   type ConsultantApplication,
   type ConsultantFillPayload,
@@ -426,6 +427,11 @@ export default function ConsultantFillPage() {
   // Hydrate from server ──────────────────────────────────────────
   useEffect(() => {
     if (!appId) return;
+    // Phase D — must pass the OTP gate first.
+    if (!getConsultantToken(appId)) {
+      router.replace(`/consultant/${encodeURIComponent(appId)}/verify`);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     getConsultantApplicationView(appId)

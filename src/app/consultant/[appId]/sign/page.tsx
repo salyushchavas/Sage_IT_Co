@@ -9,6 +9,7 @@ import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import SignaturePad from "@/components/common/SignaturePad";
 import {
   getConsultantApplicationView,
+  getConsultantToken,
   signConsultantApplication,
   type ConsultantApplication,
 } from "@/lib/api";
@@ -28,6 +29,11 @@ export default function ConsultantSignPage() {
 
   useEffect(() => {
     if (!appId) return;
+    // Phase D — must pass the OTP gate first.
+    if (!getConsultantToken(appId)) {
+      router.replace(`/consultant/${encodeURIComponent(appId)}/verify`);
+      return;
+    }
     getConsultantApplicationView(appId)
       .then((data) => {
         setApp(data);

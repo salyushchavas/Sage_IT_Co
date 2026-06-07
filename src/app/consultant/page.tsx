@@ -21,11 +21,11 @@ function ConsultantEntryInner() {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    // Email link with ?app=<uuid> drops the consultant straight on
-    // the review screen -- no need to make them click again.
+    // Email link with ?app=<uuid> sends the consultant straight to the
+    // verification gate -- they confirm their email before the form.
     if (appFromUrl && isValidUuidLike(appFromUrl)) {
       setRedirecting(true);
-      router.replace(`/consultant/${encodeURIComponent(appFromUrl)}/review`);
+      router.replace(`/consultant/${encodeURIComponent(appFromUrl)}/verify`);
     }
   }, [appFromUrl, router]);
 
@@ -38,7 +38,7 @@ function ConsultantEntryInner() {
       return;
     }
     setRedirecting(true);
-    router.push(`/consultant/${encodeURIComponent(trimmed)}/review`);
+    router.push(`/consultant/${encodeURIComponent(trimmed)}/verify`);
   };
 
   if (redirecting) {

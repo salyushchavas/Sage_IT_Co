@@ -687,7 +687,7 @@ public class EmailTemplateService {
      * receive an OTP.
      */
     public void sendConsultantApplicationCreated(ConsultantApplication application) {
-        String url = appUrl + "/consultant/" + application.getApplicationId() + "/review";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/verify";
         String displayName = application.getConsultantName() == null
                 || application.getConsultantName().isBlank()
                 ? "there"
@@ -745,7 +745,7 @@ public class EmailTemplateService {
      * re-review and decide whether to verify or push back again.
      */
     public void sendConsultantApplicationUpdated(ConsultantApplication application) {
-        String url = appUrl + "/consultant/" + application.getApplicationId() + "/review";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/verify";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has updated your engagement details based on "
                         + "the changes you requested.")
@@ -831,7 +831,7 @@ public class EmailTemplateService {
      */
     public void sendConsultantInitialFill(ConsultantApplication application) {
         String url = appUrl + "/consultant/"
-                + application.getApplicationId() + "/fill";
+                + application.getApplicationId() + "/verify";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has prepared your engagement agreement and "
                         + "needs you to complete a few details so the document "
@@ -850,6 +850,33 @@ public class EmailTemplateService {
     }
 
     /**
+     * Phase D — emails the 6-digit verification code for the consultant
+     * OTP gate to the on-record consultant email. Shows the code
+     * prominently; states the 10-minute single-use expiry and an
+     * ignore-if-not-you line. Sent only when the typed email matches the
+     * record (the caller enforces that), so this never reaches a
+     * stranger.
+     */
+    public void sendConsultantOtp(ConsultantApplication application, String code) {
+        String codeBlock =
+                "<div style=\"margin:20px 0;padding:18px 0;text-align:center;"
+                + "font-family:'Courier New',monospace;font-size:34px;"
+                + "font-weight:bold;letter-spacing:10px;color:#1B2A5C;"
+                + "background:#f4f6fb;border-radius:10px;\">"
+                + escape(code) + "</div>";
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p("Use this verification code to access and sign your "
+                        + brandName() + " agreement:")
+                + codeBlock
+                + muted("This code expires in 10 minutes and can be used once. "
+                        + "If you didn't request it, you can safely ignore this email.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Your " + brandName() + " verification code",
+                wrap("Verification code", body));
+    }
+
+    /**
      * Sent to the consultant when the ERM kicks the application back
      * for revisions after reviewing the signed submission. Includes the
      * ERM's remarks in a styled blockquote so the consultant knows
@@ -858,7 +885,7 @@ public class EmailTemplateService {
     public void sendConsultantRevisionRequest(
             ConsultantApplication application, String remarks) {
         String url = appUrl + "/consultant/"
-                + application.getApplicationId() + "/fill";
+                + application.getApplicationId() + "/verify";
         String safeRemarks = remarks == null || remarks.isBlank()
                 ? "(no remarks provided)"
                 : remarks;

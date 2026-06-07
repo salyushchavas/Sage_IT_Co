@@ -32,8 +32,18 @@ public class ConsultantRateLimiter {
     private static final int WRITE_MAX = 10;
     private static final Duration WRITE_WINDOW = Duration.ofMinutes(1);
 
+    // OTP endpoints — tighter than general consultant traffic. Keyed by
+    // appId|ip so neither a single IP nor a single app can be swept.
+    // Combined with the 5-attempt cap, 6-digit brute force is infeasible.
+    private static final int OTP_REQUEST_MAX = 5;
+    private static final Duration OTP_REQUEST_WINDOW = Duration.ofMinutes(1);
+    private static final int OTP_VERIFY_MAX = 10;
+    private static final Duration OTP_VERIFY_WINDOW = Duration.ofMinutes(1);
+
     private final ConcurrentMap<String, Deque<Instant>> readHits = new ConcurrentHashMap<>();
     private final ConcurrentMap<String, Deque<Instant>> writeHits = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Deque<Instant>> otpRequestHits = new ConcurrentHashMap<>();
+    private final ConcurrentMap<String, Deque<Instant>> otpVerifyHits = new ConcurrentHashMap<>();
 
     public boolean allowRead(String ip) {
         return tryAcquire(readHits, ip == null ? "?" : ip, READ_MAX, READ_WINDOW);
@@ -42,6 +52,16 @@ public class ConsultantRateLimiter {
     public boolean allowWrite(String applicationId) {
         return tryAcquire(writeHits, applicationId == null ? "?" : applicationId,
                 WRITE_MAX, WRITE_WINDOW);
+    }
+
+    public boolean allowOtpRequest(String key) {
+        return tryAcquire(otpRequestHits, key == null ? "?" : key,
+                OTP_REQUEST_MAX, OTP_REQUEST_WINDOW);
+    }
+
+    public boolean allowOtpVerify(String key) {
+        return tryAcquire(otpVerifyHits, key == null ? "?" : key,
+                OTP_VERIFY_MAX, OTP_VERIFY_WINDOW);
     }
 
     private boolean tryAcquire(ConcurrentMap<String, Deque<Instant>> map, String key,
