@@ -70,6 +70,24 @@ public class ConsultantApplication {
     @Transient
     private String ownerName;
 
+    /**
+     * Phase C — soft delete (archive). Only the super-admin archives,
+     * and only CANCELLED applications. The row stays in the DB
+     * (recoverable, audit history + Cloudinary PDF preserved); it's
+     * hidden from every console list and 404s on detail/mutation.
+     * Mapped as a nullable Boolean (+ DataSeeder backfills existing rows
+     * to false) so the {@code deleted = false} filter includes them.
+     */
+    @Column(name = "deleted")
+    @Builder.Default
+    private Boolean deleted = false;
+
+    @Column(name = "deleted_at")
+    private LocalDateTime deletedAt;
+
+    @Column(name = "deleted_by", length = 36)
+    private String deletedBy;
+
     @Column(name = "consultant_email", nullable = false, length = 255)
     private String consultantEmail;
 

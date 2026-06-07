@@ -6,14 +6,17 @@ import {
   Ban,
   CheckCircle2,
   Clock,
+  Copy,
   Download,
   Eye,
   EyeOff,
   ExternalLink,
+  Link2,
   Loader2,
   Mail,
   MessageSquare,
   PenLine,
+  Pencil,
   ShieldAlert,
   X,
 } from "lucide-react";
@@ -27,6 +30,7 @@ import {
   fetchAgreementPdfBlob,
   fetchMe,
   resendConsultantInvite,
+  updateConsultantContact,
   type ConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
 } from "@/lib/api";
@@ -144,7 +148,7 @@ const SECTIONS: readonly SectionDef[] = [
   },
 ];
 
-type ModalKind = null | "revision" | "approve" | "send";
+type ModalKind = null | "revision" | "approve" | "send" | "editContact";
 
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
@@ -188,12 +192,26 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
     setError("");
     try {
       await resendConsultantInvite(app.applicationId);
-      setFeedback("Invite resent.");
+      setFeedback(`Invitation re-sent to ${app.consultantEmail}.`);
       await onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't resend invite");
     } finally {
       setBusy(null);
+    }
+  };
+
+  // Phase C — manual escape hatch when email delivery fails: copy the
+  // consultant's fill link straight to the clipboard. Same-origin app, so
+  // window.location.origin is the public site host.
+  const handleCopyLink = async () => {
+    const origin = typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}/consultant/${app.applicationId}/fill`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setFeedback("Consultant link copied to clipboard.");
+    } catch {
+      setError("Couldn't copy automatically — the link is: " + url);
     }
   };
 
@@ -242,6 +260,14 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         isLocked={isLocked}
       />
 
+      <ContactActionsBar
+        status={status}
+        onEditContact={() => setModal("editContact")}
+        onResend={handleResend}
+        onCopyLink={handleCopyLink}
+        resendBusy={busy === "resend"}
+      />
+
       <ErmFilledCard app={app} />
 
       <ConsultantSections app={app} />
@@ -287,7 +313,222 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           }}
         />
       )}
+      {modal === "editContact" && (
+        <EditContactModal
+          appId={app.applicationId}
+          status={status}
+          defaultEmail={app.consultantEmail}
+          defaultName={app.consultantName ?? ""}
+          onClose={() => setModal(null)}
+          onDone={async (msg) => {
+            setModal(null);
+            setFeedback(msg);
+            await onRefresh();
+          }}
+        />
+      )}
     </div>
+  );
+}
+
+// ── Contact actions (Phase C) ──────────────────────────────────
+//
+// Edit consultant contact / resend the fill invite / copy the fill link.
+// The SUBMITTED resend also lives in StateActionBar; this bar adds resend
+// for REVISION_REQUESTED and the always-available edit + copy escape
+// hatches. Renders nothing when none apply (CANCELLED/EXPIRED).
+
+function ContactActionsBar({
+  status,
+  onEditContact,
+  onResend,
+  onCopyLink,
+  resendBusy,
+}: {
+  status: ConsultantApplication["status"];
+  onEditContact: () => void;
+  onResend: () => void;
+  onCopyLink: () => void;
+  resendBusy: boolean;
+}) {
+  const canEdit = ["SUBMITTED", "VERIFIED", "REVISION_REQUESTED", "COMPLETED"].includes(status);
+  // SUBMITTED resend is already in StateActionBar; surface it here for
+  // REVISION_REQUESTED so the action exists in both states.
+  const canResend = status === "REVISION_REQUESTED";
+  const isLocked = ["SIGNED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(status);
+  const canCopy = !isLocked;
+
+  if (!canEdit && !canResend && !canCopy) return null;
+
+  return (
+    <div className="flex items-center gap-2 flex-wrap">
+      {canEdit && (
+        <button
+          type="button"
+          onClick={onEditContact}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+        >
+          <Pencil size={12} /> Edit consultant contact
+        </button>
+      )}
+      {canResend && (
+        <button
+          type="button"
+          onClick={onResend}
+          disabled={resendBusy}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer disabled:opacity-50"
+        >
+          {resendBusy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+          Resend invitation
+        </button>
+      )}
+      {canCopy && (
+        <button
+          type="button"
+          onClick={onCopyLink}
+          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+        >
+          <Link2 size={12} /> Copy consultant link
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ── Edit consultant contact modal (Phase C) ────────────────────
+
+function EditContactModal({
+  appId,
+  status,
+  defaultEmail,
+  defaultName,
+  onClose,
+  onDone,
+}: {
+  appId: string;
+  status: ConsultantApplication["status"];
+  defaultEmail: string;
+  defaultName: string;
+  onClose: () => void;
+  onDone: (message: string) => Promise<void>;
+}) {
+  const [email, setEmail] = useState(defaultEmail);
+  const [name, setName] = useState(defaultName);
+  const [busy, setBusy] = useState<"save" | "saveResend" | null>(null);
+  const [error, setError] = useState("");
+
+  const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const canResend = status === "SUBMITTED" || status === "REVISION_REQUESTED";
+
+  const submit = async (alsoResend: boolean) => {
+    if (!emailValid) {
+      setError("Enter a valid email address.");
+      return;
+    }
+    setBusy(alsoResend ? "saveResend" : "save");
+    setError("");
+    try {
+      await updateConsultantContact(appId, {
+        consultantEmail: email.trim(),
+        consultantName: name.trim(),
+      });
+    } catch (e) {
+      // The contact update itself failed — keep the modal open to retry.
+      setError(e instanceof Error ? e.message : "Couldn't update contact.");
+      setBusy(null);
+      return;
+    }
+    // Contact is saved. A subsequent resend failure must NOT hide that
+    // success or trap the user in an error modal — close with a note.
+    if (alsoResend) {
+      try {
+        await resendConsultantInvite(appId);
+        await onDone(`Contact updated and invitation re-sent to ${email.trim()}.`);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "resend failed";
+        await onDone(`Contact updated, but the invitation couldn't be re-sent (${msg}).`);
+      }
+    } else {
+      await onDone("Consultant contact updated.");
+    }
+  };
+
+  return (
+    <ModalShell
+      title="Edit consultant contact"
+      onClose={onClose}
+      closeable={busy === null}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy !== null}
+            className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          {canResend && (
+            <button
+              type="button"
+              onClick={() => submit(true)}
+              disabled={busy !== null || !emailValid}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5 cursor-pointer disabled:opacity-60"
+            >
+              {busy === "saveResend" ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
+              Save &amp; resend invitation
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => submit(false)}
+            disabled={busy !== null || !emailValid}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-60"
+          >
+            {busy === "save" ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+            Save
+          </button>
+        </>
+      }
+    >
+      <p className="text-xs text-gray-500 mb-3">
+        Fix a wrong email or name so the consultant can reach their form.
+        This updates where future emails and the agreement PDF&apos;s contact
+        field point; it doesn&apos;t alter an already-generated signed PDF.
+      </p>
+      <div className="space-y-3">
+        <div>
+          <label className="block text-[11px] font-semibold text-gray-600 mb-1">
+            Consultant email <span className="text-red-500">*</span>
+          </label>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={busy !== null}
+            autoComplete="off"
+            className="w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy disabled:bg-gray-50"
+          />
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold text-gray-600 mb-1">
+            Consultant name
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            disabled={busy !== null}
+            className="w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy disabled:bg-gray-50"
+          />
+        </div>
+        {error && (
+          <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
+            <AlertCircle size={11} /> {error}
+          </p>
+        )}
+      </div>
+    </ModalShell>
   );
 }
 

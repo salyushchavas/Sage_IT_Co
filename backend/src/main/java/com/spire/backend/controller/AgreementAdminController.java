@@ -1,12 +1,14 @@
 package com.spire.backend.controller;
 
 import com.spire.backend.dto.ApiResponse;
+import com.spire.backend.dto.AgreementSummaryDto;
 import com.spire.backend.dto.AgreementUserDto;
 import com.spire.backend.entity.AgreementUser;
 import com.spire.backend.entity.AgreementUserRole;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.AgreementUserRepository;
 import com.spire.backend.security.AgreementAuthz;
+import com.spire.backend.service.ConsultantApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -39,6 +41,7 @@ public class AgreementAdminController {
 
     private final AgreementUserRepository agreementUserRepository;
     private final PasswordEncoder passwordEncoder;
+    private final ConsultantApplicationService consultantService;
 
     @GetMapping("/users")
     public ResponseEntity<ApiResponse<List<AgreementUserDto>>> listUsers(
@@ -54,6 +57,35 @@ public class AgreementAdminController {
                 .map(AgreementUserDto::from)
                 .toList();
         return ResponseEntity.ok(ApiResponse.success(users));
+    }
+
+    /**
+     * Phase C feature 3 — every live (non-archived) application, slimmed
+     * to identity + status + owner, for the "Agreements by ERM" grouped
+     * view. The frontend groups by ownerErmId.
+     */
+    @GetMapping("/applications")
+    public ResponseEntity<ApiResponse<List<AgreementSummaryDto>>> listAgreements(
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        List<AgreementSummaryDto> agreements = consultantService.listAllForAdmin().stream()
+                .map(AgreementSummaryDto::from)
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success(agreements));
+    }
+
+    /**
+     * Phase C feature 2 — archive (soft-delete) a CANCELLED application.
+     * 409 if not cancelled; 404 if already archived. The row stays in the
+     * DB, recoverable at the DB level. Returns 204.
+     */
+    @DeleteMapping("/applications/{appId}")
+    public ResponseEntity<Void> archiveApplication(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        consultantService.archiveApplication(appId, AgreementAuthz.userId(request), request);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/users")

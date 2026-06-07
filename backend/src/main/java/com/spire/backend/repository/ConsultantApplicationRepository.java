@@ -32,6 +32,22 @@ public interface ConsultantApplicationRepository
     // Super-admin status filter (sees all owners).
     Page<ConsultantApplication> findByStatus(String status, Pageable pageable);
 
+    // Phase C — archive (soft delete) excluded from every console list.
+    // After the DataSeeder backfill, `deleted = false` matches all live
+    // rows; archived rows (deleted = true) are dropped.
+    Page<ConsultantApplication> findByOwnerErmIdAndDeletedFalse(
+            String ownerErmId, Pageable pageable);
+
+    Page<ConsultantApplication> findByOwnerErmIdAndStatusAndDeletedFalse(
+            String ownerErmId, String status, Pageable pageable);
+
+    Page<ConsultantApplication> findByDeletedFalse(Pageable pageable);
+
+    Page<ConsultantApplication> findByStatusAndDeletedFalse(String status, Pageable pageable);
+
+    /** Admin "Agreements by ERM" grouped view — all live rows, newest first. */
+    List<ConsultantApplication> findByDeletedFalseOrderByCreatedAtDesc();
+
     /** Cron sweep — find apps past their expiry that are still in flight. */
     List<ConsultantApplication> findByStatusInAndExpiresAtBefore(
             List<String> statuses, LocalDateTime cutoff);

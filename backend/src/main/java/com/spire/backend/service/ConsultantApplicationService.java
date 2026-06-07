@@ -174,6 +174,13 @@ public class ConsultantApplicationService {
      * endpoints are appId-only and stay open).
      */
     public void assertErmCanAccess(ConsultantApplication app, HttpServletRequest request) {
+        // Phase C — an archived (soft-deleted) application is gone from
+        // the app's perspective: 404 on detail + every mutation, for the
+        // owner AND the super-admin (recovery is DB-level only).
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            throw new ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", app.getApplicationId());
+        }
         AgreementOwnership.assertCanAccess(
                 app, AgreementAuthz.userId(request), AgreementAuthz.roleEnum(request));
     }
@@ -191,17 +198,18 @@ public class ConsultantApplicationService {
         boolean all = status == null || status.isBlank() || "ALL".equalsIgnoreCase(status);
         Page<ConsultantApplication> page;
         if (role == AgreementUserRole.SUPER_ADMIN) {
+            // Phase C — archived rows excluded everywhere.
             page = all
-                    ? applicationRepository.findAll(pageable)
-                    : applicationRepository.findByStatus(status, pageable);
+                    ? applicationRepository.findByDeletedFalse(pageable)
+                    : applicationRepository.findByStatusAndDeletedFalse(status, pageable);
         } else {
             // ERM (or null role): only their own. A null/empty userId
             // matches nothing, so an unauthenticated/legacy token sees
             // an empty list rather than everyone's data.
             String owner = userId == null ? "" : userId;
             page = all
-                    ? applicationRepository.findByOwnerErmId(owner, pageable)
-                    : applicationRepository.findByOwnerErmIdAndStatus(owner, status, pageable);
+                    ? applicationRepository.findByOwnerErmIdAndDeletedFalse(owner, pageable)
+                    : applicationRepository.findByOwnerErmIdAndStatusAndDeletedFalse(owner, status, pageable);
         }
         populateOwnerNames(page.getContent());
         return page;
@@ -228,6 +236,49 @@ public class ConsultantApplicationService {
                 app.setOwnerName(idToName.get(app.getOwnerErmId()));
             }
         }
+    }
+
+    /**
+     * Phase C feature 3 — every live (non-archived) application for the
+     * admin "Agreements by ERM" grouped view, newest first, with owner
+     * names resolved. Super-admin-only (the controller enforces the role).
+     */
+    @Transactional(readOnly = true)
+    public List<ConsultantApplication> listAllForAdmin() {
+        List<ConsultantApplication> apps =
+                applicationRepository.findByDeletedFalseOrderByCreatedAtDesc();
+        populateOwnerNames(apps);
+        return apps;
+    }
+
+    /**
+     * Phase C feature 2 — super-admin archives (soft-deletes) a CANCELLED
+     * application. The row stays in the DB (recoverable; audit history +
+     * Cloudinary PDF preserved) but is hidden from every console list and
+     * 404s on detail/mutation. Only CANCELLED apps can be archived.
+     */
+    @Transactional
+    public void archiveApplication(
+            String applicationId, String adminUserId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            // Already archived — treat as gone.
+            throw new ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        if (!ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())) {
+            throw new IllegalStateException("Only cancelled applications can be archived.");
+        }
+        app.setDeleted(true);
+        app.setDeletedAt(LocalDateTime.now());
+        app.setDeletedBy(adminUserId);
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.APPLICATION_ARCHIVED,
+                ConsultantApplicationEvent.ActorType.ERM, AGREEMENT_ERM_USER_ID,
+                Map.of("deletedBy", adminUserId == null ? "" : adminUserId),
+                request);
     }
 
     @Transactional
@@ -316,22 +367,89 @@ public class ConsultantApplicationService {
         return app;
     }
 
+    /**
+     * Phase C — re-sends the consultant FILL invitation (the create-time
+     * {@link EmailTemplateService#sendConsultantInitialFill}, pointing at
+     * /consultant/{appId}/fill) to the CURRENT consultantEmail. The
+     * manual recovery path when a typo'd email left a consultant stuck.
+     * Only meaningful while the consultant still needs the form
+     * (SUBMITTED or REVISION_REQUESTED) → else 409.
+     */
     @Transactional
     public void resendInvite(String applicationId, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
+        String status = app.getStatus();
+        if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
+            throw new IllegalStateException(
+                    "The invitation can only be resent while the consultant still "
+                            + "needs to complete the form (status=" + status + ").");
+        }
         try {
-            emailTemplateService.sendConsultantApplicationCreated(app);
+            emailTemplateService.sendConsultantInitialFill(app);
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
-                    Map.of("template", "application_created",
-                            "to", app.getConsultantEmail(),
-                            "trigger", "resend"),
+                    Map.of("template", "invite_resend",
+                            "to", app.getConsultantEmail()),
                     request);
         } catch (Exception e) {
             throw new IllegalStateException("Couldn't resend invite: " + e.getMessage());
         }
+    }
+
+    /**
+     * Phase C feature 1 — ERM (owner) fixes a wrong consultant email /
+     * name. The new email flows into the ${primaryEmail} PDF placeholder
+     * for any FUTURE generation; it does NOT alter an already-generated
+     * COMPLETED PDF (immutable by design). Allowed while the contact is
+     * still actionable (SUBMITTED, VERIFIED, REVISION_REQUESTED,
+     * COMPLETED); rejected (409) otherwise.
+     */
+    @Transactional
+    public ConsultantApplication updateConsultantContact(
+            String applicationId, String consultantEmail, String consultantName,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+
+        String status = app.getStatus();
+        boolean editable =
+                ConsultantApplication.Status.SUBMITTED.name().equals(status)
+                || ConsultantApplication.Status.VERIFIED.name().equals(status)
+                || ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
+                || ConsultantApplication.Status.COMPLETED.name().equals(status);
+        if (!editable) {
+            throw new IllegalStateException(
+                    "Consultant contact can't be edited in status " + status + ".");
+        }
+
+        String newEmail = consultantEmail == null ? "" : consultantEmail.trim();
+        if (newEmail.isBlank()
+                || !newEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+            throw new IllegalArgumentException("A valid consultant email is required.");
+        }
+        String newName = consultantName == null ? null : consultantName.trim();
+
+        String oldEmail = app.getConsultantEmail();
+        String oldName = app.getConsultantName();
+
+        app.setConsultantEmail(newEmail.toLowerCase());
+        if (newName != null && !newName.isBlank()) {
+            app.setConsultantName(newName);
+        }
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CONSULTANT_CONTACT_UPDATED,
+                ConsultantApplicationEvent.ActorType.ERM, AGREEMENT_ERM_USER_ID,
+                Map.of("oldEmail", oldEmail == null ? "" : oldEmail,
+                        "newEmail", app.getConsultantEmail(),
+                        "oldName", oldName == null ? "" : oldName,
+                        "newName", app.getConsultantName() == null ? "" : app.getConsultantName()),
+                request);
+        return app;
     }
 
     @Transactional(readOnly = true)

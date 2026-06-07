@@ -86,7 +86,11 @@ public class ConsultantApplicationEvent {
         PDF_GENERATED,
         EMAIL_SENT,
         CANCELLED,
-        EXPIRED
+        EXPIRED,
+        // Phase C — ERM edits the consultant contact; super-admin
+        // archives (soft-deletes) a cancelled application.
+        CONSULTANT_CONTACT_UPDATED,
+        APPLICATION_ARCHIVED
     }
 
     public enum ActorType {

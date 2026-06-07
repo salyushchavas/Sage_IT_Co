@@ -1162,6 +1162,11 @@ public class DataSeeder implements CommandLineRunner {
                 // for download/view-inline when delivery switches to
                 // type=authenticated.
                 {"final_pdf_public_id VARCHAR(255)", "final_pdf_public_id"},
+                // Phase C — soft-delete (archive) of cancelled apps.
+                // super-admin-only; recoverable at DB level.
+                {"deleted BOOLEAN DEFAULT FALSE", "deleted"},
+                {"deleted_at TIMESTAMP", "deleted_at"},
+                {"deleted_by VARCHAR(36)", "deleted_by"},
         };
         for (String[] col : columns) {
             try {
@@ -1172,6 +1177,42 @@ public class DataSeeder implements CommandLineRunner {
                 log.debug("Couldn't add consultant_applications.{} "
                         + "(likely already present or unsupported dialect): {}",
                         col[1], e.getMessage());
+            }
+        }
+
+        // Backfill: Hibernate's ddl-auto=update may have already added
+        // `deleted` as a nullable column (no default) before this runs,
+        // leaving existing rows NULL. The list filter is `deleted = false`,
+        // which would silently drop NULL rows, so normalize them. Idempotent.
+        try {
+            int normalized = jdbcTemplate.update(
+                    "UPDATE consultant_applications SET deleted = FALSE WHERE deleted IS NULL");
+            if (normalized > 0) {
+                log.info("Backfilled consultant_applications.deleted=false on {} row(s)", normalized);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't backfill consultant_applications.deleted: {}", e.getMessage());
+        }
+
+        // Indexes backing the Phase B/C list filters (owner-scoped +
+        // soft-delete). Postgres-first; CREATE INDEX IF NOT EXISTS is a
+        // no-op on reruns. Wrapped so an unsupported dialect (MySQL dev)
+        // logs at debug rather than crashing startup. Mirrors the
+        // idx_users_participant_id pattern above.
+        String[][] indexes = {
+                {"idx_consultant_owner_deleted",
+                        "consultant_applications(owner_erm_id, deleted)"},
+                {"idx_consultant_deleted",
+                        "consultant_applications(deleted)"},
+        };
+        for (String[] idx : indexes) {
+            try {
+                jdbcTemplate.execute(
+                        "CREATE INDEX IF NOT EXISTS " + idx[0] + " ON " + idx[1]);
+                log.info("Ensured index {}", idx[0]);
+            } catch (Exception e) {
+                log.debug("Couldn't create index {} (likely already present or "
+                        + "unsupported dialect): {}", idx[0], e.getMessage());
             }
         }
     }

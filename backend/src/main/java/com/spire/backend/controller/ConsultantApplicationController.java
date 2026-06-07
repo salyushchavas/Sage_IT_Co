@@ -143,6 +143,25 @@ public class ConsultantApplicationController {
                 Map.of("message", "Invite re-sent")));
     }
 
+    /**
+     * Phase C feature 1 — owner ERM (or super-admin) fixes a wrong
+     * consultant email / name so a typo'd address never leaves a
+     * consultant stuck. Ownership-gated (non-owner → 404).
+     */
+    @PatchMapping("/api/agreement-erm/applications/{appId}/consultant-contact")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> updateConsultantContact(
+            @PathVariable String appId,
+            @RequestBody ConsultantContactBody body,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.updateConsultantContact(
+                appId,
+                body == null ? null : body.consultantEmail,
+                body == null ? null : body.consultantName,
+                request);
+        return ResponseEntity.ok(ApiResponse.success("Consultant contact updated", app));
+    }
+
     // ── Agreement-ERM side: two-stage workflow (Phase 3) ────────────
 
     @PostMapping("/api/agreement-erm/applications/{appId}/request-revision")
@@ -406,6 +425,11 @@ public class ConsultantApplicationController {
     public static class SendEmailBody {
         public String recipientEmail;
         public String note;
+    }
+
+    public static class ConsultantContactBody {
+        public String consultantEmail;
+        public String consultantName;
     }
 
     public static class ConsultantSubmitBody {

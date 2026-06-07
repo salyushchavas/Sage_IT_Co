@@ -10,6 +10,7 @@ import {
   Check,
   CheckCircle2,
   Copy,
+  FileText,
   KeyRound,
   Loader2,
   RefreshCw,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 
 import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
+import AgreementsByErmView from "@/components/agreement-erm/AgreementsByErmView";
 import {
   AdminApiError,
   adminCreateUser,
@@ -31,6 +33,8 @@ import {
   type AgreementMe,
   type AgreementUserDto,
 } from "@/lib/api";
+
+type AdminTab = "users" | "agreements";
 
 // One-time credential reveal shown after create / reset. The password
 // is never returned by the server again, so the admin must copy it now.
@@ -52,6 +56,7 @@ export default function AgreementsAdminPage() {
   const [resetTarget, setResetTarget] = useState<AgreementUserDto | null>(null);
   const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
+  const [tab, setTab] = useState<AdminTab>("users");
 
   const loadUsers = useCallback(async () => {
     setLoading(true);
@@ -116,7 +121,7 @@ export default function AgreementsAdminPage() {
   return (
     <AgreementErmShell
       title="Admin console"
-      subtitle="Create, disable, and reset agreement-console users (ERMs)."
+      subtitle="Manage agreement-console users and review agreements by ERM."
       Icon={ShieldCheck}
       toolbar={
         <Link
@@ -127,6 +132,33 @@ export default function AgreementsAdminPage() {
         </Link>
       }
     >
+      <div className="mb-5 inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
+        <button
+          type="button"
+          onClick={() => setTab("users")}
+          className={
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold cursor-pointer " +
+            (tab === "users" ? "bg-sage-navy text-white" : "text-gray-600 hover:text-sage-navy")
+          }
+        >
+          <Users size={12} /> Users
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("agreements")}
+          className={
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold cursor-pointer " +
+            (tab === "agreements" ? "bg-sage-navy text-white" : "text-gray-600 hover:text-sage-navy")
+          }
+        >
+          <FileText size={12} /> Agreements by ERM
+        </button>
+      </div>
+
+      {tab === "agreements" && <AgreementsByErmView />}
+
+      {tab === "users" && (
+      <>
       <div className="space-y-4">
         {revealed && (
           <CredentialBanner
@@ -266,6 +298,8 @@ export default function AgreementsAdminPage() {
             setRevealed({ email, password, kind: "reset" });
           }}
         />
+      )}
+      </>
       )}
     </AgreementErmShell>
   );

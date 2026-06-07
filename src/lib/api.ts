@@ -3494,6 +3494,18 @@ export interface AgreementUserDto {
   lastLoginAt: string | null;
 }
 
+// Phase C — slim row for the admin "Agreements by ERM" grouped view.
+export interface AgreementSummaryDto {
+  appId: string;
+  consultantName: string | null;
+  consultantEmail: string;
+  status: ConsultantApplicationStatus;
+  ownerErmId: string | null;
+  ownerName: string | null;
+  createdAt: string | null;
+  updatedAt: string | null;
+}
+
 /**
  * Error carrying the HTTP status so the admin UI can branch on it
  * (e.g. 409 -> "Email already in use" inline). Unlike
@@ -3576,6 +3588,40 @@ export async function adminResetUserPassword(id: string, newPassword: string) {
   );
 }
 
+// Phase C — admin "Agreements by ERM" grouped view (super-admin only).
+export async function adminListAgreements() {
+  return agreementAdminFetch<AgreementSummaryDto[]>("/api/agreements/admin/applications");
+}
+
+/**
+ * Archive (soft-delete) a CANCELLED application. Backend returns 204; we
+ * resolve to void. 401 clears the session; other failures throw
+ * AdminApiError carrying the status (e.g. 409 not-cancelled, 403 not-admin).
+ */
+export async function adminArchiveApplication(appId: string) {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new AdminApiError(401, "Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreements/admin/applications/${appId}`,
+    { method: "DELETE", headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401) {
+    clearAgreementErmToken();
+    throw new AdminApiError(401, "Session expired. Please sign in again.");
+  }
+  if (res.status === 204) return;
+  let message = `Request failed (${res.status})`;
+  try {
+    const body = (await res.json()) as ApiResponse<unknown>;
+    if (body?.message) message = body.message;
+  } catch {
+    /* non-JSON body */
+  }
+  throw new AdminApiError(res.status, message);
+}
+
 // ── Agreement-ERM operations ────────────────────────────────────
 
 export async function createConsultantApplication(data: {
@@ -3645,6 +3691,18 @@ export async function resendConsultantInvite(applicationId: string) {
   return agreementErmFetch<{ message: string }>(
     `/api/agreement-erm/applications/${applicationId}/resend-invite`,
     { method: "POST" },
+  );
+}
+
+// Phase C feature 1 — owner ERM (or super-admin) fixes the consultant's
+// email/name. Ownership-gated server-side (non-owner → 404).
+export async function updateConsultantContact(
+  applicationId: string,
+  data: { consultantEmail: string; consultantName?: string },
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/consultant-contact`,
+    { method: "PATCH", body: JSON.stringify(data) },
   );
 }
 
