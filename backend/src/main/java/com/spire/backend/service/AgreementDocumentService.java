@@ -949,8 +949,18 @@ public class AgreementDocumentService {
                     int n;
                     while ((n = zin.read(buf)) > 0) entryBytes.write(buf, 0, n);
                     String xml = entryBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
-                    String rewritten = stripOrphanEmptyParagraphsBeforePageBreaks(xml);
-                    zout.write(rewritten.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                    // Build I — strip orphan empty paragraphs around
+                    // page breaks (fixes the blank page 22 cascade).
+                    xml = stripOrphanEmptyParagraphsBeforePageBreaks(xml);
+                    // Build J — push the body bottom margin clear of
+                    // the letterhead background image so text never
+                    // overlaps the address block.
+                    xml = enlargeBottomMargin(xml);
+                    // Build J — keep every signature block (label →
+                    // signature image → name/date) on a single page
+                    // by marking its rows non-splittable.
+                    xml = keepSignatureBlocksTogether(xml);
+                    zout.write(xml.getBytes(java.nio.charset.StandardCharsets.UTF_8));
                 } else {
                     int n;
                     while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
@@ -972,6 +982,149 @@ public class AgreementDocumentService {
      * Anything more substantial is left alone so legitimate spacing
      * between sections isn't disturbed.
      */
+    /**
+     * Build J — body margin sized to clear the letterhead. The
+     * source template defines US-Letter pages with the bottom margin
+     * at 1008 twips (0.7"). The letterhead is a full-page background
+     * image anchored {@code behindDoc=1} in {@code word/header1.xml};
+     * its visible "footer" art (logo + address) sits in the bottom
+     * ~1.5" of every page. With only a 0.7" body margin, paragraphs
+     * print on top of the letterhead. Bumping the bottom margin to
+     * 2160 twips (1.5") gives the body ~0.8" of clearance over the
+     * footer art on every page.
+     */
+    static final int FOOTER_SAFE_BOTTOM_MARGIN_TWIPS = 2160;
+
+    static String enlargeBottomMargin(String xml) {
+        // Match every <w:pgMar ...> declaration so each section's
+        // margins are updated together. The bottom attr is rewritten
+        // in place; everything else is preserved verbatim.
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(<w:pgMar\\b[^>]*?\\bw:bottom=\")(\\d+)(\")",
+                java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher m = p.matcher(xml);
+        StringBuilder sb = new StringBuilder(xml.length());
+        int touched = 0;
+        int lastEnd = 0;
+        int largest = 0;
+        while (m.find()) {
+            sb.append(xml, lastEnd, m.start());
+            int currentBottom = Integer.parseInt(m.group(2));
+            largest = Math.max(largest, currentBottom);
+            int next = Math.max(currentBottom, FOOTER_SAFE_BOTTOM_MARGIN_TWIPS);
+            sb.append(m.group(1));
+            sb.append(next);
+            sb.append(m.group(3));
+            lastEnd = m.end();
+            touched++;
+        }
+        sb.append(xml, lastEnd, xml.length());
+        if (touched > 0) {
+            log.info("Template surgery: bottom margin raised on {} section(s) "
+                    + "(was {}+ twips, now {} twips)",
+                    touched, largest, FOOTER_SAFE_BOTTOM_MARGIN_TWIPS);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Build J — keeps every signature block atomic so the label
+     * ("By:", "Signature:") and the signature image and the name /
+     * title / date row all land on the same page. The block is a
+     * 4-row 2-column {@code <w:tbl>}; we identify each signature
+     * table by the presence of a signature image placeholder
+     * ({@code ${signatureImage}} or {@code ${ermSignatureImage}}) and
+     * inject {@code <w:cantSplit/>} into every row's trPr.
+     *
+     * cantSplit alone prevents a single row from splitting across
+     * pages -- which is the observed bug (label on page N, signature
+     * image on page N+1). Combined with the table being only ~3-4
+     * rows / ~3 cm tall after signature normalisation, the layout
+     * engine reliably keeps the whole block together.
+     */
+    static String keepSignatureBlocksTogether(String xml) {
+        // Walk each <w:tbl>...</w:tbl> and check whether it contains
+        // a signature placeholder. If yes, transform its rows.
+        java.util.regex.Pattern tablePattern = java.util.regex.Pattern.compile(
+                "<w:tbl\\b[^>]*>.*?</w:tbl>",
+                java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher tableMatcher = tablePattern.matcher(xml);
+        StringBuilder sb = new StringBuilder(xml.length());
+        int lastEnd = 0;
+        int tablesTouched = 0;
+        int rowsTouched = 0;
+        while (tableMatcher.find()) {
+            String table = tableMatcher.group();
+            sb.append(xml, lastEnd, tableMatcher.start());
+            if (table.contains("${signatureImage}")
+                    || table.contains("${ermSignatureImage}")
+                    || table.contains("${finalSignatureImage}")) {
+                int[] rowCount = new int[]{0};
+                String transformed = addCantSplitToEveryRow(table, rowCount);
+                sb.append(transformed);
+                tablesTouched++;
+                rowsTouched += rowCount[0];
+            } else {
+                sb.append(table);
+            }
+            lastEnd = tableMatcher.end();
+        }
+        sb.append(xml, lastEnd, xml.length());
+        if (tablesTouched > 0) {
+            log.info("Template surgery: cantSplit set on {} row(s) across {} signature table(s)",
+                    rowsTouched, tablesTouched);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Inject {@code <w:cantSplit/>} into every {@code <w:tr>} in the
+     * given table fragment. Two cases:
+     *   - row already has {@code <w:trPr>}: prepend cantSplit inside it
+     *     unless it's already there.
+     *   - row has no {@code <w:trPr>}: insert a fresh
+     *     {@code <w:trPr><w:cantSplit/></w:trPr>} right after the
+     *     {@code <w:tr ...>} opening tag.
+     */
+    private static String addCantSplitToEveryRow(String tableXml, int[] counter) {
+        java.util.regex.Pattern row = java.util.regex.Pattern.compile(
+                "(<w:tr\\b[^>]*>)(\\s*<w:trPr\\b[^>]*>)?",
+                java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher m = row.matcher(tableXml);
+        StringBuilder out = new StringBuilder(tableXml.length() + 256);
+        int lastEnd = 0;
+        while (m.find()) {
+            out.append(tableXml, lastEnd, m.start());
+            String openTag = m.group(1);
+            String trPrOpen = m.group(2);
+            out.append(openTag);
+            if (trPrOpen != null) {
+                // <w:trPr> already present -- prepend cantSplit if missing.
+                int trPrEnd = m.end();
+                // Look ahead until the matching </w:trPr> to test for
+                // an existing <w:cantSplit/> child.
+                int closeIdx = tableXml.indexOf("</w:trPr>", trPrEnd);
+                String trPrBody = closeIdx > 0
+                        ? tableXml.substring(trPrEnd, closeIdx) : "";
+                if (trPrBody.contains("<w:cantSplit")) {
+                    // Already set -- leave the row alone.
+                    out.append(trPrOpen);
+                } else {
+                    out.append(trPrOpen);
+                    out.append("<w:cantSplit/>");
+                    counter[0]++;
+                }
+            } else {
+                // No <w:trPr> yet -- inject a fresh one.
+                out.append("<w:trPr><w:cantSplit/></w:trPr>");
+                counter[0]++;
+            }
+            lastEnd = m.end();
+        }
+        out.append(tableXml, lastEnd, tableXml.length());
+        return out.toString();
+    }
+
     static String stripOrphanEmptyParagraphsBeforePageBreaks(String xml) {
         // Pattern: </w:tbl> then a self-closing empty paragraph
         // <w:p ... rsidR="..." rsidRDefault="..." /> then a paragraph
