@@ -1202,6 +1202,30 @@ public class DataSeeder implements CommandLineRunner {
                         "affirmed_appendix4"},
                 {"affirmed_appendix5 BOOLEAN NOT NULL DEFAULT FALSE",
                         "affirmed_appendix5"},
+                // F-4 (configurable per-agreement requirements). The ERM
+                // marks each appendix Required/Not Required when sending
+                // and decides whether SSN inside Appendix 3 is required.
+                // DEFAULT FALSE so existing rows backfill as "optional"
+                // -- safe for the rollover, since the old all-required
+                // gate is being replaced in the same release.
+                {"require_appendix1 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "require_appendix1"},
+                {"require_appendix2 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "require_appendix2"},
+                {"require_appendix3 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "require_appendix3"},
+                {"require_appendix4 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "require_appendix4"},
+                {"require_appendix5 BOOLEAN NOT NULL DEFAULT FALSE",
+                        "require_appendix5"},
+                {"require_ssn BOOLEAN NOT NULL DEFAULT FALSE",
+                        "require_ssn"},
+                // F-4 closing/execution signature -- captured at the
+                // review step; stamped on the agreement's last
+                // consultant signature block.
+                {"final_signature_image TEXT", "final_signature_image"},
+                {"final_signed_at TIMESTAMP", "final_signed_at"},
+                {"final_signing_ip VARCHAR(64)", "final_signing_ip"},
         };
         for (String[] col : columns) {
             try {

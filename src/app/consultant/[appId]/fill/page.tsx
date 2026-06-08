@@ -29,8 +29,10 @@ import SignaturePad from "@/components/common/SignaturePad";
 import {
   AGREEMENT_SECTIONS,
   AFFIRMATION_FLAGS,
+  effectiveRequirements,
   type AffirmationFlag,
   type AgreementSection,
+  type EffectiveRequirements,
   type SectionField,
 } from "@/lib/agreement-sections";
 import {
@@ -68,7 +70,12 @@ type SaveStatus =
 interface FormState {
   fields: Record<string, string>;
   affirmations: Record<AffirmationFlag, boolean>;
+  /** Primary signature drawn on the main-agreement step (F-4 "first"). */
   signature: string | null;
+  /** Final signature drawn on the review step (F-4 "last"). Client-only
+   *  until submit -- never autosaved, since both signatures are uploaded
+   *  to Cloudinary atomically as part of the submit call. */
+  finalSignature: string | null;
   signedLegalName: string;
 }
 
@@ -102,6 +109,7 @@ function buildInitialState(app: ConsultantApplication | null): FormState {
     fields,
     affirmations,
     signature: app?.signatureImage ?? null,
+    finalSignature: app?.finalSignatureImage ?? null,
     signedLegalName:
       app?.signedLegalName?.trim() || app?.consultantName?.trim() || "",
   };
@@ -118,26 +126,97 @@ function isFieldValueValid(field: SectionField, value: string): boolean {
   return true;
 }
 
-function isSectionComplete(
-  section: AgreementSection,
-  state: FormState,
-): boolean {
+/**
+ * True iff any non-readOnly, non-implementationPartner field in this
+ * appendix has a value OR the affirmation flag is set. CORE sections
+ * (no appendixKey) return false — they're always required, never
+ * "touched"-conditional.
+ */
+function isAppendixTouched(section: AgreementSection, form: FormState): boolean {
+  if (!section.appendixKey) return false;
   for (const field of section.fields) {
     if (field.readOnly) continue;
-    if (!isFieldValueValid(field, state.fields[field.key] ?? "")) {
+    // implementationPartner doesn't count toward "touched" -- the ERM
+    // says it's never required, so leaving it blank is the expected
+    // path even when Appendix 1 is being completed.
+    if (field.key === "implementationPartner") continue;
+    if ((form.fields[field.key] ?? "").trim().length > 0) return true;
+  }
+  if (section.affirmationFlag && form.affirmations[section.affirmationFlag]) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * True iff the owning section is "active" -- CORE always, appendix iff
+ * required by the ERM OR touched by the consultant.
+ */
+function isSectionActive(
+  section: AgreementSection,
+  form: FormState,
+  reqs: EffectiveRequirements,
+): boolean {
+  if (!section.appendixKey) return true;
+  if (reqs[section.appendixKey]) return true;
+  return isAppendixTouched(section, form);
+}
+
+/**
+ * Effective per-field required check. Honours:
+ *   - field.required (Implementation Partner is required:false)
+ *   - field.readOnly (workAuth/consultantEmail are ERM-set)
+ *   - SSN gating: bgFullSsn only required when reqs.ssn is true
+ *   - Appendix gating: an optional, untouched appendix's fields are
+ *     not required.
+ */
+function isFieldRequired(
+  field: SectionField,
+  section: AgreementSection,
+  form: FormState,
+  reqs: EffectiveRequirements,
+): boolean {
+  if (field.readOnly) return false;
+  if (!field.required) return false;
+  if (field.key === "bgFullSsn" && !reqs.ssn) return false;
+  if (!isSectionActive(section, form, reqs)) return false;
+  return true;
+}
+
+function isSectionComplete(
+  section: AgreementSection,
+  form: FormState,
+  reqs: EffectiveRequirements,
+): boolean {
+  for (const field of section.fields) {
+    if (!isFieldRequired(field, section, form, reqs)) continue;
+    if (!isFieldValueValid(field, form.fields[field.key] ?? "")) {
       return false;
     }
   }
-  if (section.requiresSignature && !state.signature) return false;
+  // Signature gating: main-agreement -> primary; review -> final.
+  if (section.requiresSignature) {
+    const sig = section.id === "review" ? form.finalSignature : form.signature;
+    if (!sig) return false;
+  }
+  // Affirmation only required when the section is active.
   if (section.requiresAffirmation && section.affirmationFlag) {
-    if (!state.affirmations[section.affirmationFlag]) return false;
+    if (
+      isSectionActive(section, form, reqs)
+      && !form.affirmations[section.affirmationFlag]
+    ) {
+      return false;
+    }
   }
   return true;
 }
 
-function firstIncompleteIndex(state: FormState): number {
+function firstIncompleteIndex(
+  form: FormState,
+  reqs: EffectiveRequirements,
+): number {
   for (let i = 0; i < AGREEMENT_SECTIONS.length - 1; i++) {
-    if (!isSectionComplete(AGREEMENT_SECTIONS[i], state)) return i;
+    if (!isSectionComplete(AGREEMENT_SECTIONS[i], form, reqs)) return i;
   }
   return AGREEMENT_SECTIONS.length - 1;
 }
@@ -199,7 +278,7 @@ export default function ConsultantWizardPage() {
         // Resume at the first incomplete section (or step 0 for a
         // brand-new application). REVISION_REQUESTED also resumes
         // from whichever section still has gaps after the ERM kick.
-        setCurrentStep(firstIncompleteIndex(initial));
+        setCurrentStep(firstIncompleteIndex(initial, effectiveRequirements(data)));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -360,6 +439,17 @@ export default function ConsultantWizardPage() {
     [scheduleSave],
   );
 
+  // F-4 final signature -- client-only until submit; never autosaved.
+  // Both the primary + final signatures are uploaded to Cloudinary
+  // atomically inside POST /submit, so partial state has nothing
+  // meaningful to persist mid-session.
+  const setFinalSignature = useCallback((dataUrl: string | null) => {
+    setForm((prev) => {
+      if (prev.finalSignature === dataUrl) return prev;
+      return { ...prev, finalSignature: dataUrl };
+    });
+  }, []);
+
   const setLegalName = useCallback(
     (value: string) => {
       setForm((prev) => {
@@ -368,6 +458,13 @@ export default function ConsultantWizardPage() {
       });
     },
     [],
+  );
+
+  // Effective requirements derived from the ERM's per-agreement flags.
+  // Memoised so per-section gating is a single derivation each render.
+  const reqs = useMemo<EffectiveRequirements>(
+    () => effectiveRequirements(app),
+    [app],
   );
 
   // Submit ─────────────────────────────────────────────────────
@@ -399,12 +496,16 @@ export default function ConsultantWizardPage() {
         };
       }
       if (!form.signature) {
-        throw new Error("Your signature is required before you can submit.");
+        throw new Error("Your primary signature is required before you can submit.");
+      }
+      if (!form.finalSignature) {
+        throw new Error("Please draw your final signature on the review step before submitting.");
       }
       await signConsultantApplication(
         appId,
         form.signedLegalName.trim(),
         form.signature,
+        form.finalSignature,
       );
       router.push("/consultant/dashboard");
     } catch (e) {
@@ -418,12 +519,13 @@ export default function ConsultantWizardPage() {
             missingFields?: string[];
             missingAffirmations?: string[];
             missingSignature?: boolean;
+            missingFinalSignature?: boolean;
           };
           message?: string;
         };
         if (obj?.data) {
           msg = obj.message || "Some items are still missing.";
-          const incompleteIdx = firstIncompleteIndex(form);
+          const incompleteIdx = firstIncompleteIndex(form, reqs);
           setCurrentStep(incompleteIdx);
           routed = true;
         }
@@ -433,12 +535,12 @@ export default function ConsultantWizardPage() {
       if (!routed) {
         // Best-effort: also try to find which section is incomplete
         // from local state so the consultant lands somewhere sensible.
-        setCurrentStep(firstIncompleteIndex(form));
+        setCurrentStep(firstIncompleteIndex(form, reqs));
       }
       setSubmitError(msg);
       setSubmitting(false);
     }
-  }, [appId, computeDelta, form, router]);
+  }, [appId, computeDelta, form, reqs, router]);
 
   // Step accessors ──────────────────────────────────────────────
   const section = AGREEMENT_SECTIONS[currentStep];
@@ -448,19 +550,21 @@ export default function ConsultantWizardPage() {
         const complete =
           i === AGREEMENT_SECTIONS.length - 1
             ? AGREEMENT_SECTIONS.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form),
-              )
-            : isSectionComplete(s, form);
+                isSectionComplete(sec, form, reqs),
+              ) && Boolean(form.finalSignature)
+            : isSectionComplete(s, form, reqs);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [form],
+    [form, reqs],
   );
-  const canAdvance = isSectionComplete(section, form);
+  const canAdvance = isSectionComplete(section, form, reqs);
   const isReviewStep = currentStep === AGREEMENT_SECTIONS.length - 1;
   const allComplete = useMemo(
     () =>
-      AGREEMENT_SECTIONS.slice(0, -1).every((s) => isSectionComplete(s, form)),
-    [form],
+      AGREEMENT_SECTIONS.slice(0, -1).every((s) =>
+        isSectionComplete(s, form, reqs),
+      ) && Boolean(form.finalSignature),
+    [form, reqs],
   );
 
   // Render ─────────────────────────────────────────────────────
@@ -541,13 +645,17 @@ export default function ConsultantWizardPage() {
         {isReviewStep ? (
           <ReviewStep
             form={form}
+            reqs={reqs}
             onJumpToSection={(idx) => setCurrentStep(idx)}
+            onFinalSignature={setFinalSignature}
+            onLegalName={setLegalName}
             allComplete={allComplete}
           />
         ) : (
           <SectionStep
             section={section}
             form={form}
+            reqs={reqs}
             touched={touched}
             revealed={revealed}
             onField={setField}
@@ -661,6 +769,7 @@ function Stepper({
 function SectionStep({
   section,
   form,
+  reqs,
   touched,
   revealed,
   onField,
@@ -675,6 +784,7 @@ function SectionStep({
 }: {
   section: AgreementSection;
   form: FormState;
+  reqs: EffectiveRequirements;
   touched: Set<string>;
   revealed: Set<string>;
   onField: (key: string, value: string) => void;
@@ -688,6 +798,15 @@ function SectionStep({
   onOpenTemplate: () => void;
 }) {
   const isCoverStep = section.id === "cover";
+  // F-4 per-section state: optional appendices show an "Optional"
+  // badge until the consultant types something, at which point they
+  // get an all-or-nothing notice (finish the section or clear it).
+  const appendixOptional = Boolean(
+    section.appendixKey && !reqs[section.appendixKey],
+  );
+  const appendixTouched = isAppendixTouched(section, form);
+  const showOptionalBadge = appendixOptional && !appendixTouched;
+  const showAllOrNothingNotice = appendixOptional && appendixTouched;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 lg:gap-6">
       {/* Read pane */}
@@ -699,6 +818,11 @@ function SectionStep({
           <h2 className="font-serif text-xl sm:text-2xl text-sage-navy mt-1">
             {section.title}
           </h2>
+          {showOptionalBadge && (
+            <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-stone-200 text-gray-700">
+              Optional — you can skip
+            </span>
+          )}
           <p className="text-sm text-gray-700 mt-3 leading-relaxed">
             {section.summary}
           </p>
@@ -732,6 +856,17 @@ function SectionStep({
           </div>
         )}
 
+        {showAllOrNothingNotice && (
+          <div className="rounded-md border border-sage-copper/40 bg-orange-50 px-3 py-2 text-xs text-sage-copper-deep inline-flex items-start gap-2">
+            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+            <span>
+              This section is optional, but you&apos;ve started filling it
+              in. Complete every required field and tick the affirmation,
+              or clear all fields to skip the section.
+            </span>
+          </div>
+        )}
+
         {section.fields.length > 0 && (
           <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
@@ -739,6 +874,7 @@ function SectionStep({
                 <FieldInput
                   key={field.key}
                   field={field}
+                  effectivelyRequired={isFieldRequired(field, section, form, reqs)}
                   value={
                     field.key === "consultantEmail"
                       ? consultantEmail
@@ -784,6 +920,7 @@ function SectionStep({
 
 function FieldInput({
   field,
+  effectivelyRequired,
   value,
   onChange,
   onBlur,
@@ -792,6 +929,8 @@ function FieldInput({
   onRevealToggle,
 }: {
   field: SectionField;
+  /** Per-app required (honours readOnly, field.required, SSN gate, optional-section gate). */
+  effectivelyRequired: boolean;
   value: string;
   onChange: (value: string) => void;
   onBlur: () => void;
@@ -806,7 +945,8 @@ function FieldInput({
     field.key === "portalAuthorizedActions" ||
     field.key === "customScopeNotes";
 
-  const invalid = touched && !field.readOnly && !isFieldValueValid(field, value);
+  const invalid =
+    touched && effectivelyRequired && !isFieldValueValid(field, value);
   const errorMsg =
     invalid && field.type === "email"
       ? "Enter a valid email address."
@@ -916,8 +1056,11 @@ function FieldInput({
     <div className={wide ? "md:col-span-2" : ""}>
       <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
         {field.label}
-        {!field.readOnly && (
-          <span className="text-red-500 ml-1">*</span>
+        {effectivelyRequired && <span className="text-red-500 ml-1">*</span>}
+        {field.readOnly && (
+          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] font-medium normal-case text-gray-500">
+            <Lock size={9} /> set by Sage IT
+          </span>
         )}
         {field.sensitive && (
           <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] font-medium normal-case text-sage-copper-deep">
@@ -1097,11 +1240,17 @@ function AffirmationBlock({
 
 function ReviewStep({
   form,
+  reqs,
   onJumpToSection,
+  onFinalSignature,
+  onLegalName,
   allComplete,
 }: {
   form: FormState;
+  reqs: EffectiveRequirements;
   onJumpToSection: (idx: number) => void;
+  onFinalSignature: (dataUrl: string | null) => void;
+  onLegalName: (value: string) => void;
   allComplete: boolean;
 }) {
   return (
@@ -1111,17 +1260,23 @@ function ReviewStep({
           Final step
         </p>
         <h2 className="font-serif text-2xl text-sage-navy mt-1">
-          Review and submit
+          Review, sign, and submit
         </h2>
         <p className="text-sm text-gray-700 mt-2">
-          Confirm everything below matches what you intended. Click any
-          section to edit it. When you submit, the agreement moves to
-          Sage IT for review.
+          Confirm everything below matches what you intended, then draw
+          your final signature to execute the agreement. When you submit,
+          the agreement moves to Sage IT for review.
         </p>
       </div>
 
       {AGREEMENT_SECTIONS.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form);
+        const complete = isSectionComplete(section, form, reqs);
+        const isAppendix = Boolean(section.appendixKey);
+        const optionalAndSkipped =
+          isAppendix
+          && section.appendixKey
+          && !reqs[section.appendixKey]
+          && !isAppendixTouched(section, form);
         return (
           <section
             key={section.id}
@@ -1140,13 +1295,29 @@ function ReviewStep({
                 <span
                   className={
                     "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
-                    (complete
-                      ? "bg-emerald-100 text-emerald-800"
-                      : "bg-amber-100 text-amber-800")
+                    (optionalAndSkipped
+                      ? "bg-stone-200 text-gray-700"
+                      : complete
+                        ? "bg-emerald-100 text-emerald-800"
+                        : "bg-amber-100 text-amber-800")
                   }
                 >
-                  {complete ? <CheckCircle2 size={11} /> : <AlertCircle size={11} />}
-                  {complete ? "Complete" : "Needs attention"}
+                  {optionalAndSkipped ? (
+                    <>
+                      <CheckCircle2 size={11} />
+                      Skipped (optional)
+                    </>
+                  ) : complete ? (
+                    <>
+                      <CheckCircle2 size={11} />
+                      Complete
+                    </>
+                  ) : (
+                    <>
+                      <AlertCircle size={11} />
+                      Needs attention
+                    </>
+                  )}
                 </span>
                 <button
                   type="button"
@@ -1199,17 +1370,14 @@ function ReviewStep({
 
       <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
         <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-          Signature
+          Primary signature (from the main agreement step)
         </p>
-        <h3 className="font-serif text-lg text-sage-navy mt-0.5">
-          Your signature
-        </h3>
         {form.signature ? (
           <div className="mt-3 inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={form.signature}
-              alt="Captured signature"
+              alt="Captured primary signature"
               style={{ maxHeight: 70, maxWidth: 260 }}
             />
           </div>
@@ -1229,16 +1397,118 @@ function ReviewStep({
         )}
       </section>
 
+      <FinalSignatureBlock
+        finalSignature={form.finalSignature}
+        legalName={form.signedLegalName}
+        onFinalSignature={onFinalSignature}
+        onLegalName={onLegalName}
+      />
+
       {!allComplete && (
         <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 inline-flex items-start gap-2">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <span>
-            Some sections still need attention. Use the section pills
-            above (or the Edit links) to jump to them.
+            {form.finalSignature
+              ? "Some sections still need attention. Use the section pills above (or the Edit links) to jump to them."
+              : "Draw your final signature above to execute the agreement, then submit."}
           </span>
         </div>
       )}
     </div>
+  );
+}
+
+// ── Final signature block (review step) ──────────────────────
+
+function FinalSignatureBlock({
+  finalSignature,
+  legalName,
+  onFinalSignature,
+  onLegalName,
+}: {
+  finalSignature: string | null;
+  legalName: string;
+  onFinalSignature: (dataUrl: string | null) => void;
+  onLegalName: (value: string) => void;
+}) {
+  const [redrawing, setRedrawing] = useState(false);
+  const captured = Boolean(finalSignature);
+  const shouldShowPad = !captured || redrawing;
+
+  return (
+    <section className="bg-white rounded-2xl border border-sage-navy/30 shadow-sm p-5 space-y-4">
+      <div>
+        <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
+          Execution signature
+        </p>
+        <h3 className="font-serif text-lg text-sage-navy mt-0.5">
+          Sign once more to execute
+        </h3>
+        <p className="text-sm text-gray-700 mt-1">
+          Draw your final signature here. This is your fresh attestation
+          that everything above matches what you intended and that you
+          are executing the agreement.
+        </p>
+      </div>
+
+      <div>
+        <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
+          Your full legal name <span className="text-red-500">*</span>
+        </label>
+        <input
+          type="text"
+          value={legalName}
+          onChange={(e) => onLegalName(e.target.value)}
+          className="w-full px-3 py-2 text-sm rounded-md border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-sage-navy focus:border-sage-navy"
+          placeholder="First Middle Last"
+        />
+      </div>
+
+      {shouldShowPad ? (
+        <div>
+          <SignaturePad
+            onChange={(data) => {
+              onFinalSignature(data);
+              if (data) setRedrawing(false);
+            }}
+            fileInputId="consultant-wizard-final-sig"
+          />
+          {redrawing && (
+            <button
+              type="button"
+              onClick={() => setRedrawing(false)}
+              className="mt-2 text-[11px] font-semibold text-gray-500 hover:text-sage-navy"
+            >
+              Cancel re-draw
+            </button>
+          )}
+        </div>
+      ) : (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1.5">
+            Captured execution signature
+          </p>
+          <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={finalSignature!}
+              alt="Captured execution signature"
+              style={{ maxHeight: 70, maxWidth: 240 }}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              setRedrawing(true);
+              onFinalSignature(null);
+            }}
+            className="ml-3 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
+          >
+            Re-draw
+          </button>
+        </div>
+      )}
+    </section>
   );
 }
 

@@ -376,7 +376,11 @@ public class AgreementDocumentService {
 
         // Image placeholders -- separate entity fields. Each renders as
         // blank when the corresponding signature hasn't been captured.
+        // F-4 first-and-last model: signatureImage is drawn on the
+        // main-agreement step; finalSignatureImage is drawn on the
+        // review step and stamps the closing/execution block.
         c.put("signatureImage", buildImage(app.getSignatureImage()));
+        c.put("finalSignatureImage", buildImage(app.getFinalSignatureImage()));
         c.put("ermSignatureImage", buildImage(app.getErmSignatureUrl()));
 
         return c;
@@ -431,6 +435,7 @@ public class AgreementDocumentService {
         for (String k : textKeys) c.put(k, LINE);
         // Signature images render as empty boxes in the preview.
         c.put("signatureImage", "");
+        c.put("finalSignatureImage", "");
         c.put("ermSignatureImage", "");
         return c;
     }

@@ -39,19 +39,35 @@ export interface SectionField {
   key: string;
   label: string;
   type: FieldType;
-  /** All fields in this config are required at submit time. */
-  required: true;
+  /**
+   * Whether the field is intrinsically required at submit time. With
+   * F-4, "intrinsic" means: required IF the owning section is being
+   * completed (always for CORE sections; conditionally for appendices
+   * via {@code effectiveRequirements}). A {@code required: false} field
+   * is never required even when the section is required -- e.g.
+   * implementationPartner sits inside Appendix 1 but the ERM has
+   * said this consultant doesn't need it.
+   */
+  required: boolean;
   /** For {@code type: "select"} -- option strings. */
   options?: readonly string[];
   /** Mark fields the UI should mask by default (SSN, routing, account). */
   sensitive?: boolean;
   placeholder?: string;
   help?: string;
-  /** Some fields (e.g. consultantEmail) are seeded by the ERM and stay
-   *  read-only in the consultant's view; flagged so the wizard renders
-   *  them as confirmations rather than inputs. */
+  /** Some fields (e.g. consultantEmail, workAuthorizationCategory) are
+   *  seeded by the ERM and stay read-only in the consultant's view;
+   *  flagged so the wizard renders them as confirmations rather than
+   *  inputs. */
   readOnly?: boolean;
 }
+
+export type AppendixKey =
+  | "appendix1"
+  | "appendix2"
+  | "appendix3"
+  | "appendix4"
+  | "appendix5";
 
 export interface AgreementSection {
   /** Stable id, also used as the route segment in the wizard. */
@@ -66,10 +82,14 @@ export interface AgreementSection {
   /** Empty array for read-only sections (main agreement, exhibit B, review). */
   fields: readonly SectionField[];
   /**
-   * TRUE only on the first signing step where the consultant draws
-   * their signature. The wizard reuses the captured image across every
-   * downstream signature block via the existing $signatureImage
-   * stamping in the generated PDF.
+   * Set on the two real signature-draw steps:
+   *   - main-agreement (step 2): the primary signature, reused as
+   *     $signatureImage across every intermediate signature block in
+   *     the generated PDF.
+   *   - review (final step): the final execution signature, stamps
+   *     the closing/execution block as $finalSignatureImage.
+   * F-4 first-and-last model -- everything between is an affirmation,
+   * not a signature redraw.
    */
   requiresSignature: boolean;
   /** TRUE on every step with a section affirmation checkbox. */
@@ -84,6 +104,13 @@ export interface AgreementSection {
     | "affirmedAppendix3"
     | "affirmedAppendix4"
     | "affirmedAppendix5";
+  /**
+   * For the five appendix sections, the {@link AppendixKey} the ERM's
+   * require_appendixN flag uses to mark the section required or
+   * optional for THIS consultant. Absent on every non-appendix section
+   * (cover, exhibits, signing steps, review).
+   */
+  appendixKey?: AppendixKey;
 }
 
 // ── Option lists ────────────────────────────────────────────────
@@ -145,6 +172,8 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         type: "select",
         required: true,
         options: WORK_AUTHORIZATION_OPTIONS,
+        readOnly: true,
+        help: "Set by Sage IT when they sent this agreement. To change it, ask your Sage IT contact.",
       },
       {
         key: "residenceAddress",
@@ -232,8 +261,11 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         key: "implementationPartner",
         label: "Implementation partner",
         type: "text",
-        required: true,
-        help: "Enter 'N/A' if none.",
+        // F-4: implementation partner is NEVER required, even when
+        // Appendix 1 is required for this consultant. Leave blank if
+        // there's no implementation partner involved.
+        required: false,
+        help: "Leave blank if there's no implementation partner. Otherwise enter the firm name.",
       },
       {
         key: "endClient",
@@ -265,6 +297,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
     requiresSignature: false,
     requiresAffirmation: true,
     affirmationFlag: "affirmedAppendix1",
+    appendixKey: "appendix1",
   },
 
   {
@@ -332,6 +365,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
     requiresSignature: false,
     requiresAffirmation: true,
     affirmationFlag: "affirmedAppendix2",
+    appendixKey: "appendix2",
   },
 
   {
@@ -388,6 +422,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
     requiresSignature: false,
     requiresAffirmation: true,
     affirmationFlag: "affirmedAppendix3",
+    appendixKey: "appendix3",
   },
 
   {
@@ -435,6 +470,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
     requiresSignature: false,
     requiresAffirmation: true,
     affirmationFlag: "affirmedAppendix4",
+    appendixKey: "appendix4",
   },
 
   {
@@ -488,6 +524,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
     requiresSignature: false,
     requiresAffirmation: true,
     affirmationFlag: "affirmedAppendix5",
+    appendixKey: "appendix5",
   },
 
   {
@@ -495,10 +532,13 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
     step: 10,
     title: "Review & Submit",
     summary:
-      "A full read-back of everything you entered, every section you affirmed, and the signature you drew. Submit only after the read-back matches what you intended.",
-    why: "Final confirmation before submission — once submitted, your application moves to ERM review.",
+      "A full read-back of everything you entered and every section you affirmed. Sign once more here to execute the agreement, then submit.",
+    why: "Final confirmation + execution signature before submission — once submitted, your application moves to ERM review.",
     fields: [],
-    requiresSignature: false,
+    // F-4 first-and-last: the review step captures the final
+    // execution signature (separate draw, stamps the closing block as
+    // $finalSignatureImage).
+    requiresSignature: true,
     requiresAffirmation: false,
   },
 ] as const;
@@ -524,17 +564,16 @@ export const AFFIRMATION_FLAGS = [
 export type AffirmationFlag = (typeof AFFIRMATION_FLAGS)[number];
 
 /**
- * Every required field key across every section. The wizard uses this
- * to build a one-pass "is the whole form complete?" check against its
- * local state, mirroring the backend's submit-time gate. Excludes
- * read-only confirmation fields (e.g. consultantEmail) since the
- * consultant can't blank them.
+ * Every required field key across every section, INDEPENDENT of any
+ * per-agreement flags. Kept for backward compat / debugging. Real
+ * submit gating uses {@link effectiveRequirements} on a given app.
  */
 export function getRequiredFieldKeys(): string[] {
   const keys: string[] = [];
   for (const section of AGREEMENT_SECTIONS) {
     for (const field of section.fields) {
       if (field.readOnly) continue;
+      if (!field.required) continue;
       keys.push(field.key);
     }
   }
@@ -555,4 +594,64 @@ export function findSectionForAffirmation(
   flag: AffirmationFlag,
 ): AgreementSection | undefined {
   return AGREEMENT_SECTIONS.find((s) => s.affirmationFlag === flag);
+}
+
+// ── F-4 effective-requirements ──────────────────────────────────
+
+/**
+ * The fields of an application the requirement model needs to read.
+ * Kept as a structural subset so call sites can pass an
+ * {@code ConsultantApplication} from the API without an extra mapping.
+ */
+export interface RequirementsInput {
+  requireAppendix1?: boolean | null;
+  requireAppendix2?: boolean | null;
+  requireAppendix3?: boolean | null;
+  requireAppendix4?: boolean | null;
+  requireAppendix5?: boolean | null;
+  requireSsn?: boolean | null;
+}
+
+export interface EffectiveRequirements {
+  /** True iff the corresponding appendix is required for this consultant. */
+  appendix1: boolean;
+  appendix2: boolean;
+  appendix3: boolean;
+  appendix4: boolean;
+  appendix5: boolean;
+  /** True iff SSN inside Appendix 3 must be supplied when Appendix 3 is being completed. */
+  ssn: boolean;
+}
+
+/**
+ * Resolves an application's per-agreement requirement flags into the
+ * effective required/optional shape the wizard + client-side validator
+ * read from. Mirrors the backend's effective-requirements model so the
+ * UX matches what the server will accept at submit time.
+ */
+export function effectiveRequirements(
+  app: RequirementsInput | null | undefined,
+): EffectiveRequirements {
+  return {
+    appendix1: app?.requireAppendix1 === true,
+    appendix2: app?.requireAppendix2 === true,
+    appendix3: app?.requireAppendix3 === true,
+    appendix4: app?.requireAppendix4 === true,
+    appendix5: app?.requireAppendix5 === true,
+    ssn: app?.requireSsn === true,
+  };
+}
+
+/**
+ * True iff {@code section} is one of the five appendices AND it's
+ * required for this consultant per {@link effectiveRequirements}. For
+ * non-appendix sections (cover, exhibits, main agreement, review) the
+ * caller should treat them as always-required CORE and ignore this.
+ */
+export function isAppendixRequired(
+  section: AgreementSection,
+  reqs: EffectiveRequirements,
+): boolean {
+  if (!section.appendixKey) return false;
+  return reqs[section.appendixKey];
 }

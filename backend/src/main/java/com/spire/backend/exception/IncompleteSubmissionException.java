@@ -5,8 +5,9 @@ import java.util.List;
 /**
  * Raised by {@code ConsultantApplicationService.consultantSubmit} when
  * the application is missing required content at submit time -- any
- * blank consultant-fillable field, any unticked section affirmation,
- * or the missing signature.
+ * blank required consultant-fillable field, any unticked required
+ * affirmation, a partially-filled optional appendix, or either of the
+ * two signatures (primary on main agreement + final on review step).
  *
  * Carries structured detail so the wizard UI can route the consultant
  * back to the offending section without a second round-trip:
@@ -16,9 +17,10 @@ import java.util.List;
  *     "success": false,
  *     "message": "Agreement is incomplete.",
  *     "data": {
- *       "missingFields":        ["primaryPhone", "achRoutingNumber", ...],
- *       "missingAffirmations":  ["affirmedExhibitA", "affirmedAppendix2"],
- *       "missingSignature":     true
+ *       "missingFields":         ["primaryPhone", "achRoutingNumber", ...],
+ *       "missingAffirmations":   ["affirmedExhibitA", "affirmedAppendix2"],
+ *       "missingSignature":      false,
+ *       "missingFinalSignature": true
  *     }
  *   }
  * </pre>
@@ -30,16 +32,19 @@ public class IncompleteSubmissionException extends RuntimeException {
     private final List<String> missingFields;
     private final List<String> missingAffirmations;
     private final boolean missingSignature;
+    private final boolean missingFinalSignature;
 
     public IncompleteSubmissionException(
             List<String> missingFields,
             List<String> missingAffirmations,
-            boolean missingSignature) {
+            boolean missingSignature,
+            boolean missingFinalSignature) {
         super("Agreement is incomplete.");
         this.missingFields = missingFields == null ? List.of() : List.copyOf(missingFields);
         this.missingAffirmations =
                 missingAffirmations == null ? List.of() : List.copyOf(missingAffirmations);
         this.missingSignature = missingSignature;
+        this.missingFinalSignature = missingFinalSignature;
     }
 
     public List<String> getMissingFields() {
@@ -52,5 +57,9 @@ public class IncompleteSubmissionException extends RuntimeException {
 
     public boolean isMissingSignature() {
         return missingSignature;
+    }
+
+    public boolean isMissingFinalSignature() {
+        return missingFinalSignature;
     }
 }

@@ -106,6 +106,13 @@ public class ConsultantApplicationController {
                 body.rateAmount1,
                 body.ratePeriod2,
                 body.rateAmount2,
+                body.visaStatus,
+                body.requireAppendix1,
+                body.requireAppendix2,
+                body.requireAppendix3,
+                body.requireAppendix4,
+                body.requireAppendix5,
+                body.requireSsn,
                 body.payload,
                 // Authenticated agreement user, stamped as the owner.
                 AgreementAuthz.userId(request),
@@ -597,7 +604,11 @@ public class ConsultantApplicationController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Submitted",
                 consultantService.consultantSubmit(
-                        appId, body.signatureBase64, body.signedLegalName, request)));
+                        appId,
+                        body.signatureBase64,
+                        body.finalSignatureBase64,
+                        body.signedLegalName,
+                        request)));
     }
 
     private static String clientIp(HttpServletRequest request) {
@@ -623,6 +634,23 @@ public class ConsultantApplicationController {
         public String rateAmount1;
         public String ratePeriod2;
         public String rateAmount2;
+        // F-4: ERM-set visa / work-authorization status. Persisted into
+        // workAuthCategory; the wizard renders it read-only on the
+        // cover step.
+        public String visaStatus;
+        // F-4: per-agreement requirement flags. The ERM ticks which
+        // appendices THIS consultant must complete; the wizard +
+        // submit validation use these to decide required vs
+        // optional-skippable.
+        public Boolean requireAppendix1;
+        public Boolean requireAppendix2;
+        public Boolean requireAppendix3;
+        public Boolean requireAppendix4;
+        public Boolean requireAppendix5;
+        // F-4: SSN inside Appendix 3 is mandatory iff this is true AND
+        // Appendix 3 is being completed (i.e. required, or
+        // optional-but-touched).
+        public Boolean requireSsn;
         // Legacy free-form payload, preserved for backward compat
         // with the existing /agreement-erm/new form. New flow ignores it.
         public JsonNode payload;
@@ -650,8 +678,10 @@ public class ConsultantApplicationController {
     }
 
     public static class ConsultantSubmitBody {
-        /** data:image/png;base64,... */
+        /** data:image/png;base64,... — primary signature drawn on the main-agreement step. */
         public String signatureBase64;
+        /** data:image/png;base64,... — final signature drawn on the review step (F-4). */
+        public String finalSignatureBase64;
         public String signedLegalName;
     }
 

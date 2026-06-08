@@ -121,6 +121,13 @@ public class ConsultantApplicationService {
             String rateAmount1,
             String ratePeriod2,
             String rateAmount2,
+            String visaStatus,
+            Boolean requireAppendix1,
+            Boolean requireAppendix2,
+            Boolean requireAppendix3,
+            Boolean requireAppendix4,
+            Boolean requireAppendix5,
+            Boolean requireSsn,
             JsonNode payload,
             String ownerErmId,
             HttpServletRequest request
@@ -144,6 +151,18 @@ public class ConsultantApplicationService {
                 .rateAmount1(rateAmount1)
                 .ratePeriod2(ratePeriod2)
                 .rateAmount2(rateAmount2)
+                // F-4: ERM-set visa is persisted on the existing
+                // workAuthCategory column (no new column).
+                .workAuthorizationCategory(
+                        visaStatus == null || visaStatus.isBlank()
+                                ? null
+                                : visaStatus.trim())
+                .requireAppendix1(Boolean.TRUE.equals(requireAppendix1))
+                .requireAppendix2(Boolean.TRUE.equals(requireAppendix2))
+                .requireAppendix3(Boolean.TRUE.equals(requireAppendix3))
+                .requireAppendix4(Boolean.TRUE.equals(requireAppendix4))
+                .requireAppendix5(Boolean.TRUE.equals(requireAppendix5))
+                .requireSsn(Boolean.TRUE.equals(requireSsn))
                 .payload(payloadJson)
                 .status(ConsultantApplication.Status.SUBMITTED.name())
                 .expiresAt(now.plusDays(APPLICATION_TTL_DAYS))
@@ -931,6 +950,7 @@ public class ConsultantApplicationService {
     public ConsultantApplication consultantSubmit(
             String applicationId,
             String signatureBase64,
+            String finalSignatureBase64,
             String signedLegalName,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
@@ -947,26 +967,31 @@ public class ConsultantApplicationService {
                     "Please enter your full legal name (first and last).");
         }
 
-        // F-1 guided-signing all-required gate. Every consultant-fillable
-        // field across cover, Exhibit A, Appendix 1, and all four
-        // appendices must be non-blank; every section affirmation must
-        // be true; the signature payload must be present. On failure we
-        // raise a structured exception carrying the offending keys so
-        // the wizard can route the consultant back to the right section
-        // without a second round-trip.
+        // F-4 effective-requirements gate. CORE fields/affirmations are
+        // always required; appendices are gated by require_appendixN
+        // (treated as required iff flagged OR optional-but-touched);
+        // SSN is gated by require_ssn AND Appendix 3 being active. The
+        // first-and-last signature model demands BOTH a main-agreement
+        // draw and a final review-step draw -- one without the other
+        // is rejected.
         boolean missingSig = signatureBase64 == null || signatureBase64.isBlank()
                 || !signatureBase64.startsWith("data:image/");
+        boolean missingFinalSig = finalSignatureBase64 == null || finalSignatureBase64.isBlank()
+                || !finalSignatureBase64.startsWith("data:image/");
         java.util.List<String> missingFields = collectMissingConsultantFields(app);
         java.util.List<String> missingAffs = collectMissingAffirmations(app);
-        if (!missingFields.isEmpty() || !missingAffs.isEmpty() || missingSig) {
+        if (!missingFields.isEmpty() || !missingAffs.isEmpty() || missingSig || missingFinalSig) {
             throw new com.spire.backend.exception.IncompleteSubmissionException(
-                    missingFields, missingAffs, missingSig);
+                    missingFields, missingAffs, missingSig, missingFinalSig);
         }
 
         String signatureUrl;
+        String finalSignatureUrl;
         try {
             signatureUrl = uploadSignatureToCloudinary(
                     signatureBase64, "signatures/consultant-" + applicationId);
+            finalSignatureUrl = uploadSignatureToCloudinary(
+                    finalSignatureBase64, "signatures/consultant-final-" + applicationId);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store signature: " + e.getMessage(), e);
@@ -982,6 +1007,10 @@ public class ConsultantApplicationService {
         // Phase D — dedicated consultant signing record, surfaced to the ERM.
         app.setSigningIp(ip);
         app.setSigningAt(now);
+        // F-4 — final (review-step) signature record.
+        app.setFinalSignatureImage(finalSignatureUrl);
+        app.setFinalSignedAt(now);
+        app.setFinalSigningIp(ip);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
 
@@ -1495,86 +1524,202 @@ public class ConsultantApplicationService {
         return request.getRemoteAddr();
     }
 
-    // ── F-1 guided-signing all-required gate ─────────────────────────
+    // ── F-4 effective-requirements gate ──────────────────────────────
     //
-    // The set of required consultant-fillable fields IS the union of:
-    //   * cover (personal block, plus consultantName + consultantEmail
-    //     which the ERM seeded but the consultant still confirms)
-    //   * Exhibit A
-    //   * Appendix 1 (employment)
-    //   * Appendix 2 ACH         -- mandatory now (was optional)
-    //   * Appendix 3 background  -- mandatory now (was optional)
-    //   * Appendix 4 portal      -- mandatory now (was optional)
-    //   * Appendix 5 security    -- mandatory now (was optional)
+    // Replaces the F-1 blanket "everything required" model. The ERM
+    // picks which appendices THIS consultant must complete at create
+    // time (require_appendix1..5 flags) and whether SSN is mandatory
+    // inside Appendix 3 (require_ssn). The validator now distinguishes:
     //
-    // Keys are the entity field names (camelCase). The wizard UI keys
-    // its sections off the same names via src/lib/agreement-sections.ts,
-    // so a missing key surfaces directly to the right step.
+    //   CORE (always required, every agreement):
+    //     - cover: consultantName, consultantEmail, primaryPhone,
+    //       residenceAddress  (workAuthorizationCategory is ERM-set,
+    //       not consultant-edited, so omitted here)
+    //     - Exhibit A: technologyTrack, customScopeNotes
+    //     - Affirmations: affirmedMainAgreement, affirmedExhibitA,
+    //       affirmedExhibitB
+    //     - implementationPartner is NEVER required (per spec)
+    //
+    //   APPENDIX 1..5 (per require_appendixN flag):
+    //     - Required: every appendix field must be non-blank AND the
+    //       affirmation must be ticked.
+    //     - Optional and untouched (no field non-blank, affirmation
+    //       not ticked): skip; no validation.
+    //     - Optional and touched (any field non-blank OR affirmation
+    //       ticked): treated as required (all-or-nothing).
+    //
+    //   SSN (bgFullSsn) inside Appendix 3:
+    //     - Required only when require_ssn AND Appendix 3 is being
+    //       completed (either required, or optional-touched).
+    //
+    // Keys returned are entity field / affirmation names; the wizard
+    // UI keys its sections off the same names via
+    // src/lib/agreement-sections.ts, so a missing key routes directly
+    // to the right step.
 
-    /** Returns the keys of every required consultant field that's blank. */
+    /** True if {@code s} has any non-whitespace character. */
+    private static boolean nonBlank(String s) {
+        return s != null && !s.trim().isEmpty();
+    }
+
+    /** Fields whose presence makes Appendix 1 "touched" (excludes implementationPartner, never required). */
+    private static boolean isAppendix1Touched(ConsultantApplication app) {
+        return nonBlank(app.getEmployerPayrollEntity())
+                || nonBlank(app.getEndClient())
+                || nonBlank(app.getRoleTitle())
+                || app.getVerifiedStartDate() != null
+                || nonBlank(app.getPayrollCycle())
+                || Boolean.TRUE.equals(app.getAffirmedAppendix1());
+    }
+
+    private static boolean isAppendix2Touched(ConsultantApplication app) {
+        return nonBlank(app.getAchAccountType())
+                || nonBlank(app.getAchBankName())
+                || nonBlank(app.getAchAccountHolderName())
+                || nonBlank(app.getAchRoutingNumber())
+                || nonBlank(app.getAchAccountNumber())
+                || nonBlank(app.getAchNoticeEmail())
+                || nonBlank(app.getAchDebitDates())
+                || nonBlank(app.getAchDebitAmounts())
+                || Boolean.TRUE.equals(app.getAffirmedAppendix2());
+    }
+
+    private static boolean isAppendix3Touched(ConsultantApplication app) {
+        // bgFullSsn is gated separately (require_ssn) — including it
+        // here would mean a stray SSN entry forces all of Appendix 3.
+        // That's the right behaviour: if the consultant typed an SSN,
+        // they engaged with the section and should finish it.
+        return nonBlank(app.getBgFullLegalName())
+                || nonBlank(app.getBgOtherNamesUsed())
+                || nonBlank(app.getBgCurrentAddress())
+                || app.getBgDateOfBirth() != null
+                || nonBlank(app.getBgFullSsn())
+                || nonBlank(app.getBgDriverLicense())
+                || Boolean.TRUE.equals(app.getAffirmedAppendix3());
+    }
+
+    private static boolean isAppendix4Touched(ConsultantApplication app) {
+        return nonBlank(app.getPortalPlatform())
+                || nonBlank(app.getPortalUsername())
+                || nonBlank(app.getPortalAuthorizedActions())
+                || app.getPortalEffectiveDate() != null
+                || nonBlank(app.getPortalRevocationContact())
+                || Boolean.TRUE.equals(app.getAffirmedAppendix4());
+    }
+
+    private static boolean isAppendix5Touched(ConsultantApplication app) {
+        return nonBlank(app.getSecurityCheckCount())
+                || nonBlank(app.getSecurityCheckNumbers())
+                || nonBlank(app.getSecurityCheckBank())
+                || nonBlank(app.getSecurityCheckHolderName())
+                || nonBlank(app.getSecurityCheckAmount())
+                || nonBlank(app.getSecurityCheckDates())
+                || Boolean.TRUE.equals(app.getAffirmedAppendix5());
+    }
+
+    /** Returns the keys of every effectively-required consultant field that's blank. */
     private static java.util.List<String> collectMissingConsultantFields(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
-        // Cover (identity confirms, prefilled but required at submit).
+        // CORE (always required).
         addIfBlank(missing, "consultantName", app.getConsultantName());
         addIfBlank(missing, "consultantEmail", app.getConsultantEmail());
         addIfBlank(missing, "primaryPhone", app.getPrimaryPhone());
-        addIfBlank(missing, "workAuthorizationCategory", app.getWorkAuthorizationCategory());
         addIfBlank(missing, "residenceAddress", app.getResidenceAddress());
-        // Exhibit A.
         addIfBlank(missing, "technologyTrack", app.getTechnologyTrack());
         addIfBlank(missing, "customScopeNotes", app.getCustomScopeNotes());
-        // Appendix 1 -- employment.
-        addIfBlank(missing, "employerPayrollEntity", app.getEmployerPayrollEntity());
-        addIfBlank(missing, "implementationPartner", app.getImplementationPartner());
-        addIfBlank(missing, "endClient", app.getEndClient());
-        addIfBlank(missing, "roleTitle", app.getRoleTitle());
-        if (app.getVerifiedStartDate() == null) missing.add("verifiedStartDate");
-        addIfBlank(missing, "payrollCycle", app.getPayrollCycle());
-        // Appendix 2 -- ACH (now mandatory).
-        addIfBlank(missing, "achAccountType", app.getAchAccountType());
-        addIfBlank(missing, "achBankName", app.getAchBankName());
-        addIfBlank(missing, "achAccountHolderName", app.getAchAccountHolderName());
-        addIfBlank(missing, "achRoutingNumber", app.getAchRoutingNumber());
-        addIfBlank(missing, "achAccountNumber", app.getAchAccountNumber());
-        addIfBlank(missing, "achNoticeEmail", app.getAchNoticeEmail());
-        addIfBlank(missing, "achDebitDates", app.getAchDebitDates());
-        addIfBlank(missing, "achDebitAmounts", app.getAchDebitAmounts());
-        // Appendix 3 -- background check (now mandatory).
-        addIfBlank(missing, "bgFullLegalName", app.getBgFullLegalName());
-        addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
-        addIfBlank(missing, "bgCurrentAddress", app.getBgCurrentAddress());
-        if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
-        addIfBlank(missing, "bgFullSsn", app.getBgFullSsn());
-        addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
-        // Appendix 4 -- portal (now mandatory).
-        addIfBlank(missing, "portalPlatform", app.getPortalPlatform());
-        addIfBlank(missing, "portalUsername", app.getPortalUsername());
-        addIfBlank(missing, "portalAuthorizedActions", app.getPortalAuthorizedActions());
-        if (app.getPortalEffectiveDate() == null) missing.add("portalEffectiveDate");
-        addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());
-        // Appendix 5 -- security check (now mandatory).
-        addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
-        addIfBlank(missing, "securityCheckNumbers", app.getSecurityCheckNumbers());
-        addIfBlank(missing, "securityCheckBank", app.getSecurityCheckBank());
-        addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
-        addIfBlank(missing, "securityCheckAmount", app.getSecurityCheckAmount());
-        addIfBlank(missing, "securityCheckDates", app.getSecurityCheckDates());
+
+        // Appendix 1 -- employment (per require_appendix1; all-or-nothing
+        // if optional but touched). implementationPartner is never required.
+        boolean app1Required = Boolean.TRUE.equals(app.getRequireAppendix1());
+        if (app1Required || isAppendix1Touched(app)) {
+            addIfBlank(missing, "employerPayrollEntity", app.getEmployerPayrollEntity());
+            addIfBlank(missing, "endClient", app.getEndClient());
+            addIfBlank(missing, "roleTitle", app.getRoleTitle());
+            if (app.getVerifiedStartDate() == null) missing.add("verifiedStartDate");
+            addIfBlank(missing, "payrollCycle", app.getPayrollCycle());
+        }
+
+        // Appendix 2 -- ACH.
+        boolean app2Required = Boolean.TRUE.equals(app.getRequireAppendix2());
+        if (app2Required || isAppendix2Touched(app)) {
+            addIfBlank(missing, "achAccountType", app.getAchAccountType());
+            addIfBlank(missing, "achBankName", app.getAchBankName());
+            addIfBlank(missing, "achAccountHolderName", app.getAchAccountHolderName());
+            addIfBlank(missing, "achRoutingNumber", app.getAchRoutingNumber());
+            addIfBlank(missing, "achAccountNumber", app.getAchAccountNumber());
+            addIfBlank(missing, "achNoticeEmail", app.getAchNoticeEmail());
+            addIfBlank(missing, "achDebitDates", app.getAchDebitDates());
+            addIfBlank(missing, "achDebitAmounts", app.getAchDebitAmounts());
+        }
+
+        // Appendix 3 -- background check (SSN gated by require_ssn).
+        boolean app3Required = Boolean.TRUE.equals(app.getRequireAppendix3());
+        boolean app3Active = app3Required || isAppendix3Touched(app);
+        if (app3Active) {
+            addIfBlank(missing, "bgFullLegalName", app.getBgFullLegalName());
+            addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
+            addIfBlank(missing, "bgCurrentAddress", app.getBgCurrentAddress());
+            if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
+            addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
+            if (Boolean.TRUE.equals(app.getRequireSsn())) {
+                addIfBlank(missing, "bgFullSsn", app.getBgFullSsn());
+            }
+        }
+
+        // Appendix 4 -- portal access.
+        boolean app4Required = Boolean.TRUE.equals(app.getRequireAppendix4());
+        if (app4Required || isAppendix4Touched(app)) {
+            addIfBlank(missing, "portalPlatform", app.getPortalPlatform());
+            addIfBlank(missing, "portalUsername", app.getPortalUsername());
+            addIfBlank(missing, "portalAuthorizedActions", app.getPortalAuthorizedActions());
+            if (app.getPortalEffectiveDate() == null) missing.add("portalEffectiveDate");
+            addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());
+        }
+
+        // Appendix 5 -- security check.
+        boolean app5Required = Boolean.TRUE.equals(app.getRequireAppendix5());
+        if (app5Required || isAppendix5Touched(app)) {
+            addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
+            addIfBlank(missing, "securityCheckNumbers", app.getSecurityCheckNumbers());
+            addIfBlank(missing, "securityCheckBank", app.getSecurityCheckBank());
+            addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
+            addIfBlank(missing, "securityCheckAmount", app.getSecurityCheckAmount());
+            addIfBlank(missing, "securityCheckDates", app.getSecurityCheckDates());
+        }
+
         return missing;
     }
 
-    /** Returns the keys of every section affirmation flag still false / null. */
+    /** Returns the keys of every effectively-required affirmation flag still false / null. */
     private static java.util.List<String> collectMissingAffirmations(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
+        // Always-required affirmations (main agreement + exhibits).
         if (!Boolean.TRUE.equals(app.getAffirmedMainAgreement())) missing.add("affirmedMainAgreement");
         if (!Boolean.TRUE.equals(app.getAffirmedExhibitA())) missing.add("affirmedExhibitA");
         if (!Boolean.TRUE.equals(app.getAffirmedExhibitB())) missing.add("affirmedExhibitB");
-        if (!Boolean.TRUE.equals(app.getAffirmedAppendix1())) missing.add("affirmedAppendix1");
-        if (!Boolean.TRUE.equals(app.getAffirmedAppendix2())) missing.add("affirmedAppendix2");
-        if (!Boolean.TRUE.equals(app.getAffirmedAppendix3())) missing.add("affirmedAppendix3");
-        if (!Boolean.TRUE.equals(app.getAffirmedAppendix4())) missing.add("affirmedAppendix4");
-        if (!Boolean.TRUE.equals(app.getAffirmedAppendix5())) missing.add("affirmedAppendix5");
+        // Per-appendix: required directly, OR optional-but-touched (all-or-nothing).
+        if ((Boolean.TRUE.equals(app.getRequireAppendix1()) || isAppendix1Touched(app))
+                && !Boolean.TRUE.equals(app.getAffirmedAppendix1())) {
+            missing.add("affirmedAppendix1");
+        }
+        if ((Boolean.TRUE.equals(app.getRequireAppendix2()) || isAppendix2Touched(app))
+                && !Boolean.TRUE.equals(app.getAffirmedAppendix2())) {
+            missing.add("affirmedAppendix2");
+        }
+        if ((Boolean.TRUE.equals(app.getRequireAppendix3()) || isAppendix3Touched(app))
+                && !Boolean.TRUE.equals(app.getAffirmedAppendix3())) {
+            missing.add("affirmedAppendix3");
+        }
+        if ((Boolean.TRUE.equals(app.getRequireAppendix4()) || isAppendix4Touched(app))
+                && !Boolean.TRUE.equals(app.getAffirmedAppendix4())) {
+            missing.add("affirmedAppendix4");
+        }
+        if ((Boolean.TRUE.equals(app.getRequireAppendix5()) || isAppendix5Touched(app))
+                && !Boolean.TRUE.equals(app.getAffirmedAppendix5())) {
+            missing.add("affirmedAppendix5");
+        }
         return missing;
     }
 

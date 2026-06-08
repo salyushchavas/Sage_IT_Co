@@ -95,10 +95,12 @@ public class GlobalExceptionHandler {
         details.put("missingFields", ex.getMissingFields());
         details.put("missingAffirmations", ex.getMissingAffirmations());
         details.put("missingSignature", ex.isMissingSignature());
-        log.warn("Incomplete consultant submission: {} field(s), {} affirmation(s), sig missing={}",
+        details.put("missingFinalSignature", ex.isMissingFinalSignature());
+        log.warn("Incomplete consultant submission: {} field(s), {} affirmation(s), sig missing={}, final sig missing={}",
                 ex.getMissingFields().size(),
                 ex.getMissingAffirmations().size(),
-                ex.isMissingSignature());
+                ex.isMissingSignature(),
+                ex.isMissingFinalSignature());
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(ex.getMessage(), details));
     }

@@ -24,7 +24,31 @@ interface FormState {
   rateAmount1: string;
   ratePeriod2: string;
   rateAmount2: string;
+  // F-4: ERM-set visa status, persisted on the workAuthCategory column.
+  // Locked + visible to the consultant on the cover step.
+  visaStatus: string;
+  // F-4: per-appendix requirement flags. The ERM ticks whichever
+  // appendices apply to THIS consultant; the wizard + submit gate use
+  // them to decide required vs optional-skippable.
+  requireAppendix1: boolean;
+  requireAppendix2: boolean;
+  requireAppendix3: boolean;
+  requireAppendix4: boolean;
+  requireAppendix5: boolean;
+  // F-4: SSN-in-Appendix-3 toggle. The Require-SSN checkbox is only
+  // enabled when Appendix 3 is also required (Required iff requireSsn
+  // AND Appendix 3 active).
+  requireSsn: boolean;
 }
+
+const VISA_OPTIONS = [
+  "F-1 STEM OPT",
+  "F-1 OPT",
+  "H-1B",
+  "Green Card",
+  "U.S. Citizen",
+  "Other",
+] as const;
 
 const EMPTY: FormState = {
   consultantName: "",
@@ -33,6 +57,13 @@ const EMPTY: FormState = {
   rateAmount1: "",
   ratePeriod2: "",
   rateAmount2: "",
+  visaStatus: "",
+  requireAppendix1: false,
+  requireAppendix2: false,
+  requireAppendix3: false,
+  requireAppendix4: false,
+  requireAppendix5: false,
+  requireSsn: false,
 };
 
 /**
@@ -61,25 +92,47 @@ export default function NewConsultantApplicationPage() {
     setChecked(true);
   }, [router]);
 
-  const set = <K extends keyof FormState>(key: K) =>
-    (e: React.ChangeEvent<HTMLInputElement>) =>
+  const setText = <K extends keyof FormState>(key: K) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
       setForm((s) => ({ ...s, [key]: e.target.value }));
 
-  const trimmed: FormState = {
+  const toggleFlag = <K extends keyof FormState>(key: K) => () =>
+    setForm((s) => {
+      const next = { ...s, [key]: !(s[key] as boolean) } as FormState;
+      // Require-SSN is only meaningful when Appendix 3 is required;
+      // clearing Appendix 3 must also clear Require-SSN so the form
+      // can't ship in an impossible state.
+      if (key === "requireAppendix3" && !next.requireAppendix3) {
+        next.requireSsn = false;
+      }
+      return next;
+    });
+
+  const trimmedStrings = {
     consultantName: form.consultantName.trim(),
     consultantEmail: form.consultantEmail.trim(),
     ratePeriod1: form.ratePeriod1.trim(),
     rateAmount1: form.rateAmount1.trim(),
     ratePeriod2: form.ratePeriod2.trim(),
     rateAmount2: form.rateAmount2.trim(),
+    visaStatus: form.visaStatus.trim(),
   };
 
-  const allRequiredFilled = Object.values(trimmed).every((v) => v.length > 0);
-  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed.consultantEmail);
+  const requiredTextValues = [
+    trimmedStrings.consultantName,
+    trimmedStrings.consultantEmail,
+    trimmedStrings.ratePeriod1,
+    trimmedStrings.rateAmount1,
+    trimmedStrings.ratePeriod2,
+    trimmedStrings.rateAmount2,
+    trimmedStrings.visaStatus,
+  ];
+  const allRequiredFilled = requiredTextValues.every((v) => v.length > 0);
+  const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedStrings.consultantEmail);
   const periodsMatch =
-    trimmed.ratePeriod1.length > 0 &&
-    trimmed.ratePeriod2.length > 0 &&
-    trimmed.ratePeriod1.toLowerCase() === trimmed.ratePeriod2.toLowerCase();
+    trimmedStrings.ratePeriod1.length > 0 &&
+    trimmedStrings.ratePeriod2.length > 0 &&
+    trimmedStrings.ratePeriod1.toLowerCase() === trimmedStrings.ratePeriod2.toLowerCase();
 
   const canSubmit = allRequiredFilled && !isSubmitting;
 
@@ -88,7 +141,7 @@ export default function NewConsultantApplicationPage() {
     setError("");
 
     if (!allRequiredFilled) {
-      setError("Every field is required.");
+      setError("Every required field needs a value.");
       return;
     }
     if (!emailLooksValid) {
@@ -98,7 +151,15 @@ export default function NewConsultantApplicationPage() {
 
     setIsSubmitting(true);
     try {
-      const app = await createConsultantApplication(trimmed);
+      const app = await createConsultantApplication({
+        ...trimmedStrings,
+        requireAppendix1: form.requireAppendix1,
+        requireAppendix2: form.requireAppendix2,
+        requireAppendix3: form.requireAppendix3,
+        requireAppendix4: form.requireAppendix4,
+        requireAppendix5: form.requireAppendix5,
+        requireSsn: form.requireSsn,
+      });
       router.replace(`/agreements/${app.applicationId}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't create application.");
@@ -150,7 +211,7 @@ export default function NewConsultantApplicationPage() {
                 <input
                   type="text"
                   value={form.consultantName}
-                  onChange={set("consultantName")}
+                  onChange={setText("consultantName")}
                   disabled={isSubmitting}
                   required
                   placeholder="Jane Q. Consultant"
@@ -161,13 +222,39 @@ export default function NewConsultantApplicationPage() {
                 <input
                   type="email"
                   value={form.consultantEmail}
-                  onChange={set("consultantEmail")}
+                  onChange={setText("consultantEmail")}
                   disabled={isSubmitting}
                   required
                   autoComplete="off"
                   placeholder="consultant@example.com"
                   className={inputClass}
                 />
+              </Field>
+              <Field
+                label="Work authorization"
+                required
+                className="md:col-span-2"
+              >
+                <select
+                  value={form.visaStatus}
+                  onChange={setText("visaStatus")}
+                  disabled={isSubmitting}
+                  required
+                  className={inputClass}
+                >
+                  <option value="" disabled>
+                    Select status…
+                  </option>
+                  {VISA_OPTIONS.map((opt) => (
+                    <option key={opt} value={opt}>
+                      {opt}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Locked on the consultant&apos;s view. They&apos;ll see
+                  it but cannot change it.
+                </p>
               </Field>
             </div>
           </section>
@@ -179,7 +266,7 @@ export default function NewConsultantApplicationPage() {
                 <input
                   type="text"
                   value={form.ratePeriod1}
-                  onChange={set("ratePeriod1")}
+                  onChange={setText("ratePeriod1")}
                   disabled={isSubmitting}
                   required
                   placeholder="Months 1-12"
@@ -190,7 +277,7 @@ export default function NewConsultantApplicationPage() {
                 <input
                   type="text"
                   value={form.rateAmount1}
-                  onChange={set("rateAmount1")}
+                  onChange={setText("rateAmount1")}
                   disabled={isSubmitting}
                   required
                   placeholder="$2,400"
@@ -201,7 +288,7 @@ export default function NewConsultantApplicationPage() {
                 <input
                   type="text"
                   value={form.ratePeriod2}
-                  onChange={set("ratePeriod2")}
+                  onChange={setText("ratePeriod2")}
                   disabled={isSubmitting}
                   required
                   placeholder="Months 13-18"
@@ -212,7 +299,7 @@ export default function NewConsultantApplicationPage() {
                 <input
                   type="text"
                   value={form.rateAmount2}
-                  onChange={set("rateAmount2")}
+                  onChange={setText("rateAmount2")}
                   disabled={isSubmitting}
                   required
                   placeholder="$1,920"
@@ -227,6 +314,58 @@ export default function NewConsultantApplicationPage() {
                 but usually a typo.
               </p>
             )}
+          </section>
+
+          <section className="space-y-3">
+            <SectionHeader title="Sections required for this consultant" />
+            <p className="text-[11px] text-gray-500">
+              Tick the appendices THIS consultant must complete. Unchecked
+              appendices are shown to them but skippable. Implementation
+              partner is never required.
+            </p>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              <RequirementCheckbox
+                label="Appendix 1 — Employment confirmation"
+                checked={form.requireAppendix1}
+                onToggle={toggleFlag("requireAppendix1")}
+                disabled={isSubmitting}
+              />
+              <RequirementCheckbox
+                label="Appendix 2 — ACH payment authorization"
+                checked={form.requireAppendix2}
+                onToggle={toggleFlag("requireAppendix2")}
+                disabled={isSubmitting}
+              />
+              <RequirementCheckbox
+                label="Appendix 3 — Background check"
+                checked={form.requireAppendix3}
+                onToggle={toggleFlag("requireAppendix3")}
+                disabled={isSubmitting}
+              />
+              <RequirementCheckbox
+                label="Appendix 4 — Portal access"
+                checked={form.requireAppendix4}
+                onToggle={toggleFlag("requireAppendix4")}
+                disabled={isSubmitting}
+              />
+              <RequirementCheckbox
+                label="Appendix 5 — Security check acknowledgment"
+                checked={form.requireAppendix5}
+                onToggle={toggleFlag("requireAppendix5")}
+                disabled={isSubmitting}
+              />
+              <RequirementCheckbox
+                label="Require SSN in Appendix 3"
+                checked={form.requireSsn}
+                onToggle={toggleFlag("requireSsn")}
+                disabled={isSubmitting || !form.requireAppendix3}
+                hint={
+                  form.requireAppendix3
+                    ? "Consultant must enter their full SSN."
+                    : "Enable Appendix 3 first."
+                }
+              />
+            </div>
           </section>
 
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-2 border-t border-gray-100">
@@ -289,5 +428,48 @@ function Field({
       </label>
       {children}
     </div>
+  );
+}
+
+function RequirementCheckbox({
+  label,
+  checked,
+  onToggle,
+  disabled,
+  hint,
+}: {
+  label: string;
+  checked: boolean;
+  onToggle: () => void;
+  disabled?: boolean;
+  hint?: string;
+}) {
+  return (
+    <label
+      className={
+        "flex items-start gap-2 rounded-md border px-3 py-2 text-xs " +
+        (disabled
+          ? "border-gray-100 bg-gray-50 text-gray-400 cursor-not-allowed"
+          : checked
+            ? "border-sage-navy bg-sage-navy/5 text-sage-navy cursor-pointer"
+            : "border-gray-200 bg-white text-gray-700 cursor-pointer hover:border-sage-navy/40")
+      }
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={onToggle}
+        disabled={disabled}
+        className="mt-0.5 h-3.5 w-3.5 accent-sage-navy"
+      />
+      <span className="flex-1 leading-snug">
+        <span className="font-semibold">{label}</span>
+        {hint && (
+          <span className="block text-[10px] text-gray-500 font-normal mt-0.5">
+            {hint}
+          </span>
+        )}
+      </span>
+    </label>
   );
 }

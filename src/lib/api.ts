@@ -3327,6 +3327,21 @@ export interface ConsultantApplication {
   affirmedAppendix3?: boolean | null;
   affirmedAppendix4?: boolean | null;
   affirmedAppendix5?: boolean | null;
+  // F-4 — per-agreement requirement flags, set by the ERM at create
+  // time. Drive which appendices the wizard treats as required vs
+  // optional-skippable for THIS consultant.
+  requireAppendix1?: boolean | null;
+  requireAppendix2?: boolean | null;
+  requireAppendix3?: boolean | null;
+  requireAppendix4?: boolean | null;
+  requireAppendix5?: boolean | null;
+  requireSsn?: boolean | null;
+  // F-4 — final (review-step) signature. Drawn separately from the
+  // primary signature on the main-agreement step; stamps the closing
+  // execution block in the generated PDF.
+  finalSignatureImage?: string | null;
+  finalSignedAt?: string | null;
+  finalSigningIp?: string | null;
 }
 
 /**
@@ -3663,6 +3678,16 @@ export async function createConsultantApplication(data: {
   rateAmount1?: string;
   ratePeriod2?: string;
   rateAmount2?: string;
+  // F-4: ERM-set visa status (persisted into workAuthCategory) and
+  // per-appendix requirement flags. Drive the wizard's effective
+  // requirements + the submit-time gate.
+  visaStatus?: string;
+  requireAppendix1?: boolean;
+  requireAppendix2?: boolean;
+  requireAppendix3?: boolean;
+  requireAppendix4?: boolean;
+  requireAppendix5?: boolean;
+  requireSsn?: boolean;
   // Legacy JSON-textarea payload. New /agreement-erm/new form does
   // not send it; preserved so the detail-view edit panel and any
   // other in-flight caller keeps compiling.
@@ -4080,25 +4105,32 @@ export async function saveConsultantFill(
 }
 
 /**
- * Phase 3: POST /api/consultant/applications/{appId}/submit.
+ * Phase 3 + F-4: POST /api/consultant/applications/{appId}/submit.
  *
- * Previously called the legacy /sign endpoint which combined sign +
- * PDF + complete in one shot. The new two-stage flow transitions
- * SUBMITTED|REVISION_REQUESTED -> VERIFIED here and waits for the ERM
- * countersignature before the final PDF is rendered. Body shape also
- * changed: { signatureBase64, signedLegalName } (new) vs the old
- * { legalName, signatureImage }. Argument order on this helper is
- * preserved (appId, legalName, signature) so the sign page's call
- * site compiles without churn.
+ * The two-stage flow transitions SUBMITTED|REVISION_REQUESTED ->
+ * VERIFIED here; the ERM countersignature later renders the final PDF.
+ * F-4 first-and-last signature model demands TWO drawn signatures:
+ *   - signatureBase64       primary (drawn on the main-agreement step)
+ *   - finalSignatureBase64  final/execution (drawn on the review step)
+ * The backend rejects the submission with a 400 +
+ * { missingFinalSignature: true } if either is absent.
  */
 export async function signConsultantApplication(
   applicationId: string,
   signedLegalName: string,
   signatureBase64: string,
+  finalSignatureBase64: string,
 ) {
   return consultantFetch<ConsultantApplication>(
     applicationId, "/submit",
-    { method: "POST", body: JSON.stringify({ signedLegalName, signatureBase64 }) },
+    {
+      method: "POST",
+      body: JSON.stringify({
+        signedLegalName,
+        signatureBase64,
+        finalSignatureBase64,
+      }),
+    },
   );
 }
 

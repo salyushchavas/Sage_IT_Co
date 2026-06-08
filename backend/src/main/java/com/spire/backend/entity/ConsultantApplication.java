@@ -340,6 +340,57 @@ public class ConsultantApplication {
     @Builder.Default
     private Boolean affirmedAppendix5 = false;
 
+    // ── F-4: per-agreement requirement flags (ERM-configurable) ──────
+    //
+    // The ERM marks each appendix Required/Not Required at create time;
+    // require_ssn flips Appendix 3's SSN field between mandatory and
+    // optional. The wizard + the submit validation read these flags
+    // off the application -- F-1's blanket "all appendices forced
+    // required" is replaced by an effective-requirements model.
+
+    @Column(name = "require_appendix1", nullable = false)
+    @Builder.Default
+    private Boolean requireAppendix1 = false;
+
+    @Column(name = "require_appendix2", nullable = false)
+    @Builder.Default
+    private Boolean requireAppendix2 = false;
+
+    @Column(name = "require_appendix3", nullable = false)
+    @Builder.Default
+    private Boolean requireAppendix3 = false;
+
+    @Column(name = "require_appendix4", nullable = false)
+    @Builder.Default
+    private Boolean requireAppendix4 = false;
+
+    @Column(name = "require_appendix5", nullable = false)
+    @Builder.Default
+    private Boolean requireAppendix5 = false;
+
+    @Column(name = "require_ssn", nullable = false)
+    @Builder.Default
+    private Boolean requireSsn = false;
+
+    // ── F-4: closing / execution signature ───────────────────────────
+    //
+    // signatureImage / signedLegalName (above) is the PRIMARY signature
+    // the consultant draws on the main-agreement step -- stamped on
+    // every signature block in the agreement via $signatureImage.
+    // finalSignatureImage is the closing execution signature drawn at
+    // the review step; stamped on the agreement's last signature block
+    // via $finalSignatureImage. final_signed_at / final_signing_ip
+    // form the audit trail.
+
+    @Column(name = "final_signature_image", columnDefinition = "TEXT")
+    private String finalSignatureImage;
+
+    @Column(name = "final_signed_at")
+    private LocalDateTime finalSignedAt;
+
+    @Column(name = "final_signing_ip", length = 64)
+    private String finalSigningIp;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 
