@@ -1,6 +1,7 @@
 package com.spire.backend.controller;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.spire.backend.dto.AgreementContent;
 import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
@@ -9,6 +10,7 @@ import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.security.AgreementAuthz;
 import com.spire.backend.security.ConsultantRateLimiter;
 import com.spire.backend.security.JwtService;
+import com.spire.backend.service.AgreementContentService;
 import com.spire.backend.service.AgreementDocumentService;
 import com.spire.backend.service.ConsultantApplicationService;
 import jakarta.servlet.http.HttpServletRequest;
@@ -51,6 +53,7 @@ public class ConsultantApplicationController {
     private final ConsultantApplicationService consultantService;
     private final ConsultantRateLimiter rateLimiter;
     private final AgreementDocumentService agreementDocumentService;
+    private final AgreementContentService agreementContentService;
     private final JwtService jwtService;
 
     /**
@@ -501,6 +504,29 @@ public class ConsultantApplicationController {
         }
         return ResponseEntity.ok(ApiResponse.success(
                 consultantService.getForConsultant(appId, request)));
+    }
+
+    /**
+     * F-3 — the full agreement clauses, partitioned per wizard section,
+     * parsed from the master template (single source of truth) plus this
+     * app's non-editable values. The frontend renders the real clauses
+     * inline and fills consultant-editable placeholders live from form
+     * state. Ownership-gated (non-owner email → 404).
+     */
+    @GetMapping("/api/consultant/applications/{appId}/agreement-content")
+    public ResponseEntity<ApiResponse<AgreementContent>> agreementContent(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowRead(clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        AgreementContent content = new AgreementContent(
+                agreementContentService.getSections(),
+                agreementDocumentService.nonEditableDisplayValues(app));
+        return ResponseEntity.ok(ApiResponse.success(content));
     }
 
     @PostMapping("/api/consultant/applications/{appId}/verify-details")

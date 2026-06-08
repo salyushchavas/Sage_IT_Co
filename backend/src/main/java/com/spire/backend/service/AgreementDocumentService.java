@@ -387,6 +387,32 @@ public class AgreementDocumentService {
     }
 
     /**
+     * F-3 — the NON-editable placeholder values for inline clause display
+     * in the consultant wizard. Same value source + formatting as
+     * {@link #buildContext}, so the on-screen clauses match the signed
+     * PDF exactly. Consultant-editable placeholders are intentionally
+     * omitted (the frontend fills them live from form state); the two
+     * signature images are handled by the frontend (drawn signature /
+     * "Sage IT").
+     */
+    public Map<String, String> nonEditableDisplayValues(ConsultantApplication app) {
+        Map<String, String> v = new HashMap<>();
+        Function<String, String> nz = s -> s == null ? "" : s;
+        v.put("effectiveDate", app.getEffectiveDate() == null
+                ? "" : app.getEffectiveDate().format(DATE_FMT));
+        v.put("ratePeriod1", nz.apply(app.getRatePeriod1()));
+        v.put("rateAmount1", nz.apply(app.getRateAmount1()));
+        v.put("ratePeriod2", nz.apply(app.getRatePeriod2()));
+        v.put("rateAmount2", nz.apply(app.getRateAmount2()));
+        v.put("ermName", nz.apply(app.getErmName()));
+        v.put("ermTitle", nz.apply(app.getErmTitle()));
+        v.put("ermEmail", resolveOwnerEmail(app));
+        v.put("signatureDate", app.getSignatureDate() == null
+                ? "" : app.getSignatureDate().toLocalDate().format(DATE_FMT));
+        return v;
+    }
+
+    /**
      * Builds the same placeholder map as {@link #buildContext} but
      * with underscore-line placeholders ("________________") for every
      * text field and empty strings for signature images. The result is

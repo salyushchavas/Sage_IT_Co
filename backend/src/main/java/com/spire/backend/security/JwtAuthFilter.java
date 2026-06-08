@@ -40,24 +40,40 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String token = authHeader.substring(7);
 
         if (jwtService.isTokenValid(token) && SecurityContextHolder.getContext().getAuthentication() == null) {
-            // Skip any token whose purpose claim is set -- those belong
-            // to side-feature filters (Agreement-ERM, future surfaces)
-            // and their subject is not a numeric user id, so this
-            // filter's extractUserId would throw NumberFormatException.
-            // The dedicated filter runs before this one and will have
-            // already populated SecurityContext for valid tokens.
+            // Skip side-feature tokens whose subject is NOT a numeric
+            // user id, so this filter's extractUserId (Long.parseLong of
+            // the subject) never throws:
+            //   - Agreement-ERM tokens carry purpose=agreement_erm
+            //     (handled by AgreementErmAuthFilter, which runs first).
+            //   - Consultant portal tokens carry type=consultant and an
+            //     email subject (validated by the consultant controller
+            //     guard). Without this skip, parseLong(email) throws and
+            //     the request error-dispatches to /error -> 403.
             String purpose = null;
+            String type = null;
             try {
                 purpose = jwtService.extractPurpose(token);
+                type = jwtService.extractTokenType(token);
             } catch (Exception ignored) {
-                // Legacy tokens without the claim -- fall through.
+                // Legacy tokens without the claims -- fall through.
             }
-            if (purpose != null && !purpose.isBlank()) {
+            if ((purpose != null && !purpose.isBlank())
+                    || "consultant".equals(type)) {
                 filterChain.doFilter(request, response);
                 return;
             }
 
-            Long userId = jwtService.extractUserId(token);
+            Long userId;
+            try {
+                userId = jwtService.extractUserId(token);
+            } catch (NumberFormatException e) {
+                // Defensive: any other non-numeric-subject token is not a
+                // user-auth token -- let downstream guards handle it
+                // rather than 500/403-ing the whole request.
+                log.warn("JWT subject is not a numeric user id; skipping user auth.");
+                filterChain.doFilter(request, response);
+                return;
+            }
             String role = jwtService.extractRole(token);
 
             // Guard: refresh tokens have no role claim → reject as auth token
