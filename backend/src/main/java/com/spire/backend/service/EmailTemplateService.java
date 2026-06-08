@@ -959,11 +959,38 @@ public class EmailTemplateService {
      * Sent once the ERM countersigns. Delivers the final PDF as an
      * attachment to BOTH the consultant and the operator inbox. Two
      * separate sends -- BCC would expose one recipient to the other.
+     *
+     * Bytes-direct overload: callers that just rendered + uploaded the
+     * PDF pass the in-memory bytes through so the email path never
+     * re-fetches from Cloudinary. The stored {@code finalPdfUrl} is a
+     * per-upload signed URL that 401s on later GET in production,
+     * which shipped the early "Your Signed Agreement" emails with
+     * attachments=0. {@link ConsultantApplicationService#ermApproveAndSign}
+     * always takes this path.
+     */
+    public void sendCompletedAgreementToParties(
+            ConsultantApplication application, byte[] pdfBytes) {
+        List<EmailService.Attachment> attachments =
+                buildPdfAttachmentFromBytes(pdfBytes, application);
+        sendCompletedAgreementBody(application, attachments);
+    }
+
+    /**
+     * Fallback for callers without freshly-rendered bytes (operator
+     * "resend completion email", legacy backfill jobs). Fetches from
+     * Cloudinary via a freshly-signed URL -- avoid where possible
+     * since signed URL fetches have been observed to 401 in prod.
      */
     public void sendCompletedAgreementToParties(ConsultantApplication application) {
         String pdfUrl = resolveFinalPdfFetchUrl(application);
         List<EmailService.Attachment> attachments = buildPdfAttachment(
                 pdfUrl, application);
+        sendCompletedAgreementBody(application, attachments);
+    }
+
+    private void sendCompletedAgreementBody(
+            ConsultantApplication application,
+            List<EmailService.Attachment> attachments) {
         String body = p("Hi,")
                 + p("The " + brandName() + " engagement agreement for "
                         + escape(safeName(application))
@@ -1022,19 +1049,39 @@ public class EmailTemplateService {
      */
     /**
      * Picks the right URL to GET when fetching the final PDF for an
-     * email attachment. Prefers a freshly-signed URL minted from
-     * {@code finalPdfPublicId} (so it survives the
-     * {@code type=authenticated} cutover), falling back to the
-     * pre-signed {@code finalPdfUrl} stored at upload time for rows
-     * persisted before public_id capture landed.
+     * email attachment. Always mints a freshly-signed URL via the SDK
+     * -- the public_id is derived deterministically from {@code appId}
+     * so rows persisted before {@code final_pdf_public_id} was a
+     * column are still served correctly. The stored
+     * {@code finalPdfUrl} is intentionally NOT used: its embedded
+     * signature is per-upload and 401s on later GET.
      */
     private String resolveFinalPdfFetchUrl(ConsultantApplication application) {
         String publicId = application.getFinalPdfPublicId();
-        if (publicId != null && !publicId.isBlank()) {
-            return agreementDocumentService.signedPdfUrl(
-                    publicId, java.time.Duration.ofMinutes(5));
+        if (publicId == null || publicId.isBlank()) {
+            publicId = AgreementDocumentService.derivePublicId(
+                    application.getApplicationId());
         }
-        return application.getFinalPdfUrl();
+        return agreementDocumentService.signedPdfUrl(
+                publicId, java.time.Duration.ofMinutes(5));
+    }
+
+    /**
+     * Wraps freshly-rendered PDF bytes (e.g. from
+     * {@link AgreementDocumentService#generateAgreementPdf}) into the
+     * email attachment shape. No Cloudinary fetch -- use whenever the
+     * caller already holds the bytes.
+     */
+    private List<EmailService.Attachment> buildPdfAttachmentFromBytes(
+            byte[] bytes, ConsultantApplication application) {
+        if (bytes == null || bytes.length == 0) {
+            log.warn("No PDF bytes available for {}; sending without attachment",
+                    application.getApplicationId());
+            return java.util.List.of();
+        }
+        String filename = AgreementDocumentService.buildPdfFilename(application);
+        return java.util.List.of(
+                new EmailService.Attachment(filename, "application/pdf", bytes));
     }
 
     private List<EmailService.Attachment> buildPdfAttachment(

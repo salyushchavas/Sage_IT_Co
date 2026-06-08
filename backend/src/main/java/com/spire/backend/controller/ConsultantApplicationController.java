@@ -279,16 +279,21 @@ public class ConsultantApplicationController {
         // even though the bytes are backend-streamed.
         consultantService.assertErmCanAccess(app, request);
 
+        // Final PDF first; only fall back to the legacy intermediate
+        // signedPdfUrl when no final PDF exists at all (pre-Phase-3
+        // single-stage rows). Always re-sign on the fly: stored
+        // {@code finalPdfUrl} carries a per-upload signature that
+        // 401s on later GET in prod.
+        boolean hasFinal = app.getFinalPdfPublicId() != null
+                || (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank());
         String sourceUrl;
-        String publicId = app.getFinalPdfPublicId();
-        if (publicId != null && !publicId.isBlank()) {
-            // Server-side fetch URL -- still signed via the API
-            // secret, but it's used only inside this JVM and never
-            // returned to the client.
+        if (hasFinal) {
+            String publicId = app.getFinalPdfPublicId();
+            if (publicId == null || publicId.isBlank()) {
+                publicId = AgreementDocumentService.derivePublicId(appId);
+            }
             sourceUrl = agreementDocumentService.signedPdfUrl(
                     publicId, java.time.Duration.ofMinutes(5));
-        } else if (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()) {
-            sourceUrl = app.getFinalPdfUrl();
         } else if (app.getSignedPdfUrl() != null && !app.getSignedPdfUrl().isBlank()) {
             sourceUrl = app.getSignedPdfUrl();
         } else {
@@ -455,16 +460,20 @@ public class ConsultantApplicationController {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
 
-        String sourceUrl;
-        String publicId = app.getFinalPdfPublicId();
-        if (publicId != null && !publicId.isBlank()) {
-            sourceUrl = agreementDocumentService.signedPdfUrl(
-                    publicId, java.time.Duration.ofMinutes(5));
-        } else if (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank()) {
-            sourceUrl = app.getFinalPdfUrl();
-        } else {
+        // COMPLETED row → final PDF must exist. Re-sign on the fly
+        // from the deterministic public_id; ignore the stored
+        // {@code finalPdfUrl} since its embedded signature is
+        // per-upload and observed to 401 on later GET.
+        if (app.getFinalPdfPublicId() == null
+                && (app.getFinalPdfUrl() == null || app.getFinalPdfUrl().isBlank())) {
             return ResponseEntity.notFound().build();
         }
+        String publicId = app.getFinalPdfPublicId();
+        if (publicId == null || publicId.isBlank()) {
+            publicId = AgreementDocumentService.derivePublicId(appId);
+        }
+        String sourceUrl = agreementDocumentService.signedPdfUrl(
+                publicId, java.time.Duration.ofMinutes(5));
 
         byte[] bytes;
         try {

@@ -95,12 +95,16 @@ public class AgreementDocumentService {
     private String agreementErmEmail;
 
     /**
-     * Carries both the Cloudinary {@code secure_url} (for display /
-     * email attachment fetch) and the {@code public_id} (for re-signing
-     * short-lived download URLs later). Two pieces of state pulled out
-     * of the upload response so callers can persist both atomically.
+     * Carries the Cloudinary {@code secure_url} + {@code public_id} for
+     * later persistence AND the raw PDF bytes that were uploaded. Bytes
+     * are returned so the immediate caller (post-countersign email) can
+     * attach them directly without re-fetching from Cloudinary -- the
+     * stored {@code secure_url} carries a per-upload signature that
+     * 401s when GET'd from the server later (observed: every completion
+     * email shipped with attachments=0). Direct bytes also avoid the
+     * 1-2 MB egress round-trip on the happy path.
      */
-    public record PdfUploadResult(String secureUrl, String publicId) {}
+    public record PdfUploadResult(String secureUrl, String publicId, byte[] bytes) {}
 
     public PdfUploadResult generateAgreementPdf(ConsultantApplication app) throws Exception {
         Map<String, Object> ctx = buildContext(app);
@@ -109,11 +113,23 @@ public class AgreementDocumentService {
         try {
             filledDocx = fillTemplate(ctx);
             pdf = convertToPdf(filledDocx);
-            return uploadToCloudinary(pdf, app.getApplicationId());
+            byte[] bytes = Files.readAllBytes(pdf);
+            PdfUploadResult uploaded = uploadToCloudinary(pdf, app.getApplicationId());
+            return new PdfUploadResult(uploaded.secureUrl(), uploaded.publicId(), bytes);
         } finally {
             safeDelete(filledDocx);
             safeDelete(pdf);
         }
+    }
+
+    /**
+     * Stable, derivable public_id for an application's final PDF.
+     * Always {@code agreements/<applicationId>}, matching the upload
+     * call. Used to re-sign download URLs for rows persisted before
+     * {@code final_pdf_public_id} was a column.
+     */
+    public static String derivePublicId(String applicationId) {
+        return "agreements/" + applicationId;
     }
 
     /**
@@ -697,7 +713,10 @@ public class AgreementDocumentService {
         if (url == null) {
             throw new IOException("Cloudinary upload returned no secure_url");
         }
-        return new PdfUploadResult(url.toString(), publicId);
+        // Bytes are filled in by the outer generateAgreementPdf() that
+        // owns the temp file -- the upload helper itself never sees
+        // them, so this slot is left null and replaced upstream.
+        return new PdfUploadResult(url.toString(), publicId, null);
     }
 
     private static void safeDelete(Path p) {

@@ -1169,7 +1169,12 @@ public class ConsultantApplicationService {
                             "kind", "final"),
                     null);
             try {
-                emailTemplateService.sendCompletedAgreementToParties(app);
+                // Pass the freshly-rendered bytes directly so the email
+                // never re-fetches from Cloudinary. The pre-signed
+                // {@code secure_url} returned at upload time 401s when
+                // GET'd later (observed in prod: completion emails
+                // shipped with attachments=0).
+                emailTemplateService.sendCompletedAgreementToParties(app, pdf.bytes());
                 appendEvent(app.getId(),
                         ConsultantApplicationEvent.EventType.EMAIL_SENT,
                         ConsultantApplicationEvent.ActorType.SYSTEM, null,
