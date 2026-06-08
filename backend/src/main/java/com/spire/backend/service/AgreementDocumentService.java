@@ -1028,23 +1028,22 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Build J — keeps every signature block atomic so the label
-     * ("By:", "Signature:") and the signature image and the name /
-     * title / date row all land on the same page. The block is a
-     * 4-row 2-column {@code <w:tbl>}; we identify each signature
-     * table by the presence of a signature image placeholder
-     * ({@code ${signatureImage}} or {@code ${ermSignatureImage}}) and
-     * inject {@code <w:cantSplit/>} into every row's trPr.
+     * Build O — keeps every signature block atomic. The Build-J pass
+     * applied {@code <w:cantSplit/>} to each row, but cantSplit only
+     * stops a single row from breaking mid-cell; it does NOT keep
+     * rows together. We saw blocks split between rows (By:/Signature
+     * line on page N, Name/Title line on page N+1). The fix is to
+     * COLLAPSE each 4-row signature {@code <w:tbl>} into a SINGLE row
+     * with two cells, each cell carrying the stacked paragraphs from
+     * the original rows. A single cantSplit row cannot break across
+     * pages, so the entire block becomes one indivisible unit.
      *
-     * cantSplit alone prevents a single row from splitting across
-     * pages -- which is the observed bug (label on page N, signature
-     * image on page N+1). Combined with the table being only ~3-4
-     * rows / ~3 cm tall after signature normalisation, the layout
-     * engine reliably keeps the whole block together.
+     * Layout-preserving: the original rows had no fixed-exact height
+     * (just {@code <w:trHeight w:val="397"/>} = minimum 0.28"). The
+     * paragraphs render at their natural heights inside the single
+     * row, so the visual block stays identical to the original.
      */
     static String keepSignatureBlocksTogether(String xml) {
-        // Walk each <w:tbl>...</w:tbl> and check whether it contains
-        // a signature placeholder. If yes, transform its rows.
         java.util.regex.Pattern tablePattern = java.util.regex.Pattern.compile(
                 "<w:tbl\\b[^>]*>.*?</w:tbl>",
                 java.util.regex.Pattern.DOTALL);
@@ -1052,18 +1051,25 @@ public class AgreementDocumentService {
         StringBuilder sb = new StringBuilder(xml.length());
         int lastEnd = 0;
         int tablesTouched = 0;
-        int rowsTouched = 0;
+        int tablesConsolidated = 0;
         while (tableMatcher.find()) {
             String table = tableMatcher.group();
             sb.append(xml, lastEnd, tableMatcher.start());
             if (table.contains("${signatureImage}")
                     || table.contains("${ermSignatureImage}")
                     || table.contains("${finalSignatureImage}")) {
-                int[] rowCount = new int[]{0};
-                String transformed = addCantSplitToEveryRow(table, rowCount);
-                sb.append(transformed);
+                String consolidated = consolidateSignatureTable(table);
+                if (consolidated != null) {
+                    sb.append(consolidated);
+                    tablesConsolidated++;
+                } else {
+                    // Couldn't safely consolidate (unexpected shape) -- fall
+                    // back to the Build-J row-level cantSplit so the block
+                    // at least doesn't break mid-row.
+                    int[] rowCount = new int[]{0};
+                    sb.append(addCantSplitToEveryRow(table, rowCount));
+                }
                 tablesTouched++;
-                rowsTouched += rowCount[0];
             } else {
                 sb.append(table);
             }
@@ -1071,20 +1077,120 @@ public class AgreementDocumentService {
         }
         sb.append(xml, lastEnd, xml.length());
         if (tablesTouched > 0) {
-            log.info("Template surgery: cantSplit set on {} row(s) across {} signature table(s)",
-                    rowsTouched, tablesTouched);
+            log.info(
+                    "Template surgery: {} signature table(s) processed; "
+                            + "{} consolidated to single cantSplit row, {} fell back to row-cantSplit",
+                    tablesTouched, tablesConsolidated,
+                    tablesTouched - tablesConsolidated);
         }
         return sb.toString();
     }
 
     /**
-     * Inject {@code <w:cantSplit/>} into every {@code <w:tr>} in the
-     * given table fragment. Two cases:
-     *   - row already has {@code <w:trPr>}: prepend cantSplit inside it
-     *     unless it's already there.
-     *   - row has no {@code <w:trPr>}: insert a fresh
-     *     {@code <w:trPr><w:cantSplit/></w:trPr>} right after the
-     *     {@code <w:tr ...>} opening tag.
+     * Build O — folds a multi-row 2-column signature table into a
+     * single-row, two-cell table where each cell carries the stacked
+     * paragraphs from the original column. The single row is marked
+     * {@code <w:cantSplit/>} so it can never break across pages.
+     *
+     * Returns null on any structural surprise so the caller can fall
+     * back to per-row cantSplit instead of corrupting the XML.
+     */
+    static String consolidateSignatureTable(String tableXml) {
+        // Slice out <w:tblPr>, <w:tblGrid>, and every <w:tr>.
+        java.util.regex.Matcher tblPrM = java.util.regex.Pattern.compile(
+                "<w:tblPr\\b.*?</w:tblPr>", java.util.regex.Pattern.DOTALL)
+                .matcher(tableXml);
+        java.util.regex.Matcher gridM = java.util.regex.Pattern.compile(
+                "<w:tblGrid\\b.*?</w:tblGrid>", java.util.regex.Pattern.DOTALL)
+                .matcher(tableXml);
+        if (!tblPrM.find() || !gridM.find()) return null;
+        String tblPr = tblPrM.group();
+        String tblGrid = gridM.group();
+
+        java.util.regex.Matcher rowM = java.util.regex.Pattern.compile(
+                "<w:tr\\b[^>]*>.*?</w:tr>", java.util.regex.Pattern.DOTALL)
+                .matcher(tableXml);
+        java.util.List<String> rows = new java.util.ArrayList<>();
+        while (rowM.find()) rows.add(rowM.group());
+        if (rows.isEmpty()) return null;
+
+        // The signature blocks have a stable 2-column shape. If a row
+        // doesn't have exactly two <w:tc> blocks, bail out so the
+        // caller falls back to row-cantSplit rather than corrupting.
+        java.util.List<String> leftCellTcPrs = new java.util.ArrayList<>();
+        java.util.List<String> rightCellTcPrs = new java.util.ArrayList<>();
+        java.util.List<java.util.List<String>> leftParas = new java.util.ArrayList<>();
+        java.util.List<java.util.List<String>> rightParas = new java.util.ArrayList<>();
+        for (String row : rows) {
+            java.util.regex.Matcher cellM = java.util.regex.Pattern.compile(
+                    "<w:tc\\b[^>]*>(.*?)</w:tc>", java.util.regex.Pattern.DOTALL)
+                    .matcher(row);
+            int cellIdx = 0;
+            while (cellM.find()) {
+                String body = cellM.group(1);
+                java.util.regex.Matcher tcPrM = java.util.regex.Pattern.compile(
+                        "<w:tcPr\\b.*?</w:tcPr>", java.util.regex.Pattern.DOTALL)
+                        .matcher(body);
+                String tcPr = tcPrM.find() ? tcPrM.group() : "";
+                java.util.regex.Matcher pM = java.util.regex.Pattern.compile(
+                        "<w:p\\b[^>]*>.*?</w:p>|<w:p\\b[^>]*/>",
+                        java.util.regex.Pattern.DOTALL).matcher(body);
+                java.util.List<String> ps = new java.util.ArrayList<>();
+                while (pM.find()) ps.add(pM.group());
+                if (cellIdx == 0) {
+                    leftCellTcPrs.add(tcPr);
+                    leftParas.add(ps);
+                } else if (cellIdx == 1) {
+                    rightCellTcPrs.add(tcPr);
+                    rightParas.add(ps);
+                }
+                cellIdx++;
+            }
+            if (cellIdx != 2) return null;
+        }
+
+        // Use the first row's tcPr (preserves column width, borders,
+        // vAlign). Concatenate paragraphs across all rows for each
+        // column. Drop any vAlign=center on the cell since multi-
+        // paragraph cells with vAlign=center collapse oddly; default
+        // top-alignment matches the visual flow of stacked lines.
+        String leftTcPr = stripCellVAlign(leftCellTcPrs.get(0));
+        String rightTcPr = stripCellVAlign(rightCellTcPrs.get(0));
+
+        StringBuilder leftBody = new StringBuilder();
+        for (java.util.List<String> ps : leftParas) {
+            for (String p : ps) leftBody.append(p);
+        }
+        StringBuilder rightBody = new StringBuilder();
+        for (java.util.List<String> ps : rightParas) {
+            for (String p : ps) rightBody.append(p);
+        }
+
+        // Build the consolidated single-row table. cantSplit is set
+        // first inside trPr so it ALWAYS holds even if the original
+        // first row had no trPr.
+        StringBuilder out = new StringBuilder(tableXml.length());
+        out.append("<w:tbl>");
+        out.append(tblPr);
+        out.append(tblGrid);
+        out.append("<w:tr>");
+        out.append("<w:trPr><w:cantSplit/></w:trPr>");
+        out.append("<w:tc>").append(leftTcPr).append(leftBody).append("</w:tc>");
+        out.append("<w:tc>").append(rightTcPr).append(rightBody).append("</w:tc>");
+        out.append("</w:tr>");
+        out.append("</w:tbl>");
+        return out.toString();
+    }
+
+    /** Remove {@code <w:vAlign .../>} from a cell's tcPr so stacked paragraphs flow naturally from the top. */
+    private static String stripCellVAlign(String tcPr) {
+        return tcPr.replaceAll("<w:vAlign\\b[^/]*/>", "");
+    }
+
+    /**
+     * Build J fallback — preserved for the rare case where a signature
+     * table doesn't match the expected 2-column shape and consolidation
+     * bails out. Injects {@code <w:cantSplit/>} into every row's trPr.
      */
     private static String addCantSplitToEveryRow(String tableXml, int[] counter) {
         java.util.regex.Pattern row = java.util.regex.Pattern.compile(
@@ -1099,15 +1205,11 @@ public class AgreementDocumentService {
             String trPrOpen = m.group(2);
             out.append(openTag);
             if (trPrOpen != null) {
-                // <w:trPr> already present -- prepend cantSplit if missing.
                 int trPrEnd = m.end();
-                // Look ahead until the matching </w:trPr> to test for
-                // an existing <w:cantSplit/> child.
                 int closeIdx = tableXml.indexOf("</w:trPr>", trPrEnd);
                 String trPrBody = closeIdx > 0
                         ? tableXml.substring(trPrEnd, closeIdx) : "";
                 if (trPrBody.contains("<w:cantSplit")) {
-                    // Already set -- leave the row alone.
                     out.append(trPrOpen);
                 } else {
                     out.append(trPrOpen);
@@ -1115,7 +1217,6 @@ public class AgreementDocumentService {
                     counter[0]++;
                 }
             } else {
-                // No <w:trPr> yet -- inject a fresh one.
                 out.append("<w:trPr><w:cantSplit/></w:trPr>");
                 counter[0]++;
             }
