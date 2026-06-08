@@ -15,6 +15,7 @@ import {
   ArrowLeft,
   ArrowRight,
   CheckCircle2,
+  ChevronDown,
   Eye,
   EyeOff,
   FileText,
@@ -748,27 +749,18 @@ export default function ConsultantWizardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-stone-50 pb-40">
+    <main className="min-h-screen bg-[#F7F4EE] pb-24 lg:pb-12 antialiased">
       <meta name="robots" content="noindex,nofollow" />
 
-      <header className="bg-sage-navy text-white">
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-10">
-          <div>
-            <p className="text-[10px] sm:text-xs font-bold uppercase tracking-widest text-sage-copper">
-              Sage IT Consultant Portal
-            </p>
-            <h1 className="font-serif text-2xl sm:text-3xl mt-1">
-              Complete your agreement
-            </h1>
-            <p className="text-xs sm:text-sm text-white/80 mt-1.5 max-w-xl">
-              Read the full clauses in each section, fill the details
-              (they appear in the text as you type), check the
-              affirmation, and continue. We auto-save as you go.
-            </p>
-          </div>
-          {/* "View full agreement" is demoted: the real clauses now render
-              inline per section. A small "View as formatted PDF" link
-              remains in each section's read pane. */}
+      <header className="border-b border-stone-200/80 bg-white/80 backdrop-blur sticky top-0 z-30">
+        <div className="max-w-7xl mx-auto px-4 sm:px-8 h-14 flex items-center justify-between">
+          <span className="font-serif text-[15px] font-semibold tracking-tight text-sage-navy">
+            Sage IT
+          </span>
+          <span className="hidden sm:inline text-[12px] text-stone-500">
+            Consultant Agreement
+          </span>
+          <SaveStatusBadge status={saveStatus} />
         </div>
       </header>
 
@@ -793,45 +785,44 @@ export default function ConsultantWizardPage() {
         }}
       />
 
-      {app.phase === 2 && (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
-          <div className="rounded-2xl border border-sage-copper/40 bg-orange-50 px-5 py-4 flex items-start gap-3">
-            <Sparkles size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
-                Phase 2
-              </p>
-              <p className="text-sm text-gray-800 mt-1 leading-relaxed">
-                Sage IT has advanced your agreement to Phase 2 on the same document.
-                Everything you filled in Phase 1 is preserved — complete the sections
-                now marked <strong>Required for Phase 2</strong>, re-sign, and submit.
-              </p>
-            </div>
+      <section className="max-w-7xl mx-auto px-4 sm:px-8 pt-6 lg:pt-10 motion-safe:[scroll-behavior:smooth]">
+        {(app.phase === 2 || (app.status === "REVISION_REQUESTED" && app.currentRevisionRemarks)) && (
+          <div className="mb-6 max-w-[min(100%,860px)]">
+            {app.phase === 2 ? (
+              <div className="rounded-xl border border-sage-copper/30 bg-[#FBF1E8] px-5 py-4 flex items-start gap-3">
+                <Sparkles size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-sage-copper-deep">
+                    Phase 2 in progress
+                  </p>
+                  <p className="text-sm text-stone-700 mt-1 leading-relaxed">
+                    Sage IT advanced your agreement to Phase 2 on the same
+                    document. Everything you filled in Phase 1 is preserved.
+                    Complete the sections now marked Required for Phase 2,
+                    re-sign, and submit.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-xl border border-sage-copper/30 bg-[#FBF1E8] px-5 py-4 flex items-start gap-3">
+                <AlertCircle size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-sage-copper-deep">
+                    Sage IT requested changes
+                  </p>
+                  <p className="text-sm text-stone-700 mt-1 whitespace-pre-wrap leading-relaxed">
+                    {app.currentRevisionRemarks}
+                  </p>
+                  <p className="text-xs text-stone-600 mt-2">
+                    Update the highlighted fields, then submit to send it back
+                    for verification.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        )}
 
-      {app.status === "REVISION_REQUESTED" && app.currentRevisionRemarks && (
-        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
-          <div className="rounded-2xl border border-sage-copper/40 bg-orange-50 px-5 py-4 flex items-start gap-3">
-            <AlertCircle size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
-            <div>
-              <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
-                Sage IT requested changes
-              </p>
-              <p className="text-sm text-gray-800 mt-1 whitespace-pre-wrap leading-relaxed">
-                {app.currentRevisionRemarks}
-              </p>
-              <p className="text-[11px] text-gray-600 mt-2">
-                Update the highlighted fields below, then submit again to send
-                it back for verification.
-              </p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <section className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
         {isReviewStep ? (
           <ReviewStep
             appId={appId}
@@ -876,29 +867,36 @@ export default function ConsultantWizardPage() {
             chequeUploadError={chequeUploadError}
             onUploadCheque={(f) => void handleChequeUpload(f)}
             phase={app.phase ?? 1}
+            onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
+            onNext={() =>
+              setCurrentStep((s) =>
+                Math.min(AGREEMENT_SECTIONS.length - 1, s + 1),
+              )
+            }
+            canAdvance={canAdvance}
+            submitting={submitting}
+            isFirstStep={currentStep === 0}
           />
         )}
         {submitError && (
-          <SubmitErrorPanel
-            message={submitError}
-            missing={submitMissing}
-            onJumpToSection={(idx, fieldKey) => {
-              setCurrentStep(idx);
-              if (fieldKey) {
-                // Build N — try to focus the offending field once the
-                // section step has rendered. Best-effort only.
-                window.setTimeout(() => {
-                  const el = document.getElementById(
-                    `field-${fieldKey}`,
-                  );
-                  if (el) {
-                    el.scrollIntoView({ behavior: "smooth", block: "center" });
-                    (el as HTMLElement).focus();
-                  }
-                }, 60);
-              }
-            }}
-          />
+          <div className="max-w-[min(100%,860px)] mt-6">
+            <SubmitErrorPanel
+              message={submitError}
+              missing={submitMissing}
+              onJumpToSection={(idx, fieldKey) => {
+                setCurrentStep(idx);
+                if (fieldKey) {
+                  window.setTimeout(() => {
+                    const el = document.getElementById(`field-${fieldKey}`);
+                    if (el) {
+                      el.scrollIntoView({ behavior: "smooth", block: "center" });
+                      (el as HTMLElement).focus();
+                    }
+                  }, 60);
+                }
+              }}
+            />
+          </div>
         )}
       </section>
 
@@ -927,6 +925,13 @@ export default function ConsultantWizardPage() {
 
 // ── Stepper ──────────────────────────────────────────────────
 
+/**
+ * Build P — non-overflowing step progress. A 10-segment progress bar
+ * shows where the consultant is (completed / current / upcoming) plus
+ * the CURRENT section name spelled out in full. A "Jump to section"
+ * menu opens a popover with the same 10-section checklist; section
+ * names never clip and the document below stays as wide as possible.
+ */
 function Stepper({
   sections,
   currentStep,
@@ -936,43 +941,125 @@ function Stepper({
   currentStep: number;
   onJump: (i: number) => void;
 }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const current = sections[currentStep];
+  const total = sections.length;
   return (
     <nav
-      aria-label="Sections"
-      className="sticky top-0 z-20 bg-stone-50/95 backdrop-blur border-b border-stone-200"
+      aria-label="Agreement sections"
+      className="sticky top-14 z-20 border-b border-stone-200/80 bg-[#F7F4EE]/90 backdrop-blur"
     >
-      <div className="max-w-5xl mx-auto px-2 sm:px-6 py-3 overflow-x-auto">
-        <ol className="flex items-center gap-1.5 sm:gap-2 min-w-max">
+      <div className="max-w-7xl mx-auto px-4 sm:px-8 py-4">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <div className="min-w-0 flex-1">
+            <p className="text-xs text-stone-500">
+              Section {currentStep + 1} of {total}
+            </p>
+            <h2 className="font-serif text-[17px] sm:text-lg text-sage-navy mt-0.5 leading-snug [text-wrap:balance]">
+              {current?.title ?? ""}
+            </h2>
+          </div>
+          <div className="relative shrink-0">
+            <button
+              type="button"
+              onClick={() => setMenuOpen((v) => !v)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-stone-300 bg-white text-stone-700 hover:border-sage-navy/40 hover:text-sage-navy motion-safe:transition-colors cursor-pointer"
+            >
+              Jump to section
+              <ChevronDown
+                size={12}
+                className={
+                  "motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out "
+                  + (menuOpen ? "rotate-180" : "")
+                }
+              />
+            </button>
+            {menuOpen && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  aria-hidden
+                  onClick={() => setMenuOpen(false)}
+                />
+                <div
+                  role="menu"
+                  className="absolute right-0 top-full mt-2 z-20 w-[min(86vw,360px)] rounded-xl border border-stone-200 bg-white shadow-[0_10px_30px_-12px_rgba(15,31,68,0.18)] overflow-hidden"
+                >
+                  <ol className="max-h-[60vh] overflow-y-auto">
+                    {sections.map((s, i) => {
+                      const active = i === currentStep;
+                      return (
+                        <li key={s.id}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setMenuOpen(false);
+                              onJump(i);
+                            }}
+                            role="menuitem"
+                            className={
+                              "w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm motion-safe:transition-colors "
+                              + (active
+                                ? "bg-sage-navy/5 text-sage-navy"
+                                : "text-stone-700 hover:bg-stone-50")
+                            }
+                          >
+                            <span
+                              className={
+                                "inline-flex items-center justify-center h-6 w-6 rounded-full text-[11px] font-medium tabular-nums "
+                                + (s.complete
+                                  ? "bg-sage-navy text-white"
+                                  : active
+                                    ? "bg-white border border-sage-navy text-sage-navy"
+                                    : "bg-stone-100 text-stone-600")
+                              }
+                            >
+                              {s.complete ? (
+                                <CheckCircle2 size={13} />
+                              ) : (
+                                s.step
+                              )}
+                            </span>
+                            <span className="font-serif text-[15px] leading-tight">
+                              {s.title}
+                            </span>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ol>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+        <div
+          className="mt-4 grid gap-1.5"
+          style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}
+          aria-hidden
+        >
           {sections.map((s, i) => {
             const active = i === currentStep;
             const past = i < currentStep;
             return (
-              <li key={s.id}>
-                <button
-                  type="button"
-                  onClick={() => onJump(i)}
-                  className={
-                    "inline-flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-[10px] sm:text-[11px] font-semibold transition-colors whitespace-nowrap " +
-                    (active
-                      ? "bg-sage-navy text-white"
-                      : s.complete
-                        ? "bg-emerald-100 text-emerald-800 hover:bg-emerald-200"
-                        : past
-                          ? "bg-amber-100 text-amber-800 hover:bg-amber-200"
-                          : "bg-stone-200 text-gray-600 hover:bg-stone-300")
-                  }
-                >
-                  {s.complete && !active ? (
-                    <CheckCircle2 size={11} />
-                  ) : (
-                    <span className="font-mono">{s.step}</span>
-                  )}
-                  <span className="hidden sm:inline">{s.title}</span>
-                </button>
-              </li>
+              <span
+                key={s.id}
+                className={
+                  "h-1.5 rounded-full motion-safe:transition-colors motion-safe:duration-300 motion-safe:ease-out "
+                  + (s.complete
+                    ? "bg-sage-navy"
+                    : active
+                      ? "bg-sage-copper"
+                      : past
+                        ? "bg-sage-navy/30"
+                        : "bg-stone-200")
+                }
+              />
             );
           })}
-        </ol>
+        </div>
       </div>
     </nav>
   );
@@ -1001,6 +1088,11 @@ function SectionStep({
   chequeUploadError,
   onUploadCheque,
   phase,
+  onBack,
+  onNext,
+  canAdvance,
+  submitting,
+  isFirstStep,
 }: {
   section: AgreementSection;
   content: AgreementContent | null;
@@ -1022,173 +1114,221 @@ function SectionStep({
   chequeUploadError: string;
   onUploadCheque: (file: File) => void;
   phase: number;
+  onBack: () => void;
+  onNext: () => void;
+  canAdvance: boolean;
+  submitting: boolean;
+  isFirstStep: boolean;
 }) {
   const isCoverStep = section.id === "cover";
-  // F-4 per-section state: optional appendices show an "Optional"
-  // badge until the consultant types something, at which point they
-  // get an all-or-nothing notice (finish the section or clear it).
   const appendixOptional = Boolean(
     section.appendixKey && !reqs[section.appendixKey],
   );
   const appendixTouched = isAppendixTouched(section, form);
   const showOptionalBadge = appendixOptional && !appendixTouched;
   const showAllOrNothingNotice = appendixOptional && appendixTouched;
-  // Build M — during Phase 2, any appendix that's now required gets a
-  // distinct "Required for Phase 2" badge. The consultant can tell at
-  // a glance which sections the ERM has promoted.
   const showPhase2RequiredBadge =
     phase === 2 && Boolean(section.appendixKey) && !appendixOptional;
+  const hasFields = section.fields.length > 0;
+  const blocks = content?.sections?.[section.id];
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 lg:gap-6">
-      {/* Read pane */}
-      <aside className="lg:col-span-2 space-y-4">
-        <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
-            Step {section.step} of {AGREEMENT_SECTIONS.length}
+    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_380px] gap-6 lg:gap-10 items-start">
+      {/* ── Reading column (dominant) ─────────────────────────── */}
+      <article
+        className="bg-white border border-stone-200/80 rounded-2xl px-6 sm:px-10 lg:px-14 py-8 sm:py-10 lg:py-12 motion-safe:transition-opacity"
+        aria-labelledby="section-title"
+      >
+        <p className="text-xs font-medium text-stone-500 tabular-nums">
+          Section {section.step}
+        </p>
+        <h1
+          id="section-title"
+          className="font-serif text-3xl sm:text-[34px] leading-[1.15] text-sage-navy mt-1.5 [text-wrap:balance]"
+        >
+          {section.title}
+        </h1>
+        {(showOptionalBadge || showPhase2RequiredBadge) && (
+          <div className="mt-3 flex gap-2 flex-wrap">
+            {showOptionalBadge && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-stone-100 text-stone-700">
+                Optional. You can skip this section.
+              </span>
+            )}
+            {showPhase2RequiredBadge && (
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sage-copper/12 text-sage-copper-deep">
+                Required for Phase 2
+              </span>
+            )}
+          </div>
+        )}
+
+        {/* Plain-English aside */}
+        <aside className="mt-6 rounded-xl bg-[#FBF1E8] px-5 py-4 max-w-[68ch]">
+          <p className="text-[11px] font-semibold tracking-wide text-sage-copper-deep">
+            In plain English
           </p>
-          <h2 className="font-serif text-xl sm:text-2xl text-sage-navy mt-1">
-            {section.title}
-          </h2>
-          {showOptionalBadge && (
-            <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-stone-200 text-gray-700">
-              Optional — you can skip
-            </span>
-          )}
-          {showPhase2RequiredBadge && (
-            <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sage-copper/15 text-sage-copper-deep">
-              Required for Phase 2
-            </span>
-          )}
-          {(() => {
-            const blocks = content?.sections?.[section.id];
-            if (blocks && blocks.length > 0) {
-              return (
-                <>
-                  <p className="text-xs text-gray-500 mt-2 mb-3 leading-relaxed">
-                    {section.summary}
-                  </p>
-                  <div className="border-t border-stone-100 pt-3">
-                    <AgreementClauseView
-                      blocks={blocks}
-                      values={content.values}
-                      fields={form.fields}
-                      signature={form.signature}
-                    />
-                  </div>
-                  <button
-                    type="button"
-                    onClick={onOpenTemplate}
-                    className="mt-3 inline-flex items-center gap-1.5 text-[11px] font-medium text-gray-400 hover:text-sage-navy underline underline-offset-2"
-                  >
-                    <FileText size={10} /> View as formatted PDF
-                  </button>
-                </>
-              );
-            }
-            // Fallback (content not loaded): the plain-language summary.
-            return (
-              <>
-                <p className="text-sm text-gray-700 mt-3 leading-relaxed">
-                  {section.summary}
-                </p>
-                <button
-                  type="button"
-                  onClick={onOpenTemplate}
-                  className="mt-4 inline-flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
-                >
-                  <FileText size={11} /> View the full agreement
-                </button>
-              </>
-            );
-          })()}
-        </div>
-        <div className="bg-orange-50 rounded-2xl border border-sage-copper/30 p-4">
-          <p className="inline-flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
-            <Sparkles size={11} /> Why we need this
+          <p className="mt-1.5 font-serif text-[15.5px] leading-[1.6] text-stone-800 [text-wrap:pretty]">
+            {section.summary}
           </p>
-          <p className="text-xs sm:text-sm text-gray-700 mt-2 leading-relaxed">
+          <p className="mt-3 text-[13px] leading-[1.55] text-stone-600 [text-wrap:pretty]">
+            <span className="font-semibold text-stone-700">Why this matters. </span>
             {section.why}
           </p>
+        </aside>
+
+        {/* Cover-step effective date callout */}
+        {isCoverStep && (
+          <div className="mt-6 inline-flex items-start gap-2 text-[13px] text-stone-600">
+            <Lock size={13} className="mt-0.5 shrink-0 text-stone-500" />
+            <span>
+              Effective date{" "}
+              <span className="font-semibold text-sage-navy tabular-nums">
+                {effectiveDateText || "to be set"}
+              </span>
+              . Set by Sage IT.
+            </span>
+          </div>
+        )}
+
+        {/* Formal clauses */}
+        {blocks && blocks.length > 0 ? (
+          <div className="mt-8 max-w-[68ch]">
+            <div className="text-[10px] font-medium tracking-[0.18em] text-stone-400 uppercase">
+              The contract text
+            </div>
+            <div className="mt-3 border-t border-stone-200 pt-5">
+              <AgreementClauseView
+                blocks={blocks}
+                values={content.values}
+                fields={form.fields}
+                signature={form.signature}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={onOpenTemplate}
+              className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+            >
+              <FileText size={12} /> View the formatted PDF
+            </button>
+          </div>
+        ) : (
+          <div className="mt-8 max-w-[68ch]">
+            <p className="font-serif text-[16px] leading-[1.65] text-stone-700">
+              {section.summary}
+            </p>
+            <button
+              type="button"
+              onClick={onOpenTemplate}
+              className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+            >
+              <FileText size={12} /> View the formatted PDF
+            </button>
+          </div>
+        )}
+      </article>
+
+      {/* ── Sticky action rail ─────────────────────────────────── */}
+      <aside className="lg:sticky lg:top-[200px] lg:self-start">
+        <div className="bg-white border border-stone-200/80 rounded-2xl px-5 sm:px-6 py-5 space-y-5">
+          {showAllOrNothingNotice && (
+            <div className="rounded-md bg-[#FBF1E8] border border-sage-copper/30 px-3 py-2.5 text-[12px] text-sage-copper-deep flex items-start gap-2">
+              <AlertCircle size={13} className="mt-0.5 shrink-0" />
+              <span>
+                This section is optional, but you have started filling it.
+                Complete every required field and tick the affirmation, or
+                clear all fields to skip.
+              </span>
+            </div>
+          )}
+
+          {hasFields && (
+            <div>
+              <h3 className="font-serif text-base text-sage-navy">
+                Your details
+              </h3>
+              <p className="mt-1 text-[12px] text-stone-500">
+                They flow into the contract as you type.
+              </p>
+              <div className="mt-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2 gap-x-4 gap-y-4">
+                {section.fields.map((field) => (
+                  <FieldInput
+                    key={field.key}
+                    field={field}
+                    effectivelyRequired={isFieldRequired(field, section, form, reqs)}
+                    value={
+                      field.key === "consultantEmail"
+                        ? consultantEmail
+                        : form.fields[field.key] ?? ""
+                    }
+                    onChange={(v) => onField(field.key, v)}
+                    onBlur={() => onTouched(field.key)}
+                    touched={touched.has(field.key)}
+                    revealed={revealed.has(field.key)}
+                    onRevealToggle={(on) => onRevealed(field.key, on)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {section.id === "appendix5" && (
+            <ChequeUploadBlock
+              uploaded={chequeUploaded}
+              uploading={chequeUploading}
+              error={chequeUploadError}
+              onUpload={onUploadCheque}
+            />
+          )}
+
+          {section.requiresSignature && (
+            <SignatureBlock
+              signature={form.signature}
+              legalName={form.signedLegalName}
+              onSignature={onSignature}
+              onLegalName={onLegalName}
+            />
+          )}
+
+          {section.requiresAffirmation && !section.requiresSignature && (
+            <SignaturePreviewBlock signature={form.signature} />
+          )}
+
+          {section.requiresAffirmation && section.affirmationFlag && (
+            <AffirmationBlock
+              flag={section.affirmationFlag}
+              checked={form.affirmations[section.affirmationFlag]}
+              onChange={(v) => onAffirm(section.affirmationFlag!, v)}
+            />
+          )}
+
+          {/* Desktop Back / Continue. Mobile uses the sticky FooterNav. */}
+          <div className="hidden lg:flex items-center justify-between pt-2 border-t border-stone-100">
+            <button
+              type="button"
+              onClick={onBack}
+              disabled={isFirstStep || submitting}
+              className="text-[13px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer inline-flex items-center gap-1"
+            >
+              <ArrowLeft size={13} /> Back
+            </button>
+            <button
+              type="button"
+              onClick={onNext}
+              disabled={!canAdvance || submitting}
+              className={
+                "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
+                + (canAdvance
+                  ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
+                  : "bg-stone-100 text-stone-400 cursor-not-allowed")
+              }
+            >
+              Continue <ArrowRight size={13} />
+            </button>
+          </div>
         </div>
       </aside>
-
-      {/* Fields / signature / affirmation pane */}
-      <div className="lg:col-span-3 space-y-4">
-        {isCoverStep && (
-          <div className="bg-stone-100 rounded-xl border border-stone-200 px-4 py-3 text-xs text-gray-700 inline-flex items-start gap-2">
-            <Lock size={12} className="mt-0.5 shrink-0 text-gray-500" />
-            <span>
-              <span className="font-semibold">Effective date:</span>{" "}
-              {effectiveDateText || "—"}
-            </span>
-          </div>
-        )}
-
-        {showAllOrNothingNotice && (
-          <div className="rounded-md border border-sage-copper/40 bg-orange-50 px-3 py-2 text-xs text-sage-copper-deep inline-flex items-start gap-2">
-            <AlertCircle size={14} className="mt-0.5 shrink-0" />
-            <span>
-              This section is optional, but you&apos;ve started filling it
-              in. Complete every required field and tick the affirmation,
-              or clear all fields to skip the section.
-            </span>
-          </div>
-        )}
-
-        {section.fields.length > 0 && (
-          <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-4">
-              {section.fields.map((field) => (
-                <FieldInput
-                  key={field.key}
-                  field={field}
-                  effectivelyRequired={isFieldRequired(field, section, form, reqs)}
-                  value={
-                    field.key === "consultantEmail"
-                      ? consultantEmail
-                      : form.fields[field.key] ?? ""
-                  }
-                  onChange={(v) => onField(field.key, v)}
-                  onBlur={() => onTouched(field.key)}
-                  touched={touched.has(field.key)}
-                  revealed={revealed.has(field.key)}
-                  onRevealToggle={(on) => onRevealed(field.key, on)}
-                />
-              ))}
-            </div>
-          </div>
-        )}
-
-        {section.id === "appendix5" && (
-          <ChequeUploadBlock
-            uploaded={chequeUploaded}
-            uploading={chequeUploading}
-            error={chequeUploadError}
-            onUpload={onUploadCheque}
-          />
-        )}
-
-        {section.requiresSignature && (
-          <SignatureBlock
-            signature={form.signature}
-            legalName={form.signedLegalName}
-            onSignature={onSignature}
-            onLegalName={onLegalName}
-          />
-        )}
-
-        {section.requiresAffirmation && !section.requiresSignature && (
-          <SignaturePreviewBlock signature={form.signature} />
-        )}
-
-        {section.requiresAffirmation && section.affirmationFlag && (
-          <AffirmationBlock
-            flag={section.affirmationFlag}
-            checked={form.affirmations[section.affirmationFlag]}
-            onChange={(v) => onAffirm(section.affirmationFlag!, v)}
-          />
-        )}
-      </div>
     </div>
   );
 }
@@ -1239,11 +1379,11 @@ function FieldInput({
     : "";
 
   const baseInputClasses =
-    "w-full px-3 py-2 text-sm rounded-md border bg-white focus:outline-none focus:ring-1 focus:ring-sage-navy focus:border-sage-navy " +
+    "w-full px-3 py-2.5 text-[14px] rounded-md border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors " +
     (invalid
       ? "border-red-300 bg-red-50/40"
       : field.readOnly
-        ? "border-stone-200 bg-stone-100 cursor-not-allowed"
+        ? "border-stone-200 bg-stone-100 text-stone-600 cursor-not-allowed"
         : "border-stone-300");
 
   let control: ReactNode;
@@ -1400,14 +1540,21 @@ function FieldInput({
     <div
       id={`field-${field.key}`}
       tabIndex={-1}
-      className={wide ? "md:col-span-2" : ""}
+      className={
+        "outline-none "
+        + (wide ? "md:col-span-2 lg:col-span-1 xl:col-span-2" : "")
+      }
     >
-      <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
+      <label className="block text-[12px] font-medium text-stone-700 mb-1.5">
         {field.label}
-        {effectivelyRequired && <span className="text-red-500 ml-1">*</span>}
+        {effectivelyRequired && (
+          <span className="text-sage-copper-deep ml-1" aria-hidden>
+            *
+          </span>
+        )}
         {field.readOnly && (
-          <span className="ml-1 inline-flex items-center gap-0.5 text-[10px] font-medium normal-case text-gray-500">
-            <Lock size={9} /> set by Sage IT
+          <span className="ml-1.5 inline-flex items-center gap-0.5 text-[10px] font-medium text-stone-500">
+            <Lock size={9} /> Set by Sage IT
           </span>
         )}
         {field.sensitive && (
@@ -1447,27 +1594,29 @@ function SignatureBlock({
   const shouldShowPad = !captured || redrawing;
 
   return (
-    <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5 space-y-4">
+    <div className="space-y-4">
       <div>
-        <p className="text-[11px] font-bold uppercase tracking-widest text-sage-navy">
-          Sign once — applied everywhere
-        </p>
-        <p className="text-sm text-gray-700 mt-1">
-          Upload an image of your signature, or draw it instead.
-          We&apos;ll apply it to every signature block in the agreement
-          — you won&apos;t be asked to re-do it on later sections.
+        <h3 className="font-serif text-base text-sage-navy">
+          Sign your agreement
+        </h3>
+        <p className="text-[13px] text-stone-600 mt-1 leading-snug">
+          Upload an image of your signature, or draw it instead. The same
+          signature applies to every block in the agreement.
         </p>
       </div>
 
       <div>
-        <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
-          Your full legal name <span className="text-red-500">*</span>
+        <label className="block text-[12px] font-medium text-stone-700 mb-1.5">
+          Your full legal name{" "}
+          <span className="text-sage-copper-deep" aria-hidden>
+            *
+          </span>
         </label>
         <input
           type="text"
           value={legalName}
           onChange={(e) => onLegalName(e.target.value)}
-          className="w-full px-3 py-2 text-sm rounded-md border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-sage-navy focus:border-sage-navy"
+          className="w-full px-3 py-2.5 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors"
           placeholder="First Middle Last"
         />
       </div>
@@ -1493,27 +1642,29 @@ function SignatureBlock({
         </div>
       ) : (
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1.5">
-            Captured signature
+          <p className="text-[12px] font-medium text-stone-600 mb-1.5">
+            Your captured signature
           </p>
-          <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={signature!}
-              alt="Captured signature"
-              style={{ maxHeight: 70, maxWidth: 240 }}
-            />
+          <div className="inline-flex items-center gap-3 flex-wrap">
+            <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={signature!}
+                alt="Captured signature"
+                style={{ maxHeight: 60, maxWidth: 200 }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setRedrawing(true);
+                onSignature(null);
+              }}
+              className="text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+            >
+              Replace signature
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setRedrawing(true);
-              onSignature(null);
-            }}
-            className="ml-3 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
-          >
-            Re-draw
-          </button>
         </div>
       )}
     </div>
@@ -1523,26 +1674,26 @@ function SignatureBlock({
 function SignaturePreviewBlock({ signature }: { signature: string | null }) {
   if (!signature) {
     return (
-      <div className="bg-orange-50 rounded-xl border border-sage-copper/30 p-4 text-xs text-sage-copper-deep inline-flex items-start gap-2">
+      <div className="rounded-xl bg-[#FBF1E8] border border-sage-copper/30 px-4 py-3 text-[12.5px] text-sage-copper-deep inline-flex items-start gap-2">
         <AlertCircle size={14} className="mt-0.5 shrink-0" />
         <span>
-          Please draw your signature on the main agreement step before
-          continuing -- we&apos;ll reuse it here.
+          Add your signature on the main agreement step first. We will
+          apply it here automatically.
         </span>
       </div>
     );
   }
   return (
-    <div className="bg-stone-100 rounded-xl border border-stone-200 p-4">
-      <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-        Your signature will be applied to this section
+    <div className="rounded-xl bg-stone-50 border border-stone-200 px-4 py-3">
+      <p className="text-[12px] font-medium text-stone-600">
+        Your signature applies to this section
       </p>
       <div className="mt-2 inline-block rounded-md border border-dashed border-stone-300 bg-white p-2">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={signature}
           alt="Signature preview"
-          style={{ maxHeight: 50, maxWidth: 180 }}
+          style={{ maxHeight: 44, maxWidth: 160 }}
         />
       </div>
     </div>
@@ -1993,7 +2144,7 @@ function ChequeUploadBlock({
 
       {uploaded ? (
         <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-800">
-          <CheckCircle2 size={14} /> Uploaded — you can re-upload to replace it.
+          <CheckCircle2 size={14} /> Uploaded. You can re-upload to replace it.
         </div>
       ) : null}
 
@@ -2056,10 +2207,10 @@ function AffirmationBlock({
     <label
       htmlFor={`affirm-${flag}`}
       className={
-        "flex items-start gap-3 p-4 rounded-2xl border cursor-pointer transition-colors " +
-        (checked
-          ? "bg-emerald-50 border-emerald-200"
-          : "bg-white border-stone-300 hover:bg-stone-50")
+        "flex items-start gap-3 p-4 rounded-xl border cursor-pointer motion-safe:transition-colors "
+        + (checked
+          ? "bg-sage-navy/5 border-sage-navy/40"
+          : "bg-white border-stone-300 hover:border-sage-navy/40 hover:bg-stone-50/60")
       }
     >
       <input
@@ -2069,7 +2220,7 @@ function AffirmationBlock({
         onChange={(e) => onChange(e.target.checked)}
         className="mt-0.5 h-4 w-4 accent-sage-navy"
       />
-      <span className="text-sm text-gray-800">
+      <span className="text-[13.5px] leading-snug text-stone-800">
         I have read and understood this section and agree to its terms.
       </span>
     </label>
@@ -2106,17 +2257,15 @@ function ReviewStep({
   onPreviewSeen: () => void;
 }) {
   return (
-    <div className="space-y-5">
-      <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
-          Final step
-        </p>
-        <h2 className="font-serif text-2xl text-sage-navy mt-1">
+    <div className="space-y-6">
+      <div>
+        <p className="text-xs text-stone-500">Final step</p>
+        <h1 className="font-serif text-3xl sm:text-[34px] leading-[1.15] text-sage-navy mt-1 [text-wrap:balance]">
           Read the agreement, then sign and submit
-        </h2>
-        <p className="text-sm text-gray-700 mt-2">
-          Below is the actual agreement that will be filed once you submit
-          — your details and primary signature are already in it. Read it
+        </h1>
+        <p className="text-[15px] text-stone-700 mt-3 max-w-[68ch] leading-[1.6]">
+          Below is the actual agreement that will be filed once you submit.
+          Your details and your primary signature are already in it. Read it
           carefully, tick the attestation, then sign and submit.
         </p>
       </div>
@@ -2127,16 +2276,16 @@ function ReviewStep({
         onScrolledToEnd={onPreviewSeen}
       />
 
-      <div>
+      <div className="max-w-[min(100%,860px)]">
         <label
           htmlFor="consultant-review-attestation"
           className={
-            "flex items-start gap-3 p-4 rounded-2xl border transition-colors "
+            "flex items-start gap-3 p-4 rounded-xl border motion-safe:transition-colors "
             + (!previewSeen
               ? "bg-stone-50 border-stone-200 cursor-not-allowed"
               : attestation
-                ? "bg-emerald-50 border-emerald-200 cursor-pointer"
-                : "bg-white border-stone-300 hover:bg-stone-50 cursor-pointer")
+                ? "bg-sage-navy/5 border-sage-navy/40 cursor-pointer"
+                : "bg-white border-stone-300 hover:border-sage-navy/40 hover:bg-stone-50/60 cursor-pointer")
           }
         >
           <input
@@ -2149,8 +2298,8 @@ function ReviewStep({
           />
           <span
             className={
-              "text-sm "
-              + (previewSeen ? "text-gray-800" : "text-gray-500")
+              "text-[14px] leading-snug "
+              + (previewSeen ? "text-stone-800" : "text-stone-500")
             }
           >
             I have read this agreement and confirm the details are mine and
@@ -2158,9 +2307,9 @@ function ReviewStep({
           </span>
         </label>
         {!previewSeen && (
-          <p className="mt-2 ml-1 text-[11px] text-gray-500 inline-flex items-center gap-1">
-            <AlertCircle size={11} /> Please scroll through the full agreement
-            above to continue.
+          <p className="mt-2 ml-1 text-[12px] text-stone-500 inline-flex items-center gap-1.5">
+            <AlertCircle size={12} /> Scroll through the full agreement above to
+            continue.
           </p>
         )}
       </div>
@@ -2176,81 +2325,78 @@ function ReviewStep({
         return (
           <section
             key={section.id}
-            className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5"
+            className="border border-stone-200/80 rounded-xl bg-white px-5 py-4"
           >
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-                  Step {section.step}
+                <p className="text-[11px] text-stone-500 tabular-nums">
+                  Section {section.step}
                 </p>
-                <h3 className="font-serif text-lg text-sage-navy mt-0.5">
+                <h3 className="font-serif text-[17px] text-sage-navy mt-0.5 leading-snug [text-wrap:balance]">
                   {section.title}
                 </h3>
               </div>
-              <div className="flex items-center gap-2 flex-wrap">
+              <div className="flex items-center gap-3 flex-wrap">
                 <span
                   className={
-                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
-                    (optionalAndSkipped
-                      ? "bg-stone-200 text-gray-700"
+                    "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium "
+                    + (optionalAndSkipped
+                      ? "bg-stone-100 text-stone-600"
                       : complete
-                        ? "bg-emerald-100 text-emerald-800"
-                        : "bg-amber-100 text-amber-800")
+                        ? "bg-sage-navy/10 text-sage-navy"
+                        : "bg-sage-copper/12 text-sage-copper-deep")
                   }
                 >
                   {optionalAndSkipped ? (
                     <>
-                      <CheckCircle2 size={11} />
-                      Skipped (optional)
+                      <CheckCircle2 size={11} /> Skipped (optional)
                     </>
                   ) : complete ? (
                     <>
-                      <CheckCircle2 size={11} />
-                      Complete
+                      <CheckCircle2 size={11} /> Complete
                     </>
                   ) : (
                     <>
-                      <AlertCircle size={11} />
-                      Needs attention
+                      <AlertCircle size={11} /> Needs attention
                     </>
                   )}
                 </span>
                 <button
                   type="button"
                   onClick={() => onJumpToSection(idx)}
-                  className="text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
+                  className="text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
                 >
-                  Edit
+                  Edit section
                 </button>
               </div>
             </div>
 
             {section.fields.length > 0 && (
-              <dl className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2">
+              <dl className="mt-3 grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-2.5">
                 {section.fields.map((field) => {
                   if (field.type === "file") return null;
                   const raw = form.fields[field.key] ?? "";
                   let displayed: string;
                   if (field.type === "date") {
-                    displayed = formatUsDate(raw) || "—";
+                    displayed = formatUsDate(raw) || "Not set";
                   } else if (field.type === "id-type") {
                     displayed =
                       raw === "DL"
                         ? "Driver's License"
                         : raw === "STATE_ID"
                           ? "State ID"
-                          : "—";
+                          : "Not set";
                   } else if (field.sensitive && raw.length > 0) {
                     displayed = maskValue(raw);
                   } else {
-                    displayed = raw || "—";
+                    displayed = raw || "Not set";
                   }
                   return (
                     <div key={field.key}>
-                      <dt className="text-[10px] uppercase tracking-wider font-semibold text-gray-500">
+                      <dt className="text-[11px] text-stone-500">
                         {field.label}
                       </dt>
-                      <dd className="text-sm text-gray-900 break-words">
+                      <dd className="text-[14px] text-stone-800 break-words mt-0.5">
                         {displayed}
                       </dd>
                     </div>
@@ -2260,23 +2406,22 @@ function ReviewStep({
             )}
 
             {section.id === "appendix5" && (
-              <p className="mt-3 text-xs text-gray-700 inline-flex items-center gap-1.5">
+              <p className="mt-3 text-[12.5px] text-stone-600 inline-flex items-center gap-1.5">
                 {chequeUploaded ? (
-                  <CheckCircle2 size={12} className="text-emerald-700" />
+                  <CheckCircle2 size={12} className="text-sage-navy" />
                 ) : (
-                  <AlertCircle size={12} className="text-amber-700" />
+                  <AlertCircle size={12} className="text-sage-copper-deep" />
                 )}
-                Cheque{" "}
-                {chequeUploaded ? "uploaded" : "not uploaded"}
+                Cheque {chequeUploaded ? "uploaded" : "not uploaded"}
               </p>
             )}
 
             {section.requiresAffirmation && section.affirmationFlag && (
-              <p className="mt-3 text-xs text-gray-700 inline-flex items-center gap-1.5">
+              <p className="mt-3 text-[12.5px] text-stone-600 inline-flex items-center gap-1.5">
                 {form.affirmations[section.affirmationFlag] ? (
-                  <CheckCircle2 size={12} className="text-emerald-700" />
+                  <CheckCircle2 size={12} className="text-sage-navy" />
                 ) : (
-                  <AlertCircle size={12} className="text-amber-700" />
+                  <AlertCircle size={12} className="text-sage-copper-deep" />
                 )}
                 Affirmation{" "}
                 {form.affirmations[section.affirmationFlag]
@@ -2288,9 +2433,9 @@ function ReviewStep({
         );
       })}
 
-      <section className="bg-white rounded-2xl border border-stone-200 shadow-sm p-5">
-        <p className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
-          Primary signature (from the main agreement step)
+      <section className="border border-stone-200/80 rounded-xl bg-white px-5 py-4">
+        <p className="text-[11px] font-medium text-stone-500">
+          Primary signature, from the main agreement step
         </p>
         {form.signature ? (
           <div className="mt-3 inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
@@ -2298,19 +2443,19 @@ function ReviewStep({
             <img
               src={form.signature}
               alt="Captured primary signature"
-              style={{ maxHeight: 70, maxWidth: 260 }}
+              style={{ maxHeight: 64, maxWidth: 240 }}
             />
           </div>
         ) : (
-          <p className="mt-2 text-xs text-amber-700 inline-flex items-center gap-1">
-            <AlertCircle size={12} /> Not yet captured — go back to the
-            main agreement step.
+          <p className="mt-2 text-[12.5px] text-sage-copper-deep inline-flex items-center gap-1.5">
+            <AlertCircle size={12} /> Not captured. Go back to the main
+            agreement step to add it.
           </p>
         )}
         {form.signedLegalName && (
-          <p className="mt-2 text-xs text-gray-600">
+          <p className="mt-2 text-[12.5px] text-stone-600">
             Signed legal name:{" "}
-            <span className="font-semibold text-gray-900">
+            <span className="font-semibold text-sage-navy">
               {form.signedLegalName}
             </span>
           </p>
@@ -2325,12 +2470,12 @@ function ReviewStep({
       />
 
       {!allComplete && (
-        <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 inline-flex items-start gap-2">
+        <div className="rounded-md border border-sage-copper/30 bg-[#FBF1E8] px-4 py-3 text-[13.5px] text-sage-copper-deep inline-flex items-start gap-2 max-w-[min(100%,860px)]">
           <AlertCircle size={14} className="mt-0.5 shrink-0" />
           <span>
             {form.finalSignature
-              ? "Some sections still need attention. Use the section pills above (or the Edit links) to jump to them."
-              : "Draw your final signature above to execute the agreement, then submit."}
+              ? "Some sections still need attention. Use the section list above to jump to them."
+              : "Add your final signature above to execute the agreement, then submit."}
           </span>
         </div>
       )}
@@ -2356,30 +2501,33 @@ function FinalSignatureBlock({
   const shouldShowPad = !captured || redrawing;
 
   return (
-    <section className="bg-white rounded-2xl border border-sage-navy/30 shadow-sm p-5 space-y-4">
+    <section className="bg-white border border-sage-navy/30 rounded-xl px-5 py-5 space-y-4 max-w-[min(100%,860px)]">
       <div>
-        <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
+        <p className="text-[11px] font-medium text-sage-copper-deep">
           Execution signature
         </p>
-        <h3 className="font-serif text-lg text-sage-navy mt-0.5">
+        <h3 className="font-serif text-[18px] text-sage-navy mt-1 leading-snug [text-wrap:balance]">
           After reading this, I am formally signing this acknowledgement.
         </h3>
-        <p className="text-sm text-gray-700 mt-1">
-          Upload (or draw) your final signature here. This is your fresh
-          attestation that everything above matches what you intended
-          and that you are executing the agreement.
+        <p className="text-[13.5px] text-stone-700 mt-2 leading-snug">
+          Upload (or draw) your final signature here. It confirms that
+          everything above matches what you intended and that you are
+          executing the agreement.
         </p>
       </div>
 
       <div>
-        <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
-          Your full legal name <span className="text-red-500">*</span>
+        <label className="block text-[12px] font-medium text-stone-700 mb-1.5">
+          Your full legal name{" "}
+          <span className="text-sage-copper-deep" aria-hidden>
+            *
+          </span>
         </label>
         <input
           type="text"
           value={legalName}
           onChange={(e) => onLegalName(e.target.value)}
-          className="w-full px-3 py-2 text-sm rounded-md border border-stone-300 bg-white focus:outline-none focus:ring-1 focus:ring-sage-navy focus:border-sage-navy"
+          className="w-full px-3 py-2.5 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors"
           placeholder="First Middle Last"
         />
       </div>
@@ -2397,35 +2545,37 @@ function FinalSignatureBlock({
             <button
               type="button"
               onClick={() => setRedrawing(false)}
-              className="mt-2 text-[11px] font-semibold text-gray-500 hover:text-sage-navy"
+              className="mt-2 text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors"
             >
-              Cancel re-draw
+              Cancel replacement
             </button>
           )}
         </div>
       ) : (
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1.5">
-            Captured execution signature
+          <p className="text-[12px] font-medium text-stone-600 mb-1.5">
+            Your captured execution signature
           </p>
-          <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={finalSignature!}
-              alt="Captured execution signature"
-              style={{ maxHeight: 70, maxWidth: 240 }}
-            />
+          <div className="inline-flex items-center gap-3 flex-wrap">
+            <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={finalSignature!}
+                alt="Captured execution signature"
+                style={{ maxHeight: 60, maxWidth: 200 }}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setRedrawing(true);
+                onFinalSignature(null);
+              }}
+              className="text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+            >
+              Replace signature
+            </button>
           </div>
-          <button
-            type="button"
-            onClick={() => {
-              setRedrawing(true);
-              onFinalSignature(null);
-            }}
-            className="ml-3 text-[11px] font-semibold text-sage-navy hover:text-sage-navy-deep underline underline-offset-2"
-          >
-            Re-draw
-          </button>
         </div>
       )}
     </section>
@@ -2460,37 +2610,39 @@ function FooterNav({
   onSubmit: () => void;
   isReviewStep: boolean;
 }) {
+  // Build P — sticky bottom bar on mobile / tablet only. Desktop hides
+  // this and uses the in-rail Back / Continue cluster, so the document
+  // surface gets the full viewport vertical real estate.
   return (
     <nav
       aria-label="Wizard navigation"
-      className="fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-30"
+      className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-30"
     >
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-3">
+      <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={onBack}
           disabled={currentStep === 0 || submitting}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-stone-200 bg-white hover:bg-stone-50 text-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-[13px] font-medium text-stone-700 hover:text-sage-navy motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
         >
-          <ArrowLeft size={12} /> Back
+          <ArrowLeft size={13} /> Back
         </button>
-        <div className="hidden sm:flex items-center gap-3 text-[11px] text-gray-500">
-          <span className="font-mono">
-            {currentStep + 1} / {total}
-          </span>
-          <SaveStatusBadge status={saveStatus} />
-        </div>
         {isReviewStep ? (
           <button
             type="button"
             onClick={onSubmit}
             disabled={!canAdvance || submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            className={
+              "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
+              + (canAdvance && !submitting
+                ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
+                : "bg-stone-100 text-stone-400 cursor-not-allowed")
+            }
           >
             {submitting ? (
-              <Loader2 size={12} className="animate-spin" />
+              <Loader2 size={13} className="animate-spin" />
             ) : (
-              <CheckCircle2 size={12} />
+              <CheckCircle2 size={13} />
             )}
             Submit agreement
           </button>
@@ -2499,15 +2651,20 @@ function FooterNav({
             type="button"
             onClick={onNext}
             disabled={!canAdvance || submitting}
-            className="inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+            className={
+              "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
+              + (canAdvance && !submitting
+                ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
+                : "bg-stone-100 text-stone-400 cursor-not-allowed")
+            }
           >
-            Next <ArrowRight size={12} />
+            Continue <ArrowRight size={13} />
           </button>
         )}
       </div>
-      <div className="sm:hidden px-4 pb-2 text-[10px] text-gray-500 flex items-center justify-between">
-        <span className="font-mono">
-          Step {currentStep + 1} / {total}
+      <div className="px-4 pb-2 text-[11px] text-stone-500 flex items-center justify-between">
+        <span className="tabular-nums">
+          Section {currentStep + 1} of {total}
         </span>
         <SaveStatusBadge status={saveStatus} />
       </div>
@@ -2516,35 +2673,38 @@ function FooterNav({
 }
 
 function SaveStatusBadge({ status }: { status: SaveStatus }) {
+  const base = "inline-flex items-center gap-1 text-[11px]";
   if (status.kind === "saving") {
     return (
-      <span className="inline-flex items-center gap-1 text-gray-500">
-        <Loader2 size={11} className="animate-spin" /> Saving…
+      <span className={`${base} text-stone-500`}>
+        <Loader2 size={11} className="animate-spin" /> Saving
       </span>
     );
   }
   if (status.kind === "saved") {
     return (
-      <span className="inline-flex items-center gap-1 text-emerald-700">
+      <span className={`${base} text-sage-navy/80`}>
         <CheckCircle2 size={11} /> Saved
       </span>
     );
   }
   if (status.kind === "paused") {
     return (
-      <span className="inline-flex items-center gap-1 text-amber-700">
-        <PauseCircle size={11} /> Saving paused — will retry
+      <span className={`${base} text-sage-copper-deep`}>
+        <PauseCircle size={11} /> Saving paused. Will retry.
       </span>
     );
   }
   if (status.kind === "error") {
     return (
-      <span className="inline-flex items-center gap-1 text-red-700">
+      <span className={`${base} text-red-700`}>
         <AlertCircle size={11} /> {status.message}
       </span>
     );
   }
-  return null;
+  return (
+    <span className={`${base} text-stone-400`}>Auto saves as you type</span>
+  );
 }
 
 // ── Template viewer modal ────────────────────────────────────

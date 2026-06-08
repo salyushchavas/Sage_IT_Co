@@ -55,7 +55,7 @@ export default function AgreementClauseView({
   signature,
 }: Props) {
   return (
-    <div className="max-h-[60vh] lg:max-h-[70vh] overflow-y-auto pr-1 space-y-2.5">
+    <div className="space-y-3 [&_p+p]:mt-3">
       {blocks.map((b, i) => (
         <BlockView
           key={i}
@@ -94,13 +94,13 @@ function BlockView({
   if (block.kind === "heading") {
     if (block.level === 1) {
       return (
-        <h3 className="font-serif text-base sm:text-lg font-bold text-sage-navy mt-5 first:mt-0 leading-snug">
+        <h3 className="font-serif text-[20px] sm:text-[22px] font-semibold text-sage-navy mt-8 first:mt-0 leading-snug [text-wrap:balance]">
           {segs(block.segments)}
         </h3>
       );
     }
     return (
-      <h4 className="font-semibold text-sm text-sage-navy mt-4 leading-snug">
+      <h4 className="font-serif text-[17px] font-semibold text-sage-navy mt-6 leading-snug [text-wrap:balance]">
         {segs(block.segments)}
       </h4>
     );
@@ -108,15 +108,15 @@ function BlockView({
 
   if (block.kind === "table") {
     return (
-      <div className="overflow-x-auto my-2">
-        <table className="w-full text-[11px] border border-stone-300 border-collapse">
+      <div className="overflow-x-auto my-4">
+        <table className="w-full text-[13px] border border-stone-300 border-collapse">
           <tbody>
             {(block.rows ?? []).map((row, ri) => (
               <tr key={ri}>
                 {row.map((cell, ci) => (
                   <td
                     key={ci}
-                    className="border border-stone-300 px-2 py-1 align-top text-gray-700"
+                    className="border border-stone-300 px-3 py-2 align-top text-stone-700"
                   >
                     {segs(cell)}
                   </td>
@@ -131,10 +131,10 @@ function BlockView({
 
   // paragraph
   if (!block.segments || block.segments.length === 0) {
-    return <div className="h-1.5" />;
+    return <div className="h-2" />;
   }
   return (
-    <p className="text-[13px] leading-relaxed text-gray-700 whitespace-pre-wrap">
+    <p className="font-serif text-[16.5px] leading-[1.65] text-stone-800 whitespace-pre-wrap [text-wrap:pretty]">
       {segs(block.segments)}
     </p>
   );
@@ -162,11 +162,7 @@ function SegmentView({
   if (key in FIELD_LABELS) {
     const v = (fields[key] ?? "").trim();
     if (v) {
-      return (
-        <span className="font-semibold text-sage-navy whitespace-pre-wrap">
-          {v}
-        </span>
-      );
+      return <Filled value={v} />;
     }
     return <Blank label={FIELD_LABELS[key]} />;
   }
@@ -187,24 +183,32 @@ function SegmentView({
 
   // 3. ERM signature → filled at countersignature.
   if (name === "ermSignatureImage") {
-    return (
-      <span className="text-gray-400 italic">[Sage IT signature]</span>
-    );
+    return <span className="text-stone-400 italic">[Sage IT signature]</span>;
   }
 
   // 4. Non-editable app value (effective date, rates, ERM block, …).
   const fromValues = (values[name] ?? "").trim();
   if (fromValues) {
-    return <span className="font-semibold text-sage-navy">{fromValues}</span>;
+    return <Filled value={fromValues} />;
   }
 
   // 5. Neutral blank.
   return <Blank label={prettify(name)} />;
 }
 
+/** Filled inline value. Copper underline ties the delight moment to the brand. */
+function Filled({ value }: { value: string }) {
+  return (
+    <span className="font-semibold text-sage-navy whitespace-pre-wrap border-b border-sage-copper/60">
+      {value}
+    </span>
+  );
+}
+
+/** Empty required placeholder. Calm copper dotted underline + chip background. */
 function Blank({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center px-1.5 rounded bg-sage-copper/10 text-sage-copper-deep border-b border-dashed border-sage-copper/60 text-[12px] font-medium">
+    <span className="inline-flex items-center px-1.5 rounded bg-sage-copper/8 text-sage-copper-deep border-b border-dashed border-sage-copper/60 text-[14px] font-medium not-italic">
       {label}
     </span>
   );
