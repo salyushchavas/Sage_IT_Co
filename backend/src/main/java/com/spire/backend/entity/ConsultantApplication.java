@@ -425,6 +425,18 @@ public class ConsultantApplication {
     @Column(name = "cheque_content_type", length = 64)
     private String chequeContentType;
 
+    // ── Build L: 15-day invite expiry ─────────────────────────────────
+    //
+    // Timestamp of the LAST time the ERM sent the fill invitation
+    // (initial create + every resend-invite). The expiry sweep flips
+    // a SUBMITTED row to EXPIRED when (now - inviteSentAt) > 15 days
+    // -- a stale invite blocks consultant access. REVISION_REQUESTED,
+    // VERIFIED, and COMPLETED are intentionally exempt: the consultant
+    // has already engaged or the loop is closed.
+
+    @Column(name = "invite_sent_at")
+    private LocalDateTime inviteSentAt;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 

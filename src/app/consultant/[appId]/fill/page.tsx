@@ -720,6 +720,14 @@ export default function ConsultantWizardPage() {
       router.replace("/consultant/dashboard");
     }} />;
   }
+  // Build L — invite went stale (15-day window). The consultant sees a
+  // clear "expired" state; the wizard never mounts. They can re-engage
+  // only after an ERM resends the invite, which restarts the clock.
+  if (app.status === "EXPIRED") {
+    return <ConsultantStatusScreen kind="expired" onSignOut={() => {
+      router.replace("/consultant/dashboard");
+    }} />;
+  }
 
   return (
     <main className="min-h-screen bg-stone-50 pb-40">
@@ -1485,7 +1493,7 @@ function ConsultantStatusScreen({
   kind,
   onSignOut,
 }: {
-  kind: "sent" | "accepted";
+  kind: "sent" | "accepted" | "expired";
   onSignOut: () => void;
 }) {
   const copy = kind === "sent"
@@ -1494,11 +1502,17 @@ function ConsultantStatusScreen({
         title: "Your agreement has been sent for verification.",
         body: "We'll review it and update you here once it's accepted. There's nothing else you need to do right now.",
       }
-    : {
-        eyebrow: "Accepted",
-        title: "Your agreement has been accepted.",
-        body: "Thank you. Your engagement is now in motion. Sage IT will be in touch with the next steps.",
-      };
+    : kind === "accepted"
+      ? {
+          eyebrow: "Accepted",
+          title: "Your agreement has been accepted.",
+          body: "Thank you. Your engagement is now in motion. Sage IT will be in touch with the next steps.",
+        }
+      : {
+          eyebrow: "Expired",
+          title: "This invitation has expired.",
+          body: "The 15-day window to complete this agreement has passed. Please contact Sage IT and ask them to resend the invitation -- the clock will restart once they do.",
+        };
   return (
     <main className="min-h-screen bg-stone-50">
       <meta name="robots" content="noindex,nofollow" />

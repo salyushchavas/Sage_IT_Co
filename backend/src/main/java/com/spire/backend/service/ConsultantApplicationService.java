@@ -66,6 +66,13 @@ import java.util.UUID;
 public class ConsultantApplicationService {
 
     private static final int APPLICATION_TTL_DAYS = 7;
+    /**
+     * Build L — invite stays valid for 15 days from {@code inviteSentAt}.
+     * Past that, a SUBMITTED row is flipped to EXPIRED both lazily on
+     * consultant access (so the dashboard reflects the state without
+     * waiting for the cron) and by the daily sweep.
+     */
+    private static final int INVITE_VALIDITY_DAYS = 15;
 
     /**
      * Sentinel ermUserId for applications created via the hardcoded
@@ -168,6 +175,11 @@ public class ConsultantApplicationService {
                 // the consultant sees a stable "Effective: MM-DD-YYYY"
                 // on the cover step and the PDF stamps it consistently.
                 .effectiveDate(now.toLocalDate())
+                // Build L — invite_sent_at tracks the LAST time the ERM
+                // sent the fill invitation. Drives the 15-day expiry
+                // sweep + the lazy access guard. Reset on every
+                // {@link #resendInvite}.
+                .inviteSentAt(now)
                 .payload(payloadJson)
                 .status(ConsultantApplication.Status.SUBMITTED.name())
                 .expiresAt(now.plusDays(APPLICATION_TTL_DAYS))
@@ -370,9 +382,11 @@ public class ConsultantApplicationService {
 
     /**
      * Portal dashboard list. Returns every non-deleted agreement
-     * addressed to {@code email}, EXCLUDING CANCELLED and EXPIRED.
-     * Sorted: actionable first (SUBMITTED, REVISION_REQUESTED),
-     * then VERIFIED (waiting on ERM), then COMPLETED.
+     * addressed to {@code email}, EXCLUDING CANCELLED only. EXPIRED
+     * rows STAY visible so the consultant can see the "invitation
+     * expired -- please contact Sage IT" state on the dashboard
+     * (Build L). Sorted: actionable first (SUBMITTED,
+     * REVISION_REQUESTED), then VERIFIED, then COMPLETED, EXPIRED last.
      */
     @Transactional(readOnly = true)
     public List<ConsultantApplication> listForConsultant(String email) {
@@ -382,11 +396,8 @@ public class ConsultantApplicationService {
                 .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
                         normalised)
                 .stream()
-                .filter(app -> {
-                    String s = app.getStatus();
-                    return !ConsultantApplication.Status.CANCELLED.name().equals(s)
-                            && !ConsultantApplication.Status.EXPIRED.name().equals(s);
-                })
+                .filter(app -> !ConsultantApplication.Status.CANCELLED.name()
+                        .equals(app.getStatus()))
                 .sorted((a, b) -> Integer.compare(
                         dashboardRank(a.getStatus()),
                         dashboardRank(b.getStatus())))
@@ -400,6 +411,9 @@ public class ConsultantApplicationService {
         if (ConsultantApplication.Status.VERIFIED.name().equals(status)) return 1;
         if (ConsultantApplication.Status.SIGNED.name().equals(status)) return 2;
         if (ConsultantApplication.Status.COMPLETED.name().equals(status)) return 3;
+        // Build L — EXPIRED is shown but ranked last so actionable
+        // items always sit above it.
+        if (ConsultantApplication.Status.EXPIRED.name().equals(status)) return 5;
         return 4;
     }
 
@@ -490,23 +504,27 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Phase C feature 2 — super-admin archives (soft-deletes) a CANCELLED
-     * application. The row stays in the DB (recoverable; audit history +
-     * Cloudinary PDF preserved) but is hidden from every console list and
-     * 404s on detail/mutation. Only CANCELLED apps can be archived.
+     * Build L — super-admin soft-deletes ANY agreement, regardless of
+     * status. The row stays in the DB (recoverable; audit history +
+     * Cloudinary PDF preserved) but is hidden from every console list
+     * (ERM, super-admin, consultant) and 404s on detail / mutation
+     * for all three roles. Replaces the Phase C "only CANCELLED can be
+     * archived" restriction.
+     *
+     * Audit event is still APPLICATION_ARCHIVED (kept for back-compat
+     * with the existing event stream) -- the metadata carries the
+     * previous status so an operator can tell what was wiped.
      */
     @Transactional
-    public void archiveApplication(
+    public void deleteApplication(
             String applicationId, String adminUserId, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         if (Boolean.TRUE.equals(app.getDeleted())) {
-            // Already archived — treat as gone.
+            // Already deleted — treat as gone.
             throw new ResourceNotFoundException(
                     "ConsultantApplication", "applicationId", applicationId);
         }
-        if (!ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())) {
-            throw new IllegalStateException("Only cancelled applications can be archived.");
-        }
+        String previousStatus = app.getStatus();
         app.setDeleted(true);
         app.setDeletedAt(LocalDateTime.now());
         app.setDeletedBy(adminUserId);
@@ -515,7 +533,8 @@ public class ConsultantApplicationService {
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.APPLICATION_ARCHIVED,
                 ConsultantApplicationEvent.ActorType.ERM, AGREEMENT_ERM_USER_ID,
-                Map.of("deletedBy", adminUserId == null ? "" : adminUserId),
+                Map.of("deletedBy", adminUserId == null ? "" : adminUserId,
+                        "previousStatus", previousStatus == null ? "" : previousStatus),
                 request);
     }
 
@@ -626,6 +645,12 @@ public class ConsultantApplicationService {
         }
         try {
             emailTemplateService.sendConsultantInitialFill(app);
+            // Build L — resetting invite_sent_at to "now" restarts the
+            // 15-day expiry clock, so an ERM resend gives the
+            // consultant a fresh window without an operator having to
+            // touch the row directly.
+            app.setInviteSentAt(LocalDateTime.now());
+            applicationRepository.save(app);
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -713,7 +738,15 @@ public class ConsultantApplicationService {
     public ConsultantApplication getForConsultant(String applicationId,
                                                   HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        if (isTerminalCancellation(app.getStatus())) {
+        // Build L — lazy 15-day invite expiry. If a SUBMITTED row's
+        // invite is older than 15 days, flip it to EXPIRED on the
+        // spot so the dashboard / wizard render the expired state
+        // even if the daily cron hasn't fired yet.
+        app = applyInviteExpiryIfStale(app, request);
+        // CANCELLED stays a hard block; EXPIRED is now readable so
+        // the consultant can see the "invitation expired" status
+        // screen rather than a generic error.
+        if (ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())) {
             throw new IllegalStateException(
                     "This application is no longer accepting consultant actions.");
         }
@@ -721,6 +754,36 @@ public class ConsultantApplicationService {
                 ConsultantApplicationEvent.EventType.ACCESSED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
                 Map.of("status", app.getStatus()),
+                request);
+        return app;
+    }
+
+    /**
+     * Build L — flips a SUBMITTED row past its 15-day invite window
+     * to EXPIRED in place. Returns the (possibly mutated) entity.
+     * No-op for any other state, and for SUBMITTED rows whose invite
+     * is still inside the window.
+     */
+    private ConsultantApplication applyInviteExpiryIfStale(
+            ConsultantApplication app, HttpServletRequest request) {
+        if (!ConsultantApplication.Status.SUBMITTED.name().equals(app.getStatus())) {
+            return app;
+        }
+        LocalDateTime sentAt = app.getInviteSentAt();
+        if (sentAt == null) sentAt = app.getCreatedAt();
+        if (sentAt == null) return app;
+        if (sentAt.plusDays(INVITE_VALIDITY_DAYS).isAfter(LocalDateTime.now())) {
+            return app;
+        }
+        String previousStatus = app.getStatus();
+        app.setStatus(ConsultantApplication.Status.EXPIRED.name());
+        applicationRepository.save(app);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.EXPIRED,
+                ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                Map.of("reason", "invite-15-day-expiry",
+                        "previousStatus", previousStatus,
+                        "inviteSentAt", sentAt.toString()),
                 request);
         return app;
     }
@@ -919,6 +982,10 @@ public class ConsultantApplicationService {
             ConsultantFillPatch patch,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        // Build L — lazy 15-day expiry guard. A SUBMITTED row whose
+        // invite is past 15 days flips to EXPIRED and the fill is
+        // rejected with the consultant-visible "expired" state below.
+        app = applyInviteExpiryIfStale(app, request);
         String status = app.getStatus();
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
@@ -959,6 +1026,9 @@ public class ConsultantApplicationService {
             String signedLegalName,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        // Build L — lazy 15-day expiry guard. Stops a stale invite
+        // from sliding through submit between the daily cron sweeps.
+        app = applyInviteExpiryIfStale(app, request);
         String fromStatus = app.getStatus();
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(fromStatus)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(fromStatus)) {
@@ -1543,14 +1613,16 @@ public class ConsultantApplicationService {
     @Transactional
     public int expireStaleApplications() {
         LocalDateTime now = LocalDateTime.now();
+        // Build L — sweep only SUBMITTED rows whose invite is past 15
+        // days. REVISION_REQUESTED, VERIFIED, UPDATED, COMPLETED are
+        // exempt: the consultant has already engaged or the ERM is
+        // mid-review, so they shouldn't time out under the consultant
+        // -invite rule.
+        LocalDateTime cutoff = now.minusDays(INVITE_VALIDITY_DAYS);
         List<String> inFlight = List.of(
-                ConsultantApplication.Status.DRAFT.name(),
-                ConsultantApplication.Status.SUBMITTED.name(),
-                ConsultantApplication.Status.REVISION_REQUESTED.name(),
-                ConsultantApplication.Status.UPDATED.name(),
-                ConsultantApplication.Status.VERIFIED.name());
+                ConsultantApplication.Status.SUBMITTED.name());
         List<ConsultantApplication> stale =
-                applicationRepository.findByStatusInAndExpiresAtBefore(inFlight, now);
+                applicationRepository.findByStatusInAndInviteSentAtBefore(inFlight, cutoff);
         if (stale.isEmpty()) return 0;
 
         for (ConsultantApplication app : stale) {
@@ -1561,7 +1633,9 @@ public class ConsultantApplicationService {
                     ConsultantApplicationEvent.EventType.EXPIRED,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
                     Map.of("expiredAt", now.toString(),
-                            "previousStatus", previousStatus),
+                            "previousStatus", previousStatus,
+                            "reason", "invite-15-day-expiry",
+                            "inviteSentAt", String.valueOf(app.getInviteSentAt())),
                     null);
         }
         return stale.size();

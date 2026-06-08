@@ -1240,6 +1240,10 @@ public class DataSeeder implements CommandLineRunner {
                 {"cheque_public_id VARCHAR(255)", "cheque_public_id"},
                 {"cheque_uploaded_at TIMESTAMP", "cheque_uploaded_at"},
                 {"cheque_content_type VARCHAR(64)", "cheque_content_type"},
+                // Build L — 15-day invite expiry. Set at create + every
+                // resend-invite; the sweep flips SUBMITTED rows whose
+                // invite is >15 days old to EXPIRED.
+                {"invite_sent_at TIMESTAMP", "invite_sent_at"},
         };
         for (String[] col : columns) {
             try {
@@ -1265,6 +1269,20 @@ public class DataSeeder implements CommandLineRunner {
             }
         } catch (Exception e) {
             log.debug("Couldn't backfill consultant_applications.deleted: {}", e.getMessage());
+        }
+
+        // Build L — backfill invite_sent_at = created_at for legacy rows
+        // so the 15-day expiry sweep can reason about them. Idempotent.
+        try {
+            int backfilled = jdbcTemplate.update(
+                    "UPDATE consultant_applications SET invite_sent_at = created_at "
+                            + "WHERE invite_sent_at IS NULL");
+            if (backfilled > 0) {
+                log.info("Backfilled consultant_applications.invite_sent_at=created_at on {} row(s)",
+                        backfilled);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't backfill consultant_applications.invite_sent_at: {}", e.getMessage());
         }
 
         // Indexes backing the Phase B/C list filters (owner-scoped +

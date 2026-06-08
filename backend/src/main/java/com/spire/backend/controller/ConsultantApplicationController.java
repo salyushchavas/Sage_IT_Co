@@ -86,6 +86,14 @@ public class ConsultantApplicationController {
         // Email-match guard: an agreement addressed to a different
         // consultant looks like it doesn't exist to this token holder.
         ConsultantApplication app = consultantService.getByApplicationId(appId);
+        // Build L — soft-deleted agreements are gone for the consultant
+        // too. The row + audit are still in the DB so an operator can
+        // recover them, but every consultant-side endpoint behaves as
+        // if the agreement never existed.
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", appId);
+        }
         String onRecord = app.getConsultantEmail();
         if (onRecord == null
                 || !onRecord.trim().toLowerCase().equals(normalised)) {
@@ -977,6 +985,10 @@ public class ConsultantApplicationController {
                 r.action = "NONE";
             } else if (ConsultantApplication.Status.COMPLETED.name().equals(s)) {
                 r.statusLabel = "Accepted";
+                r.action = "NONE";
+            } else if (ConsultantApplication.Status.EXPIRED.name().equals(s)) {
+                // Build L — invite went stale (15-day window).
+                r.statusLabel = "Invitation expired";
                 r.action = "NONE";
             } else {
                 r.statusLabel = s;

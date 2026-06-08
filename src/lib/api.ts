@@ -3646,11 +3646,14 @@ export async function adminListAgreements() {
 }
 
 /**
- * Archive (soft-delete) a CANCELLED application. Backend returns 204; we
- * resolve to void. 401 clears the session; other failures throw
- * AdminApiError carrying the status (e.g. 409 not-cancelled, 403 not-admin).
+ * Build L — super-admin soft-deletes ANY agreement (any status). The
+ * backend returns 204; we resolve to void. 401 clears the session;
+ * other failures throw AdminApiError carrying the status.
+ *
+ * (Old name: adminArchiveApplication. Re-exported under that name
+ * for backward compat with any caller that hasn't been re-bumped.)
  */
-export async function adminArchiveApplication(appId: string) {
+export async function adminDeleteApplication(appId: string) {
   const token = getAgreementErmToken();
   if (!token) {
     throw new AdminApiError(401, "Session expired. Please sign in again.");
@@ -3673,6 +3676,9 @@ export async function adminArchiveApplication(appId: string) {
   }
   throw new AdminApiError(res.status, message);
 }
+
+/** Legacy alias preserved for any caller that hasn't been renamed yet. */
+export const adminArchiveApplication = adminDeleteApplication;
 
 // ── Agreement-ERM operations ────────────────────────────────────
 

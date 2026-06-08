@@ -59,5 +59,9 @@ public interface ConsultantApplicationRepository
     List<ConsultantApplication> findByStatusInAndExpiresAtBefore(
             List<String> statuses, LocalDateTime cutoff);
 
+    /** Build L — sweep apps whose invite is past the 15-day window. */
+    List<ConsultantApplication> findByStatusInAndInviteSentAtBefore(
+            List<String> statuses, LocalDateTime cutoff);
+
     long countByErmUserIdAndStatus(Long ermUserId, String status);
 }

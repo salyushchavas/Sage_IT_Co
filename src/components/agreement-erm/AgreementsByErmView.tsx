@@ -4,18 +4,17 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
-  Archive,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   Loader2,
+  Trash2,
   Users,
 } from "lucide-react";
 
 import {
-  adminArchiveApplication,
+  adminDeleteApplication,
   adminListAgreements,
-  AdminApiError,
   type AgreementSummaryDto,
 } from "@/lib/api";
 import AgreementStatusPill from "./AgreementStatusPill";
@@ -104,10 +103,12 @@ export default function AgreementsByErmView() {
       return next;
     });
 
-  const handleArchive = async (appId: string) => {
+  const handleDelete = async (appId: string) => {
     if (
       !confirm(
-        "Archive this cancelled agreement? It will be hidden from the console.",
+        "Delete this agreement?\n\n"
+          + "This removes it from all dashboards -- ERM and consultant. "
+          + "The row is retained internally for audit; recovery is DB-level only.",
       )
     ) {
       return;
@@ -115,15 +116,11 @@ export default function AgreementsByErmView() {
     setArchivingId(appId);
     setError("");
     try {
-      await adminArchiveApplication(appId);
+      await adminDeleteApplication(appId);
       setRows((prev) => prev.filter((r) => r.appId !== appId));
-      setFeedback("Agreement archived.");
+      setFeedback("Agreement deleted.");
     } catch (e) {
-      if (e instanceof AdminApiError && e.status === 409) {
-        setError("Only cancelled agreements can be archived.");
-      } else {
-        setError(e instanceof Error ? e.message : "Couldn't archive agreement.");
-      }
+      setError(e instanceof Error ? e.message : "Couldn't delete agreement.");
     } finally {
       setArchivingId(null);
     }
@@ -223,21 +220,19 @@ export default function AgreementsByErmView() {
                             >
                               Open
                             </Link>
-                            {r.status === "CANCELLED" && (
-                              <button
-                                type="button"
-                                onClick={() => handleArchive(r.appId)}
-                                disabled={archivingId === r.appId}
-                                className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-red-200 bg-white hover:bg-red-50 text-red-700 cursor-pointer disabled:opacity-50"
-                              >
-                                {archivingId === r.appId ? (
-                                  <Loader2 size={11} className="animate-spin" />
-                                ) : (
-                                  <Archive size={11} />
-                                )}
-                                Archive
-                              </button>
-                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDelete(r.appId)}
+                              disabled={archivingId === r.appId}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-red-200 bg-white hover:bg-red-50 text-red-700 cursor-pointer disabled:opacity-50"
+                            >
+                              {archivingId === r.appId ? (
+                                <Loader2 size={11} className="animate-spin" />
+                              ) : (
+                                <Trash2 size={11} />
+                              )}
+                              Delete
+                            </button>
                           </div>
                         </td>
                       </tr>

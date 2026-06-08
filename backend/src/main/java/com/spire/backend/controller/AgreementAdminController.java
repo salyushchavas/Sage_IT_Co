@@ -75,16 +75,17 @@ public class AgreementAdminController {
     }
 
     /**
-     * Phase C feature 2 — archive (soft-delete) a CANCELLED application.
-     * 409 if not cancelled; 404 if already archived. The row stays in the
-     * DB, recoverable at the DB level. Returns 204.
+     * Build L — super-admin soft-deletes any agreement (any status).
+     * Hidden from every console afterward (ERM, super-admin,
+     * consultant) and 404s on detail / mutation. Row + audit retained
+     * so an operator can recover at the DB level. Returns 204.
      */
     @DeleteMapping("/applications/{appId}")
-    public ResponseEntity<Void> archiveApplication(
+    public ResponseEntity<Void> deleteApplication(
             @PathVariable String appId,
             HttpServletRequest request) {
         AgreementAuthz.requireSuperAdmin(request);
-        consultantService.archiveApplication(appId, AgreementAuthz.userId(request), request);
+        consultantService.deleteApplication(appId, AgreementAuthz.userId(request), request);
         return ResponseEntity.noContent().build();
     }
 

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
+  Ban,
   CheckCircle2,
   Clock,
   FileText,
@@ -252,6 +253,17 @@ function actionTone(action: ConsultantPortalAction, status: string) {
           button: "",
           passiveCopy:
             "Sage IT has accepted this agreement. No further action is required.",
+        };
+      }
+      if (status === "EXPIRED") {
+        return {
+          // Build L — stale invite. Quiet, non-actionable.
+          badge: "bg-stone-200 text-gray-700",
+          icon: <Ban size={11} />,
+          cta: "",
+          button: "",
+          passiveCopy:
+            "The 15-day window to complete this agreement has passed. Contact Sage IT and ask them to resend the invitation.",
         };
       }
       return _SENT_FOR_VERIFICATION_TONE;
