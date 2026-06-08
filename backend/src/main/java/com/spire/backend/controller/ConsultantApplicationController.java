@@ -248,6 +248,24 @@ public class ConsultantApplicationController {
                         body.ermSignatureBase64, request)));
     }
 
+    /**
+     * Build M — owner ERM (or super-admin) advances a Phase-1
+     * COMPLETED agreement to Phase 2 on the SAME document. Promoted
+     * sections flip to required; data is preserved; signatures +
+     * affirmations clear; status transitions back to SUBMITTED with
+     * the 15-day invite window restarted.
+     */
+    @PostMapping("/api/agreement-erm/applications/{appId}/advance-to-phase-2")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> advanceToPhase2(
+            @PathVariable String appId,
+            @RequestBody(required = false) ConsultantApplicationService.Phase2Promotion body,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Advanced to Phase 2",
+                consultantService.advanceToPhase2(appId, body, request)));
+    }
+
     @PostMapping("/api/agreement-erm/applications/{appId}/send-email")
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<Void> sendEmail(
@@ -958,6 +976,8 @@ public class ConsultantApplicationController {
         public String action;
         public String createdAt;
         public String updatedAt;
+        /** Build M — current phase of the two-phase agreement (1 or 2). */
+        public Integer phase;
 
         public static ConsultantAgreementSummary from(ConsultantApplication app) {
             ConsultantAgreementSummary r = new ConsultantAgreementSummary();
@@ -966,6 +986,7 @@ public class ConsultantApplicationController {
                     "Integrated Two-Phase Coaching & Post-Offer Support Agreement";
             r.technologyTrack = app.getTechnologyTrack();
             r.status = app.getStatus();
+            r.phase = app.getPhase();
             String s = app.getStatus();
             // Build K — post-submit states are status-only. The wizard
             // is reachable solely in SUBMITTED / REVISION_REQUESTED;

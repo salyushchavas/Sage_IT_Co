@@ -905,6 +905,38 @@ public class EmailTemplateService {
     }
 
     /**
+     * Build M — sent to the consultant the moment the ERM advances a
+     * Phase-1 COMPLETED agreement to Phase 2 on the same document.
+     * No PDF attachment (post-Build-K policy: the consultant never
+     * receives the generated PDF over email). Body says the agreement
+     * has been reopened for Phase 2, points back to the portal, and
+     * notes that everything they previously filled is still in place.
+     */
+    public void sendConsultantPhase2Notification(ConsultantApplication application) {
+        String url = appUrl + "/consultant";
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p(brandName() + " has advanced your engagement agreement "
+                        + "to Phase 2 on the same document. Everything you "
+                        + "completed for Phase 1 is preserved -- you'll only "
+                        + "need to fill the additional sections that Phase 2 "
+                        + "requires, then re-sign and submit.")
+                + button("Open your portal", url)
+                + ctaFallback(url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Phase: 2",
+                        "Window: 15 days from this email")
+                + muted("Re-open the link, complete the remaining sections, "
+                        + "and submit again. There is no PDF attached -- "
+                        + "Sage IT's records carry the agreement.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Phase 2 -- please complete the remaining sections of your "
+                        + brandName() + " agreement",
+                wrap("Phase 2 reopened", body));
+    }
+
+    /**
      * Sent to the operator the moment the consultant signs and
      * submits. Links to the agreement-erm detail page so the operator
      * can approve-and-sign or send-back-for-revision in one click.

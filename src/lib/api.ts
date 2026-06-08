@@ -3344,6 +3344,10 @@ export interface ConsultantApplication {
   finalSigningIp?: string | null;
   // Build G — Appendix 3 ID type toggle. "DL" | "STATE_ID".
   idType?: string | null;
+  // Build M — current phase of the two-phase coaching agreement.
+  // 1 = pre-employment (creation default); 2 = post-offer, reached
+  // via the ERM "Advance to Phase 2" action on the same document.
+  phase?: number | null;
   // Build G — Appendix 5 security cheque upload. The public_id is
   // persisted; the wizard treats a non-null value as "uploaded".
   chequePublicId?: string | null;
@@ -3798,6 +3802,33 @@ export async function ermApproveAndSign(
 }
 
 /**
+ * Build M — advances a Phase-1 COMPLETED agreement to Phase 2 on the
+ * same document. Optional promotion map flips selected previously-
+ * optional sections to required for the Phase-2 fill; an empty body
+ * promotes every currently-optional section. Status transitions
+ * COMPLETED → SUBMITTED, signatures + affirmations clear, every
+ * filled field stays put.
+ */
+export interface Phase2PromotionPayload {
+  appendix1?: boolean;
+  appendix2?: boolean;
+  appendix3?: boolean;
+  appendix4?: boolean;
+  appendix5?: boolean;
+  ssn?: boolean;
+}
+
+export async function ermAdvanceToPhase2(
+  applicationId: string,
+  promotion?: Phase2PromotionPayload,
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/advance-to-phase-2`,
+    { method: "POST", body: JSON.stringify(promotion ?? {}) },
+  );
+}
+
+/**
  * Forwards the final signed PDF to an arbitrary recipient with an
  * optional note. Backend returns 204 No Content; the helper resolves
  * to void on success.
@@ -4161,6 +4192,8 @@ export interface ConsultantAgreementSummary {
   action: ConsultantPortalAction;
   createdAt: string | null;
   updatedAt: string | null;
+  // Build M — current phase of the two-phase coaching agreement.
+  phase: number | null;
 }
 
 /**

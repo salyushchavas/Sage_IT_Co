@@ -193,6 +193,11 @@ function AgreementRow({
               {item.technologyTrack}
             </span>
           )}
+          {(item.phase ?? 1) === 2 && (
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sage-copper/15 text-sage-copper-deep">
+              Phase 2
+            </span>
+          )}
         </div>
         <h2 className="font-serif text-base text-gray-900 mt-2 line-clamp-2">
           {item.agreementTitle}

@@ -1244,6 +1244,11 @@ public class DataSeeder implements CommandLineRunner {
                 // resend-invite; the sweep flips SUBMITTED rows whose
                 // invite is >15 days old to EXPIRED.
                 {"invite_sent_at TIMESTAMP", "invite_sent_at"},
+                // Build M — two-phase coaching. 1 = pre-employment
+                // (current default), 2 = post-offer (advanced via the
+                // ERM "Advance to Phase 2" action). NOT NULL DEFAULT 1
+                // so existing rows backfill cleanly.
+                {"phase SMALLINT NOT NULL DEFAULT 1", "phase"},
         };
         for (String[] col : columns) {
             try {
@@ -1283,6 +1288,19 @@ public class DataSeeder implements CommandLineRunner {
             }
         } catch (Exception e) {
             log.debug("Couldn't backfill consultant_applications.invite_sent_at: {}", e.getMessage());
+        }
+
+        // Build M — backfill phase=1 for any legacy row where Hibernate
+        // added the column before the DataSeeder DEFAULT could land.
+        // Idempotent.
+        try {
+            int backfilled = jdbcTemplate.update(
+                    "UPDATE consultant_applications SET phase = 1 WHERE phase IS NULL");
+            if (backfilled > 0) {
+                log.info("Backfilled consultant_applications.phase=1 on {} row(s)", backfilled);
+            }
+        } catch (Exception e) {
+            log.debug("Couldn't backfill consultant_applications.phase: {}", e.getMessage());
         }
 
         // Indexes backing the Phase B/C list filters (owner-scoped +

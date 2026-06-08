@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   AlertCircle,
+  ArrowUpRight,
   Ban,
   CheckCircle2,
   Clock,
@@ -25,6 +26,7 @@ import {
 import SignaturePad from "@/components/common/SignaturePad";
 import {
   cancelConsultantApplication,
+  ermAdvanceToPhase2,
   ermApproveAndSign,
   ermRequestRevision,
   ermSendPdfToEmail,
@@ -36,6 +38,7 @@ import {
   updateConsultantContact,
   type ConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
+  type Phase2PromotionPayload,
 } from "@/lib/api";
 import AgreementStatusPill from "./AgreementStatusPill";
 import AgreementEventTimeline from "./AgreementEventTimeline";
@@ -152,7 +155,7 @@ const SECTIONS: readonly SectionDef[] = [
   },
 ];
 
-type ModalKind = null | "revision" | "approve" | "send" | "editContact";
+type ModalKind = null | "revision" | "approve" | "send" | "editContact" | "advancePhase2";
 
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
@@ -262,6 +265,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         resendBusy={busy === "resend"}
         cancelBusy={busy === "cancel"}
         isLocked={isLocked}
+        onAdvanceToPhase2={() => setModal("advancePhase2")}
       />
 
       <ContactActionsBar
@@ -331,6 +335,19 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           onDone={async (msg) => {
             setModal(null);
             setFeedback(msg);
+            await onRefresh();
+          }}
+        />
+      )}
+      {modal === "advancePhase2" && (
+        <AdvanceToPhase2Modal
+          app={app}
+          onClose={() => setModal(null)}
+          onDone={async () => {
+            setModal(null);
+            setFeedback(
+              "Advanced to Phase 2. The consultant has been notified.",
+            );
             await onRefresh();
           }}
         />
@@ -582,6 +599,7 @@ function AccessRecord({ app }: { app: ConsultantApplication }) {
 // ── Header ─────────────────────────────────────────────────────
 
 function HeaderRow({ app }: { app: ConsultantApplication }) {
+  const phase = app.phase ?? 1;
   return (
     <div>
       <div className="flex items-center gap-2 flex-wrap">
@@ -589,6 +607,16 @@ function HeaderRow({ app }: { app: ConsultantApplication }) {
           {app.consultantName || app.consultantEmail}
         </h1>
         <AgreementStatusPill status={app.status} />
+        <span
+          className={
+            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider "
+            + (phase === 2
+              ? "bg-sage-copper/15 text-sage-copper-deep"
+              : "bg-sage-navy/10 text-sage-navy")
+          }
+        >
+          Phase {phase}
+        </span>
       </div>
       <p className="text-xs font-mono text-gray-500 mt-0.5">{app.applicationId}</p>
       <p className="text-xs text-gray-500 mt-0.5">{app.consultantEmail}</p>
@@ -617,6 +645,7 @@ function StateActionBar({
   resendBusy,
   cancelBusy,
   isLocked,
+  onAdvanceToPhase2,
 }: {
   status: ConsultantApplication["status"];
   app: ConsultantApplication;
@@ -628,6 +657,7 @@ function StateActionBar({
   resendBusy: boolean;
   cancelBusy: boolean;
   isLocked: boolean;
+  onAdvanceToPhase2: () => void;
 }) {
   if (status === "SUBMITTED") {
     return (
@@ -696,7 +726,13 @@ function StateActionBar({
   }
 
   if (status === "COMPLETED") {
-    return <CompletedActions app={app} onSendEmail={onSendEmail} />;
+    return (
+      <CompletedActions
+        app={app}
+        onSendEmail={onSendEmail}
+        onAdvanceToPhase2={onAdvanceToPhase2}
+      />
+    );
   }
 
   if (status === "CANCELLED" || status === "EXPIRED") {
@@ -803,12 +839,15 @@ function DangerButton({
 function CompletedActions({
   app,
   onSendEmail,
+  onAdvanceToPhase2,
 }: {
   app: ConsultantApplication;
   onSendEmail: () => void;
+  onAdvanceToPhase2: () => void;
 }) {
   const [busy, setBusy] = useState<"view" | "download" | null>(null);
   const [error, setError] = useState("");
+  const currentPhase = app.phase ?? 1;
 
   const handleAction = async (mode: "view" | "download") => {
     setBusy(mode);
@@ -846,9 +885,11 @@ function CompletedActions({
   };
 
   return (
-    <BarShell badge="Completed" tone="emerald">
+    <BarShell badge={`Completed${currentPhase === 2 ? " (Phase 2)" : ""}`} tone="emerald">
       <p className="text-xs text-gray-600 max-w-md">
-        Final PDF generated and emailed to both parties.
+        {currentPhase === 2
+          ? "Phase 2 PDF generated and emailed."
+          : "Final PDF generated and emailed to both parties."}
       </p>
       <div className="flex items-center gap-2 flex-wrap">
         <button
@@ -885,6 +926,16 @@ function CompletedActions({
         >
           <Mail size={12} /> Send to email…
         </button>
+        {currentPhase === 1 && (
+          <button
+            type="button"
+            onClick={onAdvanceToPhase2}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+          >
+            <ArrowUpRight size={12} /> Advance to Phase 2
+          </button>
+        )}
       </div>
       {error && (
         <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
@@ -1400,6 +1451,146 @@ function ModalShell({
         </footer>
       </div>
     </div>
+  );
+}
+
+/**
+ * Build M — ERM advances a Phase-1 COMPLETED agreement to Phase 2.
+ * Lists the five appendices + the SSN flag as checkboxes; each
+ * checkbox is pre-checked when the section is currently optional
+ * (those are the typical candidates for promotion). Confirm calls
+ * the backend endpoint, which flips the chosen require_* flags,
+ * preserves filled data, clears signatures + affirmations, and
+ * transitions COMPLETED → SUBMITTED.
+ */
+function AdvanceToPhase2Modal({
+  app,
+  onClose,
+  onDone,
+}: {
+  app: ConsultantApplication;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  // Currently-optional sections are the default selection; sections
+  // already required in Phase 1 stay required and shouldn't be
+  // toggleable to "unrequired" via this dialog.
+  const initial = {
+    appendix1: !app.requireAppendix1,
+    appendix2: !app.requireAppendix2,
+    appendix3: !app.requireAppendix3,
+    appendix4: !app.requireAppendix4,
+    appendix5: !app.requireAppendix5,
+    ssn: !app.requireSsn,
+  };
+  const [promote, setPromote] = useState<Phase2PromotionPayload>(initial);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const rows: Array<{
+    key: keyof Phase2PromotionPayload;
+    label: string;
+    alreadyRequired: boolean;
+  }> = [
+    { key: "appendix1", label: "Appendix 1 — Employment Confirmation", alreadyRequired: Boolean(app.requireAppendix1) },
+    { key: "appendix2", label: "Appendix 2 — ACH Payment Authorization", alreadyRequired: Boolean(app.requireAppendix2) },
+    { key: "appendix3", label: "Appendix 3 — Background Check", alreadyRequired: Boolean(app.requireAppendix3) },
+    { key: "appendix4", label: "Appendix 4 — Portal & Account Access", alreadyRequired: Boolean(app.requireAppendix4) },
+    { key: "appendix5", label: "Appendix 5 — Security Check", alreadyRequired: Boolean(app.requireAppendix5) },
+    { key: "ssn", label: "Require SSN (within Appendix 3)", alreadyRequired: Boolean(app.requireSsn) },
+  ];
+
+  const submit = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      await ermAdvanceToPhase2(app.applicationId, promote);
+      await onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't advance to Phase 2.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title="Advance to Phase 2"
+      subtitle="Reopens this agreement for the consultant on the same document. Phase-1 data is preserved."
+      onClose={onClose}
+      closeable={!busy}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-copper-deep text-white hover:opacity-90 disabled:opacity-60 cursor-pointer"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <ArrowUpRight size={12} />}
+            {busy ? "Advancing…" : "Advance to Phase 2"}
+          </button>
+        </>
+      }
+    >
+      <p className="text-xs text-gray-600">
+        Tick the sections the consultant must now complete. The consultant&apos;s
+        previously filled values stay put; both signatures + every section
+        affirmation will clear so they re-sign the now-final document.
+      </p>
+      <ul className="mt-4 space-y-2">
+        {rows.map((row) => (
+          <li
+            key={row.key}
+            className={
+              "flex items-start gap-2 rounded-md border p-3 "
+              + (row.alreadyRequired
+                ? "border-gray-200 bg-gray-50"
+                : "border-stone-200 bg-white")
+            }
+          >
+            <input
+              id={`phase2-${row.key}`}
+              type="checkbox"
+              disabled={busy || row.alreadyRequired}
+              checked={row.alreadyRequired || Boolean(promote[row.key])}
+              onChange={(e) =>
+                setPromote((prev) => ({ ...prev, [row.key]: e.target.checked }))
+              }
+              className="mt-0.5 h-3.5 w-3.5 accent-sage-navy"
+            />
+            <label
+              htmlFor={`phase2-${row.key}`}
+              className="text-xs text-gray-800 flex-1 cursor-pointer"
+            >
+              <span className="font-semibold">{row.label}</span>
+              {row.alreadyRequired && (
+                <span className="block text-[10px] text-gray-500 mt-0.5">
+                  Already required in Phase 1 — stays required.
+                </span>
+              )}
+            </label>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-4 text-[11px] text-gray-500">
+        On confirm: status flips COMPLETED → SUBMITTED, both signatures clear,
+        the 15-day invite window restarts, and the consultant gets a no-PDF
+        email asking them to complete Phase 2.
+      </p>
+      {error && (
+        <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-600">
+          <AlertCircle size={14} /> {error}
+        </p>
+      )}
+    </ModalShell>
   );
 }
 

@@ -92,7 +92,11 @@ public class ConsultantApplicationEvent {
         CONSULTANT_CONTACT_UPDATED,
         APPLICATION_ARCHIVED,
         // Build G — consultant uploads their Appendix 5 security cheque.
-        CHEQUE_UPLOADED
+        CHEQUE_UPLOADED,
+        // Build M — ERM reopens a Phase-1 COMPLETED agreement for
+        // Phase 2 on the same document. Metadata carries the promoted
+        // sections + the actor's user id.
+        ADVANCED_TO_PHASE_2
     }
 
     public enum ActorType {

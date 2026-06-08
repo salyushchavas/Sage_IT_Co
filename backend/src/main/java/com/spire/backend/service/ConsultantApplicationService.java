@@ -1270,6 +1270,164 @@ public class ConsultantApplicationService {
         return app;
     }
 
+    // ── Build M: advance Phase-1 COMPLETED to Phase 2 ────────────────
+
+    /**
+     * Build M — promotion map carried in the advance-to-phase-2 body.
+     * Each non-null Boolean targets one of the per-agreement
+     * requirement flags; the service treats {@code true} as "promote
+     * this section to required for Phase 2". {@code false}/null leave
+     * the existing value untouched. The default empty body promotes
+     * EVERY currently-optional section the consultant skipped in
+     * Phase 1.
+     */
+    public static class Phase2Promotion {
+        public Boolean appendix1;
+        public Boolean appendix2;
+        public Boolean appendix3;
+        public Boolean appendix4;
+        public Boolean appendix5;
+        public Boolean ssn;
+    }
+
+    /**
+     * Build M — ERM reopens a Phase-1 COMPLETED agreement on the SAME
+     * document. The action:
+     *
+     *   - flips selected previously-optional require_* flags to TRUE
+     *     (default: every section the consultant skipped in Phase 1);
+     *   - PRESERVES every filled field -- nothing is wiped;
+     *   - clears BOTH consultant signatures + their audit timestamps,
+     *     plus every section affirmation, because the consultant must
+     *     re-sign / re-affirm the now-final document at Phase 2;
+     *   - clears the Phase-1 ERM countersignature artifacts (name /
+     *     title / signature url / signatureDate) and the final PDF
+     *     pointers; the Phase-2 countersign regenerates everything;
+     *   - resets {@code inviteSentAt} so the 15-day expiry window
+     *     restarts;
+     *   - transitions COMPLETED -> SUBMITTED so the consultant flow
+     *     reopens the wizard;
+     *   - sets {@code phase} to 2 and audits
+     *     {@code ADVANCED_TO_PHASE_2} with the promoted sections;
+     *   - sends the consultant a no-PDF "Phase 2 -- please complete
+     *     the remaining sections" email.
+     */
+    @Transactional
+    public ConsultantApplication advanceToPhase2(
+            String applicationId,
+            Phase2Promotion promotion,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())) {
+            throw new IllegalStateException(
+                    "Only a COMPLETED agreement can be advanced to Phase 2 "
+                            + "(status=" + app.getStatus() + ").");
+        }
+        Integer currentPhase = app.getPhase();
+        if (currentPhase != null && currentPhase >= 2) {
+            throw new IllegalStateException(
+                    "This agreement is already at Phase " + currentPhase + ".");
+        }
+
+        // Resolve the promotion map. A null / empty body means "promote
+        // every currently-optional section the consultant skipped" --
+        // the typical operator path. Non-null entries in the body are
+        // honoured verbatim (true => promote, false => leave alone).
+        boolean p1 = promotion != null && Boolean.TRUE.equals(promotion.appendix1);
+        boolean p2 = promotion != null && Boolean.TRUE.equals(promotion.appendix2);
+        boolean p3 = promotion != null && Boolean.TRUE.equals(promotion.appendix3);
+        boolean p4 = promotion != null && Boolean.TRUE.equals(promotion.appendix4);
+        boolean p5 = promotion != null && Boolean.TRUE.equals(promotion.appendix5);
+        boolean pSsn = promotion != null && Boolean.TRUE.equals(promotion.ssn);
+        boolean explicitSelection = promotion != null && (
+                promotion.appendix1 != null || promotion.appendix2 != null
+                || promotion.appendix3 != null || promotion.appendix4 != null
+                || promotion.appendix5 != null || promotion.ssn != null);
+        if (!explicitSelection) {
+            // Default selection: every appendix currently flagged
+            // optional gets promoted. ssn follows the same rule but
+            // only if Appendix 3 ends up required (it's meaningless
+            // outside that section).
+            p1 = !Boolean.TRUE.equals(app.getRequireAppendix1());
+            p2 = !Boolean.TRUE.equals(app.getRequireAppendix2());
+            p3 = !Boolean.TRUE.equals(app.getRequireAppendix3());
+            p4 = !Boolean.TRUE.equals(app.getRequireAppendix4());
+            p5 = !Boolean.TRUE.equals(app.getRequireAppendix5());
+            // Leave SSN unchanged in the default path -- the ERM
+            // toggles it explicitly when they want it.
+        }
+
+        java.util.List<String> promoted = new java.util.ArrayList<>();
+        if (p1) { app.setRequireAppendix1(true); promoted.add("appendix1"); }
+        if (p2) { app.setRequireAppendix2(true); promoted.add("appendix2"); }
+        if (p3) { app.setRequireAppendix3(true); promoted.add("appendix3"); }
+        if (p4) { app.setRequireAppendix4(true); promoted.add("appendix4"); }
+        if (p5) { app.setRequireAppendix5(true); promoted.add("appendix5"); }
+        if (pSsn) { app.setRequireSsn(true); promoted.add("ssn"); }
+
+        // Clear consultant signatures + every audit timestamp + every
+        // section affirmation so the consultant has to re-sign and
+        // re-affirm the now-final document. Field data stays put.
+        app.setSignatureImage(null);
+        app.setSignedAt(null);
+        app.setSignedIp(null);
+        app.setSignedUserAgent(null);
+        app.setSigningAt(null);
+        app.setSigningIp(null);
+        app.setFinalSignatureImage(null);
+        app.setFinalSignedAt(null);
+        app.setFinalSigningIp(null);
+        app.setSignedLegalName(null);
+        app.setAffirmedMainAgreement(false);
+        app.setAffirmedExhibitA(false);
+        app.setAffirmedExhibitB(false);
+        app.setAffirmedAppendix1(false);
+        app.setAffirmedAppendix2(false);
+        app.setAffirmedAppendix3(false);
+        app.setAffirmedAppendix4(false);
+        app.setAffirmedAppendix5(false);
+
+        // Clear the Phase-1 ERM countersignature record + the final
+        // PDF pointers. ermApproveAndSign regenerates both at Phase 2
+        // countersign.
+        app.setErmName(null);
+        app.setErmTitle(null);
+        app.setErmSignatureUrl(null);
+        app.setSignatureDate(null);
+        app.setFinalPdfUrl(null);
+        app.setFinalPdfPublicId(null);
+
+        LocalDateTime now = LocalDateTime.now();
+        app.setPhase(2);
+        app.setStatus(ConsultantApplication.Status.SUBMITTED.name());
+        app.setInviteSentAt(now);
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.ADVANCED_TO_PHASE_2,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("ermUserId", AgreementAuthz.userId(request) == null
+                                ? "" : AgreementAuthz.userId(request),
+                        "promoted", promoted),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantPhase2Notification(app);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("template", "consultant_phase2_notification"),
+                    null);
+        } catch (Exception e) {
+            log.warn("Phase 2 notification email failed for {}: {}",
+                    applicationId, e.getMessage());
+        }
+
+        return app;
+    }
+
     /**
      * Sends the final PDF to an arbitrary recipient (operator use:
      * forwarding to the consultant's manager, legal, payroll, etc.).

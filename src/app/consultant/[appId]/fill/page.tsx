@@ -775,6 +775,24 @@ export default function ConsultantWizardPage() {
         }}
       />
 
+      {app.phase === 2 && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+          <div className="rounded-2xl border border-sage-copper/40 bg-orange-50 px-5 py-4 flex items-start gap-3">
+            <Sparkles size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
+                Phase 2
+              </p>
+              <p className="text-sm text-gray-800 mt-1 leading-relaxed">
+                Sage IT has advanced your agreement to Phase 2 on the same document.
+                Everything you filled in Phase 1 is preserved — complete the sections
+                now marked <strong>Required for Phase 2</strong>, re-sign, and submit.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
       {app.status === "REVISION_REQUESTED" && app.currentRevisionRemarks && (
         <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
           <div className="rounded-2xl border border-sage-copper/40 bg-orange-50 px-5 py-4 flex items-start gap-3">
@@ -839,6 +857,7 @@ export default function ConsultantWizardPage() {
             chequeUploading={chequeUploading}
             chequeUploadError={chequeUploadError}
             onUploadCheque={(f) => void handleChequeUpload(f)}
+            phase={app.phase ?? 1}
           />
         )}
         {submitError && (
@@ -947,6 +966,7 @@ function SectionStep({
   chequeUploading,
   chequeUploadError,
   onUploadCheque,
+  phase,
 }: {
   section: AgreementSection;
   content: AgreementContent | null;
@@ -967,6 +987,7 @@ function SectionStep({
   chequeUploading: boolean;
   chequeUploadError: string;
   onUploadCheque: (file: File) => void;
+  phase: number;
 }) {
   const isCoverStep = section.id === "cover";
   // F-4 per-section state: optional appendices show an "Optional"
@@ -978,6 +999,11 @@ function SectionStep({
   const appendixTouched = isAppendixTouched(section, form);
   const showOptionalBadge = appendixOptional && !appendixTouched;
   const showAllOrNothingNotice = appendixOptional && appendixTouched;
+  // Build M — during Phase 2, any appendix that's now required gets a
+  // distinct "Required for Phase 2" badge. The consultant can tell at
+  // a glance which sections the ERM has promoted.
+  const showPhase2RequiredBadge =
+    phase === 2 && Boolean(section.appendixKey) && !appendixOptional;
   return (
     <div className="grid grid-cols-1 lg:grid-cols-5 gap-4 lg:gap-6">
       {/* Read pane */}
@@ -992,6 +1018,11 @@ function SectionStep({
           {showOptionalBadge && (
             <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-stone-200 text-gray-700">
               Optional — you can skip
+            </span>
+          )}
+          {showPhase2RequiredBadge && (
+            <span className="mt-2 inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sage-copper/15 text-sage-copper-deep">
+              Required for Phase 2
             </span>
           )}
           {(() => {

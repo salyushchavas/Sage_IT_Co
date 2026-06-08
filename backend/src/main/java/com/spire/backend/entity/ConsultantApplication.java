@@ -437,6 +437,23 @@ public class ConsultantApplication {
     @Column(name = "invite_sent_at")
     private LocalDateTime inviteSentAt;
 
+    // ── Build M: two-phase coaching ───────────────────────────────────
+    //
+    // Phase 1 = pre-employment coaching package; Phase 2 = post-offer
+    // support that activates after the consultant accepts a qualifying
+    // job. The ERM can ADVANCE a Phase-1 COMPLETED agreement to Phase 2
+    // on the SAME document -- all Phase-1 data stays put, previously-
+    // skippable sections (Appendix 1, Appendix 4, etc.) flip to
+    // required, signatures + affirmations are cleared, and the
+    // consultant resubmits.
+    //
+    // Stored as a tinyint-style smallint default 1 so existing rows
+    // backfill cleanly and a future "Phase 3" addition is one bump.
+
+    @Column(name = "phase", nullable = false)
+    @Builder.Default
+    private Integer phase = 1;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 
