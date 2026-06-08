@@ -32,6 +32,8 @@ import {
   AGREEMENT_SECTIONS,
   AFFIRMATION_FLAGS,
   effectiveRequirements,
+  findSectionForAffirmation,
+  findSectionForFieldKey,
   type AffirmationFlag,
   type AgreementSection,
   type EffectiveRequirements,
@@ -290,6 +292,15 @@ export default function ConsultantWizardPage() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>({ kind: "idle" });
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState("");
+  // Build N — structured incomplete-items returned by consultantSubmit.
+  // The wizard renders these grouped by section with one-tap jumps to
+  // the offending step (and tries to scroll/focus the missing field).
+  const [submitMissing, setSubmitMissing] = useState<{
+    missingFields: string[];
+    missingAffirmations: string[];
+    missingSignature: boolean;
+    missingFinalSignature: boolean;
+  } | null>(null);
   const [templateOpen, setTemplateOpen] = useState(false);
   // Build G — Appendix 5 cheque upload state. True once the server
   // confirms the public_id is stored. Wizard mirrors the row.
@@ -573,6 +584,7 @@ export default function ConsultantWizardPage() {
   const handleSubmit = useCallback(async () => {
     if (!appId) return;
     setSubmitError("");
+    setSubmitMissing(null);
     setSubmitting(true);
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
@@ -617,10 +629,16 @@ export default function ConsultantWizardPage() {
       setSubmitting(false);
       return;
     } catch (e) {
-      // Parse the structured backend payload when present so we can
-      // route back to the first incomplete section.
+      // Parse the structured backend payload when present so the
+      // wizard can show a section-grouped, jump-navigable list of
+      // exactly what's missing.
       let msg = e instanceof Error ? e.message : "Couldn't submit.";
-      let routed = false;
+      let structured: {
+        missingFields: string[];
+        missingAffirmations: string[];
+        missingSignature: boolean;
+        missingFinalSignature: boolean;
+      } | null = null;
       try {
         const obj = JSON.parse(msg) as {
           data?: {
@@ -632,19 +650,19 @@ export default function ConsultantWizardPage() {
           message?: string;
         };
         if (obj?.data) {
-          msg = obj.message || "Some items are still missing.";
-          const incompleteIdx = firstIncompleteIndex(form, reqs, chequeUploaded);
-          setCurrentStep(incompleteIdx);
-          routed = true;
+          msg = obj.message
+            || "Some items are still needed before you can submit.";
+          structured = {
+            missingFields: obj.data.missingFields ?? [],
+            missingAffirmations: obj.data.missingAffirmations ?? [],
+            missingSignature: Boolean(obj.data.missingSignature),
+            missingFinalSignature: Boolean(obj.data.missingFinalSignature),
+          };
         }
       } catch {
         /* not JSON; fall through with the original message */
       }
-      if (!routed) {
-        // Best-effort: also try to find which section is incomplete
-        // from local state so the consultant lands somewhere sensible.
-        setCurrentStep(firstIncompleteIndex(form, reqs, chequeUploaded));
-      }
+      setSubmitMissing(structured);
       setSubmitError(msg);
       setSubmitting(false);
     }
@@ -861,10 +879,26 @@ export default function ConsultantWizardPage() {
           />
         )}
         {submitError && (
-          <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 inline-flex items-start gap-2">
-            <AlertCircle size={14} className="mt-0.5 shrink-0" />
-            <span>{submitError}</span>
-          </div>
+          <SubmitErrorPanel
+            message={submitError}
+            missing={submitMissing}
+            onJumpToSection={(idx, fieldKey) => {
+              setCurrentStep(idx);
+              if (fieldKey) {
+                // Build N — try to focus the offending field once the
+                // section step has rendered. Best-effort only.
+                window.setTimeout(() => {
+                  const el = document.getElementById(
+                    `field-${fieldKey}`,
+                  );
+                  if (el) {
+                    el.scrollIntoView({ behavior: "smooth", block: "center" });
+                    (el as HTMLElement).focus();
+                  }
+                }, 60);
+              }
+            }}
+          />
         )}
       </section>
 
@@ -1363,7 +1397,11 @@ function FieldInput({
   }
 
   return (
-    <div className={wide ? "md:col-span-2" : ""}>
+    <div
+      id={`field-${field.key}`}
+      tabIndex={-1}
+      className={wide ? "md:col-span-2" : ""}
+    >
       <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-600 mb-1">
         {field.label}
         {effectivelyRequired && <span className="text-red-500 ml-1">*</span>}
@@ -1415,9 +1453,9 @@ function SignatureBlock({
           Sign once — applied everywhere
         </p>
         <p className="text-sm text-gray-700 mt-1">
-          Draw your signature below. We&apos;ll apply it to every
-          signature block in the agreement — you won&apos;t be asked to
-          re-draw it on later sections.
+          Upload an image of your signature, or draw it instead.
+          We&apos;ll apply it to every signature block in the agreement
+          — you won&apos;t be asked to re-do it on later sections.
         </p>
       </div>
 
@@ -1587,6 +1625,180 @@ function ConsultantStatusScreen({
   );
 }
 
+// ── Build N: submit-error panel grouped by section ────────────
+
+/**
+ * Build N — descriptive, section-grouped, jump-navigable rendering of
+ * the structured incomplete-submission payload the backend returns
+ * on a failed consultantSubmit. Replaces the old "Some items are
+ * still missing." red banner.
+ *
+ * The map groups missingFields by their owning section (via
+ * findSectionForFieldKey), missingAffirmations by their owning
+ * section (via findSectionForAffirmation), and the two signature
+ * flags by the step they belong to. Each group renders a clickable
+ * "Go to section" button that routes the wizard to that step and
+ * tries to scroll/focus the first offending field.
+ */
+const FIELD_LABELS: Record<string, string> = (() => {
+  const out: Record<string, string> = {};
+  for (const s of AGREEMENT_SECTIONS) {
+    for (const f of s.fields) {
+      out[f.key] = f.label;
+    }
+  }
+  // The cheque upload field has its own label in the section config
+  // but the UI surfaces it via the ChequeUploadBlock; keep the
+  // friendly label here too so the missing-list reads consistently.
+  out["chequeUpload"] = "Security cheque upload";
+  return out;
+})();
+
+function fieldFriendlyLabel(key: string): string {
+  return FIELD_LABELS[key] ?? key;
+}
+
+function SubmitErrorPanel({
+  message,
+  missing,
+  onJumpToSection,
+}: {
+  message: string;
+  missing: {
+    missingFields: string[];
+    missingAffirmations: string[];
+    missingSignature: boolean;
+    missingFinalSignature: boolean;
+  } | null;
+  onJumpToSection: (idx: number, fieldKey?: string) => void;
+}) {
+  if (!missing) {
+    return (
+      <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 inline-flex items-start gap-2">
+        <AlertCircle size={14} className="mt-0.5 shrink-0" />
+        <span>{message}</span>
+      </div>
+    );
+  }
+
+  type Group = {
+    sectionIdx: number;
+    sectionTitle: string;
+    items: { label: string; fieldKey?: string }[];
+  };
+  const groups = new Map<string, Group>();
+  const upsert = (
+    sectionIdx: number,
+    sectionTitle: string,
+    label: string,
+    fieldKey?: string,
+  ) => {
+    const key = `${sectionIdx}|${sectionTitle}`;
+    const existing = groups.get(key);
+    if (existing) {
+      existing.items.push({ label, fieldKey });
+    } else {
+      groups.set(key, {
+        sectionIdx,
+        sectionTitle,
+        items: [{ label, fieldKey }],
+      });
+    }
+  };
+
+  for (const key of missing.missingFields) {
+    const section = findSectionForFieldKey(key);
+    if (!section) continue;
+    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === section.id);
+    upsert(idx, section.title, fieldFriendlyLabel(key), key);
+  }
+  for (const flag of missing.missingAffirmations) {
+    const section = findSectionForAffirmation(flag as AffirmationFlag);
+    if (!section) continue;
+    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === section.id);
+    upsert(idx, section.title, "Section affirmation not ticked");
+  }
+  if (missing.missingSignature) {
+    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === "main-agreement");
+    if (idx >= 0) {
+      upsert(idx, "The Agreement", "Primary signature not captured");
+    }
+  }
+  if (missing.missingFinalSignature) {
+    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === "review");
+    if (idx >= 0) {
+      upsert(idx, "Review & Submit", "Final signature not captured");
+    }
+  }
+
+  const ordered = Array.from(groups.values()).sort(
+    (a, b) => a.sectionIdx - b.sectionIdx,
+  );
+
+  if (ordered.length === 0) {
+    // Backend rejected for an unknown reason -- fall back to the
+    // generic message so the consultant still gets feedback.
+    return (
+      <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 inline-flex items-start gap-2">
+        <AlertCircle size={14} className="mt-0.5 shrink-0" />
+        <span>{message}</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 sm:p-5">
+      <div className="flex items-start gap-2">
+        <AlertCircle size={16} className="text-red-700 mt-0.5 shrink-0" />
+        <div>
+          <p className="text-sm font-semibold text-red-800">
+            {message}
+          </p>
+          <p className="text-[11px] text-red-700/80 mt-0.5">
+            Tap any item below to jump straight to the section that needs it.
+          </p>
+        </div>
+      </div>
+      <ul className="mt-3 space-y-2">
+        {ordered.map((g) => (
+          <li
+            key={g.sectionIdx}
+            className="rounded-xl border border-red-200 bg-white p-3"
+          >
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-widest text-red-700">
+                  {g.sectionTitle}
+                </p>
+                <ul className="mt-1.5 space-y-0.5">
+                  {g.items.map((item, i) => (
+                    <li
+                      key={i}
+                      className="text-xs text-gray-800 inline-flex items-center gap-1.5"
+                    >
+                      <span className="block h-1 w-1 rounded-full bg-red-500" />
+                      {item.label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  onJumpToSection(g.sectionIdx, g.items[0]?.fieldKey)
+                }
+                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer shrink-0"
+              >
+                Go to section <ArrowRight size={11} />
+              </button>
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 // ── Build I: Consultant locked-down preview (watermarked images) ──
 
 /**
@@ -1608,16 +1820,25 @@ function ConsultantStatusScreen({
 function ConsultantImagesPreview({
   appId,
   primarySignature,
-  onLoaded,
+  onScrolledToEnd,
 }: {
   appId: string;
   primarySignature: string | null;
-  onLoaded: () => void;
+  /**
+   * Build N — fires once the consultant has scrolled through the
+   * whole preview. Drives the gated attestation checkbox in the
+   * parent: until this fires, the attestation stays disabled. If
+   * the rendered images fit without scrolling, the helper fires
+   * immediately on layout so a short agreement isn't blocked.
+   */
+  onScrolledToEnd: () => void;
 }) {
   const [pages, setPages] = useState<string[] | null>(null);
   const [viewerEmail, setViewerEmail] = useState<string>("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [reachedEnd, setReachedEnd] = useState(false);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -1629,7 +1850,6 @@ function ConsultantImagesPreview({
         if (cancelled) return;
         setPages(data.pages);
         setViewerEmail(data.viewerEmail || "");
-        onLoaded();
       } catch (e) {
         if (cancelled) return;
         setError(e instanceof Error ? e.message : "Couldn't render the preview.");
@@ -1640,7 +1860,43 @@ function ConsultantImagesPreview({
     return () => {
       cancelled = true;
     };
-  }, [appId, primarySignature, onLoaded]);
+  }, [appId, primarySignature]);
+
+  // Build N — scroll-to-end detection. Three triggers fire onScrolledToEnd:
+  //   1. The scroll handler when the scrollTop+clientHeight reaches the
+  //      bottom (with a 24px slack so a short-overflow user doesn't
+  //      need pixel-perfect scrolling).
+  //   2. A post-render layout check: if scrollHeight <= clientHeight
+  //      (the preview fits without scrolling), the consultant has
+  //      "seen the whole agreement" by default -- unlock immediately.
+  //   3. ResizeObserver re-runs the layout check when the page images
+  //      finish decoding (image height changes scrollHeight).
+  const markEnd = useCallback(() => {
+    if (reachedEnd) return;
+    setReachedEnd(true);
+    onScrolledToEnd();
+  }, [reachedEnd, onScrolledToEnd]);
+
+  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
+      markEnd();
+    }
+  };
+
+  useEffect(() => {
+    if (!pages || reachedEnd) return;
+    const el = scrollerRef.current;
+    if (!el) return;
+    const check = () => {
+      if (el.scrollHeight <= el.clientHeight + 1) markEnd();
+    };
+    check();
+    const observer = new ResizeObserver(check);
+    observer.observe(el);
+    Array.from(el.querySelectorAll("img")).forEach((img) => observer.observe(img));
+    return () => observer.disconnect();
+  }, [pages, reachedEnd, markEnd]);
 
   return (
     <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
@@ -1673,7 +1929,11 @@ function ConsultantImagesPreview({
           </div>
         )}
         {pages && !error && (
-          <div className="max-h-[640px] overflow-y-auto space-y-3 pr-2">
+          <div
+            ref={scrollerRef}
+            onScroll={handleScroll}
+            className="max-h-[640px] overflow-y-auto space-y-3 pr-2"
+          >
             {pages.map((b64, idx) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img
@@ -1864,30 +2124,46 @@ function ReviewStep({
       <ConsultantImagesPreview
         appId={appId}
         primarySignature={form.signature}
-        onLoaded={onPreviewSeen}
+        onScrolledToEnd={onPreviewSeen}
       />
 
-      <label
-        htmlFor="consultant-review-attestation"
-        className={
-          "flex items-start gap-3 p-4 rounded-2xl border cursor-pointer transition-colors "
-          + (attestation
-            ? "bg-emerald-50 border-emerald-200"
-            : "bg-white border-stone-300 hover:bg-stone-50")
-        }
-      >
-        <input
-          id="consultant-review-attestation"
-          type="checkbox"
-          checked={attestation}
-          onChange={(e) => onAttestation(e.target.checked)}
-          className="mt-0.5 h-4 w-4 accent-sage-navy"
-        />
-        <span className="text-sm text-gray-800">
-          I have read this agreement and confirm the details are mine and
-          accurate.
-        </span>
-      </label>
+      <div>
+        <label
+          htmlFor="consultant-review-attestation"
+          className={
+            "flex items-start gap-3 p-4 rounded-2xl border transition-colors "
+            + (!previewSeen
+              ? "bg-stone-50 border-stone-200 cursor-not-allowed"
+              : attestation
+                ? "bg-emerald-50 border-emerald-200 cursor-pointer"
+                : "bg-white border-stone-300 hover:bg-stone-50 cursor-pointer")
+          }
+        >
+          <input
+            id="consultant-review-attestation"
+            type="checkbox"
+            checked={attestation}
+            disabled={!previewSeen}
+            onChange={(e) => onAttestation(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-sage-navy disabled:cursor-not-allowed"
+          />
+          <span
+            className={
+              "text-sm "
+              + (previewSeen ? "text-gray-800" : "text-gray-500")
+            }
+          >
+            I have read this agreement and confirm the details are mine and
+            accurate.
+          </span>
+        </label>
+        {!previewSeen && (
+          <p className="mt-2 ml-1 text-[11px] text-gray-500 inline-flex items-center gap-1">
+            <AlertCircle size={11} /> Please scroll through the full agreement
+            above to continue.
+          </p>
+        )}
+      </div>
 
       {AGREEMENT_SECTIONS.slice(0, -1).map((section, idx) => {
         const complete = isSectionComplete(section, form, reqs, chequeUploaded);
@@ -2089,9 +2365,9 @@ function FinalSignatureBlock({
           After reading this, I am formally signing this acknowledgement.
         </h3>
         <p className="text-sm text-gray-700 mt-1">
-          Draw your final signature here. This is your fresh attestation
-          that everything above matches what you intended and that you
-          are executing the agreement.
+          Upload (or draw) your final signature here. This is your fresh
+          attestation that everything above matches what you intended
+          and that you are executing the agreement.
         </p>
       </div>
 

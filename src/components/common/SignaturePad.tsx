@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { AlertCircle, PenLine, Upload as UploadIcon, X } from "lucide-react";
 import SignatureCanvas from "react-signature-canvas";
 
-const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
+const MAX_SIGNATURE_BYTES = 5 * 1024 * 1024;
 
 interface Props {
   /** Notified whenever the active signature data URL changes. Pass
@@ -22,15 +22,20 @@ interface Props {
 }
 
 /**
- * Draw-or-upload signature pad. Lifted out of /consultant/[appId]/sign
- * so the ERM approve-and-sign modal can reuse the same canvas + upload
- * UX rather than duplicating ~100 lines of JSX. Always emits a base64
- * data URL via {@link Props#onChange}; the parent decides what to do
- * with it (POST it, embed in a preview, etc.).
+ * Build N — upload-first signature input. The consultant lands in
+ * UPLOAD mode (drag/click an image of their signature) with a small
+ * "Or draw your signature instead" link revealing the canvas. Draw
+ * stays available but is the secondary path. Both modes emit a
+ * base64 data URL via {@link Props#onChange}; the parent decides
+ * what to do with it (POST it, embed in a preview, etc.).
  *
- * react-signature-canvas requires DOM measurements before it can render,
- * so the canvas is gated behind a "mounted" effect to avoid the
- * server-render / hydration mismatch.
+ * Backend normalisation re-encodes every signature -- drawn or
+ * uploaded, PNG or JPEG -- to a 190x76 PNG with a 96-DPI pHYs tag,
+ * so both paths render at the same physical size in the final PDF.
+ *
+ * react-signature-canvas requires DOM measurements before it can
+ * render, so the canvas is gated behind a "mounted" effect to avoid
+ * the server-render / hydration mismatch.
  */
 export default function SignaturePad({
   onChange,
@@ -38,7 +43,7 @@ export default function SignaturePad({
   height = 130,
   fileInputId = "sage-signature-upload",
 }: Props) {
-  const [method, setMethod] = useState<"draw" | "upload">("draw");
+  const [method, setMethod] = useState<"draw" | "upload">("upload");
   const [data, setData] = useState<string | null>(null);
   const [error, setError] = useState("");
   const [mounted, setMounted] = useState(false);
@@ -85,7 +90,7 @@ export default function SignaturePad({
       return;
     }
     if (file.size > MAX_SIGNATURE_BYTES) {
-      setError("File too large (max 2 MB).");
+      setError("File too large (max 5 MB).");
       return;
     }
     const reader = new FileReader();
@@ -104,42 +109,48 @@ export default function SignaturePad({
 
   return (
     <div className="space-y-2">
-      <div className="flex items-center justify-between">
-        <span className="block text-[11px] font-semibold text-gray-600">
-          Signature method
-        </span>
-        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1">
-          <button
-            type="button"
-            onClick={() => switchMethod("draw")}
-            disabled={disabled}
+      {method === "upload" ? (
+        <>
+          <label
+            htmlFor={fileInputId}
             className={
-              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed " +
-              (method === "draw"
-                ? "bg-sage-navy text-white shadow-sm"
-                : "bg-transparent text-gray-600 hover:text-sage-navy")
+              "block rounded-xl border-2 border-dashed bg-gray-50 px-4 py-6 text-center transition " +
+              (disabled
+                ? "border-gray-200 cursor-not-allowed"
+                : "border-gray-300 hover:border-sage-navy hover:bg-sage-navy/5 cursor-pointer")
             }
           >
-            <PenLine size={12} /> Draw
-          </button>
-          <button
-            type="button"
-            onClick={() => switchMethod("upload")}
-            disabled={disabled}
-            className={
-              "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed " +
-              (method === "upload"
-                ? "bg-sage-navy text-white shadow-sm"
-                : "bg-transparent text-gray-600 hover:text-sage-navy")
-            }
-          >
-            <UploadIcon size={12} /> Upload
-          </button>
-        </div>
-      </div>
-
-      {method === "draw" ? (
-        <div>
+            <UploadIcon size={20} className="mx-auto text-sage-navy mb-2" />
+            <p className="text-sm font-semibold text-gray-800">
+              Upload your signature
+            </p>
+            <p className="text-[11px] text-gray-500 mt-1">
+              PNG or JPG, max 5 MB. A transparent-background PNG looks
+              cleanest.
+            </p>
+            <input
+              ref={fileInputRef}
+              id={fileInputId}
+              type="file"
+              accept="image/png,image/jpeg,image/jpg"
+              disabled={disabled}
+              onChange={(e) => handleFile(e.target.files?.[0])}
+              className="hidden"
+            />
+          </label>
+          <div className="flex items-center justify-end">
+            <button
+              type="button"
+              onClick={() => switchMethod("draw")}
+              disabled={disabled}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-sage-navy disabled:opacity-50 cursor-pointer"
+            >
+              <PenLine size={11} /> Or draw your signature instead
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
           <div
             className="rounded-xl border border-gray-200 bg-white overflow-hidden"
             style={{ height }}
@@ -168,10 +179,15 @@ export default function SignaturePad({
               </div>
             )}
           </div>
-          <div className="mt-1.5 flex items-center justify-between">
-            <p className="text-[11px] text-gray-500">
-              Sign here with your mouse or finger.
-            </p>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={() => switchMethod("upload")}
+              disabled={disabled}
+              className="inline-flex items-center gap-1 text-[11px] font-semibold text-gray-500 hover:text-sage-navy disabled:opacity-50 cursor-pointer"
+            >
+              <UploadIcon size={11} /> Upload an image instead
+            </button>
             <button
               type="button"
               onClick={handleClearDrawn}
@@ -181,30 +197,7 @@ export default function SignaturePad({
               Clear &amp; re-sign
             </button>
           </div>
-        </div>
-      ) : (
-        <label
-          htmlFor={fileInputId}
-          className={
-            "block rounded-xl border-2 border-dashed bg-gray-50 px-4 py-5 text-center transition " +
-            (disabled
-              ? "border-gray-200 cursor-not-allowed"
-              : "border-gray-300 hover:border-sage-navy hover:bg-sage-navy/5 cursor-pointer")
-          }
-        >
-          <UploadIcon size={18} className="mx-auto text-gray-400 mb-1.5" />
-          <p className="text-sm font-semibold text-gray-700">Click to upload</p>
-          <p className="text-[11px] text-gray-500 mt-0.5">PNG / JPG, max 2 MB</p>
-          <input
-            ref={fileInputRef}
-            id={fileInputId}
-            type="file"
-            accept="image/png,image/jpeg,image/jpg"
-            disabled={disabled}
-            onChange={(e) => handleFile(e.target.files?.[0])}
-            className="hidden"
-          />
-        </label>
+        </>
       )}
 
       {error && (
