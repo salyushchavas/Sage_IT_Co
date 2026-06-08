@@ -336,20 +336,21 @@ export default function ConsultantWizardPage() {
     getConsultantApplicationView(appId)
       .then((data) => {
         if (cancelled) return;
-        if (data.status === "COMPLETED") {
-          router.replace("/consultant/dashboard");
-          return;
-        }
-        if (data.status === "VERIFIED" || data.status === "SIGNED") {
-          router.replace("/consultant/dashboard");
-          return;
-        }
         if (data.status === "CANCELLED" || data.status === "EXPIRED") {
           router.replace("/consultant/dashboard");
           return;
         }
-        const initial = buildInitialState(data);
+        // Build K — VERIFIED / SIGNED / UPDATED / COMPLETED render
+        // inline status screens on this route. The wizard scaffolding
+        // (auto-save, fields) doesn't run; the consultant sees a
+        // calm "sent for verification" / "accepted" copy with no
+        // PDF, no download, no edit affordance.
         setApp(data);
+        if (data.status === "VERIFIED" || data.status === "SIGNED"
+                || data.status === "UPDATED" || data.status === "COMPLETED") {
+          return;
+        }
+        const initial = buildInitialState(data);
         setForm(initial);
         lastSavedRef.current = { ...initial };
         setChequeUploaded(Boolean(data.chequePublicId));
@@ -602,13 +603,19 @@ export default function ConsultantWizardPage() {
       if (!form.finalSignature) {
         throw new Error("Please draw your final signature on the review step before submitting.");
       }
-      await signConsultantApplication(
+      const updated = await signConsultantApplication(
         appId,
         form.signedLegalName.trim(),
         form.signature,
         form.finalSignature,
       );
-      router.push("/consultant/dashboard");
+      // Build K — stay on this route and re-render as the inline
+      // "sent for verification" status screen. Dropping the redirect
+      // gives the consultant immediate, in-place feedback that the
+      // submit landed.
+      setApp(updated);
+      setSubmitting(false);
+      return;
     } catch (e) {
       // Parse the structured backend payload when present so we can
       // route back to the first incomplete section.
@@ -699,6 +706,21 @@ export default function ConsultantWizardPage() {
     );
   }
 
+  // Build K — post-submit experience is status-only. The wizard never
+  // mounts in these states; the consultant sees a calm confirmation
+  // screen with no PDF, no download, no edit affordance.
+  if (app.status === "VERIFIED" || app.status === "SIGNED"
+          || app.status === "UPDATED") {
+    return <ConsultantStatusScreen kind="sent" onSignOut={() => {
+      router.replace("/consultant/dashboard");
+    }} />;
+  }
+  if (app.status === "COMPLETED") {
+    return <ConsultantStatusScreen kind="accepted" onSignOut={() => {
+      router.replace("/consultant/dashboard");
+    }} />;
+  }
+
   return (
     <main className="min-h-screen bg-stone-50 pb-40">
       <meta name="robots" content="noindex,nofollow" />
@@ -744,6 +766,26 @@ export default function ConsultantWizardPage() {
           setCurrentStep(i);
         }}
       />
+
+      {app.status === "REVISION_REQUESTED" && app.currentRevisionRemarks && (
+        <div className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
+          <div className="rounded-2xl border border-sage-copper/40 bg-orange-50 px-5 py-4 flex items-start gap-3">
+            <AlertCircle size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
+            <div>
+              <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper-deep">
+                Sage IT requested changes
+              </p>
+              <p className="text-sm text-gray-800 mt-1 whitespace-pre-wrap leading-relaxed">
+                {app.currentRevisionRemarks}
+              </p>
+              <p className="text-[11px] text-gray-600 mt-2">
+                Update the highlighted fields below, then submit again to send
+                it back for verification.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
 
       <section className="max-w-5xl mx-auto px-4 sm:px-6 pt-6">
         {isReviewStep ? (
@@ -1427,6 +1469,76 @@ function SignaturePreviewBlock({ signature }: { signature: string | null }) {
         />
       </div>
     </div>
+  );
+}
+
+// ── Build K: Consultant status-only post-submit screens ──────
+
+/**
+ * Build K — replaces the post-submit redirect to /dashboard with an
+ * inline status screen. The consultant sees only state-driven copy
+ * (no PDF, no download) after submitting. Two variants:
+ *   - sent: VERIFIED / SIGNED / UPDATED
+ *   - accepted: COMPLETED
+ */
+function ConsultantStatusScreen({
+  kind,
+  onSignOut,
+}: {
+  kind: "sent" | "accepted";
+  onSignOut: () => void;
+}) {
+  const copy = kind === "sent"
+    ? {
+        eyebrow: "Submitted",
+        title: "Your agreement has been sent for verification.",
+        body: "We'll review it and update you here once it's accepted. There's nothing else you need to do right now.",
+      }
+    : {
+        eyebrow: "Accepted",
+        title: "Your agreement has been accepted.",
+        body: "Thank you. Your engagement is now in motion. Sage IT will be in touch with the next steps.",
+      };
+  return (
+    <main className="min-h-screen bg-stone-50">
+      <meta name="robots" content="noindex,nofollow" />
+      <header className="bg-sage-navy text-white">
+        <div className="max-w-3xl mx-auto px-6 py-10 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-bold uppercase tracking-widest text-sage-copper">
+              Sage IT Consultant Portal
+            </p>
+            <h1 className="font-serif text-3xl mt-2">Your agreement</h1>
+          </div>
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-white/30 hover:bg-white/10 transition-colors"
+          >
+            Back to dashboard
+          </button>
+        </div>
+      </header>
+      <section className="max-w-3xl mx-auto px-6 py-16">
+        <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-8">
+          <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
+            {copy.eyebrow}
+          </p>
+          <h2 className="font-serif text-2xl sm:text-3xl text-sage-navy mt-2">
+            {copy.title}
+          </h2>
+          <p className="text-sm text-gray-700 mt-4 leading-relaxed">
+            {copy.body}
+          </p>
+          {kind === "sent" && (
+            <p className="text-[11px] text-gray-500 mt-6 inline-flex items-center gap-1">
+              <Lock size={12} /> For your security, the signed agreement is held
+              in Sage IT's records and is not downloadable from this portal.
+            </p>
+          )}
+        </div>
+      </section>
+    </main>
   );
 }
 

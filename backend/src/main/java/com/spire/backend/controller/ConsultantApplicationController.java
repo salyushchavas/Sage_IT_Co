@@ -529,60 +529,24 @@ public class ConsultantApplicationController {
     }
 
     /**
-     * Stream the final signed PDF to the verified consultant. Mirrors
-     * the ERM streaming endpoint -- backend fetches from Cloudinary with
-     * credentials, the Cloudinary URL never reaches the client; frontend
-     * wraps the bytes in a blob URL. Only available for COMPLETED.
+     * Build K — the consultant PDF download endpoint is intentionally
+     * gone. Consultants never download or view the generated PDF; the
+     * post-submit experience is status-only. A 403 stub stays here so
+     * any cached frontend, bookmarked email, or stale link surfaces
+     * as a clear "no longer available" rather than a 404 (which would
+     * be confusing — the agreement does exist, the action does not).
      */
     @GetMapping("/api/consultant/applications/{appId}/pdf")
-    public ResponseEntity<byte[]> consultantDownloadPdf(
+    public ResponseEntity<ApiResponse<Map<String, String>>> consultantDownloadPdfRemoved(
             @PathVariable String appId,
-            @RequestParam(value = "disposition", required = false) String disposition,
             HttpServletRequest request) {
+        // Honour the email-scoped token guard so this can't be probed
+        // anonymously for existence.
         requireConsultantToken(appId, request);
-        ConsultantApplication app = consultantService.getByApplicationId(appId);
-        if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
-        }
-
-        // COMPLETED row → final PDF must exist. Re-sign on the fly
-        // from the deterministic public_id; ignore the stored
-        // {@code finalPdfUrl} since its embedded signature is
-        // per-upload and observed to 401 on later GET.
-        if (app.getFinalPdfPublicId() == null
-                && (app.getFinalPdfUrl() == null || app.getFinalPdfUrl().isBlank())) {
-            return ResponseEntity.notFound().build();
-        }
-        String publicId = app.getFinalPdfPublicId();
-        if (publicId == null || publicId.isBlank()) {
-            publicId = AgreementDocumentService.derivePublicId(appId);
-        }
-        String sourceUrl = agreementDocumentService.signedPdfUrl(
-                publicId, java.time.Duration.ofMinutes(5));
-
-        byte[] bytes;
-        try {
-            java.net.URLConnection conn = new java.net.URL(sourceUrl).openConnection();
-            conn.setConnectTimeout(30_000);
-            conn.setReadTimeout(30_000);
-            try (java.io.InputStream in = conn.getInputStream()) {
-                bytes = in.readAllBytes();
-            }
-        } catch (java.io.IOException e) {
-            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
-        }
-
-        String filename = AgreementDocumentService.buildPdfFilename(app);
-        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
-                ? "attachment"
-                : "inline";
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
-                .contentLength(bytes.length)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        dispositionMode + "; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-                .body(bytes);
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(
+                ApiResponse.error(
+                        "The consultant PDF download has been retired. "
+                                + "Check your dashboard for the current status."));
     }
 
     // ── Consultant-side (consultant-token gated, rate-limited) ──────
@@ -755,9 +719,11 @@ public class ConsultantApplicationController {
         }
         ConsultantApplication app = consultantService.getByApplicationId(appId);
         String status = app.getStatus();
+        // Build K — preview is reachable ONLY while the consultant can
+        // still edit / submit. Once they've signed (VERIFIED) or the
+        // ERM has approved (COMPLETED), there is no PDF view at all.
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
-                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
-                && !ConsultantApplication.Status.VERIFIED.name().equals(status)) {
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
         String primarySig = body == null ? null : body.primarySignatureBase64;
@@ -801,9 +767,11 @@ public class ConsultantApplicationController {
         }
         ConsultantApplication app = consultantService.getByApplicationId(appId);
         String status = app.getStatus();
+        // Build K — preview is reachable ONLY while the consultant can
+        // still edit / submit. Once they've signed (VERIFIED) or the
+        // ERM has approved (COMPLETED), there is no PDF view at all.
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
-                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
-                && !ConsultantApplication.Status.VERIFIED.name().equals(status)) {
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
         String primarySig = body == null ? null : body.primarySignatureBase64;
@@ -991,6 +959,11 @@ public class ConsultantApplicationController {
             r.technologyTrack = app.getTechnologyTrack();
             r.status = app.getStatus();
             String s = app.getStatus();
+            // Build K — post-submit states are status-only. The wizard
+            // is reachable solely in SUBMITTED / REVISION_REQUESTED;
+            // VERIFIED and COMPLETED have NO action (no view, no
+            // download). The dashboard renders the label as a passive
+            // pill in those states.
             if (ConsultantApplication.Status.SUBMITTED.name().equals(s)) {
                 r.statusLabel = "Awaiting your signature";
                 r.action = "SIGN";
@@ -1000,14 +973,14 @@ public class ConsultantApplicationController {
             } else if (ConsultantApplication.Status.UPDATED.name().equals(s)
                     || ConsultantApplication.Status.VERIFIED.name().equals(s)
                     || ConsultantApplication.Status.SIGNED.name().equals(s)) {
-                r.statusLabel = "Submitted — under review by Sage IT";
-                r.action = "VIEW";
+                r.statusLabel = "Sent for verification";
+                r.action = "NONE";
             } else if (ConsultantApplication.Status.COMPLETED.name().equals(s)) {
-                r.statusLabel = "Completed";
-                r.action = "DOWNLOAD";
+                r.statusLabel = "Accepted";
+                r.action = "NONE";
             } else {
                 r.statusLabel = s;
-                r.action = "VIEW";
+                r.action = "NONE";
             }
             r.createdAt = app.getCreatedAt() == null ? null : app.getCreatedAt().toString();
             r.updatedAt = app.getUpdatedAt() == null ? null : app.getUpdatedAt().toString();

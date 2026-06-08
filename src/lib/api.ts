@@ -4138,11 +4138,13 @@ export async function fetchErmPreviewPdfBlob(
 
 // ── Portal dashboard + PDF download ────────────────────────────
 
+// Build K — post-submit experience is status-only. SIGN +
+// REVIEW_AND_SIGN open the wizard; NONE means "show the status pill,
+// no button". DOWNLOAD and VIEW are intentionally gone.
 export type ConsultantPortalAction =
   | "SIGN"
   | "REVIEW_AND_SIGN"
-  | "VIEW"
-  | "DOWNLOAD";
+  | "NONE";
 
 export interface ConsultantAgreementSummary {
   appId: string;
@@ -4259,26 +4261,6 @@ export interface AgreementContent {
  */
 export async function fetchAgreementContent(applicationId: string) {
   return consultantFetch<AgreementContent>(applicationId, "/agreement-content");
-}
-
-/**
- * GET /api/consultant/applications/{appId}/pdf — backend-streamed PDF.
- * Returns the raw {@link Response} so the caller can call {@code .blob()}
- * and wrap it in a {@code URL.createObjectURL} blob URL (leak-proof
- * download / view). Only valid for COMPLETED applications.
- */
-export async function fetchConsultantPdfBlob(
-  applicationId: string,
-  disposition: "inline" | "attachment" = "attachment",
-): Promise<Response> {
-  const token = getConsultantToken();
-  if (!token) {
-    throw new Error("Verification required.");
-  }
-  return fetch(
-    `${BASE_URL}/api/consultant/applications/${applicationId}/pdf?disposition=${disposition}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
 }
 
 export async function getConsultantApplicationView(applicationId: string) {

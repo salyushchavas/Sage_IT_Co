@@ -991,24 +991,46 @@ public class EmailTemplateService {
     private void sendCompletedAgreementBody(
             ConsultantApplication application,
             List<EmailService.Attachment> attachments) {
-        String body = p("Hi,")
+        // Build K — separate sends. The ERM gets the PDF attachment as
+        // before. The consultant gets a plain, no-attachment "your
+        // agreement has been accepted" note so they know the loop is
+        // closed but never receive a downloadable copy. This mirrors
+        // the dashboard rule: post-submit the consultant sees status
+        // only, no PDF anywhere.
+        String ermBody = p("Hi,")
                 + p("The " + brandName() + " engagement agreement for "
                         + escape(safeName(application))
                         + " has been countersigned and is now complete. "
-                        + "A copy of the signed PDF is attached.")
+                        + "A copy of the signed PDF is attached for your records.")
                 + receipt(
                         "Application ID: " + application.getApplicationId(),
                         "Consultant: " + safeName(application),
                         "Signed: " + (application.getSignatureDate() == null
                                 ? "--"
                                 : application.getSignatureDate().toString()))
-                + muted("Please keep this email for your records.");
-        String subject = "Your Signed " + brandName() + " Agreement";
-        String wrapped = wrap("Your signed agreement", body);
+                + muted("Internal copy. The consultant has been notified separately "
+                        + "without an attachment per policy.");
+        String ermSubject = "Signed " + brandName() + " Agreement -- "
+                + safeName(application);
         emailService.sendEmail(
-                application.getConsultantEmail(), subject, wrapped, attachments);
+                agreementErmEmail, ermSubject,
+                wrap("Signed agreement (internal)", ermBody),
+                attachments);
+
+        String url = appUrl + "/consultant";
+        String consultantBody = p("Hi " + escape(firstName(application)) + ",")
+                + p("Good news -- your " + brandName() + " engagement agreement "
+                        + "has been accepted. Nothing else is needed from you.")
+                + p("You can sign back into your portal any time to see your "
+                        + "current status.")
+                + button("Open your portal", url)
+                + ctaFallback(url)
+                + muted("For your security, the signed PDF is held in Sage IT's "
+                        + "records and is not sent over email.");
         emailService.sendEmail(
-                agreementErmEmail, subject, wrapped, attachments);
+                application.getConsultantEmail(),
+                "Your " + brandName() + " Agreement has been accepted",
+                wrap("Agreement accepted", consultantBody));
     }
 
     /**

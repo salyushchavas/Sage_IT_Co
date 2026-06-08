@@ -6,9 +6,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Clock,
-  Download,
-  Eye,
   FileText,
+  Hourglass,
   Loader2,
   LogOut,
   PenLine,
@@ -18,24 +17,23 @@ import {
 import {
   clearConsultantToken,
   fetchConsultantAgreements,
-  fetchConsultantPdfBlob,
   getConsultantToken,
   type ConsultantAgreementSummary,
   type ConsultantPortalAction,
 } from "@/lib/api";
 
 /**
- * Consultant portal dashboard. Lists every actionable / in-flight /
- * completed agreement addressed to the verified email -- across every
- * ERM. Each row carries a status label + a single primary action
- * (Sign / Review & Sign / View / Download) derived server-side.
+ * Build K — consultant portal dashboard. Lists every agreement
+ * addressed to the verified email. SIGN + REVIEW_AND_SIGN rows route
+ * to the wizard; VERIFIED + COMPLETED rows show the status pill with
+ * NO action button (post-submit experience is status-only -- the
+ * consultant never views or downloads the generated PDF from here).
  */
 export default function ConsultantPortalDashboardPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<ConsultantAgreementSummary[]>([]);
   const [error, setError] = useState("");
-  const [downloadingId, setDownloadingId] = useState<string | null>(null);
 
   // Token guard + initial fetch ──────────────────────────────────
   useEffect(() => {
@@ -82,36 +80,10 @@ export default function ConsultantPortalDashboardPage() {
     router.replace("/consultant");
   };
 
-  const handleAction = async (item: ConsultantAgreementSummary) => {
-    if (item.action === "DOWNLOAD") {
-      setDownloadingId(item.appId);
-      try {
-        const res = await fetchConsultantPdfBlob(item.appId, "attachment");
-        if (!res.ok) {
-          throw new Error(`Download failed (${res.status})`);
-        }
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        const slug =
-          (item.technologyTrack || "").replace(/[^A-Za-z0-9]+/g, "-") ||
-          item.appId.slice(0, 8);
-        a.download = `SageITCO-Agreement_${slug}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Couldn't download.");
-      } finally {
-        setDownloadingId(null);
-      }
-      return;
-    }
-    // SIGN / REVIEW_AND_SIGN / VIEW all lead to the same per-app fill
-    // surface; the fill page decides between read-only and editable
-    // based on the application's status.
+  const handleAction = (item: ConsultantAgreementSummary) => {
+    // Build K — only SIGN / REVIEW_AND_SIGN are clickable. NONE rows
+    // (VERIFIED, COMPLETED) render the status pill only; no navigation.
+    if (item.action !== "SIGN" && item.action !== "REVIEW_AND_SIGN") return;
     router.push(`/consultant/${encodeURIComponent(item.appId)}/fill`);
   };
 
@@ -183,8 +155,7 @@ export default function ConsultantPortalDashboardPage() {
               <AgreementRow
                 key={item.appId}
                 item={item}
-                onAction={() => void handleAction(item)}
-                downloading={downloadingId === item.appId}
+                onAction={() => handleAction(item)}
               />
             ))}
           </ul>
@@ -197,13 +168,12 @@ export default function ConsultantPortalDashboardPage() {
 function AgreementRow({
   item,
   onAction,
-  downloading,
 }: {
   item: ConsultantAgreementSummary;
   onAction: () => void;
-  downloading: boolean;
 }) {
-  const tone = actionTone(item.action);
+  const tone = actionTone(item.action, item.status);
+  const clickable = item.action === "SIGN" || item.action === "REVIEW_AND_SIGN";
   return (
     <li className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
       <div className="flex-1 min-w-0">
@@ -233,27 +203,28 @@ function AgreementRow({
           </p>
         )}
       </div>
-      <button
-        type="button"
-        onClick={onAction}
-        disabled={downloading}
-        className={
-          "inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-md text-xs font-bold transition-colors shadow-sm shrink-0 disabled:opacity-50 disabled:cursor-not-allowed " +
-          tone.button
-        }
-      >
-        {downloading ? (
-          <Loader2 size={12} className="animate-spin" />
-        ) : (
-          tone.icon
-        )}
-        {tone.cta}
-      </button>
+      {clickable ? (
+        <button
+          type="button"
+          onClick={onAction}
+          className={
+            "inline-flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-md text-xs font-bold transition-colors shadow-sm shrink-0 " +
+            tone.button
+          }
+        >
+          {tone.icon}
+          {tone.cta}
+        </button>
+      ) : (
+        <p className="text-[11px] text-gray-500 max-w-[14rem] shrink-0">
+          {tone.passiveCopy}
+        </p>
+      )}
     </li>
   );
 }
 
-function actionTone(action: ConsultantPortalAction) {
+function actionTone(action: ConsultantPortalAction, status: string) {
   switch (action) {
     case "SIGN":
       return {
@@ -261,6 +232,7 @@ function actionTone(action: ConsultantPortalAction) {
         icon: <PenLine size={11} />,
         cta: "Sign agreement",
         button: "bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer",
+        passiveCopy: "",
       };
     case "REVIEW_AND_SIGN":
       return {
@@ -269,22 +241,31 @@ function actionTone(action: ConsultantPortalAction) {
         cta: "Review & re-sign",
         button:
           "bg-sage-copper text-white hover:bg-sage-copper-deep cursor-pointer",
+        passiveCopy: "",
       };
-    case "VIEW":
-      return {
-        badge: "bg-sage-navy/10 text-sage-navy",
-        icon: <Eye size={11} />,
-        cta: "View",
-        button:
-          "border border-gray-200 bg-white text-gray-700 hover:bg-gray-50 cursor-pointer",
-      };
-    case "DOWNLOAD":
-      return {
-        badge: "bg-emerald-100 text-emerald-800",
-        icon: <CheckCircle2 size={11} />,
-        cta: "Download signed copy",
-        button:
-          "bg-emerald-600 text-white hover:bg-emerald-700 cursor-pointer",
-      };
+    case "NONE":
+      if (status === "COMPLETED") {
+        return {
+          badge: "bg-emerald-100 text-emerald-800",
+          icon: <CheckCircle2 size={11} />,
+          cta: "",
+          button: "",
+          passiveCopy:
+            "Sage IT has accepted this agreement. No further action is required.",
+        };
+      }
+      return _SENT_FOR_VERIFICATION_TONE;
+    default:
+      return _SENT_FOR_VERIFICATION_TONE;
   }
 }
+
+const _SENT_FOR_VERIFICATION_TONE = {
+  badge: "bg-sage-navy/10 text-sage-navy",
+  icon: <Hourglass size={11} />,
+  cta: "",
+  button: "",
+  passiveCopy:
+    "Sent for verification. We'll update the status here once Sage IT has reviewed it.",
+};
+
