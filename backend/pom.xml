@@ -110,6 +110,18 @@
             <version>5.2.5</version>
         </dependency>
 
+        <!-- Build I: Apache PDFBox. Rasterises the consultant
+             review-step preview PDF page-by-page so the wizard can
+             show watermarked PNGs instead of a downloadable PDF.
+             Used only inside ConsultantApplicationController's
+             preview-images endpoint; never returned bytes to the
+             client, never embedded in the final stored PDF. -->
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.3</version>
+        </dependency>
+
         <!-- office-stamper engine (renamed from docx-stamper): runs
              ${placeholder} substitution against a Word template.
              Drives AgreementDocumentService.fillTemplate. v2.x lives

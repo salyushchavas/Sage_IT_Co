@@ -41,10 +41,19 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
+
+// Build I — PDFBox rasterises the consultant review preview into page
+// images so the wizard can show watermarked PNGs instead of a saveable
+// PDF.
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.rendering.PDFRenderer;
 
 /**
  * Two-stage agreement PDF generator.
@@ -154,6 +163,103 @@ public class AgreementDocumentService {
             safeDelete(filledDocx);
             safeDelete(pdf);
         }
+    }
+
+    /**
+     * Build I — rasterises {@code pdfBytes} (typically from
+     * {@link #renderPdfBytes}) into a list of PNG byte arrays, one per
+     * PDF page, each stamped with a diagonal, semi-transparent
+     * watermark of {@code viewerEmail} + a UTC timestamp +
+     * "CONFIDENTIAL". The wizard shows these as the consultant review
+     * preview so the document cannot be downloaded as a PDF and every
+     * screenshot or photograph carries the viewer's identity.
+     *
+     * Render DPI is intentionally modest (~110) so the bytes stay
+     * cheap to stream and the watermark stays legible.
+     */
+    public List<byte[]> renderWatermarkedPageImages(
+            byte[] pdfBytes, String viewerEmail) throws IOException {
+        if (pdfBytes == null || pdfBytes.length == 0) {
+            throw new IOException("Empty PDF bytes; nothing to rasterize.");
+        }
+        // PDFBox 3.x: use Loader.loadPDF (the old PDDocument.load is
+        // gone). The whole rasterisation happens inside a single
+        // try-with-resources so the document closes even on partial
+        // failure.
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDFRenderer renderer = new PDFRenderer(doc);
+            int pageCount = doc.getNumberOfPages();
+            String stamp = watermarkText(viewerEmail);
+            List<byte[]> pages = new ArrayList<>(pageCount);
+            for (int i = 0; i < pageCount; i++) {
+                BufferedImage page = renderer.renderImageWithDPI(i, 110f);
+                BufferedImage stamped = applyWatermark(page, stamp);
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ImageIO.write(stamped, "png", baos);
+                pages.add(baos.toByteArray());
+            }
+            log.info("Build I — rendered {} watermarked preview page(s) for {}",
+                    pageCount, viewerEmail);
+            return pages;
+        }
+    }
+
+    /** Build I — formats the watermark text shown on every page image. */
+    private static String watermarkText(String viewerEmail) {
+        String email = (viewerEmail == null || viewerEmail.isBlank())
+                ? "consultant" : viewerEmail.trim();
+        String ts = LocalDateTime.now(java.time.ZoneOffset.UTC)
+                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'"));
+        return "CONFIDENTIAL  •  " + email + "  •  " + ts;
+    }
+
+    /**
+     * Build I — bakes a repeating, diagonal, semi-transparent watermark
+     * across {@code page}. The rasterised page bytes are the only
+     * delivery vehicle, so once the watermark is on the image the
+     * consultant cannot strip it from the browser. A diagonal rotation
+     * + tiled layout makes a clean crop of the underlying text
+     * impractical.
+     */
+    private static BufferedImage applyWatermark(BufferedImage page, String text) {
+        int w = page.getWidth();
+        int h = page.getHeight();
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+            g.drawImage(page, 0, 0, null);
+            // Diagonal, repeating watermark. Rotated 30 deg counter-
+            // clockwise around the page centre.
+            g.setComposite(java.awt.AlphaComposite.getInstance(
+                    java.awt.AlphaComposite.SRC_OVER, 0.18f));
+            g.setColor(new java.awt.Color(0x1B, 0x2A, 0x5C)); // sage-navy
+            int fontSize = Math.max(18, Math.min(w, h) / 36);
+            g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, fontSize));
+            java.awt.geom.AffineTransform original = g.getTransform();
+            g.rotate(Math.toRadians(-30), w / 2.0, h / 2.0);
+            java.awt.FontMetrics fm = g.getFontMetrics();
+            int textW = fm.stringWidth(text);
+            int textH = fm.getHeight();
+            int stepX = textW + fontSize * 4;
+            int stepY = textH * 5;
+            // Cover the page generously past its bounds so the rotation
+            // doesn't leave bare corners.
+            int margin = Math.max(w, h) / 2;
+            for (int y = -margin; y < h + margin; y += stepY) {
+                int xShift = (y / stepY) % 2 == 0 ? 0 : stepX / 2;
+                for (int x = -margin + xShift; x < w + margin; x += stepX) {
+                    g.drawString(text, x, y);
+                }
+            }
+            g.setTransform(original);
+        } finally {
+            g.dispose();
+        }
+        return out;
     }
 
     /**
@@ -648,49 +754,94 @@ public class AgreementDocumentService {
      * returned so PDF generation never breaks.
      */
     private static byte[] normalizeSignaturePng(byte[] input) {
+        BufferedImage original = null;
         try {
-            BufferedImage original = ImageIO.read(new ByteArrayInputStream(input));
-            if (original == null) {
-                log.warn("Signature normalize: undecodable bytes ({}B), passing through",
-                        input.length);
-                return input;
-            }
-            int srcW = original.getWidth();
-            int srcH = original.getHeight();
+            original = ImageIO.read(new ByteArrayInputStream(input));
+        } catch (Exception decodeErr) {
+            log.warn("Signature normalize: decode failed ({}); falling back to blank",
+                    decodeErr.getMessage());
+        }
+        if (original == null) {
+            // Build I — DO NOT return raw bytes. Returning the raw
+            // bytes is what previously let a high-resolution sig sneak
+            // through and overflow its row, cascading into a blank
+            // page. A clean 1x1 transparent PNG produces a zero-area
+            // image -- the layout stays identical to "no signature".
+            log.warn("Signature normalize: undecodable bytes ({}B), substituting blank",
+                    input.length);
+            return blankSignaturePng();
+        }
+        int srcW = original.getWidth();
+        int srcH = original.getHeight();
 
-            // Fit inside the box, preserve aspect, never upscale.
-            double scale = Math.min(
-                    Math.min((double) SIGNATURE_BOX_WIDTH_PX / srcW,
-                             (double) SIGNATURE_BOX_HEIGHT_PX / srcH),
-                    1.0);
-            int targetW = Math.max(1, (int) Math.round(srcW * scale));
-            int targetH = Math.max(1, (int) Math.round(srcH * scale));
+        // Fit inside the box, preserve aspect, never upscale.
+        double scale = Math.min(
+                Math.min((double) SIGNATURE_BOX_WIDTH_PX / srcW,
+                         (double) SIGNATURE_BOX_HEIGHT_PX / srcH),
+                1.0);
+        int targetW = Math.max(1, (int) Math.round(srcW * scale));
+        int targetH = Math.max(1, (int) Math.round(srcH * scale));
 
-            BufferedImage resized = new BufferedImage(
-                    targetW, targetH, BufferedImage.TYPE_INT_ARGB);
-            Graphics2D g = resized.createGraphics();
-            try {
-                g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
-                        RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                g.setRenderingHint(RenderingHints.KEY_RENDERING,
-                        RenderingHints.VALUE_RENDER_QUALITY);
-                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                        RenderingHints.VALUE_ANTIALIAS_ON);
-                g.drawImage(original, 0, 0, targetW, targetH, null);
-            } finally {
-                g.dispose();
-            }
+        BufferedImage resized = new BufferedImage(
+                targetW, targetH, BufferedImage.TYPE_INT_ARGB);
+        Graphics2D g = resized.createGraphics();
+        try {
+            g.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                    RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            g.setRenderingHint(RenderingHints.KEY_RENDERING,
+                    RenderingHints.VALUE_RENDER_QUALITY);
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                    RenderingHints.VALUE_ANTIALIAS_ON);
+            g.drawImage(original, 0, 0, targetW, targetH, null);
+        } finally {
+            g.dispose();
+        }
 
+        try {
             byte[] out = encodePngWithDensity(resized);
-            // Operational evidence that the normalize fired on the real
-            // embedding path with the expected box + density.
             log.info("Signature normalized: in {}x{} -> out {}x{} px, density=96dpi, bytes {}->{}",
                     srcW, srcH, targetW, targetH, input.length, out.length);
             return out;
-        } catch (Exception e) {
-            log.warn("Signature normalize failed ({}); using original bytes",
-                    e.getMessage());
-            return input;
+        } catch (Exception encodeErr) {
+            // Build I — if the metadata-merge encode path fails (rare,
+            // but it has happened on Java 17 + certain ImageIO
+            // configurations), encode WITHOUT the pHYs chunk. The
+            // resulting image is still resized to the fixed box; the
+            // density defaults to 72 DPI which renders ~7×2.7 cm
+            // instead of ~5×2 cm -- larger than ideal, but BOUNDED, so
+            // the layout doesn't catastrophically overflow.
+            log.warn("Signature normalize: pHYs encode failed ({}); falling back to bare PNG at {}x{}",
+                    encodeErr.getMessage(), targetW, targetH);
+            try {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ImageIO.write(resized, "png", baos);
+                return baos.toByteArray();
+            } catch (Exception finalErr) {
+                log.error("Signature normalize: bare PNG encode also failed ({}); substituting blank",
+                        finalErr.getMessage());
+                return blankSignaturePng();
+            }
+        }
+    }
+
+    /** 1x1 transparent PNG bytes. Cached because the cost is the same every call. */
+    private static volatile byte[] BLANK_SIGNATURE_PNG;
+    private static byte[] blankSignaturePng() {
+        byte[] cached = BLANK_SIGNATURE_PNG;
+        if (cached != null) return cached;
+        BufferedImage blank = new BufferedImage(1, 1, BufferedImage.TYPE_INT_ARGB);
+        try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            ImageIO.write(blank, "png", baos);
+            cached = baos.toByteArray();
+            BLANK_SIGNATURE_PNG = cached;
+            return cached;
+        } catch (IOException e) {
+            // Shouldn't happen with TYPE_INT_ARGB + bundled PNG writer.
+            // If it does, hand back zero bytes -- docx-stamper treats
+            // those as an empty placeholder.
+            log.error("Blank signature PNG encode failed: {}", e.getMessage());
+            return new byte[0];
         }
     }
 
@@ -731,6 +882,125 @@ public class AgreementDocumentService {
 
     // ── Template fill ───────────────────────────────────────────────
 
+    /**
+     * Cached preprocessed template bytes. Built once on first render
+     * (cheap surgery: ~450 KB string replace) and reused for every
+     * subsequent render -- the surgery output is consultant-
+     * independent, so caching is safe.
+     *
+     * volatile so the lazy-init double-check publishes safely under
+     * the Spring container's worker threads.
+     */
+    private volatile byte[] preprocessedTemplateBytes;
+
+    /**
+     * Build I — strips structural artifacts that cause LibreOffice to
+     * emit blank intermediate pages around signature blocks. Each
+     * appendix boundary in the source template has the shape:
+     *
+     *     <w:tbl>...signature table...</w:tbl>
+     *     <w:p/>                                  <-- orphan empty paragraph
+     *     <w:p><w:r><w:br w:type="page"/></w:r></w:p>
+     *     <w:p>(next appendix heading)</w:p>
+     *
+     * When the signature table happens to land at page bottom, the
+     * orphan paragraph spills onto the next page; the explicit page
+     * break then forces ANOTHER new page, leaving the page in between
+     * blank. Removing the four orphan paragraphs (one per appendix
+     * boundary that follows a signature block) collapses the cascade
+     * so the appendix heading lands immediately on the next page.
+     *
+     * Done in-memory: the template lives on the classpath as a
+     * read-only resource, so we read it once, edit the
+     * {@code word/document.xml} entry, and repackage the ZIP into a
+     * byte[] cache.
+     */
+    private byte[] preprocessedTemplate() throws IOException {
+        byte[] cached = preprocessedTemplateBytes;
+        if (cached != null) return cached;
+        synchronized (this) {
+            cached = preprocessedTemplateBytes;
+            if (cached != null) return cached;
+            try (InputStream in = templateResource.getInputStream()) {
+                cached = applyTemplateSurgery(in.readAllBytes());
+            }
+            preprocessedTemplateBytes = cached;
+            log.info("Preprocessed agreement template cached ({} KB)",
+                    cached.length / 1024);
+            return cached;
+        }
+    }
+
+    /** Visible for direct testing; performs the ZIP-internal XML rewrite. */
+    static byte[] applyTemplateSurgery(byte[] templateBytes) throws IOException {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream(templateBytes.length);
+        try (java.util.zip.ZipInputStream zin =
+                     new java.util.zip.ZipInputStream(new ByteArrayInputStream(templateBytes));
+             java.util.zip.ZipOutputStream zout = new java.util.zip.ZipOutputStream(baos)) {
+            java.util.zip.ZipEntry entry;
+            byte[] buf = new byte[8192];
+            while ((entry = zin.getNextEntry()) != null) {
+                // Preserve compression mode + extra fields on each entry
+                // so the resulting .docx is still a valid OPC package.
+                java.util.zip.ZipEntry copy = new java.util.zip.ZipEntry(entry.getName());
+                zout.putNextEntry(copy);
+                if ("word/document.xml".equals(entry.getName())) {
+                    ByteArrayOutputStream entryBytes = new ByteArrayOutputStream();
+                    int n;
+                    while ((n = zin.read(buf)) > 0) entryBytes.write(buf, 0, n);
+                    String xml = entryBytes.toString(java.nio.charset.StandardCharsets.UTF_8);
+                    String rewritten = stripOrphanEmptyParagraphsBeforePageBreaks(xml);
+                    zout.write(rewritten.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                } else {
+                    int n;
+                    while ((n = zin.read(buf)) > 0) zout.write(buf, 0, n);
+                }
+                zout.closeEntry();
+            }
+        }
+        return baos.toByteArray();
+    }
+
+    /**
+     * Build I — string-level XML surgery. Removes exactly the orphan
+     * empty paragraph in the pattern
+     *
+     *   {@code </w:tbl><w:p .../><w:p ...><w:r><w:br w:type="page"/></w:r></w:p>}
+     *
+     * The match is intentionally narrow: self-closed empty paragraph
+     * (no inner runs) between a table end and a page-break paragraph.
+     * Anything more substantial is left alone so legitimate spacing
+     * between sections isn't disturbed.
+     */
+    static String stripOrphanEmptyParagraphsBeforePageBreaks(String xml) {
+        // Pattern: </w:tbl> then a self-closing empty paragraph
+        // <w:p ... rsidR="..." rsidRDefault="..." /> then a paragraph
+        // whose only run is <w:r><w:br w:type="page"/></w:r>.
+        // The empty paragraph is replaced by nothing; the page-break
+        // paragraph is kept intact.
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(</w:tbl>)\\s*<w:p\\b[^>]*/>\\s*(<w:p\\b[^>]*><w:r><w:br w:type=\"page\"/></w:r></w:p>)",
+                java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher m = p.matcher(xml);
+        StringBuilder sb = new StringBuilder(xml.length());
+        int removed = 0;
+        int lastEnd = 0;
+        while (m.find()) {
+            sb.append(xml, lastEnd, m.start());
+            sb.append(m.group(1));
+            sb.append(m.group(2));
+            lastEnd = m.end();
+            removed++;
+        }
+        sb.append(xml, lastEnd, xml.length());
+        if (removed > 0) {
+            log.info("Template surgery: removed {} orphan empty paragraph(s) "
+                    + "between signature tables and page-break paragraphs",
+                    removed);
+        }
+        return sb.toString();
+    }
+
     private Path fillTemplate(Map<String, Object> ctx) throws IOException {
         Path out = Files.createTempFile("agreement-", ".docx");
         // standard() -- includes the default preprocessors + comment
@@ -762,7 +1032,11 @@ public class AgreementDocumentService {
                 .unresolvedExpressionsDefaultValue("")
                 .setFailOnUnresolvedExpression(false);
         StreamStamper<?> stamper = OfficeStampers.docxStamper(cfg);
-        try (InputStream in = templateResource.getInputStream();
+        // Build I — feed the preprocessed template (orphan empty
+        // paragraphs stripped) instead of the raw classpath resource so
+        // every render benefits from the alignment surgery.
+        byte[] templateBytes = preprocessedTemplate();
+        try (InputStream in = new ByteArrayInputStream(templateBytes);
              OutputStream os = Files.newOutputStream(out)) {
             stamper.stamp(in, ctx, os);
         }

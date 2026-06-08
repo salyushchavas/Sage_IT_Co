@@ -780,6 +780,55 @@ public class ConsultantApplicationController {
     }
 
     /**
+     * Build I — locked-down consultant preview. Renders the agreement
+     * to PDF in-memory (no Cloudinary), then PDFBox-rasterises each
+     * page into a watermarked PNG (viewer email + UTC timestamp +
+     * CONFIDENTIAL baked in). Response is a JSON envelope of base64
+     * PNGs, one per page; the frontend renders them in a scrollable
+     * read-only view. The underlying PDF bytes never reach the
+     * client, so there is no downloadable file -- this replaces the
+     * old /preview-pdf for the consultant review step.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/preview-images")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> consultantPreviewImages(
+            @PathVariable String appId,
+            @RequestBody(required = false) PreviewPdfBody body,
+            HttpServletRequest request) {
+        String viewerEmail = requireConsultantToken(appId, request);
+        if (!rateLimiter.allowRead(clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        String status = app.getStatus();
+        if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
+                && !ConsultantApplication.Status.VERIFIED.name().equals(status)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        String primarySig = body == null ? null : body.primarySignatureBase64;
+        List<String> pages;
+        try {
+            byte[] pdfBytes = agreementDocumentService.renderPdfBytes(
+                    app, AgreementDocumentService.consultantPreviewOverrides(primarySig));
+            java.util.List<byte[]> images = agreementDocumentService
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail);
+            pages = new java.util.ArrayList<>(images.size());
+            for (byte[] png : images) {
+                pages.add(java.util.Base64.getEncoder().encodeToString(png));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Couldn't render the preview."));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pages", pages);
+        payload.put("pageCount", pages.size());
+        payload.put("viewerEmail", viewerEmail);
+        return ResponseEntity.ok(ApiResponse.success("Preview ready", payload));
+    }
+
+    /**
      * ERM-side inline preview before countersigning. Renders the PDF
      * at the consultant-submitted state (both consultant signatures
      * present, ERM signature blank) by streaming the bytes through

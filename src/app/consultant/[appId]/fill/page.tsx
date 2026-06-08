@@ -6,6 +6,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type ReactNode,
 } from "react";
 import { useParams, useRouter } from "next/navigation";
@@ -39,7 +40,7 @@ import {
 import {
   fetchAgreementContent,
   fetchAgreementTemplatePdfBlob,
-  fetchConsultantPreviewPdfBlob,
+  fetchConsultantPreviewImages,
   getConsultantApplicationView,
   getConsultantToken,
   saveConsultantFill,
@@ -1429,19 +1430,25 @@ function SignaturePreviewBlock({ signature }: { signature: string | null }) {
   );
 }
 
-// ── Build G: Consultant in-line PDF preview ──────────────────
+// ── Build I: Consultant locked-down preview (watermarked images) ──
 
 /**
- * Embeds the freshly-rendered agreement PDF at the review step. The
- * bytes come from POST /consultant/applications/{appId}/preview-pdf
- * (in-memory render; no Cloudinary fetch); the blob URL feeds an
- * iframe so the consultant scrolls through the actual document.
+ * Build I — replaces the Build G PDF iframe with a scrollable view of
+ * watermarked PNGs, one per page. The backend renders the agreement to
+ * PDF in memory, rasterises each page via PDFBox, bakes a watermark
+ * (CONFIDENTIAL + viewer email + UTC timestamp) on every page, and
+ * sends back base64 PNGs. No downloadable PDF leaves the server.
  *
- * Re-renders whenever the primary signature changes (the preview
- * needs to embed the latest drawn signature). Object URLs are
- * revoked when the component unmounts to keep memory bounded.
+ * UI lockdown (best-effort: screenshots can't be blocked in a
+ * browser, but every capture carries the viewer's identity):
+ *   - context menu disabled (right-click does nothing)
+ *   - text selection disabled (user-select:none)
+ *   - image drag disabled (draggable={false} + onDragStart prevented)
+ *
+ * Re-fetches whenever the primary signature changes (the preview
+ * embeds the latest drawn signature).
  */
-function ConsultantPdfPreview({
+function ConsultantImagesPreview({
   appId,
   primarySignature,
   onLoaded,
@@ -1450,25 +1457,21 @@ function ConsultantPdfPreview({
   primarySignature: string | null;
   onLoaded: () => void;
 }) {
-  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [pages, setPages] = useState<string[] | null>(null);
+  const [viewerEmail, setViewerEmail] = useState<string>("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    let createdUrl: string | null = null;
     setLoading(true);
     setError("");
     (async () => {
       try {
-        const res = await fetchConsultantPreviewPdfBlob(appId, primarySignature);
-        if (!res.ok) {
-          throw new Error(`Couldn't render the preview (${res.status})`);
-        }
-        const blob = await res.blob();
+        const data = await fetchConsultantPreviewImages(appId, primarySignature);
         if (cancelled) return;
-        createdUrl = URL.createObjectURL(blob);
-        setBlobUrl(createdUrl);
+        setPages(data.pages);
+        setViewerEmail(data.viewerEmail || "");
         onLoaded();
       } catch (e) {
         if (cancelled) return;
@@ -1479,7 +1482,6 @@ function ConsultantPdfPreview({
     })();
     return () => {
       cancelled = true;
-      if (createdUrl) URL.revokeObjectURL(createdUrl);
     };
   }, [appId, primarySignature, onLoaded]);
 
@@ -1492,25 +1494,43 @@ function ConsultantPdfPreview({
         <h3 className="font-serif text-lg text-sage-navy mt-0.5">
           This is the document that will be filed
         </h3>
+        <p className="text-[11px] text-gray-500 mt-1 inline-flex items-center gap-1">
+          <Lock size={11} /> This document is confidential and watermarked to you
+          {viewerEmail ? ` (${viewerEmail})` : ""}.
+        </p>
       </header>
-      <div className="bg-stone-100 p-4 min-h-[480px] flex items-stretch justify-stretch">
-        {loading && !blobUrl && (
-          <div className="flex-1 flex items-center justify-center text-xs text-gray-500">
+      <div
+        className="bg-stone-100 p-4 min-h-[480px] select-none"
+        style={{ userSelect: "none", WebkitUserSelect: "none" }}
+        onContextMenu={(e) => e.preventDefault()}
+      >
+        {loading && !pages && (
+          <div className="flex items-center justify-center text-xs text-gray-500 py-12">
             <Loader2 size={16} className="animate-spin mr-2" />
-            Generating preview…
+            Generating watermarked preview…
           </div>
         )}
         {error && (
-          <div className="flex-1 flex items-center justify-center text-xs text-red-700">
+          <div className="flex items-center justify-center text-xs text-red-700 py-12">
             <AlertCircle size={14} className="mr-1.5" /> {error}
           </div>
         )}
-        {blobUrl && !error && (
-          <iframe
-            src={blobUrl}
-            title="Agreement preview"
-            className="w-full h-[640px] rounded-md border border-stone-300 bg-white"
-          />
+        {pages && !error && (
+          <div className="max-h-[640px] overflow-y-auto space-y-3 pr-2">
+            {pages.map((b64, idx) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={idx}
+                src={`data:image/png;base64,${b64}`}
+                alt={`Agreement preview page ${idx + 1}`}
+                draggable={false}
+                onDragStart={(e) => e.preventDefault()}
+                onContextMenu={(e) => e.preventDefault()}
+                className="block w-full rounded-md border border-stone-300 bg-white shadow-sm pointer-events-auto"
+                style={{ userSelect: "none", WebkitUserDrag: "none" } as CSSProperties}
+              />
+            ))}
+          </div>
         )}
       </div>
     </section>
@@ -1684,7 +1704,7 @@ function ReviewStep({
         </p>
       </div>
 
-      <ConsultantPdfPreview
+      <ConsultantImagesPreview
         appId={appId}
         primarySignature={form.signature}
         onLoaded={onPreviewSeen}

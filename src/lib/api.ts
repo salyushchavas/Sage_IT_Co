@@ -4085,36 +4085,31 @@ export async function uploadConsultantCheque(
 }
 
 /**
- * Build G — consultant review-step preview. POST so the primary
- * signature (a base64 data URL) can ride in the body without leaking
- * into a URL. The backend renders the agreement directly to bytes and
- * streams them back; no Cloudinary round-trip. Returns a blob the
- * caller wraps as an object URL for the inline iframe.
+ * Build I — replaces the Build G PDF preview with a watermarked-images
+ * preview. The backend renders the agreement to PDF in-memory,
+ * rasterises each page via PDFBox, bakes a watermark
+ * (CONFIDENTIAL + viewer email + UTC timestamp) on every page, and
+ * returns a JSON envelope of base64 PNGs. No downloadable PDF leaves
+ * the server, removing the obvious save path for the consultant view.
  */
-export async function fetchConsultantPreviewPdfBlob(
+export interface ConsultantPreviewImages {
+  pages: string[];
+  pageCount: number;
+  viewerEmail: string;
+}
+
+export async function fetchConsultantPreviewImages(
   applicationId: string,
   primarySignatureBase64: string | null,
-): Promise<Response> {
-  const token = getConsultantToken();
-  const res = await fetch(
-    `${BASE_URL}/api/consultant/applications/${applicationId}/preview-pdf`,
+): Promise<ConsultantPreviewImages> {
+  return consultantFetch<ConsultantPreviewImages>(
+    applicationId,
+    "/preview-images",
     {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
       body: JSON.stringify({ primarySignatureBase64 }),
     },
   );
-  if (res.status === 401) {
-    clearConsultantToken();
-    if (typeof window !== "undefined") {
-      window.location.assign("/consultant");
-    }
-    throw new Error("Verification required.");
-  }
-  return res;
 }
 
 /**
