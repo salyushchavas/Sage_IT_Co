@@ -486,8 +486,6 @@ public class AgreementDocumentService {
         Function<String, String> nz = s -> s == null ? "" : s;
         // Build G — every consultant-facing date renders MM-DD-YYYY.
         Function<LocalDate, String> fd = d -> d == null ? "" : d.format(US_SHORT_DATE_FMT);
-        Function<LocalDateTime, String> fdt =
-                d -> d == null ? "" : d.toLocalDate().format(US_SHORT_DATE_FMT);
 
         // Header. The template's ${participantFullLegalName} and
         // ${primaryEmail} placeholders don't have 1:1 entity getters
@@ -573,7 +571,15 @@ public class AgreementDocumentService {
         c.put("ermName", nz.apply(app.getErmName()));
         c.put("ermTitle", nz.apply(app.getErmTitle()));
         c.put("ermEmail", resolveOwnerEmail(app));
-        c.put("signatureDate", fdt.apply(app.getSignatureDate()));
+        // Build Q — the consultant signs at the review step; the
+        // preview renders BEFORE submit, so the persisted
+        // signatureDate is still null. Fall back to today's date so
+        // "Date / Email: ${signatureDate} / ${primaryEmail}" never
+        // shows the email without a date. Once the consultant
+        // submits, signatureDate is persisted (see
+        // ConsultantApplicationService.consultantSubmit) and this
+        // fallback stops firing.
+        c.put("signatureDate", resolveSignatureDate(app));
 
         // Image placeholders -- separate entity fields. Each renders as
         // blank when the corresponding signature hasn't been captured.
@@ -608,9 +614,27 @@ public class AgreementDocumentService {
         v.put("ermName", nz.apply(app.getErmName()));
         v.put("ermTitle", nz.apply(app.getErmTitle()));
         v.put("ermEmail", resolveOwnerEmail(app));
-        v.put("signatureDate", app.getSignatureDate() == null
-                ? "" : app.getSignatureDate().toLocalDate().format(US_SHORT_DATE_FMT));
+        // Build Q — same today-fallback as buildContext so the
+        // inline-clause read view in the wizard shows the date in
+        // every signature block before submit.
+        v.put("signatureDate", resolveSignatureDate(app));
         return v;
+    }
+
+    /**
+     * Build Q — single source of truth for the consultant's
+     * signature date in every render path (final PDF, preview-images,
+     * inline-clause view). Returns the persisted {@code signatureDate}
+     * formatted MM-DD-YYYY when set, else today's date as a preview
+     * fallback. Empty only when there is no consultant signature on
+     * file AND no fallback context (i.e. a blank-template render).
+     */
+    private static String resolveSignatureDate(ConsultantApplication app) {
+        LocalDateTime stamped = app.getSignatureDate();
+        if (stamped != null) {
+            return stamped.toLocalDate().format(US_SHORT_DATE_FMT);
+        }
+        return LocalDate.now().format(US_SHORT_DATE_FMT);
     }
 
     /**

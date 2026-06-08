@@ -1086,6 +1086,14 @@ public class ConsultantApplicationService {
         app.setFinalSignatureImage(finalSignatureUrl);
         app.setFinalSignedAt(now);
         app.setFinalSigningIp(ip);
+        // Build Q — persist the signing date here so the
+        // ${signatureDate} placeholder in every consultant signature
+        // block ("Date / Email: ${signatureDate} / ${primaryEmail}")
+        // shows the actual moment of submission. ermApproveAndSign
+        // OVERWRITES this if/when the ERM countersigns later, which is
+        // the right behaviour: the final PDF's signature date should
+        // reflect the most recent signing action.
+        app.setSignatureDate(now);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
 
