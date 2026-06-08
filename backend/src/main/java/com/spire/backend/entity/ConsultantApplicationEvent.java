@@ -90,7 +90,9 @@ public class ConsultantApplicationEvent {
         // Phase C — ERM edits the consultant contact; super-admin
         // archives (soft-deletes) a cancelled application.
         CONSULTANT_CONTACT_UPDATED,
-        APPLICATION_ARCHIVED
+        APPLICATION_ARCHIVED,
+        // Build G — consultant uploads their Appendix 5 security cheque.
+        CHEQUE_UPLOADED
     }
 
     public enum ActorType {

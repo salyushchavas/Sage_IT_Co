@@ -1226,6 +1226,20 @@ public class DataSeeder implements CommandLineRunner {
                 {"final_signature_image TEXT", "final_signature_image"},
                 {"final_signed_at TIMESTAMP", "final_signed_at"},
                 {"final_signing_ip VARCHAR(64)", "final_signing_ip"},
+                // Build G — Appendix 3 ID type toggle (DL | STATE_ID)
+                // alongside the relabeled bg_driver_license column
+                // (now "ID number"). Plain VARCHAR (no enum mapping)
+                // so the ALTER stays additive.
+                {"id_type VARCHAR(16)", "id_type"},
+                // Build G — Appendix 5 security cheque upload. The
+                // bytes live in Cloudinary; only the public_id +
+                // timestamp + original content type are persisted.
+                // No NOT NULL constraint: the cheque is required
+                // only when Appendix 5 applies, gated in the submit
+                // validator.
+                {"cheque_public_id VARCHAR(255)", "cheque_public_id"},
+                {"cheque_uploaded_at TIMESTAMP", "cheque_uploaded_at"},
+                {"cheque_content_type VARCHAR(64)", "cheque_content_type"},
         };
         for (String[] col : columns) {
             try {

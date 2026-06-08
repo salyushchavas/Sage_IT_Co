@@ -391,6 +391,40 @@ public class ConsultantApplication {
     @Column(name = "final_signing_ip", length = 64)
     private String finalSigningIp;
 
+    // ── Build G: Appendix 3 ID type toggle ───────────────────────────
+    //
+    // Build G repurposes the existing bgDriverLicense column as the
+    // ID NUMBER (relabeled "Driver's License / State ID number") and
+    // adds idType to record which kind of ID. PDF renders the chosen
+    // type next to the number. Values: "DL" | "STATE_ID" -- stored
+    // as plain VARCHAR (no JPA enum mapping) so DataSeeder's
+    // ALTER ... ADD COLUMN IF NOT EXISTS migration shape stays
+    // simple.
+
+    @Column(name = "id_type", length = 16)
+    private String idType;
+
+    // ── Build G: Appendix 5 security cheque upload ───────────────────
+    //
+    // The consultant uploads a photo/PDF of the post-dated cheque(s)
+    // via POST /consultant/applications/{appId}/cheque. The bytes
+    // land in Cloudinary at {@code cheques/<appId>}
+    // (resource_type=image, type=authenticated) and the public_id
+    // is persisted here so the ERM can stream a re-signed inline
+    // view on demand. The cheque is NOT embedded in the generated
+    // agreement PDF in this build -- it's an out-of-band artifact
+    // surfaced through the ConsultantDetailView.
+
+    @Column(name = "cheque_public_id")
+    private String chequePublicId;
+
+    @Column(name = "cheque_uploaded_at")
+    private LocalDateTime chequeUploadedAt;
+
+    /** Original Content-Type of the uploaded cheque (image/* | application/pdf). */
+    @Column(name = "cheque_content_type", length = 64)
+    private String chequeContentType;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 

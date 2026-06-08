@@ -163,6 +163,11 @@ public class ConsultantApplicationService {
                 .requireAppendix4(Boolean.TRUE.equals(requireAppendix4))
                 .requireAppendix5(Boolean.TRUE.equals(requireAppendix5))
                 .requireSsn(Boolean.TRUE.equals(requireSsn))
+                // Build G — effective date is the creation date. Was
+                // formerly set at ermApproveAndSign; moving it here so
+                // the consultant sees a stable "Effective: MM-DD-YYYY"
+                // on the cover step and the PDF stamps it consistently.
+                .effectiveDate(now.toLocalDate())
                 .payload(payloadJson)
                 .status(ConsultantApplication.Status.SUBMITTED.name())
                 .expiresAt(now.plusDays(APPLICATION_TTL_DAYS))
@@ -1135,6 +1140,9 @@ public class ConsultantApplicationService {
         }
 
         LocalDateTime now = LocalDateTime.now();
+        // Build G — effectiveDate is set at create. Legacy rows that
+        // missed the create-time set still get a same-day backfill
+        // here so the closing block isn't blank.
         if (app.getEffectiveDate() == null) {
             app.setEffectiveDate(now.toLocalDate());
         }
@@ -1279,6 +1287,9 @@ public class ConsultantApplicationService {
         public String securityCheckAmount;
         public String securityCheckDates;
 
+        // Build G: Appendix 3 ID type toggle. Values: "DL" | "STATE_ID".
+        public String idType;
+
         // F-1 (guided signing foundation): per-section affirmations.
         // Boolean (object) so null = "not sent in this partial save"
         // and false = "explicitly unchecked" -- only non-null values
@@ -1332,6 +1343,7 @@ public class ConsultantApplicationService {
             if (securityCheckHolderName != null)  { app.setSecurityCheckHolderName(securityCheckHolderName); changed = true; }
             if (securityCheckAmount != null)      { app.setSecurityCheckAmount(securityCheckAmount); changed = true; }
             if (securityCheckDates != null)       { app.setSecurityCheckDates(securityCheckDates); changed = true; }
+            if (idType != null)                   { app.setIdType(idType); changed = true; }
             // F-1 affirmation flags. Null skips, anything else writes through.
             if (affirmedMainAgreement != null)    { app.setAffirmedMainAgreement(affirmedMainAgreement); changed = true; }
             if (affirmedExhibitA != null)         { app.setAffirmedExhibitA(affirmedExhibitA); changed = true; }
@@ -1384,6 +1396,7 @@ public class ConsultantApplicationService {
             if (securityCheckHolderName != null) names.add("securityCheckHolderName");
             if (securityCheckAmount != null) names.add("securityCheckAmount");
             if (securityCheckDates != null) names.add("securityCheckDates");
+            if (idType != null) names.add("idType");
             if (affirmedMainAgreement != null) names.add("affirmedMainAgreement");
             if (affirmedExhibitA != null) names.add("affirmedExhibitA");
             if (affirmedExhibitB != null) names.add("affirmedExhibitB");
@@ -1395,6 +1408,98 @@ public class ConsultantApplicationService {
             return names;
         }
     }
+
+    // ── Build G: Appendix 5 security cheque upload ───────────────────
+
+    /** Hard upper bound; matches Spring's {@code spring.servlet.multipart.max-file-size}. */
+    private static final long MAX_CHEQUE_BYTES = 10L * 1024L * 1024L;
+
+    /**
+     * Persists the consultant's Appendix 5 security cheque. Uploads
+     * the bytes to Cloudinary at {@code cheques/<appId>}
+     * (type=authenticated; resource_type=auto so PDFs and JPEGs both
+     * land cleanly) and records the public_id + content type on the
+     * row. Subsequent uploads overwrite. Audit CHEQUE_UPLOADED.
+     */
+    @Transactional
+    public ConsultantApplication uploadCheque(
+            String applicationId,
+            byte[] bytes,
+            String contentType,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("Cheque file is empty.");
+        }
+        if (bytes.length > MAX_CHEQUE_BYTES) {
+            throw new IllegalArgumentException(
+                    "Cheque file is too large (>10 MB).");
+        }
+        String normalisedType = contentType == null ? "" : contentType.toLowerCase();
+        boolean isImage = normalisedType.startsWith("image/");
+        boolean isPdf = normalisedType.equals("application/pdf");
+        if (!isImage && !isPdf) {
+            throw new IllegalArgumentException(
+                    "Cheque must be an image (JPG/PNG/HEIC) or PDF.");
+        }
+        String publicId = "cheques/" + applicationId;
+        try {
+            cloudinary.uploader().upload(bytes,
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "public_id", publicId,
+                            // 'auto' picks image vs raw based on content;
+                            // both flavours can be re-fetched via signedUrl
+                            // by passing the right resourceType.
+                            "resource_type", isPdf ? "raw" : "image",
+                            "type", "authenticated",
+                            "overwrite", true));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(
+                    "Couldn't store cheque: " + e.getMessage(), e);
+        }
+        app.setChequePublicId(publicId);
+        app.setChequeContentType(normalisedType);
+        app.setChequeUploadedAt(LocalDateTime.now());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CHEQUE_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("publicId", publicId,
+                        "contentType", normalisedType,
+                        "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /**
+     * Streams the bytes of a previously-uploaded cheque. Re-signs the
+     * delivery URL on every call (the per-upload stored URL 401s
+     * later -- same pattern as the final PDF). Returns null when no
+     * cheque has been uploaded yet.
+     */
+    public ChequeBytes fetchChequeBytes(String applicationId) throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        String publicId = app.getChequePublicId();
+        if (publicId == null || publicId.isBlank()) return null;
+        boolean isPdf = "application/pdf".equalsIgnoreCase(app.getChequeContentType());
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
+        java.net.URLConnection conn = new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (java.io.InputStream in = conn.getInputStream()) {
+            byte[] bytes = in.readAllBytes();
+            return new ChequeBytes(bytes, app.getChequeContentType());
+        }
+    }
+
+    /** Carries the cheque bytes + their original content-type for the controller's stream. */
+    public record ChequeBytes(byte[] bytes, String contentType) {}
 
     /**
      * Decodes a data:image/...;base64,... data URL and pushes the
@@ -1658,7 +1763,8 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "achDebitAmounts", app.getAchDebitAmounts());
         }
 
-        // Appendix 3 -- background check (SSN gated by require_ssn).
+        // Appendix 3 -- background check (SSN gated by require_ssn,
+        // idType + ID number always required when the section is active).
         boolean app3Required = Boolean.TRUE.equals(app.getRequireAppendix3());
         boolean app3Active = app3Required || isAppendix3Touched(app);
         if (app3Active) {
@@ -1666,6 +1772,10 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
             addIfBlank(missing, "bgCurrentAddress", app.getBgCurrentAddress());
             if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
+            String t = app.getIdType();
+            if (t == null || (!"DL".equals(t) && !"STATE_ID".equals(t))) {
+                missing.add("idType");
+            }
             addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
             if (Boolean.TRUE.equals(app.getRequireSsn())) {
                 addIfBlank(missing, "bgFullSsn", app.getBgFullSsn());
@@ -1682,7 +1792,7 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());
         }
 
-        // Appendix 5 -- security check.
+        // Appendix 5 -- security check (cheque upload required when active).
         boolean app5Required = Boolean.TRUE.equals(app.getRequireAppendix5());
         if (app5Required || isAppendix5Touched(app)) {
             addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
@@ -1691,6 +1801,32 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
             addIfBlank(missing, "securityCheckAmount", app.getSecurityCheckAmount());
             addIfBlank(missing, "securityCheckDates", app.getSecurityCheckDates());
+            // Cheque file is required when Appendix 5 applies. The
+            // wizard uploads it via POST /cheque before submit; the
+            // entity holds the public_id and content type.
+            if (app.getChequePublicId() == null || app.getChequePublicId().isBlank()) {
+                missing.add("chequeUpload");
+            }
+        }
+
+        // Build G strict format checks. Only enforced WHEN the field is
+        // effectively required (i.e. already in `missing`-checking scope);
+        // an unfilled optional field doesn't need a format check.
+        if (app2Required || isAppendix2Touched(app)) {
+            if (nonBlank(app.getAchRoutingNumber())
+                    && !app.getAchRoutingNumber().replaceAll("\\D", "").matches("\\d{9}")) {
+                missing.add("achRoutingNumber");
+            }
+            if (nonBlank(app.getAchAccountNumber())
+                    && !app.getAchAccountNumber().replaceAll("\\D", "").matches("\\d{10}")) {
+                missing.add("achAccountNumber");
+            }
+        }
+        if (app3Active && Boolean.TRUE.equals(app.getRequireSsn())) {
+            if (nonBlank(app.getBgFullSsn())
+                    && !app.getBgFullSsn().matches("\\d{3}-\\d{2}-\\d{4}")) {
+                missing.add("bgFullSsn");
+            }
         }
 
         return missing;

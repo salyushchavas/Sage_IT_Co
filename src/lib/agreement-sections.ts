@@ -28,7 +28,14 @@ export type FieldType =
   | "date"
   | "ssn"
   | "routing"
-  | "account";
+  | "account"
+  // Build G: a 2-button toggle for "Driver's License" vs "State ID"
+  // sitting next to the ID-number input in Appendix 3.
+  | "id-type"
+  // Build G: file upload tile (image or PDF) for the Appendix 5
+  // security cheque. Bytes upload via a separate endpoint; the
+  // wizard tracks "uploaded ✓" state, not a value string.
+  | "file";
 
 export interface SectionField {
   /**
@@ -411,8 +418,14 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         placeholder: "XXX-XX-XXXX",
       },
       {
+        key: "idType",
+        label: "ID type",
+        type: "id-type",
+        required: true,
+      },
+      {
         key: "bgDriverLicense",
-        label: "Driver's license number",
+        label: "Driver's License / State ID number",
         type: "text",
         required: true,
         sensitive: true,
@@ -519,6 +532,13 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "Check date(s)",
         type: "text",
         required: true,
+      },
+      {
+        key: "chequeUpload",
+        label: "Upload your security cheque",
+        type: "file",
+        required: true,
+        help: "Photo or PDF of the post-dated cheque, ≤10 MB. Stored privately; visible only to Sage IT.",
       },
     ],
     requiresSignature: false,

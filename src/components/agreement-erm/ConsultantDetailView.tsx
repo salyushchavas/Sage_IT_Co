@@ -29,6 +29,8 @@ import {
   ermRequestRevision,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
+  fetchAgreementChequeBlob,
+  fetchErmPreviewPdfBlob,
   fetchMe,
   resendConsultantInvite,
   updateConsultantContact,
@@ -119,7 +121,8 @@ const SECTIONS: readonly SectionDef[] = [
       { key: "bgCurrentAddress", label: "Current address", wide: true },
       { key: "bgDateOfBirth", label: "Date of birth" },
       { key: "bgFullSsn", label: "Full SSN", pii: true },
-      { key: "bgDriverLicense", label: "Driver's license", pii: true },
+      { key: "idType", label: "ID type" },
+      { key: "bgDriverLicense", label: "Driver's License / State ID", pii: true },
     ],
   },
   {
@@ -270,6 +273,8 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
       />
 
       <ErmFilledCard app={app} />
+
+      {status === "VERIFIED" && <ErmPdfPreview appId={app.applicationId} />}
 
       <ConsultantSections app={app} />
 
@@ -966,7 +971,185 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
       {SECTIONS.map((section) => (
         <ConsultantSectionCard key={section.id} section={section} app={app} />
       ))}
+      <SecurityChequeCard app={app} />
     </div>
+  );
+}
+
+/**
+ * Build G — inline preview of the consultant-signed agreement before
+ * the ERM countersigns. Renders the PDF server-side from current
+ * entity data (consultant signatures embedded, ERM blank); bytes
+ * stream through {@link fetchErmPreviewPdfBlob} → blob URL → iframe.
+ * No Cloudinary fetch -- the stored final PDF doesn't exist yet.
+ */
+function ErmPdfPreview({ appId }: { appId: string }) {
+  const [blobUrl, setBlobUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    let createdUrl: string | null = null;
+    setLoading(true);
+    setError("");
+    (async () => {
+      try {
+        const res = await fetchErmPreviewPdfBlob(appId);
+        if (!res.ok) {
+          throw new Error(`Couldn't render the preview (${res.status})`);
+        }
+        const blob = await res.blob();
+        if (cancelled) return;
+        createdUrl = URL.createObjectURL(blob);
+        setBlobUrl(createdUrl);
+      } catch (e) {
+        if (cancelled) return;
+        setError(e instanceof Error ? e.message : "Couldn't render the preview.");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (createdUrl) URL.revokeObjectURL(createdUrl);
+    };
+  }, [appId]);
+
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+      <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
+        <h3 className="font-serif text-lg text-gray-900">
+          Consultant-signed PDF preview
+        </h3>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          Read this before countersigning. Streamed in-memory; not stored.
+        </p>
+      </header>
+      <div className="bg-stone-100 p-4 min-h-[480px] flex items-stretch justify-stretch">
+        {loading && !blobUrl && (
+          <div className="flex-1 flex items-center justify-center text-xs text-gray-500">
+            <Loader2 size={16} className="animate-spin mr-2" />
+            Generating preview…
+          </div>
+        )}
+        {error && (
+          <div className="flex-1 flex items-center justify-center text-xs text-red-700">
+            <AlertCircle size={14} className="mr-1.5" /> {error}
+          </div>
+        )}
+        {blobUrl && !error && (
+          <iframe
+            src={blobUrl}
+            title="Consultant-signed agreement preview"
+            className="w-full h-[640px] rounded-md border border-stone-300 bg-white"
+          />
+        )}
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Build G — inline view + download of the consultant's Appendix 5
+ * cheque. Bytes are streamed through the backend (re-signs the
+ * Cloudinary URL each call), wrapped in a blob URL for the open/
+ * download action -- the raw Cloudinary URL never reaches the DOM.
+ */
+function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
+  const [busy, setBusy] = useState<"view" | "download" | null>(null);
+  const [error, setError] = useState("");
+  const uploaded = Boolean(app.chequePublicId);
+
+  const handleAction = async (mode: "view" | "download") => {
+    setBusy(mode);
+    setError("");
+    try {
+      const res = await fetchAgreementChequeBlob(
+        app.applicationId,
+        mode === "download" ? "attachment" : "inline",
+      );
+      if (!res.ok) {
+        throw new Error(`Couldn't fetch the cheque (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      if (mode === "view") {
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        const ext = blob.type === "application/pdf" ? "pdf" : "img";
+        a.download = `SageITCO-Cheque_${app.applicationId}.${ext}`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't fetch the cheque.");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+      <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100 flex items-start justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="font-serif text-lg text-gray-900">Security cheque</h3>
+          <p className="text-[11px] text-gray-500 mt-0.5">
+            Build G — the post-dated cheque the consultant uploaded for Appendix 5.
+          </p>
+        </div>
+        <span
+          className={
+            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
+            (uploaded
+              ? "bg-emerald-100 text-emerald-800"
+              : "bg-stone-200 text-gray-700")
+          }
+        >
+          {uploaded ? "Uploaded" : "Not uploaded"}
+        </span>
+      </header>
+      <div className="px-5 sm:px-6 py-4 space-y-2">
+        {!uploaded ? (
+          <p className="text-xs text-gray-600">
+            The consultant has not uploaded their cheque yet.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => handleAction("view")}
+                disabled={busy !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                View inline
+              </button>
+              <button
+                type="button"
+                onClick={() => handleAction("download")}
+                disabled={busy !== null}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-white text-sage-navy border border-stone-300 hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+              >
+                Download
+              </button>
+              {app.chequeUploadedAt && (
+                <span className="text-[10px] text-gray-500">
+                  Uploaded {new Date(app.chequeUploadedAt).toLocaleString()}
+                </span>
+              )}
+            </div>
+            {error && (
+              <p className="text-[11px] text-red-600">{error}</p>
+            )}
+          </>
+        )}
+      </div>
+    </section>
   );
 }
 

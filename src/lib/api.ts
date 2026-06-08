@@ -3342,6 +3342,13 @@ export interface ConsultantApplication {
   finalSignatureImage?: string | null;
   finalSignedAt?: string | null;
   finalSigningIp?: string | null;
+  // Build G — Appendix 3 ID type toggle. "DL" | "STATE_ID".
+  idType?: string | null;
+  // Build G — Appendix 5 security cheque upload. The public_id is
+  // persisted; the wizard treats a non-null value as "uploaded".
+  chequePublicId?: string | null;
+  chequeUploadedAt?: string | null;
+  chequeContentType?: string | null;
 }
 
 /**
@@ -3387,6 +3394,8 @@ export interface ConsultantFillPayload {
   securityCheckHolderName?: string;
   securityCheckAmount?: string;
   securityCheckDates?: string;
+  // Build G — Appendix 3 ID type toggle ("DL" | "STATE_ID").
+  idType?: string;
   // F-1 affirmation booleans -- the wizard sends these as the
   // consultant ticks each section's "I have read and understood"
   // checkbox. Backend treats null as "not sent" (partial save).
@@ -3856,6 +3865,31 @@ export async function fetchAgreementPdfBlob(
   return res;
 }
 
+/**
+ * Build G — streams the consultant's Appendix 5 security cheque to the
+ * ERM. Mirrors {@link fetchAgreementPdfBlob}'s session handling. The
+ * response body is the cheque file (image or PDF) -- the Content-Type
+ * header tells the caller which.
+ */
+export async function fetchAgreementChequeBlob(
+  applicationId: string,
+  disposition: "inline" | "attachment" = "inline",
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-erm/applications/${applicationId}/cheque?disposition=${disposition}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
+}
+
 // ── Consultant portal (email-scoped session) ───────────────────
 //
 // The portal phase replaces the per-appId Phase D gate. A single
@@ -3998,6 +4032,113 @@ async function consultantFetch<T>(
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
   return body.data;
+}
+
+/**
+ * Build G — multipart POST helper: the standard {@link consultantFetch}
+ * forces application/json. This wrapper attaches the consultant token
+ * but lets the browser set the multipart Content-Type with boundary.
+ */
+async function consultantMultipartFetch(
+  applicationId: string,
+  path: string,
+  formData: FormData,
+): Promise<void> {
+  const token = getConsultantToken();
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}${path}`,
+    {
+      method: "POST",
+      headers: token ? { Authorization: `Bearer ${token}` } : {},
+      body: formData,
+    },
+  );
+  if (res.status === 401) {
+    clearConsultantToken();
+    if (typeof window !== "undefined") {
+      window.location.assign("/consultant");
+    }
+    throw new Error("Verification required.");
+  }
+  if (res.status === 429) {
+    throw new Error("Too many requests. Try again in a minute.");
+  }
+  const body = await readApiResponse<unknown>(res);
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Request failed (${res.status})`);
+  }
+}
+
+/**
+ * Build G — uploads the Appendix 5 security cheque. The backend stores
+ * the bytes in Cloudinary and persists the public_id on the row; the
+ * wizard treats {@link ConsultantApplication.chequePublicId} as the
+ * "uploaded ✓" signal.
+ */
+export async function uploadConsultantCheque(
+  applicationId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, "/cheque", form);
+}
+
+/**
+ * Build G — consultant review-step preview. POST so the primary
+ * signature (a base64 data URL) can ride in the body without leaking
+ * into a URL. The backend renders the agreement directly to bytes and
+ * streams them back; no Cloudinary round-trip. Returns a blob the
+ * caller wraps as an object URL for the inline iframe.
+ */
+export async function fetchConsultantPreviewPdfBlob(
+  applicationId: string,
+  primarySignatureBase64: string | null,
+): Promise<Response> {
+  const token = getConsultantToken();
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/preview-pdf`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ primarySignatureBase64 }),
+    },
+  );
+  if (res.status === 401) {
+    clearConsultantToken();
+    if (typeof window !== "undefined") {
+      window.location.assign("/consultant");
+    }
+    throw new Error("Verification required.");
+  }
+  return res;
+}
+
+/**
+ * Build G — ERM inline preview of the consultant-signed agreement
+ * before countersigning. Streams the bytes server-side; no Cloudinary
+ * round-trip. Same session handling as
+ * {@link fetchAgreementPdfBlob}.
+ */
+export async function fetchErmPreviewPdfBlob(
+  applicationId: string,
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-erm/applications/${applicationId}/preview-pdf`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
 }
 
 // ── Portal dashboard + PDF download ────────────────────────────

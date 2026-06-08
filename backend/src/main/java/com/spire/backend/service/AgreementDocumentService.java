@@ -75,6 +75,11 @@ public class AgreementDocumentService {
     private static final DateTimeFormatter DATE_FMT =
             DateTimeFormatter.ofPattern("MMMM d, yyyy");
 
+    /** Build G — US short date used wherever the consultant sees a
+     *  date in the wizard / cover read-back / PDF date columns. */
+    private static final DateTimeFormatter US_SHORT_DATE_FMT =
+            DateTimeFormatter.ofPattern("MM-dd-yyyy");
+
     /** LibreOffice conversion timeout. 60s is comfortably above the
      *  observed ~3-8s cold-start range on Railway's containers. */
     private static final long LIBREOFFICE_TIMEOUT_SECONDS = 60L;
@@ -107,19 +112,73 @@ public class AgreementDocumentService {
     public record PdfUploadResult(String secureUrl, String publicId, byte[] bytes) {}
 
     public PdfUploadResult generateAgreementPdf(ConsultantApplication app) throws Exception {
+        byte[] bytes = renderPdfBytes(app, null);
+        PdfUploadResult uploaded = uploadBytesToCloudinary(bytes, app.getApplicationId());
+        return new PdfUploadResult(uploaded.secureUrl(), uploaded.publicId(), bytes);
+    }
+
+    /**
+     * Build G — pure render path: DOCX → LibreOffice → bytes. Does NOT
+     * upload to Cloudinary. Used by:
+     *   - {@link #generateAgreementPdf} for the final stored PDF
+     *     (caller uploads the returned bytes).
+     *   - {@code /preview-pdf} endpoints for the consultant + ERM
+     *     in-place previews. Previews stream the bytes directly to
+     *     the browser, so no Cloudinary round-trip happens.
+     *
+     * The optional {@code overrides} swap individual context values
+     * before stamping. The preview endpoints use this to:
+     *   - inject a draft primary signature from a data: URL when it
+     *     hasn't been uploaded yet (consultant preview at the
+     *     review step), or
+     *   - blank out signatures that shouldn't appear yet (ERM
+     *     preview hides the ERM signature; consultant preview
+     *     hides final + ERM).
+     *
+     * Every signature variant runs through {@link #normalizeSignaturePng}
+     * via {@link #buildImage} or {@link #buildImageFromDataUrl} so
+     * previews and finals are sized identically.
+     */
+    public byte[] renderPdfBytes(
+            ConsultantApplication app,
+            ContextOverrides overrides) throws Exception {
         Map<String, Object> ctx = buildContext(app);
+        if (overrides != null) overrides.apply(ctx, this);
         Path filledDocx = null;
         Path pdf = null;
         try {
             filledDocx = fillTemplate(ctx);
             pdf = convertToPdf(filledDocx);
-            byte[] bytes = Files.readAllBytes(pdf);
-            PdfUploadResult uploaded = uploadToCloudinary(pdf, app.getApplicationId());
-            return new PdfUploadResult(uploaded.secureUrl(), uploaded.publicId(), bytes);
+            return Files.readAllBytes(pdf);
         } finally {
             safeDelete(filledDocx);
             safeDelete(pdf);
         }
+    }
+
+    /**
+     * Build G — applied after {@link #buildContext} to override or
+     * blank specific signature slots for preview renders. The two
+     * concrete subclasses live as factory methods below.
+     */
+    public interface ContextOverrides {
+        void apply(Map<String, Object> ctx, AgreementDocumentService svc);
+    }
+
+    /** Consultant preview: primary signature from a data: URL; final + ERM blank. */
+    public static ContextOverrides consultantPreviewOverrides(String primarySignatureDataUrl) {
+        return (ctx, svc) -> {
+            if (primarySignatureDataUrl != null && !primarySignatureDataUrl.isBlank()) {
+                ctx.put("signatureImage", svc.buildImageFromDataUrl(primarySignatureDataUrl));
+            }
+            ctx.put("finalSignatureImage", "");
+            ctx.put("ermSignatureImage", "");
+        };
+    }
+
+    /** ERM preview: consultant signatures from Cloudinary (re-fetched); ERM blank. */
+    public static ContextOverrides ermPreviewOverrides() {
+        return (ctx, svc) -> ctx.put("ermSignatureImage", "");
     }
 
     /**
@@ -297,6 +356,14 @@ public class AgreementDocumentService {
      * global env value when the owner can't be resolved (e.g. a legacy
      * row with no owner).
      */
+    /** Build G — maps the ID-type code to the consultant-facing label. */
+    static String idTypeLabel(String code) {
+        if (code == null) return "";
+        if ("DL".equals(code)) return "Driver's License";
+        if ("STATE_ID".equals(code)) return "State ID";
+        return "";
+    }
+
     private String resolveOwnerEmail(ConsultantApplication app) {
         String ownerId = app.getOwnerErmId();
         if (ownerId != null) {
@@ -311,9 +378,10 @@ public class AgreementDocumentService {
     private Map<String, Object> buildContext(ConsultantApplication app) {
         Map<String, Object> c = new HashMap<>();
         Function<String, String> nz = s -> s == null ? "" : s;
-        Function<LocalDate, String> fd = d -> d == null ? "" : d.format(DATE_FMT);
+        // Build G — every consultant-facing date renders MM-DD-YYYY.
+        Function<LocalDate, String> fd = d -> d == null ? "" : d.format(US_SHORT_DATE_FMT);
         Function<LocalDateTime, String> fdt =
-                d -> d == null ? "" : d.toLocalDate().format(DATE_FMT);
+                d -> d == null ? "" : d.toLocalDate().format(US_SHORT_DATE_FMT);
 
         // Header. The template's ${participantFullLegalName} and
         // ${primaryEmail} placeholders don't have 1:1 entity getters
@@ -365,7 +433,18 @@ public class AgreementDocumentService {
         c.put("bgCurrentAddress", nz.apply(app.getBgCurrentAddress()));
         c.put("bgDateOfBirth", fd.apply(app.getBgDateOfBirth()));
         c.put("bgFullSsn", nz.apply(app.getBgFullSsn()));
-        c.put("bgDriverLicense", nz.apply(app.getBgDriverLicense()));
+        // Build G — Appendix 3 renders "Driver's License: 12345" or
+        // "State ID: 12345" via $bgDriverLicense (the existing
+        // placeholder; we now prefix with the chosen idType label).
+        // Pure $idType is also exposed so the template can drop the
+        // label separately if it wants.
+        String idTypeLabel = idTypeLabel(app.getIdType());
+        c.put("idType", idTypeLabel);
+        String dl = nz.apply(app.getBgDriverLicense());
+        c.put("bgDriverLicense",
+                idTypeLabel.isEmpty() || dl.isEmpty()
+                        ? dl
+                        : idTypeLabel + ": " + dl);
 
         // Appendix 4 -- portal access (optional).
         c.put("portalPlatform", nz.apply(app.getPortalPlatform()));
@@ -415,7 +494,7 @@ public class AgreementDocumentService {
         Map<String, String> v = new HashMap<>();
         Function<String, String> nz = s -> s == null ? "" : s;
         v.put("effectiveDate", app.getEffectiveDate() == null
-                ? "" : app.getEffectiveDate().format(DATE_FMT));
+                ? "" : app.getEffectiveDate().format(US_SHORT_DATE_FMT));
         v.put("ratePeriod1", nz.apply(app.getRatePeriod1()));
         v.put("rateAmount1", nz.apply(app.getRateAmount1()));
         v.put("ratePeriod2", nz.apply(app.getRatePeriod2()));
@@ -424,7 +503,7 @@ public class AgreementDocumentService {
         v.put("ermTitle", nz.apply(app.getErmTitle()));
         v.put("ermEmail", resolveOwnerEmail(app));
         v.put("signatureDate", app.getSignatureDate() == null
-                ? "" : app.getSignatureDate().toLocalDate().format(DATE_FMT));
+                ? "" : app.getSignatureDate().toLocalDate().format(US_SHORT_DATE_FMT));
         return v;
     }
 
@@ -463,7 +542,7 @@ public class AgreementDocumentService {
                 "achDebitDates", "achDebitAmounts",
                 // Appendix 3 -- background check
                 "bgFullLegalName", "bgOtherNamesUsed", "bgCurrentAddress",
-                "bgDateOfBirth", "bgFullSsn", "bgDriverLicense",
+                "bgDateOfBirth", "bgFullSsn", "bgDriverLicense", "idType",
                 // Appendix 4 -- portal
                 "portalPlatform", "portalUsername", "portalAuthorizedActions",
                 "portalEffectiveDate", "portalRevocationContact",
@@ -521,6 +600,35 @@ public class AgreementDocumentService {
         } catch (Exception e) {
             log.warn("Failed loading signature image from {}: {}",
                     url, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * Build G — decodes a {@code data:image/...;base64,...} URL and
+     * normalises it through the same sizing pipeline as
+     * {@link #buildImage}. Returns "" when the URL is malformed so
+     * the preview render still completes (blank box instead of a
+     * stamper failure).
+     *
+     * Public so the package-private
+     * {@link #consultantPreviewOverrides} lambda can call into it.
+     */
+    Object buildImageFromDataUrl(String dataUrl) {
+        if (dataUrl == null || dataUrl.isBlank()) return "";
+        int comma = dataUrl.indexOf(',');
+        if (comma < 0 || !dataUrl.startsWith("data:image/")) {
+            log.warn("Build G — discarded malformed data URL for preview signature");
+            return "";
+        }
+        try {
+            byte[] bytes = java.util.Base64.getDecoder()
+                    .decode(dataUrl.substring(comma + 1));
+            byte[] normalized = normalizeSignaturePng(bytes);
+            return new Image(normalized);
+        } catch (Exception e) {
+            log.warn("Build G — failed to decode preview signature data URL: {}",
+                    e.getMessage());
             return "";
         }
     }
@@ -694,7 +802,7 @@ public class AgreementDocumentService {
 
     // ── Cloudinary upload ───────────────────────────────────────────
 
-    private PdfUploadResult uploadToCloudinary(Path pdf, String appId) throws IOException {
+    private PdfUploadResult uploadBytesToCloudinary(byte[] bytes, String appId) throws IOException {
         // type=authenticated: bare /raw/upload/agreements/{id} URLs
         // return 401. Re-fetching requires a signature minted with the
         // API secret (see signedPdfUrl()). The secure_url returned at
@@ -703,7 +811,7 @@ public class AgreementDocumentService {
         // (no second sign() round trip), but anyone who only knows the
         // public_id can't construct it.
         String publicId = "agreements/" + appId;
-        Map<?, ?> result = cloudinary.uploader().upload(pdf.toFile(),
+        Map<?, ?> result = cloudinary.uploader().upload(bytes,
                 ObjectUtils.asMap(
                         "public_id", publicId,
                         "resource_type", "raw",
@@ -714,8 +822,8 @@ public class AgreementDocumentService {
             throw new IOException("Cloudinary upload returned no secure_url");
         }
         // Bytes are filled in by the outer generateAgreementPdf() that
-        // owns the temp file -- the upload helper itself never sees
-        // them, so this slot is left null and replaced upstream.
+        // already holds them -- the upload helper itself never re-reads
+        // them, so this slot stays null and is replaced upstream.
         return new PdfUploadResult(url.toString(), publicId, null);
     }
 

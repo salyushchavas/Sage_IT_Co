@@ -25,6 +25,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
+import org.springframework.web.multipart.MultipartFile;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -325,6 +326,90 @@ public class ConsultantApplicationController {
                         dispositionMode + "; filename=\"" + filename + "\"")
                 .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
                 .body(bytes);
+    }
+
+    // ── Build G: Appendix 5 cheque upload + ERM view ────────────────
+
+    /**
+     * Consultant uploads their Appendix 5 security cheque. Email-scoped
+     * token + ownership-gated (a token holder addressing someone else's
+     * appId gets 404 via {@link #requireConsultantToken}). Stores the
+     * bytes in Cloudinary, persists the public_id + content type, and
+     * audits CHEQUE_UPLOADED with the caller IP.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/cheque")
+    public ResponseEntity<ApiResponse<Map<String, String>>> uploadCheque(
+            @PathVariable String appId,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadCheque(
+                    appId, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "Cheque uploaded.")));
+    }
+
+    /** ERM-side inline view / download of the consultant's cheque. */
+    @GetMapping("/api/agreement-erm/applications/{appId}/cheque")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewCheque(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamCheque(appId, disposition);
+    }
+
+    /** Consultant-side preview of their own uploaded cheque (audit + re-confirm UX). */
+    @GetMapping("/api/consultant/applications/{appId}/cheque")
+    public ResponseEntity<byte[]> consultantViewCheque(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamCheque(appId, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamCheque(String appId, String disposition) {
+        ConsultantApplicationService.ChequeBytes cheque;
+        try {
+            cheque = consultantService.fetchChequeBytes(appId);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        if (cheque == null || cheque.bytes() == null || cheque.bytes().length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String contentType = cheque.contentType();
+        if (contentType == null || contentType.isBlank()) {
+            contentType = "application/octet-stream";
+        }
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String ext = isPdf ? ".pdf" : ".img";
+        String filename = "SageITCO-Cheque_" + appId + ext;
+        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
+                ? "attachment" : "inline";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .contentLength(cheque.bytes().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        dispositionMode + "; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(cheque.bytes());
     }
 
     // ── Consultant portal auth (PUBLIC — no session token) ──────────
@@ -646,6 +731,89 @@ public class ConsultantApplicationController {
                         request)));
     }
 
+    // ── Build G: in-memory PDF previews (no Cloudinary fetch) ──────
+
+    /**
+     * Consultant-side review-step preview. Renders the agreement PDF
+     * from CURRENT entity data + the primary signature the consultant
+     * just drew (passed as a data: URL since it hasn't been uploaded
+     * yet). Streams the bytes inline -- no Cloudinary upload, no
+     * persistence; the bytes are throw-away for this preview.
+     *
+     * Status guard mirrors the consultant fill flow (SUBMITTED |
+     * REVISION_REQUESTED); COMPLETED rows use the existing
+     * {@code /pdf} endpoint.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/preview-pdf")
+    public ResponseEntity<byte[]> consultantPreviewPdf(
+            @PathVariable String appId,
+            @RequestBody(required = false) PreviewPdfBody body,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowRead(clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).build();
+        }
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        String status = app.getStatus();
+        if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
+                && !ConsultantApplication.Status.VERIFIED.name().equals(status)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        String primarySig = body == null ? null : body.primarySignatureBase64;
+        byte[] bytes;
+        try {
+            bytes = agreementDocumentService.renderPdfBytes(
+                    app,
+                    AgreementDocumentService.consultantPreviewOverrides(primarySig));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+        String filename = AgreementDocumentService.buildPdfFilename(app);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"preview-" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(bytes);
+    }
+
+    /**
+     * ERM-side inline preview before countersigning. Renders the PDF
+     * at the consultant-submitted state (both consultant signatures
+     * present, ERM signature blank) by streaming the bytes through
+     * the render-to-bytes path -- no Cloudinary round-trip. Limited
+     * to VERIFIED (consultant submitted, ERM hasn't countersigned)
+     * since that's the only state where the preview adds value.
+     */
+    @GetMapping("/api/agreement-erm/applications/{appId}/preview-pdf")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermPreviewPdf(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        }
+        byte[] bytes;
+        try {
+            bytes = agreementDocumentService.renderPdfBytes(
+                    app, AgreementDocumentService.ermPreviewOverrides());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+        String filename = AgreementDocumentService.buildPdfFilename(app);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"preview-" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(bytes);
+    }
+
     private static String clientIp(HttpServletRequest request) {
         if (request == null) return null;
         String xff = request.getHeader("X-Forwarded-For");
@@ -710,6 +878,15 @@ public class ConsultantApplicationController {
     public static class ConsultantContactBody {
         public String consultantEmail;
         public String consultantName;
+    }
+
+    /**
+     * Build G — body for the consultant review-step preview. The
+     * primary signature has not been uploaded yet (Cloudinary upload
+     * happens at submit), so the wizard sends the data: URL inline.
+     */
+    public static class PreviewPdfBody {
+        public String primarySignatureBase64;
     }
 
     public static class ConsultantSubmitBody {
