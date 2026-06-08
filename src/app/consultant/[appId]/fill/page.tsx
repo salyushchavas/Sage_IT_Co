@@ -837,6 +837,9 @@ export default function ConsultantWizardPage() {
             onAttestation={setAttestation}
             previewSeen={previewSeen}
             onPreviewSeen={markPreviewSeen}
+            onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
+            onSubmit={() => void handleSubmit()}
+            submitting={submitting}
           />
         ) : (
           <SectionStep
@@ -2242,6 +2245,9 @@ function ReviewStep({
   onAttestation,
   previewSeen,
   onPreviewSeen,
+  onBack,
+  onSubmit,
+  submitting,
 }: {
   appId: string;
   form: FormState;
@@ -2255,6 +2261,9 @@ function ReviewStep({
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
   onPreviewSeen: () => void;
+  onBack: () => void;
+  onSubmit: () => void;
+  submitting: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -2479,6 +2488,39 @@ function ReviewStep({
           </span>
         </div>
       )}
+
+      {/* Build P / hotfix — desktop submit cluster. FooterNav is
+          lg:hidden so the desktop layout needs its own Submit
+          affordance. Mobile users still get the sticky FooterNav
+          below the viewport. */}
+      <div className="flex items-center justify-between gap-3 pt-4 border-t border-stone-200 max-w-[min(100%,860px)]">
+        <button
+          type="button"
+          onClick={onBack}
+          disabled={submitting}
+          className="inline-flex items-center gap-1 text-[13px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+        >
+          <ArrowLeft size={13} /> Back
+        </button>
+        <button
+          type="button"
+          onClick={onSubmit}
+          disabled={!allComplete || submitting}
+          className={
+            "inline-flex items-center gap-1.5 px-5 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
+            + (allComplete && !submitting
+              ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
+              : "bg-stone-100 text-stone-400 cursor-not-allowed")
+          }
+        >
+          {submitting ? (
+            <Loader2 size={13} className="animate-spin" />
+          ) : (
+            <CheckCircle2 size={13} />
+          )}
+          Submit agreement
+        </button>
+      </div>
     </div>
   );
 }
