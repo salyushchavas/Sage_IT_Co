@@ -581,6 +581,17 @@ public class AgreementDocumentService {
         // fallback stops firing.
         c.put("signatureDate", resolveSignatureDate(app));
 
+        // Build R — final signing IP, rendered as a faint trace line
+        // ("IP: <ip>") under the Date / Email line in each consultant
+        // signature block. The value is captured at consultantSubmit
+        // (overwritten on every re-sign so a revision-resubmit
+        // updates it). The template surgery
+        // (keepSignatureBlocksTogether / insertSigningIpLine) injects
+        // the gray 7pt paragraph; here we just provide the value.
+        // Pre-submit previews show "(pending)" since the IP isn't
+        // recorded until the consultant actually clicks submit.
+        c.put("finalSigningIp", resolveFinalSigningIp(app));
+
         // Image placeholders -- separate entity fields. Each renders as
         // blank when the corresponding signature hasn't been captured.
         // F-4 first-and-last model: signatureImage is drawn on the
@@ -618,6 +629,8 @@ public class AgreementDocumentService {
         // inline-clause read view in the wizard shows the date in
         // every signature block before submit.
         v.put("signatureDate", resolveSignatureDate(app));
+        // Build R — same final-signing-IP fallback as buildContext.
+        v.put("finalSigningIp", resolveFinalSigningIp(app));
         return v;
     }
 
@@ -635,6 +648,20 @@ public class AgreementDocumentService {
             return stamped.toLocalDate().format(US_SHORT_DATE_FMT);
         }
         return LocalDate.now().format(US_SHORT_DATE_FMT);
+    }
+
+    /**
+     * Build R — final signing IP for the faint trace line under each
+     * consultant signature block. Captured at the review-step submit
+     * and overwritten on every re-sign (revision resubmit), so the
+     * value always reflects the most recent execution event. Empty
+     * on a pre-submit preview render -- callers should treat empty
+     * as "(pending)" in the rendered line.
+     */
+    private static String resolveFinalSigningIp(ConsultantApplication app) {
+        String ip = app.getFinalSigningIp();
+        if (ip != null && !ip.isBlank()) return ip.trim();
+        return "(pending)";
     }
 
     /**
@@ -682,6 +709,8 @@ public class AgreementDocumentService {
                 // ERM signature block (text -- the images themselves are
                 // signatureImage / ermSignatureImage below).
                 "ermName", "ermTitle", "ermEmail", "signatureDate",
+                // Build R — faint IP trace line under the Date/Email line.
+                "finalSigningIp",
         };
         for (String k : textKeys) c.put(k, LINE);
         // Signature images render as empty boxes in the preview.
@@ -980,6 +1009,14 @@ public class AgreementDocumentService {
                     // the letterhead background image so text never
                     // overlaps the address block.
                     xml = enlargeBottomMargin(xml);
+                    // Build R — insert a faint IP trace paragraph
+                    // ("IP: ${finalSigningIp}", gray 7pt) immediately
+                    // after every "Date / Email:" paragraph in the
+                    // consultant signature blocks. Must run BEFORE
+                    // keepSignatureBlocksTogether so the new
+                    // paragraph rides into the consolidated single-
+                    // row cell with the rest of the block.
+                    xml = insertSigningIpLine(xml);
                     // Build J — keep every signature block (label →
                     // signature image → name/date) on a single page
                     // by marking its rows non-splittable.
@@ -1047,6 +1084,62 @@ public class AgreementDocumentService {
             log.info("Template surgery: bottom margin raised on {} section(s) "
                     + "(was {}+ twips, now {} twips)",
                     touched, largest, FOOTER_SAFE_BOTTOM_MARGIN_TWIPS);
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Build R — inserts a faint IP trace paragraph immediately after
+     * every {@code "Date / Email: ${signatureDate} / ${primaryEmail}"}
+     * paragraph in the document. Renders as gray 7pt
+     * ({@code w:sz="14"}, {@code w:color="808080"}) so it reads as
+     * roughly 50% opacity on white, present for security and
+     * traceability but unobtrusive next to the main signature lines.
+     *
+     * docx-stamper substitutes {@code ${finalSigningIp}} from the
+     * context map built by {@link #buildContext}; the value is
+     * captured at the review-step submit and overwritten on every
+     * re-sign so a revision-resubmit updates it.
+     *
+     * Must run BEFORE {@link #keepSignatureBlocksTogether} so the new
+     * paragraph rides into the consolidated single-row cell with the
+     * rest of the block.
+     */
+    private static final String SIGNING_IP_PARAGRAPH =
+            "<w:p>"
+                    + "<w:pPr><w:spacing w:before=\"40\" w:after=\"0\"/></w:pPr>"
+                    + "<w:r>"
+                    + "<w:rPr>"
+                    + "<w:sz w:val=\"14\"/>"
+                    + "<w:color w:val=\"808080\"/>"
+                    + "</w:rPr>"
+                    + "<w:t xml:space=\"preserve\">IP: ${finalSigningIp}</w:t>"
+                    + "</w:r>"
+                    + "</w:p>";
+
+    static String insertSigningIpLine(String xml) {
+        // The Date/Email line is the LAST paragraph in the right cell
+        // of every consultant signature block. The unique signature
+        // identifies it without false positives across the rest of
+        // the document.
+        java.util.regex.Pattern p = java.util.regex.Pattern.compile(
+                "(<w:t[^>]*>Date / Email: \\$\\{signatureDate\\} / \\$\\{primaryEmail\\}</w:t>"
+                        + "</w:r></w:p>)",
+                java.util.regex.Pattern.DOTALL);
+        java.util.regex.Matcher m = p.matcher(xml);
+        StringBuilder sb = new StringBuilder(xml.length());
+        int lastEnd = 0;
+        int touched = 0;
+        while (m.find()) {
+            sb.append(xml, lastEnd, m.end());
+            sb.append(SIGNING_IP_PARAGRAPH);
+            lastEnd = m.end();
+            touched++;
+        }
+        sb.append(xml, lastEnd, xml.length());
+        if (touched > 0) {
+            log.info("Template surgery: inserted faint IP line after {} Date/Email paragraph(s)",
+                    touched);
         }
         return sb.toString();
     }
