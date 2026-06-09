@@ -295,6 +295,18 @@ function parseChequeCount(raw: string | undefined | null): number {
   return Math.min(50, n);
 }
 
+/**
+ * Build W — resolve special backend missing-tokens that don't map to
+ * a single field key. "cheques" / "chequeUpload" both point at
+ * Appendix 5 (the multi-cheque list lives there).
+ */
+function sectionForSpecialKey(key: string): AgreementSection | undefined {
+  if (key === "cheques" || key === "chequeUpload") {
+    return AGREEMENT_SECTIONS.find((s) => s.id === "appendix5");
+  }
+  return undefined;
+}
+
 function firstIncompleteIndex(
   form: FormState,
   reqs: EffectiveRequirements,
@@ -796,6 +808,96 @@ export default function ConsultantWizardPage() {
     [form, reqs, chequeEntries, attestation, previewSeen],
   );
 
+  // Build W — live re-evaluation of the missing list. The backend
+  // payload is the source of truth at the moment of the failed
+  // submit, but the consultant fixes items in place; we re-check
+  // each one against the CURRENT form/affirmation/signature/cheque
+  // state on every render so a field disappears from the panel the
+  // instant it's filled, the affirmation clears the moment it's
+  // ticked, etc. When everything is fixed, liveMissing is empty and
+  // the panel auto-dismisses.
+  const liveMissing = useMemo(() => {
+    if (!submitMissing) return null;
+    const fields = submitMissing.missingFields.filter((k) => {
+      if (k === "cheques" || k === "chequeUpload") {
+        // Multi-cheque rule: every index 0..count-1 needs number + upload.
+        const required = parseChequeCount(form.fields["securityCheckCount"]);
+        if (required <= 0) return true;
+        for (let i = 0; i < required; i++) {
+          const entry = chequeEntries.find((e) => e.index === i);
+          if (!entry || !entry.number?.trim() || !entry.publicId?.trim()) {
+            return true;
+          }
+        }
+        return false;
+      }
+      const value = form.fields[k] ?? "";
+      const section = findSectionForFieldKey(k);
+      const field = section?.fields.find((f) => f.key === k);
+      if (!field) return Boolean(!value?.trim());
+      // Use the existing per-field validator so format checks
+      // (routing/account/SSN/email) match the backend rules.
+      return !isFieldValueValid(field, value);
+    });
+    const affs = submitMissing.missingAffirmations.filter((flag) => {
+      return !form.affirmations[flag as AffirmationFlag];
+    });
+    const missingSig = submitMissing.missingSignature && !form.signature;
+    const missingFinalSig =
+      submitMissing.missingFinalSignature && !form.finalSignature;
+    if (
+      fields.length === 0
+      && affs.length === 0
+      && !missingSig
+      && !missingFinalSig
+    ) {
+      return null;
+    }
+    return {
+      missingFields: fields,
+      missingAffirmations: affs,
+      missingSignature: missingSig,
+      missingFinalSignature: missingFinalSig,
+    };
+  }, [submitMissing, form, chequeEntries]);
+
+  // Build W — auto-dismiss the panel the moment the list empties.
+  useEffect(() => {
+    if (submitMissing && !liveMissing) {
+      setSubmitMissing(null);
+      setSubmitError("");
+    }
+  }, [submitMissing, liveMissing]);
+
+  // Build W — per-section sets of currently-missing items. Used to
+  // mark sections on the stepper + flag the exact field/affirmation/
+  // signature inside the section render.
+  const missingByField = useMemo(() => {
+    const s = new Set<string>();
+    if (liveMissing) for (const k of liveMissing.missingFields) s.add(k);
+    return s;
+  }, [liveMissing]);
+  const missingByAffirmation = useMemo(() => {
+    const s = new Set<string>();
+    if (liveMissing) for (const f of liveMissing.missingAffirmations) s.add(f);
+    return s;
+  }, [liveMissing]);
+  const sectionsWithMissing = useMemo(() => {
+    const ids = new Set<string>();
+    if (!liveMissing) return ids;
+    for (const k of liveMissing.missingFields) {
+      const sec = findSectionForFieldKey(k) ?? sectionForSpecialKey(k);
+      if (sec) ids.add(sec.id);
+    }
+    for (const f of liveMissing.missingAffirmations) {
+      const sec = findSectionForAffirmation(f as AffirmationFlag);
+      if (sec) ids.add(sec.id);
+    }
+    if (liveMissing.missingSignature) ids.add("main-agreement");
+    if (liveMissing.missingFinalSignature) ids.add("review");
+    return ids;
+  }, [liveMissing]);
+
   // Render ─────────────────────────────────────────────────────
 
   if (loading) {
@@ -947,10 +1049,18 @@ export default function ConsultantWizardPage() {
         sections={sectionStatus}
         currentStep={currentStep}
         readPct={readingProgress}
+        sectionsWithMissing={sectionsWithMissing}
         onJump={(i) => {
           // Jump-back only. Completed and the current step are
           // navigable; upcoming sections are locked until prior ones
-          // are complete.
+          // are complete. Sections flagged in sectionsWithMissing
+          // (from a failed submit) are ALWAYS navigable so the
+          // consultant can fix them from any later section.
+          const targetId = AGREEMENT_SECTIONS[i]?.id;
+          if (targetId && sectionsWithMissing.has(targetId)) {
+            setCurrentStep(i);
+            return;
+          }
           if (i < currentStep) {
             setCurrentStep(i);
             return;
@@ -1021,6 +1131,7 @@ export default function ConsultantWizardPage() {
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
             onSubmit={() => void handleSubmit()}
             submitting={submitting}
+            missingFinalSignature={Boolean(liveMissing?.missingFinalSignature)}
           />
         ) : (
           <SectionStep
@@ -1064,24 +1175,55 @@ export default function ConsultantWizardPage() {
             submitting={submitting}
             isFirstStep={currentStep === 0}
             onReadProgress={handleReadingProgress}
+            missingFieldKeys={missingByField}
+            missingAffirmation={
+              section.affirmationFlag
+                ? missingByAffirmation.has(section.affirmationFlag)
+                : false
+            }
+            missingSignature={
+              section.id === "main-agreement"
+              && Boolean(liveMissing?.missingSignature)
+            }
+            missingCheques={
+              section.id === "appendix5"
+              && (missingByField.has("cheques") || missingByField.has("chequeUpload"))
+            }
           />
         )}
-        {submitError && (
+        {liveMissing && (
           <div className="max-w-[min(100%,860px)] mt-6">
-            <SubmitErrorPanel
-              message={submitError}
-              missing={submitMissing}
-              onJumpToSection={(idx, fieldKey) => {
+            <MissingItemsPanel
+              missing={liveMissing}
+              onJumpToItem={(idx, anchorId) => {
                 setCurrentStep(idx);
-                if (fieldKey) {
+                window.setTimeout(() => {
+                  if (!anchorId) return;
+                  const el = document.getElementById(anchorId);
+                  if (!el) return;
+                  el.scrollIntoView({ behavior: "smooth", block: "center" });
+                  // Briefly pulse the target so the eye finds it after
+                  // the section swap + scroll.
+                  el.classList.add("ring-2", "ring-sage-copper", "ring-offset-2");
                   window.setTimeout(() => {
-                    const el = document.getElementById(`field-${fieldKey}`);
-                    if (el) {
-                      el.scrollIntoView({ behavior: "smooth", block: "center" });
-                      (el as HTMLElement).focus();
-                    }
-                  }, 60);
-                }
+                    el.classList.remove("ring-2", "ring-sage-copper", "ring-offset-2");
+                  }, 1800);
+                  // Focus inputs / checkboxes / buttons; ignore other
+                  // wrappers (the .scrollIntoView is enough for those).
+                  const tag = el.tagName.toLowerCase();
+                  if (tag === "input" || tag === "textarea" || tag === "select"
+                      || tag === "button") {
+                    (el as HTMLElement).focus();
+                  } else {
+                    // The FieldInput wrapper is tabindex=-1 + focusable
+                    // so the affirmation label / inner input gets the
+                    // ring outline without trapping keyboard nav.
+                    const focusable = el.querySelector<HTMLElement>(
+                      "input, textarea, select, button",
+                    );
+                    focusable?.focus();
+                  }
+                }, 80);
               }}
             />
           </div>
@@ -1125,11 +1267,16 @@ function Stepper({
   sections,
   currentStep,
   readPct,
+  sectionsWithMissing,
   onJump,
 }: {
   sections: { id: string; title: string; step: number; complete: boolean }[];
   currentStep: number;
   readPct: number;
+  /** Build W — sections that have at least one item missing from the
+   *  last failed submit. Renders a copper dot on the segment + menu
+   *  row so the consultant sees at a glance which sections need work. */
+  sectionsWithMissing: Set<string>;
   onJump: (i: number) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -1202,7 +1349,11 @@ function Stepper({
                   <ol className="max-h-[60vh] overflow-y-auto py-1">
                     {sections.map((s, i) => {
                       const active = i === currentStep;
-                      const locked = i > currentStep && !s.complete;
+                      const hasMissing = sectionsWithMissing.has(s.id);
+                      // Build W — sections flagged from a failed submit
+                      // are always navigable so the consultant can fix
+                      // them even if other later sections are locked.
+                      const locked = i > currentStep && !s.complete && !hasMissing;
                       return (
                         <li key={s.id}>
                           <button
@@ -1227,7 +1378,9 @@ function Stepper({
                               aria-hidden
                               className="inline-flex items-center justify-center h-5 w-5"
                             >
-                              {s.complete ? (
+                              {hasMissing ? (
+                                <AlertCircle size={14} style={{ color: "var(--copper-deep)" }} />
+                              ) : s.complete ? (
                                 <CheckCircle2 size={14} style={{ color: "var(--navy)" }} />
                               ) : active ? (
                                 <span
@@ -1238,8 +1391,19 @@ function Stepper({
                                 <Lock size={12} style={{ color: "var(--muted)" }} />
                               )}
                             </span>
-                            <span className="display text-[14.5px] leading-snug truncate">
+                            <span className="display text-[14.5px] leading-snug truncate inline-flex items-center gap-1.5">
                               {s.title}
+                              {hasMissing && !active && (
+                                <span
+                                  className="text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded"
+                                  style={{
+                                    background: "var(--copper-wash)",
+                                    color: "var(--copper-deep)",
+                                  }}
+                                >
+                                  Needs attention
+                                </span>
+                              )}
                             </span>
                             <span
                               className="text-[11px] tabular-nums"
@@ -1272,6 +1436,7 @@ function Stepper({
             {sections.map((s, i) => {
               const active = i === currentStep;
               const past = i < currentStep;
+              const hasMissing = sectionsWithMissing.has(s.id);
               return (
                 <button
                   key={s.id}
@@ -1281,24 +1446,37 @@ function Stepper({
                   onFocus={() => setPeek(i)}
                   onBlur={() => setPeek((p) => (p === i ? null : p))}
                   onClick={() => {
-                    if (i > currentStep && !s.complete) return;
+                    // Build W — missing sections are always navigable.
+                    if (i > currentStep && !s.complete && !hasMissing) return;
                     onJump(i);
                   }}
-                  aria-label={`Section ${s.step}: ${s.title}`}
+                  aria-label={
+                    `Section ${s.step}: ${s.title}`
+                    + (hasMissing ? " — needs attention" : "")
+                  }
                   className="relative h-3 flex items-center cursor-pointer"
                 >
                   <span
                     className="h-1.5 w-full rounded-full motion-safe:transition-colors motion-safe:duration-300 motion-safe:ease-out"
                     style={{
-                      background: s.complete
-                        ? "var(--navy)"
-                        : active
-                          ? "var(--copper)"
-                          : past
-                            ? "rgba(27,42,92,0.30)"
-                            : "var(--line)",
+                      background: hasMissing
+                        ? "var(--copper-deep)"
+                        : s.complete
+                          ? "var(--navy)"
+                          : active
+                            ? "var(--copper)"
+                            : past
+                              ? "rgba(27,42,92,0.30)"
+                              : "var(--line)",
                     }}
                   />
+                  {hasMissing && (
+                    <span
+                      aria-hidden
+                      className="absolute -top-1.5 left-1/2 -translate-x-1/2 h-2 w-2 rounded-full ring-2 ring-white"
+                      style={{ background: "var(--copper-deep)" }}
+                    />
+                  )}
                 </button>
               );
             })}
@@ -1352,6 +1530,10 @@ function SectionStep({
   submitting,
   isFirstStep,
   onReadProgress,
+  missingFieldKeys,
+  missingAffirmation,
+  missingSignature,
+  missingCheques,
 }: {
   section: AgreementSection;
   content: AgreementContent | null;
@@ -1380,6 +1562,11 @@ function SectionStep({
   onBack: () => void;
   onNext: () => void;
   canAdvance: boolean;
+  /** Build W — submit-time gaps the wizard should flag in place. */
+  missingFieldKeys: Set<string>;
+  missingAffirmation: boolean;
+  missingSignature: boolean;
+  missingCheques: boolean;
   submitting: boolean;
   isFirstStep: boolean;
   onReadProgress: (pct: number) => void;
@@ -1666,6 +1853,7 @@ function SectionStep({
                     touched={touched.has(field.key)}
                     revealed={revealed.has(field.key)}
                     onRevealToggle={(on) => onRevealed(field.key, on)}
+                    needsAttention={missingFieldKeys.has(field.key)}
                   />
                 ))}
               </div>
@@ -1673,23 +1861,29 @@ function SectionStep({
           )}
 
           {section.id === "appendix5" && (
-            <ChequeListBlock
-              count={parseChequeCount(form.fields["securityCheckCount"])}
-              entries={chequeEntries}
-              uploadingIndex={chequeUploadingIndex}
-              error={chequeUploadError}
-              onUploadAt={onUploadChequeAt}
-              onMetadataChange={onChequeMetadataChange}
-            />
+            <div id="field-cheques">
+              <ChequeListBlock
+                count={parseChequeCount(form.fields["securityCheckCount"])}
+                entries={chequeEntries}
+                uploadingIndex={chequeUploadingIndex}
+                error={chequeUploadError}
+                onUploadAt={onUploadChequeAt}
+                onMetadataChange={onChequeMetadataChange}
+                needsAttention={missingCheques}
+              />
+            </div>
           )}
 
           {section.requiresSignature && (
-            <SignatureBlock
-              signature={form.signature}
-              legalName={form.signedLegalName}
-              onSignature={onSignature}
-              onLegalName={onLegalName}
-            />
+            <div id="signature-block">
+              <SignatureBlock
+                signature={form.signature}
+                legalName={form.signedLegalName}
+                onSignature={onSignature}
+                onLegalName={onLegalName}
+                needsAttention={missingSignature}
+              />
+            </div>
           )}
 
           {section.requiresAffirmation && !section.requiresSignature && (
@@ -1702,6 +1896,7 @@ function SectionStep({
               checked={form.affirmations[section.affirmationFlag]}
               onChange={(v) => onAffirm(section.affirmationFlag!, v)}
               scrollGated={!sectionScrolled}
+              needsAttention={missingAffirmation}
             />
           )}
 
@@ -1746,6 +1941,7 @@ function FieldInput({
   touched,
   revealed,
   onRevealToggle,
+  needsAttention = false,
 }: {
   field: SectionField;
   /** Per-app required (honours readOnly, field.required, SSN gate, optional-section gate). */
@@ -1756,6 +1952,8 @@ function FieldInput({
   touched: boolean;
   revealed: boolean;
   onRevealToggle: (on: boolean) => void;
+  /** Build W — flagged by a failed submit; render the copper "needs attention" border. */
+  needsAttention?: boolean;
 }) {
   const wide =
     field.type === "textarea" ||
@@ -1784,9 +1982,11 @@ function FieldInput({
     "w-full px-3 py-2.5 text-[14px] rounded-md border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors " +
     (invalid
       ? "border-red-300 bg-red-50/40"
-      : field.readOnly
-        ? "border-stone-200 bg-stone-100 text-stone-600 cursor-not-allowed"
-        : "border-stone-300");
+      : needsAttention
+        ? "border-[var(--copper)] bg-[color:var(--copper-wash)]/60"
+        : field.readOnly
+          ? "border-stone-200 bg-stone-100 text-stone-600 cursor-not-allowed"
+          : "border-stone-300");
 
   let control: ReactNode;
   // Build G — special types rendered outside the standard input grid
@@ -1966,8 +2166,16 @@ function FieldInput({
         )}
       </label>
       {control}
-      {field.help && !errorMsg && (
+      {field.help && !errorMsg && !needsAttention && (
         <p className="mt-1 text-[11px] text-gray-500">{field.help}</p>
+      )}
+      {!errorMsg && needsAttention && (
+        <p
+          className="mt-1 text-[11px] inline-flex items-center gap-1 font-medium"
+          style={{ color: "var(--copper-deep)" }}
+        >
+          <AlertCircle size={11} /> Needs attention before you submit.
+        </p>
       )}
       {errorMsg && (
         <p className="mt-1 text-[11px] text-red-600 inline-flex items-center gap-1">
@@ -1985,18 +2193,31 @@ function SignatureBlock({
   legalName,
   onSignature,
   onLegalName,
+  needsAttention = false,
 }: {
   signature: string | null;
   legalName: string;
   onSignature: (dataUrl: string | null) => void;
   onLegalName: (value: string) => void;
+  /** Build W — flagged by a failed submit; render the copper "needs attention" border. */
+  needsAttention?: boolean;
 }) {
   const [redrawing, setRedrawing] = useState(false);
   const captured = Boolean(signature);
   const shouldShowPad = !captured || redrawing;
 
   return (
-    <div className="space-y-4">
+    <div
+      className={"space-y-4 motion-safe:transition-colors " + (needsAttention ? "rounded-xl p-4" : "")}
+      style={
+        needsAttention
+          ? {
+              border: "1px solid var(--copper)",
+              background: "var(--copper-wash)",
+            }
+          : undefined
+      }
+    >
       <div>
         <h3
           className="display text-[18px] font-semibold leading-tight"
@@ -2011,6 +2232,14 @@ function SignatureBlock({
           Upload an image of your signature, or draw it instead. The same
           signature applies to every signature block in the agreement.
         </p>
+        {needsAttention && (
+          <p
+            className="mt-1.5 text-[11.5px] inline-flex items-center gap-1 font-medium"
+            style={{ color: "var(--copper-deep)" }}
+          >
+            <AlertCircle size={11} /> Your signature is still required.
+          </p>
+        )}
       </div>
 
       <div>
@@ -2563,140 +2792,171 @@ function fieldFriendlyLabel(key: string): string {
   return FIELD_LABELS[key] ?? key;
 }
 
-function SubmitErrorPanel({
-  message,
+/**
+ * Build W — calm, plain-language, per-item navigable missing-items
+ * summary. Each row is its own clickable link that routes the wizard
+ * to the section AND scrolls to + focuses the exact missing field,
+ * affirmation checkbox, or signature pad. The panel auto-dismisses
+ * the instant every item is fixed (driven by the live re-evaluation
+ * in `liveMissing` above).
+ */
+function MissingItemsPanel({
   missing,
-  onJumpToSection,
+  onJumpToItem,
 }: {
-  message: string;
   missing: {
     missingFields: string[];
     missingAffirmations: string[];
     missingSignature: boolean;
     missingFinalSignature: boolean;
-  } | null;
-  onJumpToSection: (idx: number, fieldKey?: string) => void;
-}) {
-  if (!missing) {
-    return (
-      <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 inline-flex items-start gap-2">
-        <AlertCircle size={14} className="mt-0.5 shrink-0" />
-        <span>{message}</span>
-      </div>
-    );
-  }
-
-  type Group = {
-    sectionIdx: number;
-    sectionTitle: string;
-    items: { label: string; fieldKey?: string }[];
   };
-  const groups = new Map<string, Group>();
+  /** Routes to {sectionIdx} and scroll/focuses {anchorId} if present. */
+  onJumpToItem: (sectionIdx: number, anchorId?: string) => void;
+}) {
+  type Item = { label: string; anchorId?: string };
+  type Group = { sectionIdx: number; sectionTitle: string; items: Item[] };
+  const groups = new Map<number, Group>();
   const upsert = (
     sectionIdx: number,
     sectionTitle: string,
     label: string,
-    fieldKey?: string,
+    anchorId?: string,
   ) => {
-    const key = `${sectionIdx}|${sectionTitle}`;
-    const existing = groups.get(key);
+    const existing = groups.get(sectionIdx);
     if (existing) {
-      existing.items.push({ label, fieldKey });
+      existing.items.push({ label, anchorId });
     } else {
-      groups.set(key, {
+      groups.set(sectionIdx, {
         sectionIdx,
         sectionTitle,
-        items: [{ label, fieldKey }],
+        items: [{ label, anchorId }],
       });
     }
   };
 
   for (const key of missing.missingFields) {
-    const section = findSectionForFieldKey(key);
+    const section =
+      findSectionForFieldKey(key) ?? sectionForSpecialKey(key);
     if (!section) continue;
     const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === section.id);
-    upsert(idx, section.title, fieldFriendlyLabel(key), key);
+    if (idx < 0) continue;
+    upsert(
+      idx,
+      section.title,
+      fieldFriendlyLabel(key),
+      key === "cheques" || key === "chequeUpload"
+        ? "field-cheques"
+        : `field-${key}`,
+    );
   }
   for (const flag of missing.missingAffirmations) {
     const section = findSectionForAffirmation(flag as AffirmationFlag);
     if (!section) continue;
     const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === section.id);
-    upsert(idx, section.title, "Section affirmation not ticked");
+    if (idx < 0) continue;
+    upsert(
+      idx,
+      section.title,
+      "Confirm you've read and agree to this section",
+      `affirm-${flag}`,
+    );
   }
   if (missing.missingSignature) {
     const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === "main-agreement");
     if (idx >= 0) {
-      upsert(idx, "The Agreement", "Primary signature not captured");
+      upsert(idx, "The Agreement", "Your signature", "signature-block");
     }
   }
   if (missing.missingFinalSignature) {
     const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === "review");
     if (idx >= 0) {
-      upsert(idx, "Review & Submit", "Final signature not captured");
+      upsert(
+        idx,
+        "Review & Submit",
+        "Your final signature",
+        "final-signature-block",
+      );
     }
   }
 
   const ordered = Array.from(groups.values()).sort(
     (a, b) => a.sectionIdx - b.sectionIdx,
   );
-
-  if (ordered.length === 0) {
-    // Backend rejected for an unknown reason -- fall back to the
-    // generic message so the consultant still gets feedback.
-    return (
-      <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 inline-flex items-start gap-2">
-        <AlertCircle size={14} className="mt-0.5 shrink-0" />
-        <span>{message}</span>
-      </div>
-    );
-  }
+  const total = ordered.reduce((n, g) => n + g.items.length, 0);
 
   return (
-    <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 sm:p-5">
-      <div className="flex items-start gap-2">
-        <AlertCircle size={16} className="text-red-700 mt-0.5 shrink-0" />
+    <div
+      role="status"
+      className="rounded-2xl p-4 sm:p-5"
+      style={{
+        background: "var(--copper-wash, #faf1ea)",
+        border: "1px solid rgba(168,98,63,0.35)",
+        boxShadow: "0 8px 24px -20px rgba(168,98,63,0.45)",
+      }}
+    >
+      <div className="flex items-start gap-2.5">
+        <AlertCircle
+          size={18}
+          className="mt-0.5 shrink-0"
+          style={{ color: "var(--copper-deep, #a8623f)" }}
+        />
         <div>
-          <p className="text-sm font-semibold text-red-800">
-            {message}
+          <p
+            className="text-sm font-semibold"
+            style={{ color: "var(--navy, #1B2A5C)" }}
+          >
+            Almost there — {total} item{total === 1 ? "" : "s"} left to finish
           </p>
-          <p className="text-[11px] text-red-700/80 mt-0.5">
-            Tap any item below to jump straight to the section that needs it.
+          <p
+            className="text-[12px] mt-0.5"
+            style={{ color: "var(--muted, #5c6577)" }}
+          >
+            Click any item to jump straight to it. It&apos;ll disappear from
+            this list as soon as you fix it.
           </p>
         </div>
       </div>
-      <ul className="mt-3 space-y-2">
+      <ul className="mt-3 space-y-3">
         {ordered.map((g) => (
           <li
             key={g.sectionIdx}
-            className="rounded-xl border border-red-200 bg-white p-3"
+            className="rounded-xl bg-white p-3"
+            style={{ border: "1px solid var(--line, #e4e7ee)" }}
           >
-            <div className="flex items-start justify-between gap-3 flex-wrap">
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-widest text-red-700">
-                  {g.sectionTitle}
-                </p>
-                <ul className="mt-1.5 space-y-0.5">
-                  {g.items.map((item, i) => (
-                    <li
-                      key={i}
-                      className="text-xs text-gray-800 inline-flex items-center gap-1.5"
+            <p
+              className="text-[10px] font-bold uppercase tracking-widest"
+              style={{ color: "var(--copper-deep, #a8623f)" }}
+            >
+              {g.sectionTitle}
+            </p>
+            <ul className="mt-2 -mx-1">
+              {g.items.map((item, i) => (
+                <li key={i}>
+                  <button
+                    type="button"
+                    onClick={() => onJumpToItem(g.sectionIdx, item.anchorId)}
+                    className="w-full text-left inline-flex items-center justify-between gap-3 px-2 py-1.5 rounded-md hover:bg-stone-50 motion-safe:transition-colors cursor-pointer group"
+                  >
+                    <span className="inline-flex items-center gap-2 text-[13px]">
+                      <span
+                        aria-hidden
+                        className="block h-1.5 w-1.5 rounded-full shrink-0"
+                        style={{ background: "var(--copper, #C87D5C)" }}
+                      />
+                      <span style={{ color: "var(--ink, #1d2433)" }}>
+                        {item.label}
+                      </span>
+                    </span>
+                    <span
+                      className="text-[11px] font-semibold inline-flex items-center gap-0.5 motion-safe:transition-transform group-hover:translate-x-0.5"
+                      style={{ color: "var(--copper-deep, #a8623f)" }}
                     >
-                      <span className="block h-1 w-1 rounded-full bg-red-500" />
-                      {item.label}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <button
-                type="button"
-                onClick={() =>
-                  onJumpToSection(g.sectionIdx, g.items[0]?.fieldKey)
-                }
-                className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer shrink-0"
-              >
-                Go to section <ArrowRight size={11} />
-              </button>
-            </div>
+                      Jump to it <ArrowRight size={11} />
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
           </li>
         ))}
       </ul>
@@ -2875,6 +3135,7 @@ function ChequeListBlock({
   error,
   onUploadAt,
   onMetadataChange,
+  needsAttention = false,
 }: {
   count: number;
   entries: ChequeEntry[];
@@ -2885,21 +3146,46 @@ function ChequeListBlock({
     index: number,
     patch: { number?: string; date?: string },
   ) => void;
+  /** Build W — flagged by a failed submit; surfaces an inline attention banner. */
+  needsAttention?: boolean;
 }) {
+  const attentionBanner = needsAttention ? (
+    <p
+      className="text-[11.5px] inline-flex items-center gap-1 font-medium"
+      style={{ color: "var(--copper-deep)" }}
+    >
+      <AlertCircle size={11} /> Each cheque needs both a number and an upload.
+    </p>
+  ) : null;
   if (count <= 0) {
     return (
-      <section className="rounded-2xl border border-stone-200 bg-stone-50/60 px-5 py-4 text-[12.5px] text-stone-600 inline-flex items-start gap-2">
-        <AlertCircle size={13} className="mt-0.5 shrink-0" />
-        <span>
-          Enter the number of cheques above to add upload slots for each
-          one.
+      <section className="rounded-2xl border border-stone-200 bg-stone-50/60 px-5 py-4 text-[12.5px] text-stone-600 space-y-2">
+        <span className="inline-flex items-start gap-2">
+          <AlertCircle size={13} className="mt-0.5 shrink-0" />
+          <span>
+            Enter the number of cheques above to add upload slots for each
+            one.
+          </span>
         </span>
+        {attentionBanner}
       </section>
     );
   }
   const indices = Array.from({ length: count }, (_, i) => i);
   return (
-    <section className="space-y-3">
+    <section
+      className="space-y-3"
+      style={
+        needsAttention
+          ? {
+              border: "1px solid var(--copper)",
+              background: "var(--copper-wash)",
+              borderRadius: "16px",
+              padding: "16px",
+            }
+          : undefined
+      }
+    >
       <header>
         <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
           Security cheques
@@ -2912,6 +3198,7 @@ function ChequeListBlock({
           cheque number and date, then upload a photo or PDF (≤10 MB).
           The files are stored privately and visible only to Sage IT.
         </p>
+        {attentionBanner}
       </header>
       {indices.map((i) => {
         const entry = entries.find((e) => e.index === i);
@@ -3018,25 +3305,37 @@ function AffirmationBlock({
   checked,
   onChange,
   scrollGated = false,
+  needsAttention = false,
 }: {
   flag: AffirmationFlag;
   checked: boolean;
   onChange: (value: boolean) => void;
   /** Build U — true until the consultant has scrolled this section. */
   scrollGated?: boolean;
+  /** Build W — flagged by a failed submit; render the copper "needs attention" border. */
+  needsAttention?: boolean;
 }) {
   const locked = scrollGated && !checked;
+  const borderColor = checked
+    ? "border-[var(--ok)]/55"
+    : needsAttention
+      ? "border-[var(--copper)]"
+      : "bg-[var(--paper)] border-[var(--line)] hover:border-[var(--ok)]/40";
   return (
     <label
       htmlFor={`affirm-${flag}`}
       className={
         "flex items-start gap-3 p-4 rounded-xl border motion-safe:transition-colors "
         + (locked ? "cursor-not-allowed opacity-65 " : "cursor-pointer ")
-        + (checked
-          ? "border-[var(--ok)]/55"
-          : "bg-[var(--paper)] border-[var(--line)] hover:border-[var(--ok)]/40")
+        + borderColor
       }
-      style={checked ? { background: "var(--ok-wash)" } : undefined}
+      style={
+        checked
+          ? { background: "var(--ok-wash)" }
+          : needsAttention
+            ? { background: "var(--copper-wash)" }
+            : undefined
+      }
       title={locked ? "Scroll the section to read it first." : undefined}
     >
       <input
@@ -3105,6 +3404,7 @@ function ReviewStep({
   onBack,
   onSubmit,
   submitting,
+  missingFinalSignature,
 }: {
   appId: string;
   form: FormState;
@@ -3121,6 +3421,8 @@ function ReviewStep({
   onBack: () => void;
   onSubmit: () => void;
   submitting: boolean;
+  /** Build W — final signature missing on the last failed submit. */
+  missingFinalSignature: boolean;
 }) {
   return (
     <div className="space-y-6">
@@ -3346,12 +3648,15 @@ function ReviewStep({
         )}
       </section>
 
-      <FinalSignatureBlock
-        finalSignature={form.finalSignature}
-        legalName={form.signedLegalName}
-        onFinalSignature={onFinalSignature}
-        onLegalName={onLegalName}
-      />
+      <div id="final-signature-block">
+        <FinalSignatureBlock
+          finalSignature={form.finalSignature}
+          legalName={form.signedLegalName}
+          onFinalSignature={onFinalSignature}
+          onLegalName={onLegalName}
+          needsAttention={missingFinalSignature}
+        />
+      </div>
 
       {!allComplete && (
         <div className="rounded-md border border-sage-copper/30 bg-[#FBF1E8] px-4 py-3 text-[13.5px] text-sage-copper-deep inline-flex items-start gap-2 max-w-[min(100%,860px)]">
@@ -3426,11 +3731,14 @@ function FinalSignatureBlock({
   legalName,
   onFinalSignature,
   onLegalName,
+  needsAttention = false,
 }: {
   finalSignature: string | null;
   legalName: string;
   onFinalSignature: (dataUrl: string | null) => void;
   onLegalName: (value: string) => void;
+  /** Build W — flagged by a failed submit; renders the copper attention border. */
+  needsAttention?: boolean;
 }) {
   const [redrawing, setRedrawing] = useState(false);
   const captured = Boolean(finalSignature);
@@ -3439,7 +3747,12 @@ function FinalSignatureBlock({
   return (
     <section
       className="rounded-xl px-5 py-5 space-y-4 max-w-[min(100%,860px)]"
-      style={{ background: "var(--paper)", border: "1px solid var(--navy)" }}
+      style={{
+        background: needsAttention ? "var(--copper-wash)" : "var(--paper)",
+        border: needsAttention
+          ? "1px solid var(--copper)"
+          : "1px solid var(--navy)",
+      }}
     >
       <div>
         <p
@@ -3454,6 +3767,14 @@ function FinalSignatureBlock({
         >
           After reading this, I am formally signing this acknowledgement.
         </h3>
+        {needsAttention && (
+          <p
+            className="mt-1.5 text-[11.5px] inline-flex items-center gap-1 font-medium"
+            style={{ color: "var(--copper-deep)" }}
+          >
+            <AlertCircle size={11} /> Your final signature is still required.
+          </p>
+        )}
         <p
           className="text-[13.5px] mt-2 leading-snug"
           style={{ color: "var(--ink)" }}
