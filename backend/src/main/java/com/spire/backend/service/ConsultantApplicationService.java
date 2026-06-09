@@ -28,6 +28,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -1556,11 +1557,20 @@ public class ConsultantApplicationService {
         }
 
         String ip = clientIp(request);
+        // Build U — quick stat the ERM checks at a glance + audit row
+        // with timestamp + IP for the activity timeline.
+        int previousCount = app.getConsultantDownloadCount() == null
+                ? 0 : app.getConsultantDownloadCount();
+        LocalDateTime downloadedAt = LocalDateTime.now();
+        app.setConsultantDownloadCount(previousCount + 1);
+        app.setConsultantLastDownloadedAt(downloadedAt);
+        applicationRepository.save(app);
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CONSULTANT_DOWNLOAD,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
                 Map.of("ip", ip == null ? "" : ip,
                         "bytes", String.valueOf(bytes.length),
+                        "downloadCount", String.valueOf(previousCount + 1),
                         "documentHash", app.getDocumentHash() == null
                                 ? "" : app.getDocumentHash()),
                 request);
@@ -2026,6 +2036,238 @@ public class ConsultantApplicationService {
     /** Carries the cheque bytes + their original content-type for the controller's stream. */
     public record ChequeBytes(byte[] bytes, String contentType) {}
 
+    // ── Build U: multi-cheque support ────────────────────────────────
+
+    /** One entry in the {@code cheques} JSON list. */
+    public record ChequeEntry(
+            int index,
+            String number,
+            String date,
+            String publicId,
+            String contentType,
+            String uploadedAt) {}
+
+    /**
+     * Decode the {@code cheques} JSON column into a sorted-by-index
+     * list. Falls back to {@code [{index:0, publicId:<legacy>}]} when
+     * the column is null but the legacy {@code chequePublicId} is set,
+     * so pre-Build-U rows keep rendering.
+     */
+    public List<ChequeEntry> parseCheques(ConsultantApplication app) {
+        String json = app.getCheques();
+        if (json != null && !json.isBlank()) {
+            try {
+                JsonNode root = objectMapper.readTree(json);
+                if (root.isArray()) {
+                    List<ChequeEntry> out = new ArrayList<>(root.size());
+                    for (JsonNode n : root) {
+                        out.add(new ChequeEntry(
+                                n.path("index").asInt(0),
+                                n.path("number").asText(""),
+                                n.path("date").asText(""),
+                                n.path("publicId").asText(""),
+                                n.path("contentType").asText(""),
+                                n.path("uploadedAt").asText("")));
+                    }
+                    out.sort(java.util.Comparator.comparingInt(ChequeEntry::index));
+                    return out;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to parse cheques JSON for {}: {}",
+                        app.getApplicationId(), e.getMessage());
+            }
+        }
+        String legacy = app.getChequePublicId();
+        if (legacy != null && !legacy.isBlank()) {
+            return List.of(new ChequeEntry(
+                    0, "", "", legacy,
+                    app.getChequeContentType() == null ? "" : app.getChequeContentType(),
+                    app.getChequeUploadedAt() == null ? "" : app.getChequeUploadedAt().toString()));
+        }
+        return List.of();
+    }
+
+    /** Patch payload for the per-cheque metadata setter. */
+    public static class ChequeMetadataPatch {
+        public String number;
+        public String date;
+    }
+
+    /**
+     * Build U — sets/updates the metadata (number, date) for one
+     * cheque entry without touching its uploaded bytes. The consultant
+     * /fill page calls this each time they edit a per-cheque input.
+     */
+    @Transactional
+    public ConsultantApplication setChequeMetadata(
+            String applicationId,
+            int index,
+            ChequeMetadataPatch patch,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (index < 0 || index > 50) {
+            throw new IllegalArgumentException("Cheque index out of range.");
+        }
+        List<ChequeEntry> entries = new ArrayList<>(parseCheques(app));
+        ChequeEntry existing = findEntry(entries, index);
+        String number = patch == null || patch.number == null ? "" : patch.number.trim();
+        String date = patch == null || patch.date == null ? "" : patch.date.trim();
+        ChequeEntry replacement = new ChequeEntry(
+                index,
+                number,
+                date,
+                existing == null ? "" : existing.publicId(),
+                existing == null ? "" : existing.contentType(),
+                existing == null ? "" : existing.uploadedAt());
+        upsertEntry(entries, replacement);
+        app.setCheques(serialiseCheques(entries));
+        applicationRepository.save(app);
+        return app;
+    }
+
+    /**
+     * Build U — upload bytes for cheque #{@code index}. Stored under
+     * {@code agreements/{appId}-cheque-{index}} (authenticated; type
+     * varies by content). Updates only that entry in the JSON list;
+     * other entries (incl. metadata) untouched. CHEQUE_UPLOADED audit.
+     */
+    @Transactional
+    public ConsultantApplication uploadChequeAt(
+            String applicationId,
+            int index,
+            byte[] bytes,
+            String contentType,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (index < 0 || index > 50) {
+            throw new IllegalArgumentException("Cheque index out of range.");
+        }
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("Cheque file is empty.");
+        }
+        if (bytes.length > MAX_CHEQUE_BYTES) {
+            throw new IllegalArgumentException(
+                    "Cheque file is too large (>10 MB).");
+        }
+        String normalisedType = contentType == null ? "" : contentType.toLowerCase();
+        boolean isImage = normalisedType.startsWith("image/");
+        boolean isPdf = normalisedType.equals("application/pdf");
+        if (!isImage && !isPdf) {
+            throw new IllegalArgumentException(
+                    "Cheque must be an image (JPG/PNG/HEIC) or PDF.");
+        }
+        String publicId = "agreements/" + applicationId + "-cheque-" + index;
+        try {
+            cloudinary.uploader().upload(bytes,
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "public_id", publicId,
+                            "resource_type", isPdf ? "raw" : "image",
+                            "type", "authenticated",
+                            "overwrite", true));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(
+                    "Couldn't store cheque: " + e.getMessage(), e);
+        }
+
+        List<ChequeEntry> entries = new ArrayList<>(parseCheques(app));
+        ChequeEntry existing = findEntry(entries, index);
+        ChequeEntry replacement = new ChequeEntry(
+                index,
+                existing == null ? "" : existing.number(),
+                existing == null ? "" : existing.date(),
+                publicId,
+                normalisedType,
+                LocalDateTime.now().toString());
+        upsertEntry(entries, replacement);
+        app.setCheques(serialiseCheques(entries));
+        // Keep the legacy single-cheque fields current too so the ERM's
+        // existing "cheque uploaded" pill in the wizard's review step
+        // and the older fetchChequeBytes path keep working.
+        if (index == 0) {
+            app.setChequePublicId(publicId);
+            app.setChequeContentType(normalisedType);
+            app.setChequeUploadedAt(LocalDateTime.now());
+        }
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CHEQUE_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("publicId", publicId,
+                        "index", index,
+                        "contentType", normalisedType,
+                        "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /**
+     * Build U — streams the bytes for cheque #{@code index}. Re-signs
+     * the URL on every call (per-upload URL 401s later). Returns null
+     * when the index has no upload on file.
+     */
+    public ChequeBytes fetchChequeBytesAt(String applicationId, int index)
+            throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        List<ChequeEntry> entries = parseCheques(app);
+        ChequeEntry entry = findEntry(new ArrayList<>(entries), index);
+        if (entry == null || entry.publicId() == null || entry.publicId().isBlank()) {
+            return null;
+        }
+        boolean isPdf = "application/pdf".equalsIgnoreCase(entry.contentType());
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(entry.publicId());
+        java.net.URLConnection conn = new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (java.io.InputStream in = conn.getInputStream()) {
+            byte[] bytes = in.readAllBytes();
+            return new ChequeBytes(bytes, entry.contentType());
+        }
+    }
+
+    private static ChequeEntry findEntry(List<ChequeEntry> entries, int index) {
+        for (ChequeEntry e : entries) {
+            if (e.index() == index) return e;
+        }
+        return null;
+    }
+
+    private static void upsertEntry(List<ChequeEntry> entries, ChequeEntry replacement) {
+        for (int i = 0; i < entries.size(); i++) {
+            if (entries.get(i).index() == replacement.index()) {
+                entries.set(i, replacement);
+                return;
+            }
+        }
+        entries.add(replacement);
+    }
+
+    private String serialiseCheques(List<ChequeEntry> entries) {
+        entries.sort(java.util.Comparator.comparingInt(ChequeEntry::index));
+        try {
+            return objectMapper.writeValueAsString(entries);
+        } catch (Exception e) {
+            throw new IllegalStateException("Couldn't serialise cheques.", e);
+        }
+    }
+
+    /** Parse the consultant-entered cheque count, capped at 50 (sanity). */
+    private static int parseChequeCountSafe(String raw) {
+        if (raw == null || raw.isBlank()) return 0;
+        try {
+            int n = Integer.parseInt(raw.trim());
+            if (n < 0) return 0;
+            return Math.min(50, n);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     /**
      * Decodes a data:image/...;base64,... data URL and pushes the
      * bytes to Cloudinary under the given public_id. Returns the
@@ -2257,7 +2499,7 @@ public class ConsultantApplicationService {
     }
 
     /** Returns the keys of every effectively-required consultant field that's blank. */
-    private static java.util.List<String> collectMissingConsultantFields(
+    private java.util.List<String> collectMissingConsultantFields(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
         // CORE (always required).
@@ -2321,20 +2563,33 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());
         }
 
-        // Appendix 5 -- security check (cheque upload required when active).
+        // Appendix 5 -- security cheque(s) required when active.
+        // Build U — multi-cheque: each entry 0..count-1 must have a
+        // number AND an upload. The legacy single chequePublicId is
+        // honoured via parseCheques (treated as index 0) for pre-Build-U
+        // rows that haven't migrated their data.
         boolean app5Required = Boolean.TRUE.equals(app.getRequireAppendix5());
         if (app5Required || isAppendix5Touched(app)) {
             addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
-            addIfBlank(missing, "securityCheckNumbers", app.getSecurityCheckNumbers());
             addIfBlank(missing, "securityCheckBank", app.getSecurityCheckBank());
             addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
             addIfBlank(missing, "securityCheckAmount", app.getSecurityCheckAmount());
-            addIfBlank(missing, "securityCheckDates", app.getSecurityCheckDates());
-            // Cheque file is required when Appendix 5 applies. The
-            // wizard uploads it via POST /cheque before submit; the
-            // entity holds the public_id and content type.
-            if (app.getChequePublicId() == null || app.getChequePublicId().isBlank()) {
-                missing.add("chequeUpload");
+            int requiredCount = parseChequeCountSafe(app.getSecurityCheckCount());
+            if (requiredCount <= 0) {
+                // Adding "cheques" as a single missing token covers both
+                // "count not set" and "no cheques uploaded".
+                missing.add("cheques");
+            } else {
+                List<ChequeEntry> entries = parseCheques(app);
+                for (int i = 0; i < requiredCount; i++) {
+                    ChequeEntry e = findEntry(new java.util.ArrayList<>(entries), i);
+                    if (e == null
+                            || e.number() == null || e.number().isBlank()
+                            || e.publicId() == null || e.publicId().isBlank()) {
+                        missing.add("cheques");
+                        break;
+                    }
+                }
             }
         }
 

@@ -3366,6 +3366,53 @@ export interface ConsultantApplication {
   consentGivenAt?: string | null;
   consentIp?: string | null;
   consentVersion?: string | null;
+  // Build U — multi-cheque support. JSON string of ChequeEntry[];
+  // ERM detail + wizard parse this client-side.
+  cheques?: string | null;
+  // Build U — consultant download accounting surfaced to the ERM.
+  consultantDownloadCount?: number | null;
+  consultantLastDownloadedAt?: string | null;
+}
+
+/**
+ * Build U — one cheque entry as stored in the cheques JSON column.
+ * Backward-compat: when the column is empty but legacy chequePublicId
+ * is set, the backend returns it as a single entry at index 0.
+ */
+export interface ChequeEntry {
+  index: number;
+  number: string;
+  date: string;
+  publicId: string;
+  contentType: string;
+  uploadedAt: string;
+}
+
+/**
+ * Parse the {@code cheques} JSON column into a sorted-by-index list.
+ * Tolerates null / malformed JSON by returning an empty array.
+ */
+export function parseChequeList(raw: string | null | undefined): ChequeEntry[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((n) => {
+        const o = n as Record<string, unknown>;
+        return {
+          index: Number(o.index ?? 0),
+          number: String(o.number ?? ""),
+          date: String(o.date ?? ""),
+          publicId: String(o.publicId ?? ""),
+          contentType: String(o.contentType ?? ""),
+          uploadedAt: String(o.uploadedAt ?? ""),
+        } satisfies ChequeEntry;
+      })
+      .sort((a, b) => a.index - b.index);
+  } catch {
+    return [];
+  }
 }
 
 /**
@@ -4132,6 +4179,46 @@ export async function uploadConsultantCheque(
   const form = new FormData();
   form.append("file", file);
   await consultantMultipartFetch(applicationId, "/cheque", form);
+}
+
+/**
+ * Build U — upload the bytes for cheque #{@code index}. One call per
+ * cheque entry; the backend stores each under
+ * {@code agreements/{appId}-cheque-{index}}.
+ */
+export async function uploadConsultantChequeAt(
+  applicationId: string,
+  index: number,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, `/cheques/${index}`, form);
+}
+
+/**
+ * Build U — patch the metadata (number, date) for cheque #{@code index}
+ * without touching the uploaded bytes. Save-on-blur from the wizard.
+ */
+export async function saveConsultantChequeMetadata(
+  applicationId: string,
+  index: number,
+  body: { number?: string; date?: string },
+): Promise<ConsultantApplication> {
+  return consultantFetch<ConsultantApplication>(
+    applicationId,
+    `/cheques/${index}`,
+    { method: "PUT", body: JSON.stringify(body) },
+  );
+}
+
+/**
+ * Build U — ERM-side cheque viewer URL helper. The bytes are streamed
+ * server-side; this returns the inline URL with the ERM session token
+ * implicitly attached by the browser's fetch on click.
+ */
+export function ermChequeViewUrl(applicationId: string, index: number): string {
+  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/cheques/${index}?disposition=inline`;
 }
 
 /**

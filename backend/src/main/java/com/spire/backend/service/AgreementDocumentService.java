@@ -498,13 +498,19 @@ public class AgreementDocumentService {
         c.put("portalEffectiveDate", fd.apply(app.getPortalEffectiveDate()));
         c.put("portalRevocationContact", nz.apply(app.getPortalRevocationContact()));
 
-        // Appendix 5 -- security check (optional).
+        // Appendix 5 -- security cheque(s) (optional).
         c.put("securityCheckCount", nz.apply(app.getSecurityCheckCount()));
-        c.put("securityCheckNumbers", nz.apply(app.getSecurityCheckNumbers()));
+        // Build U — derive numbers + dates from the cheques JSON list
+        // (one row per cheque) so the template's existing placeholders
+        // stay populated. Falls back to the legacy single-text columns
+        // when the JSON is empty (pre-Build-U rows).
+        c.put("securityCheckNumbers", deriveChequeField(app, "number",
+                app.getSecurityCheckNumbers()));
         c.put("securityCheckBank", nz.apply(app.getSecurityCheckBank()));
         c.put("securityCheckHolderName", nz.apply(app.getSecurityCheckHolderName()));
         c.put("securityCheckAmount", nz.apply(app.getSecurityCheckAmount()));
-        c.put("securityCheckDates", nz.apply(app.getSecurityCheckDates()));
+        c.put("securityCheckDates", deriveChequeField(app, "date",
+                app.getSecurityCheckDates()));
 
         // ERM signature block. ermName/ermTitle come from the Approve &
         // Sign input (the signer confirms them); ermEmail is resolved
@@ -603,6 +609,37 @@ public class AgreementDocumentService {
      * on a pre-submit preview render -- callers should treat empty
      * as "(pending)" in the rendered line.
      */
+    /**
+     * Build U — join the per-cheque field ("number" or "date") from the
+     * cheques JSON column into a comma-separated string for the
+     * template's existing {@code ${securityCheckNumbers}} /
+     * {@code ${securityCheckDates}} placeholders. Falls back to the
+     * legacy single-text column for pre-Build-U rows.
+     */
+    private static String deriveChequeField(ConsultantApplication app, String key, String legacy) {
+        String json = app.getCheques();
+        if (json != null && !json.isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper m =
+                        new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.databind.JsonNode arr = m.readTree(json);
+                if (arr.isArray()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                        String v = n.path(key).asText("");
+                        if (v.isBlank()) continue;
+                        if (sb.length() > 0) sb.append(", ");
+                        sb.append(v);
+                    }
+                    if (sb.length() > 0) return sb.toString();
+                }
+            } catch (Exception ignored) {
+                /* fall through to legacy */
+            }
+        }
+        return legacy == null ? "" : legacy;
+    }
+
     private static String resolveFinalSigningIp(ConsultantApplication app) {
         String ip = app.getFinalSigningIp();
         if (ip != null && !ip.isBlank()) return ip.trim();

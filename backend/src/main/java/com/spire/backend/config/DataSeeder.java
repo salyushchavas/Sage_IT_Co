@@ -1274,6 +1274,17 @@ public class DataSeeder implements CommandLineRunner {
                 {"consent_given_at TIMESTAMP", "consent_given_at"},
                 {"consent_ip VARCHAR(64)", "consent_ip"},
                 {"consent_version VARCHAR(32)", "consent_version"},
+                // Build U — multi-cheque support. Stored as JSON-in-TEXT
+                // for cross-DB portability (same convention as payload).
+                // Legacy single cheque_public_id stays as a fallback.
+                {"cheques TEXT", "cheques"},
+                // Build U — ERM-visible count of times the consultant
+                // has downloaded their released consultant-version PDF.
+                // Incremented on every successful POST .../download.
+                {"consultant_download_count INTEGER NOT NULL DEFAULT 0",
+                        "consultant_download_count"},
+                {"consultant_last_downloaded_at TIMESTAMP",
+                        "consultant_last_downloaded_at"},
         };
         for (String[] col : columns) {
             try {

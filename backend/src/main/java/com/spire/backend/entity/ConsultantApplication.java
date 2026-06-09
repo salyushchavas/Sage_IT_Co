@@ -425,6 +425,24 @@ public class ConsultantApplication {
     @Column(name = "cheque_content_type", length = 64)
     private String chequeContentType;
 
+    /**
+     * Build U — multiple-cheque support. JSON-in-TEXT array of
+     * {@code [{"index": 0, "number": "1001", "date": "2026-09-15",
+     * "publicId": "agreements/<appId>-cheque-0",
+     * "contentType": "image/jpeg", "uploadedAt": "2026-06-10T…"}]}.
+     *
+     * The legacy single {@code chequePublicId} stays as a fallback
+     * (treated as index 0) for rows from before this migration so
+     * existing ERM views and the existing fetchChequeBytes path keep
+     * working. New uploads always land here via
+     * {@code uploadChequeAt(index, …)}.
+     *
+     * Stored as TEXT to keep the schema portable across MySQL dev and
+     * Postgres prod — same convention as {@code payload} above.
+     */
+    @Column(name = "cheques", columnDefinition = "TEXT")
+    private String cheques;
+
     // ── Build L: 15-day invite expiry ─────────────────────────────────
     //
     // Timestamp of the LAST time the ERM sent the fill invitation
@@ -498,6 +516,20 @@ public class ConsultantApplication {
 
     @Column(name = "consent_version", length = 32)
     private String consentVersion;
+
+    // ── Build U: consultant download accounting ──────────────────────
+    //
+    // Incremented on every successful consultant-version PDF download
+    // (after the OTP exchange). The ERM detail surfaces both: "downloads:
+    // N" as a quick stat outside the collapsed activity log, and
+    // CONSULTANT_DOWNLOAD events with timestamps + IPs inside the log.
+
+    @Column(name = "consultant_download_count", nullable = false)
+    @Builder.Default
+    private Integer consultantDownloadCount = 0;
+
+    @Column(name = "consultant_last_downloaded_at")
+    private LocalDateTime consultantLastDownloadedAt;
 
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────

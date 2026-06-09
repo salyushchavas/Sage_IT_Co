@@ -50,12 +50,15 @@ import {
   fetchConsultantPreviewImages,
   getConsultantApplicationView,
   getConsultantToken,
+  parseChequeList,
   recordConsultantConsent,
   requestConsultantDownloadOtp,
+  saveConsultantChequeMetadata,
   saveConsultantFill,
   signConsultantApplication,
-  uploadConsultantCheque,
+  uploadConsultantChequeAt,
   type AgreementContent,
+  type ChequeEntry,
   type ConsultantApplication,
   type ConsultantFillPayload,
 } from "@/lib/api";
@@ -238,18 +241,29 @@ function isSectionComplete(
   section: AgreementSection,
   form: FormState,
   reqs: EffectiveRequirements,
-  chequeUploaded: boolean,
+  chequeEntries: ChequeEntry[],
 ): boolean {
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
-    if (field.type === "file") {
-      if (!isFieldRequired(field, section, form, reqs)) continue;
-      if (!chequeUploaded) return false;
-      continue;
-    }
+    // Build U — never rendered after the multi-cheque refactor, but
+    // section blueprints from older releases may still ship one;
+    // defer to the per-cheque check below.
+    if (field.type === "file") continue;
     if (!isFieldRequired(field, section, form, reqs)) continue;
     if (!isFieldValueValid(field, form.fields[field.key] ?? "")) {
       return false;
+    }
+  }
+  // Build U — Appendix 5 completeness: when the appendix applies,
+  // every cheque 0..count-1 needs a number AND an upload.
+  if (section.id === "appendix5" && isSectionActive(section, form, reqs)) {
+    const count = parseChequeCount(form.fields["securityCheckCount"]);
+    if (count <= 0) return false;
+    for (let i = 0; i < count; i++) {
+      const entry = chequeEntries.find((e) => e.index === i);
+      if (!entry) return false;
+      if (!entry.number || !entry.number.trim()) return false;
+      if (!entry.publicId || !entry.publicId.trim()) return false;
     }
   }
   // Signature gating: main-agreement -> primary; review -> final.
@@ -269,13 +283,25 @@ function isSectionComplete(
   return true;
 }
 
+/**
+ * Build U — parse the consultant-entered "Number of cheques" field
+ * into a non-negative int, capping at 50 (sanity). Returns 0 when the
+ * field is empty or junk.
+ */
+function parseChequeCount(raw: string | undefined | null): number {
+  if (!raw) return 0;
+  const n = parseInt(String(raw).trim(), 10);
+  if (Number.isNaN(n) || n < 0) return 0;
+  return Math.min(50, n);
+}
+
 function firstIncompleteIndex(
   form: FormState,
   reqs: EffectiveRequirements,
-  chequeUploaded: boolean,
+  chequeEntries: ChequeEntry[],
 ): number {
   for (let i = 0; i < AGREEMENT_SECTIONS.length - 1; i++) {
-    if (!isSectionComplete(AGREEMENT_SECTIONS[i], form, reqs, chequeUploaded)) return i;
+    if (!isSectionComplete(AGREEMENT_SECTIONS[i], form, reqs, chequeEntries)) return i;
   }
   return AGREEMENT_SECTIONS.length - 1;
 }
@@ -321,11 +347,12 @@ export default function ConsultantWizardPage() {
     [],
   );
   const [templateOpen, setTemplateOpen] = useState(false);
-  // Build G — Appendix 5 cheque upload state. True once the server
-  // confirms the public_id is stored. Wizard mirrors the row.
-  const [chequeUploaded, setChequeUploaded] = useState(false);
+  // Build G — Appendix 5 cheque upload state.
+  // Build U — extended to per-cheque list. Each entry maps to
+  // index i and tracks {number, date, publicId, uploadedAt}.
+  const [chequeEntries, setChequeEntries] = useState<ChequeEntry[]>([]);
   const [chequeUploadError, setChequeUploadError] = useState("");
-  const [chequeUploading, setChequeUploading] = useState(false);
+  const [chequeUploadingIndex, setChequeUploadingIndex] = useState<number | null>(null);
   // Build G — review-step attestation gate. The consultant must
   // (a) load the generated PDF preview, (b) tick the attestation
   // checkbox, and (c) draw the final signature -- in any order --
@@ -383,12 +410,13 @@ export default function ConsultantWizardPage() {
         const initial = buildInitialState(data);
         setForm(initial);
         lastSavedRef.current = { ...initial };
-        setChequeUploaded(Boolean(data.chequePublicId));
+        const entries = parseChequeList(data.cheques);
+        setChequeEntries(entries);
         // Resume at the first incomplete section (or step 0 for a
         // brand-new application). REVISION_REQUESTED also resumes
         // from whichever section still has gaps after the ERM kick.
         setCurrentStep(firstIncompleteIndex(
-            initial, effectiveRequirements(data), Boolean(data.chequePublicId)));
+            initial, effectiveRequirements(data), entries));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -560,23 +588,69 @@ export default function ConsultantWizardPage() {
     });
   }, []);
 
-  // Build G — Appendix 5 cheque upload. Uploads via multipart POST;
-  // the row's chequePublicId is the "uploaded ✓" signal. The wizard
-  // mirrors that as local state so it doesn't have to refetch the
-  // whole application after every upload.
-  const handleChequeUpload = useCallback(
-    async (file: File) => {
+  // Build U — per-cheque upload. One call per index; the wizard mirrors
+  // the row's cheques JSON so it doesn't have to refetch after every
+  // upload. The "uploaded" signal per index is a non-empty publicId on
+  // the matching ChequeEntry.
+  const handleChequeUploadAt = useCallback(
+    async (index: number, file: File) => {
       if (!appId) return;
       setChequeUploadError("");
-      setChequeUploading(true);
+      setChequeUploadingIndex(index);
       try {
-        await uploadConsultantCheque(appId, file);
-        setChequeUploaded(true);
+        await uploadConsultantChequeAt(appId, index, file);
+        setChequeEntries((prev) => {
+          const next = prev.filter((e) => e.index !== index);
+          const existing = prev.find((e) => e.index === index);
+          next.push({
+            index,
+            number: existing?.number ?? "",
+            date: existing?.date ?? "",
+            publicId: `agreements/${appId}-cheque-${index}`,
+            contentType: file.type,
+            uploadedAt: new Date().toISOString(),
+          });
+          next.sort((a, b) => a.index - b.index);
+          return next;
+        });
       } catch (e) {
         const msg = e instanceof Error ? e.message : "Couldn't upload.";
         setChequeUploadError(msg);
       } finally {
-        setChequeUploading(false);
+        setChequeUploadingIndex(null);
+      }
+    },
+    [appId],
+  );
+
+  // Build U — per-cheque metadata patch. Saves only the number / date
+  // for one index; the upload bytes (if any) survive untouched.
+  const handleChequeMetadataChange = useCallback(
+    async (
+      index: number,
+      patch: { number?: string; date?: string },
+    ) => {
+      if (!appId) return;
+      // Optimistic update so the input is responsive.
+      setChequeEntries((prev) => {
+        const next = prev.filter((e) => e.index !== index);
+        const existing = prev.find((e) => e.index === index);
+        next.push({
+          index,
+          number: patch.number ?? existing?.number ?? "",
+          date: patch.date ?? existing?.date ?? "",
+          publicId: existing?.publicId ?? "",
+          contentType: existing?.contentType ?? "",
+          uploadedAt: existing?.uploadedAt ?? "",
+        });
+        next.sort((a, b) => a.index - b.index);
+        return next;
+      });
+      try {
+        await saveConsultantChequeMetadata(appId, index, patch);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Couldn't save.";
+        setChequeUploadError(msg);
       }
     },
     [appId],
@@ -685,7 +759,7 @@ export default function ConsultantWizardPage() {
       setSubmitError(msg);
       setSubmitting(false);
     }
-  }, [appId, computeDelta, form, reqs, chequeUploaded, router]);
+  }, [appId, computeDelta, form, reqs, chequeEntries, router]);
 
   // Step accessors ──────────────────────────────────────────────
   const section = AGREEMENT_SECTIONS[currentStep];
@@ -695,14 +769,14 @@ export default function ConsultantWizardPage() {
         const complete =
           i === AGREEMENT_SECTIONS.length - 1
             ? AGREEMENT_SECTIONS.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeUploaded),
+                isSectionComplete(sec, form, reqs, chequeEntries),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeUploaded);
+            : isSectionComplete(s, form, reqs, chequeEntries);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [form, reqs, chequeUploaded],
+    [form, reqs, chequeEntries],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeUploaded);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries);
   const isReviewStep = currentStep === AGREEMENT_SECTIONS.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -712,12 +786,12 @@ export default function ConsultantWizardPage() {
   const allComplete = useMemo(
     () =>
       AGREEMENT_SECTIONS.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeUploaded),
+        isSectionComplete(s, form, reqs, chequeEntries),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [form, reqs, chequeUploaded, attestation, previewSeen],
+    [form, reqs, chequeEntries, attestation, previewSeen],
   );
 
   // Render ─────────────────────────────────────────────────────
@@ -937,7 +1011,7 @@ export default function ConsultantWizardPage() {
             onFinalSignature={setFinalSignature}
             onLegalName={setLegalName}
             allComplete={allComplete}
-            chequeUploaded={chequeUploaded}
+            chequeEntries={chequeEntries}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -970,10 +1044,13 @@ export default function ConsultantWizardPage() {
             consultantEmail={app.consultantEmail}
             effectiveDateText={formatUsDate(app.effectiveDate)}
             onOpenTemplate={() => setTemplateOpen(true)}
-            chequeUploaded={chequeUploaded}
-            chequeUploading={chequeUploading}
+            chequeEntries={chequeEntries}
+            chequeUploadingIndex={chequeUploadingIndex}
             chequeUploadError={chequeUploadError}
-            onUploadCheque={(f) => void handleChequeUpload(f)}
+            onUploadChequeAt={(index, f) => void handleChequeUploadAt(index, f)}
+            onChequeMetadataChange={(index, patch) =>
+              void handleChequeMetadataChange(index, patch)
+            }
             phase={app.phase ?? 1}
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
             onNext={() =>
@@ -1261,10 +1338,11 @@ function SectionStep({
   consultantEmail,
   effectiveDateText,
   onOpenTemplate,
-  chequeUploaded,
-  chequeUploading,
+  chequeEntries,
+  chequeUploadingIndex,
   chequeUploadError,
-  onUploadCheque,
+  onUploadChequeAt,
+  onChequeMetadataChange,
   phase,
   onBack,
   onNext,
@@ -1288,10 +1366,14 @@ function SectionStep({
   consultantEmail: string;
   effectiveDateText: string;
   onOpenTemplate: () => void;
-  chequeUploaded: boolean;
-  chequeUploading: boolean;
+  chequeEntries: ChequeEntry[];
+  chequeUploadingIndex: number | null;
   chequeUploadError: string;
-  onUploadCheque: (file: File) => void;
+  onUploadChequeAt: (index: number, file: File) => void;
+  onChequeMetadataChange: (
+    index: number,
+    patch: { number?: string; date?: string },
+  ) => void;
   phase: number;
   onBack: () => void;
   onNext: () => void;
@@ -1314,20 +1396,37 @@ function SectionStep({
 
   // Build S — track scroll progress inside the document column so the
   // header's "% read" label + the left-edge rail fill stay in sync.
+  // Build U — sectionScrolled re-arms the per-section affirmation gate:
+  // false on every section change, true once the consultant has read
+  // ~95% of the section's content.
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const [sectionScrolled, setSectionScrolled] = useState(false);
   const recomputeProgress = useCallback(() => {
     const el = scrollerRef.current;
     if (!el) return;
     const scrollable = el.scrollHeight - el.clientHeight;
     if (scrollable <= 1) {
+      // Content fits without scrolling — treat as "fully read" so the
+      // affirmation isn't permanently locked on short sections.
+      setSectionScrolled(true);
       onReadProgress(100);
       return;
     }
     const pct = Math.min(100, (el.scrollTop / scrollable) * 100);
+    if (pct >= 95) setSectionScrolled(true);
     onReadProgress(pct);
   }, [onReadProgress]);
 
+  // Build U — every section change resets the reading panel to the
+  // top and re-arms the scroll-gated affirmation. setTimeout lets the
+  // new section's content paint before we measure.
   useEffect(() => {
+    const el = scrollerRef.current;
+    if (el) {
+      el.scrollTop = 0;
+      el.style.setProperty("--read", "0%");
+    }
+    setSectionScrolled(false);
     onReadProgress(0);
     const t = window.setTimeout(recomputeProgress, 50);
     return () => window.clearTimeout(t);
@@ -1572,11 +1671,13 @@ function SectionStep({
           )}
 
           {section.id === "appendix5" && (
-            <ChequeUploadBlock
-              uploaded={chequeUploaded}
-              uploading={chequeUploading}
+            <ChequeListBlock
+              count={parseChequeCount(form.fields["securityCheckCount"])}
+              entries={chequeEntries}
+              uploadingIndex={chequeUploadingIndex}
               error={chequeUploadError}
-              onUpload={onUploadCheque}
+              onUploadAt={onUploadChequeAt}
+              onMetadataChange={onChequeMetadataChange}
             />
           )}
 
@@ -1598,6 +1699,7 @@ function SectionStep({
               flag={section.affirmationFlag}
               checked={form.affirmations[section.affirmationFlag]}
               onChange={(v) => onAffirm(section.affirmationFlag!, v)}
+              scrollGated={!sectionScrolled}
             />
           )}
 
@@ -2447,10 +2549,11 @@ const FIELD_LABELS: Record<string, string> = (() => {
       out[f.key] = f.label;
     }
   }
-  // The cheque upload field has its own label in the section config
-  // but the UI surfaces it via the ChequeUploadBlock; keep the
-  // friendly label here too so the missing-list reads consistently.
+  // Build U — multi-cheque list. The section blueprint no longer
+  // carries a chequeUpload field key, but the submit-error panel may
+  // surface "cheques" as a missing token, so keep a friendly label.
   out["chequeUpload"] = "Security cheque upload";
+  out["cheques"] = "Security cheques";
   return out;
 })();
 
@@ -2720,7 +2823,7 @@ function ConsultantImagesPreview({
         {loading && !pages && (
           <div className="flex items-center justify-center text-xs text-gray-500 py-12">
             <Loader2 size={16} className="animate-spin mr-2" />
-            Generating watermarked preview…
+            Generating preview…
           </div>
         )}
         {error && (
@@ -2754,84 +2857,149 @@ function ConsultantImagesPreview({
   );
 }
 
-// ── Build G: Appendix 5 security-cheque upload ────────────────
+// ── Build U: Appendix 5 multi-cheque list ────────────────────
 
-function ChequeUploadBlock({
-  uploaded,
-  uploading,
+/**
+ * Build U — renders one input group per cheque (driven by the
+ * consultant's "Number of cheques" entry). Each group has its own
+ * cheque-number, cheque-date, and file upload. Replaces the previous
+ * single ChequeUploadBlock + free-text "Check numbers" / "Check
+ * dates" inputs.
+ */
+function ChequeListBlock({
+  count,
+  entries,
+  uploadingIndex,
   error,
-  onUpload,
+  onUploadAt,
+  onMetadataChange,
 }: {
-  uploaded: boolean;
-  uploading: boolean;
+  count: number;
+  entries: ChequeEntry[];
+  uploadingIndex: number | null;
   error: string;
-  onUpload: (file: File) => void;
+  onUploadAt: (index: number, file: File) => void;
+  onMetadataChange: (
+    index: number,
+    patch: { number?: string; date?: string },
+  ) => void;
 }) {
-  const inputId = "consultant-wizard-cheque";
+  if (count <= 0) {
+    return (
+      <section className="rounded-2xl border border-stone-200 bg-stone-50/60 px-5 py-4 text-[12.5px] text-stone-600 inline-flex items-start gap-2">
+        <AlertCircle size={13} className="mt-0.5 shrink-0" />
+        <span>
+          Enter the number of cheques above to add upload slots for each
+          one.
+        </span>
+      </section>
+    );
+  }
+  const indices = Array.from({ length: count }, (_, i) => i);
   return (
-    <section
-      className={
-        "rounded-2xl border shadow-sm p-5 space-y-3 "
-        + (uploaded
-          ? "bg-emerald-50/40 border-emerald-300"
-          : "bg-white border-stone-200")
-      }
-    >
-      <div>
+    <section className="space-y-3">
+      <header>
         <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
-          Security cheque
+          Security cheques
         </p>
         <h3 className="font-serif text-lg text-sage-navy mt-0.5">
-          Upload your post-dated cheque
+          One entry per cheque
         </h3>
-        <p className="text-xs text-gray-700 mt-1 leading-relaxed">
-          Required to complete Appendix 5. Acceptable formats: JPG, PNG,
-          HEIC, or PDF. Maximum size 10 MB. The file is stored privately
-          and is visible only to Sage IT.
+        <p className="text-xs text-gray-700 mt-1 leading-relaxed max-w-[64ch]">
+          Required to complete Appendix 5. For each cheque, enter the
+          cheque number and date, then upload a photo or PDF (≤10 MB).
+          The files are stored privately and visible only to Sage IT.
         </p>
-      </div>
-
-      {uploaded ? (
-        <div className="inline-flex items-center gap-2 text-xs font-semibold text-emerald-800">
-          <CheckCircle2 size={14} /> Uploaded. You can re-upload to replace it.
-        </div>
-      ) : null}
-
-      <label
-        htmlFor={inputId}
-        className={
-          "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border cursor-pointer transition-colors "
-          + (uploading
-            ? "bg-stone-100 text-gray-400 border-stone-200 cursor-wait"
-            : uploaded
-              ? "bg-white text-sage-navy border-stone-300 hover:bg-stone-50"
-              : "bg-sage-navy text-white border-sage-navy hover:bg-sage-navy-deep")
-        }
-      >
-        {uploading ? (
-          <>
-            <Loader2 size={12} className="animate-spin" /> Uploading…
-          </>
-        ) : (
-          <>
-            <FileText size={12} /> {uploaded ? "Replace file" : "Choose file"}
-          </>
-        )}
-      </label>
-      <input
-        id={inputId}
-        type="file"
-        accept="image/*,application/pdf"
-        disabled={uploading}
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          if (f) onUpload(f);
-          // Reset so the same filename re-fires onChange when retried.
-          e.currentTarget.value = "";
-        }}
-        className="hidden"
-      />
-
+      </header>
+      {indices.map((i) => {
+        const entry = entries.find((e) => e.index === i);
+        const uploaded = Boolean(entry?.publicId);
+        const uploading = uploadingIndex === i;
+        const inputId = `cheque-${i}-file`;
+        return (
+          <div
+            key={i}
+            className={
+              "rounded-xl border p-4 space-y-3 "
+              + (uploaded
+                ? "bg-emerald-50/40 border-emerald-300"
+                : "bg-white border-stone-200")
+            }
+          >
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
+              Cheque {i + 1}
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="block text-[12px]">
+                <span className="font-medium text-stone-700">
+                  Cheque number <span className="text-sage-copper-deep" aria-hidden>*</span>
+                </span>
+                <input
+                  type="text"
+                  value={entry?.number ?? ""}
+                  onChange={(e) =>
+                    onMetadataChange(i, { number: e.target.value })
+                  }
+                  placeholder="e.g. 1001"
+                  className="mt-1 w-full px-3 py-2 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper"
+                />
+              </label>
+              <label className="block text-[12px]">
+                <span className="font-medium text-stone-700">Cheque date</span>
+                <input
+                  type="date"
+                  value={entry?.date ?? ""}
+                  onChange={(e) =>
+                    onMetadataChange(i, { date: e.target.value })
+                  }
+                  className="mt-1 w-full px-3 py-2 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper"
+                />
+              </label>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <label
+                htmlFor={inputId}
+                className={
+                  "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border cursor-pointer motion-safe:transition-colors "
+                  + (uploading
+                    ? "bg-stone-100 text-gray-400 border-stone-200 cursor-wait"
+                    : uploaded
+                      ? "bg-white text-sage-navy border-stone-300 hover:bg-stone-50"
+                      : "bg-sage-navy text-white border-sage-navy hover:bg-sage-navy-deep")
+                }
+              >
+                {uploading ? (
+                  <>
+                    <Loader2 size={12} className="animate-spin" /> Uploading…
+                  </>
+                ) : (
+                  <>
+                    <FileText size={12} />
+                    {uploaded ? "Replace file" : "Choose file"}
+                  </>
+                )}
+              </label>
+              {uploaded && !uploading && (
+                <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800">
+                  <CheckCircle2 size={13} /> Uploaded
+                </span>
+              )}
+              <input
+                id={inputId}
+                type="file"
+                accept="image/*,application/pdf"
+                disabled={uploading}
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) onUploadAt(i, f);
+                  e.currentTarget.value = "";
+                }}
+                className="hidden"
+              />
+            </div>
+          </div>
+        );
+      })}
       {error && (
         <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
           <AlertCircle size={11} /> {error}
@@ -2847,26 +3015,33 @@ function AffirmationBlock({
   flag,
   checked,
   onChange,
+  scrollGated = false,
 }: {
   flag: AffirmationFlag;
   checked: boolean;
   onChange: (value: boolean) => void;
+  /** Build U — true until the consultant has scrolled this section. */
+  scrollGated?: boolean;
 }) {
+  const locked = scrollGated && !checked;
   return (
     <label
       htmlFor={`affirm-${flag}`}
       className={
-        "flex items-start gap-3 p-4 rounded-xl border cursor-pointer motion-safe:transition-colors "
+        "flex items-start gap-3 p-4 rounded-xl border motion-safe:transition-colors "
+        + (locked ? "cursor-not-allowed opacity-65 " : "cursor-pointer ")
         + (checked
           ? "border-[var(--ok)]/55"
           : "bg-[var(--paper)] border-[var(--line)] hover:border-[var(--ok)]/40")
       }
       style={checked ? { background: "var(--ok-wash)" } : undefined}
+      title={locked ? "Scroll the section to read it first." : undefined}
     >
       <input
         id={`affirm-${flag}`}
         type="checkbox"
         checked={checked}
+        disabled={locked}
         onChange={(e) => onChange(e.target.checked)}
         className="sr-only peer"
       />
@@ -2897,6 +3072,14 @@ function AffirmationBlock({
         style={{ color: checked ? "var(--ok)" : "var(--ink)" }}
       >
         I have read and understood this section and agree to its terms.
+        {locked && (
+          <span
+            className="block mt-1 text-[11.5px] font-medium"
+            style={{ color: "var(--muted)" }}
+          >
+            Scroll the section to the end to confirm.
+          </span>
+        )}
       </span>
     </label>
   );
@@ -2912,7 +3095,7 @@ function ReviewStep({
   onFinalSignature,
   onLegalName,
   allComplete,
-  chequeUploaded,
+  chequeEntries,
   attestation,
   onAttestation,
   previewSeen,
@@ -2928,7 +3111,7 @@ function ReviewStep({
   onFinalSignature: (dataUrl: string | null) => void;
   onLegalName: (value: string) => void;
   allComplete: boolean;
-  chequeUploaded: boolean;
+  chequeEntries: ChequeEntry[];
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -3007,7 +3190,7 @@ function ReviewStep({
       </div>
 
       {AGREEMENT_SECTIONS.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeUploaded);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix
@@ -3097,16 +3280,23 @@ function ReviewStep({
               </dl>
             )}
 
-            {section.id === "appendix5" && (
-              <p className="mt-3 text-[12.5px] text-stone-600 inline-flex items-center gap-1.5">
-                {chequeUploaded ? (
-                  <CheckCircle2 size={12} className="text-sage-navy" />
-                ) : (
-                  <AlertCircle size={12} className="text-sage-copper-deep" />
-                )}
-                Cheque {chequeUploaded ? "uploaded" : "not uploaded"}
-              </p>
-            )}
+            {section.id === "appendix5" && (() => {
+              const required = parseChequeCount(form.fields["securityCheckCount"]);
+              const uploadedCount = chequeEntries.filter(
+                (e) => e.publicId && e.number && e.index < required,
+              ).length;
+              const allReady = required > 0 && uploadedCount === required;
+              return (
+                <p className="mt-3 text-[12.5px] text-stone-600 inline-flex items-center gap-1.5">
+                  {allReady ? (
+                    <CheckCircle2 size={12} className="text-sage-navy" />
+                  ) : (
+                    <AlertCircle size={12} className="text-sage-copper-deep" />
+                  )}
+                  Cheques: {uploadedCount} of {required} uploaded
+                </p>
+              );
+            })()}
 
             {section.requiresAffirmation && section.affirmationFlag && (
               <p className="mt-3 text-[12.5px] text-stone-600 inline-flex items-center gap-1.5">

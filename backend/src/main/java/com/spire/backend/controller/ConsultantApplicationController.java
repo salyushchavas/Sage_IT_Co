@@ -427,6 +427,112 @@ public class ConsultantApplicationController {
         return streamCheque(appId, disposition);
     }
 
+    /**
+     * Build U — per-cheque upload. The consultant /fill page POSTs one
+     * call per cheque entry (index 0, 1, …). Each entry lands at
+     * {@code agreements/{appId}-cheque-{index}} in Cloudinary; the
+     * cheques JSON column on the row tracks per-cheque metadata.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/cheques/{index}")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadChequeAtIndex(
+            @PathVariable String appId,
+            @PathVariable int index,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadChequeAt(
+                    appId, index, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "Cheque " + (index + 1) + " uploaded.",
+                        "index", index)));
+    }
+
+    /**
+     * Build U — per-cheque metadata patch. Updates only the number +
+     * date for the given index; the uploaded bytes (if any) survive
+     * the patch.
+     */
+    @PutMapping("/api/consultant/applications/{appId}/cheques/{index}")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> patchChequeMetadata(
+            @PathVariable String appId,
+            @PathVariable int index,
+            @RequestBody ConsultantApplicationService.ChequeMetadataPatch body,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                "Saved",
+                consultantService.setChequeMetadata(appId, index, body, request)));
+    }
+
+    /** Consultant-side preview of one specific cheque by index. */
+    @GetMapping("/api/consultant/applications/{appId}/cheques/{index}")
+    public ResponseEntity<byte[]> consultantViewChequeAtIndex(
+            @PathVariable String appId,
+            @PathVariable int index,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamChequeAt(appId, index, disposition);
+    }
+
+    /** ERM-side inline view / download of one specific cheque by index. */
+    @GetMapping("/api/agreement-erm/applications/{appId}/cheques/{index}")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewChequeAtIndex(
+            @PathVariable String appId,
+            @PathVariable int index,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamChequeAt(appId, index, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamChequeAt(String appId, int index, String disposition) {
+        ConsultantApplicationService.ChequeBytes cheque;
+        try {
+            cheque = consultantService.fetchChequeBytesAt(appId, index);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        if (cheque == null || cheque.bytes() == null || cheque.bytes().length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String contentType = cheque.contentType();
+        if (contentType == null || contentType.isBlank()) {
+            contentType = "application/octet-stream";
+        }
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String ext = isPdf ? ".pdf" : ".img";
+        String filename = "SageITCO-Cheque-" + (index + 1) + "_" + appId + ext;
+        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
+                ? "attachment" : "inline";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .contentLength(cheque.bytes().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        dispositionMode + "; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(cheque.bytes());
+    }
+
     private ResponseEntity<byte[]> streamCheque(String appId, String disposition) {
         ConsultantApplicationService.ChequeBytes cheque;
         try {

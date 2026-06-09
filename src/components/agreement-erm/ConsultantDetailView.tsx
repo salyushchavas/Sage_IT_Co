@@ -6,6 +6,8 @@ import {
   ArrowUpRight,
   Ban,
   CheckCircle2,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Copy,
   Download,
@@ -29,14 +31,16 @@ import {
   ermAdvanceToPhase2,
   ermApproveAndSign,
   ermApproveConsultantVersion,
+  ermChequeViewUrl,
   ermRequestRevision,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
-  fetchAgreementChequeBlob,
   fetchErmPreviewPdfBlob,
   fetchMe,
+  parseChequeList,
   resendConsultantInvite,
   updateConsultantContact,
+  type ChequeEntry,
   type ConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
   type Phase2PromotionPayload,
@@ -143,15 +147,13 @@ const SECTIONS: readonly SectionDef[] = [
   },
   {
     id: "security",
-    title: "Security check",
+    title: "Security cheque",
     optional: true,
     fields: [
-      { key: "securityCheckCount", label: "Check count" },
-      { key: "securityCheckNumbers", label: "Check numbers" },
+      { key: "securityCheckCount", label: "Cheque count" },
       { key: "securityCheckBank", label: "Bank" },
       { key: "securityCheckHolderName", label: "Holder name" },
       { key: "securityCheckAmount", label: "Amount" },
-      { key: "securityCheckDates", label: "Dates" },
     ],
   },
 ];
@@ -315,9 +317,11 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
 
       <AccessRecord app={app} />
 
-      <Section title={`Activity (${events.length})`}>
+      <ConsultantDownloadStat app={app} />
+
+      <CollapsibleSection title={`Activity (${events.length})`} defaultOpen={false}>
         <AgreementEventTimeline events={events} />
-      </Section>
+      </CollapsibleSection>
 
       {modal === "revision" && (
         <RequestRevisionModal
@@ -1163,17 +1167,42 @@ function ErmPdfPreview({ appId }: { appId: string }) {
  * download action -- the raw Cloudinary URL never reaches the DOM.
  */
 function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
-  const [busy, setBusy] = useState<"view" | "download" | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
-  const uploaded = Boolean(app.chequePublicId);
+  // Build U — pull the cheque list from the JSON column, falling back
+  // to the legacy single cheque as index 0 (handled by parseChequeList
+  // on the backend before serialization; mirror it here).
+  const entries = useMemo<ChequeEntry[]>(() => {
+    const parsed = parseChequeList(app.cheques ?? null);
+    if (parsed.length > 0) return parsed;
+    if (app.chequePublicId) {
+      return [{
+        index: 0,
+        number: "",
+        date: "",
+        publicId: app.chequePublicId,
+        contentType: app.chequeContentType ?? "",
+        uploadedAt: app.chequeUploadedAt ?? "",
+      }];
+    }
+    return [];
+  }, [app.cheques, app.chequePublicId, app.chequeContentType, app.chequeUploadedAt]);
 
-  const handleAction = async (mode: "view" | "download") => {
-    setBusy(mode);
+  const uploadedCount = entries.filter((e) => e.publicId).length;
+
+  const handleAction = async (entry: ChequeEntry, mode: "view" | "download") => {
+    const key = `${entry.index}-${mode}`;
+    setBusy(key);
     setError("");
     try {
-      const res = await fetchAgreementChequeBlob(
-        app.applicationId,
-        mode === "download" ? "attachment" : "inline",
+      // Index-aware ERM endpoint — works for the new per-cheque storage
+      // and falls back to the legacy single-cheque path at index 0 via
+      // the backend's parseCheques.
+      const res = await fetch(
+        ermChequeViewUrl(app.applicationId, entry.index)
+          .replace("disposition=inline",
+            `disposition=${mode === "download" ? "attachment" : "inline"}`),
+        { credentials: "include" },
       );
       if (!res.ok) {
         throw new Error(`Couldn't fetch the cheque (${res.status})`);
@@ -1186,7 +1215,7 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
         const a = document.createElement("a");
         a.href = url;
         const ext = blob.type === "application/pdf" ? "pdf" : "img";
-        a.download = `SageITCO-Cheque_${app.applicationId}.${ext}`;
+        a.download = `SageITCO-Cheque-${entry.index + 1}_${app.applicationId}.${ext}`;
         document.body.appendChild(a);
         a.click();
         a.remove();
@@ -1203,57 +1232,83 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
     <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
       <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100 flex items-start justify-between gap-3 flex-wrap">
         <div>
-          <h3 className="font-serif text-lg text-gray-900">Security cheque</h3>
+          <h3 className="font-serif text-lg text-gray-900">Security cheques</h3>
           <p className="text-[11px] text-gray-500 mt-0.5">
-            Build G — the post-dated cheque the consultant uploaded for Appendix 5.
+            Per-cheque uploads the consultant provided for Appendix 5.
           </p>
         </div>
         <span
           className={
             "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
-            (uploaded
+            (uploadedCount > 0
               ? "bg-emerald-100 text-emerald-800"
               : "bg-stone-200 text-gray-700")
           }
         >
-          {uploaded ? "Uploaded" : "Not uploaded"}
+          {uploadedCount > 0 ? `${uploadedCount} uploaded` : "Not uploaded"}
         </span>
       </header>
-      <div className="px-5 sm:px-6 py-4 space-y-2">
-        {!uploaded ? (
+      <div className="px-5 sm:px-6 py-4 space-y-3">
+        {entries.length === 0 ? (
           <p className="text-xs text-gray-600">
-            The consultant has not uploaded their cheque yet.
+            The consultant has not uploaded any cheques yet.
           </p>
         ) : (
-          <>
-            <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={() => handleAction("view")}
-                disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                View inline
-              </button>
-              <button
-                type="button"
-                onClick={() => handleAction("download")}
-                disabled={busy !== null}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-white text-sage-navy border border-stone-300 hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
-              >
-                Download
-              </button>
-              {app.chequeUploadedAt && (
-                <span className="text-[10px] text-gray-500">
-                  Uploaded {new Date(app.chequeUploadedAt).toLocaleString()}
-                </span>
+          entries.map((entry) => (
+            <div
+              key={entry.index}
+              className="border border-stone-100 rounded-lg p-3 flex flex-col gap-2"
+            >
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <p className="text-xs font-semibold text-sage-navy">
+                  Cheque {entry.index + 1}
+                  {entry.number && (
+                    <span className="ml-2 text-[11px] font-normal text-gray-600">
+                      № <span className="font-mono">{entry.number}</span>
+                    </span>
+                  )}
+                  {entry.date && (
+                    <span className="ml-2 text-[11px] font-normal text-gray-600">
+                      dated {entry.date}
+                    </span>
+                  )}
+                </p>
+                <div className="flex items-center gap-2">
+                  {entry.publicId ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => handleAction(entry, "view")}
+                        disabled={busy !== null}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 cursor-pointer"
+                      >
+                        View
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleAction(entry, "download")}
+                        disabled={busy !== null}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold bg-white text-sage-navy border border-stone-300 hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                      >
+                        Download
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[11px] text-sage-copper-deep">
+                      Not uploaded
+                    </span>
+                  )}
+                </div>
+              </div>
+              {entry.uploadedAt && entry.publicId && (
+                <p className="text-[10px] text-gray-500">
+                  Uploaded {new Date(entry.uploadedAt).toLocaleString()}
+                </p>
               )}
             </div>
-            {error && (
-              <p className="text-[11px] text-red-600">{error}</p>
-            )}
-          </>
+          ))
         )}
+        {error && <p className="text-[11px] text-red-600">{error}</p>}
       </div>
     </section>
   );
@@ -1438,6 +1493,78 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
         {title}
       </p>
       <div className="rounded-xl border border-gray-100 bg-white p-4">{children}</div>
+    </div>
+  );
+}
+
+/**
+ * Build U — title bar collapses/expands a section on click. Used for
+ * the Activity log so it doesn't dominate the detail page; the ERM
+ * opens it on demand.
+ */
+function CollapsibleSection({
+  title,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="w-full text-left inline-flex items-center gap-1.5 text-[11px] uppercase tracking-wider font-semibold text-gray-500 hover:text-sage-navy mb-1.5 cursor-pointer"
+      >
+        {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+        {title}
+      </button>
+      {open && (
+        <div className="rounded-xl border border-gray-100 bg-white p-4">{children}</div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Build U — quick stat surfacing how many times the consultant has
+ * downloaded their consultant-version PDF. Lives OUTSIDE the
+ * collapsed Activity section so the ERM sees it at a glance; the
+ * full per-download event rows (with IP/time) live inside the
+ * timeline when the ERM expands it.
+ */
+function ConsultantDownloadStat({ app }: { app: ConsultantApplication }) {
+  const count = app.consultantDownloadCount ?? 0;
+  if (!app.consultantCopyReleased && count === 0) return null;
+  const fmt = (iso: string | null | undefined) =>
+    iso
+      ? new Date(iso).toLocaleString("en-IN", {
+          timeZone: "Asia/Kolkata",
+          dateStyle: "medium",
+          timeStyle: "short",
+        })
+      : null;
+  const last = fmt(app.consultantLastDownloadedAt);
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 inline-flex items-start gap-2.5">
+      <Download size={14} className="text-sage-navy mt-0.5 shrink-0" />
+      <div>
+        <p className="text-xs font-semibold text-sage-navy">
+          Consultant downloads:{" "}
+          <span className="font-mono tabular-nums">{count}</span>
+        </p>
+        <p className="text-[11px] text-gray-500 mt-0.5">
+          {count === 0
+            ? "Consultant has not downloaded their copy yet."
+            : last
+              ? `Last download ${last}.`
+              : "Counted on every OTP-verified download."}
+        </p>
+      </div>
     </div>
   );
 }

@@ -126,7 +126,7 @@ export default function AgreementErmShell({
       </main>
 
       <footer className="py-6 text-center text-[11px] text-gray-400">
-        Hidden internal console · Sage IT Co
+        Sage IT Co
       </footer>
     </div>
   );

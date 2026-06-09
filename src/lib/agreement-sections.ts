@@ -489,24 +489,17 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
   {
     id: "appendix5",
     step: 9,
-    title: "Appendix 5 — Security Check Acknowledgment",
+    title: "Appendix 5 — Security Cheque Acknowledgment",
     summary:
-      "Acknowledges any post-dated security check(s) you've provided. Sage IT will hold them solely as limited security for matured, undisputed amounts under this agreement.",
-    why: "Acknowledges any payment-security check(s) held solely as limited security for matured, undisputed amounts.",
+      "Acknowledges any post-dated security cheque(s) you've provided. Sage IT will hold them solely as limited security for matured, undisputed amounts under this agreement.",
+    why: "Acknowledges any payment-security cheque(s) held solely as limited security for matured, undisputed amounts.",
     fields: [
       {
         key: "securityCheckCount",
-        label: "Number of checks",
+        label: "Number of cheques",
         type: "text",
         required: true,
         placeholder: "e.g. 2",
-      },
-      {
-        key: "securityCheckNumbers",
-        label: "Check numbers",
-        type: "text",
-        required: true,
-        sensitive: true,
       },
       {
         key: "securityCheckBank",
@@ -527,19 +520,12 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         required: true,
         placeholder: "e.g. $5,000",
       },
-      {
-        key: "securityCheckDates",
-        label: "Check date(s)",
-        type: "text",
-        required: true,
-      },
-      {
-        key: "chequeUpload",
-        label: "Upload your security cheque",
-        type: "file",
-        required: true,
-        help: "Photo or PDF of the post-dated cheque, ≤10 MB. Stored privately; visible only to Sage IT.",
-      },
+      // Build U — Per-cheque number + upload pairs are rendered by
+      // ChequeListBlock (one input group per cheque, driven by
+      // securityCheckCount). The legacy securityCheckNumbers /
+      // securityCheckDates / single chequeUpload fields are no longer
+      // surfaced — chequeListReplaced gates them out of the section
+      // completeness check.
     ],
     requiresSignature: false,
     requiresAffirmation: true,

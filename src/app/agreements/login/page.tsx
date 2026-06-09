@@ -36,8 +36,8 @@ export default function AgreementsLoginPage() {
   return (
     <SplitAuthLayout
       heroTitle={"Sage\nAgreements."}
-      heroSubtitle="Operator console for sending, tracking, and signing consultant engagement agreements. Hidden internal surface — separate from the regular ERM dashboard."
-      heroFooter="Hidden internal console · Sage IT Co"
+      heroSubtitle="Operator console for sending, tracking, and signing consultant engagement agreements."
+      heroFooter="Sage IT Co"
     >
       {/* noindex is handled effectively by the route's layout metadata
           export + robots.ts; a client-side <meta> would render into
