@@ -1074,6 +1074,12 @@ public class ConsultantApplicationController {
         public String updatedAt;
         /** Build M — current phase of the two-phase agreement (1 or 2). */
         public Integer phase;
+        /** Build T — ERM has released a consultant-version copy. */
+        public boolean consultantCopyReleased;
+        /** Build T — downloadAvailable = released AND the public_id is on the row. */
+        public boolean downloadAvailable;
+        /** Build T — release timestamp, surfaced for "released N days ago" hints. */
+        public String consultantCopyReleasedAt;
 
         public static ConsultantAgreementSummary from(ConsultantApplication app) {
             ConsultantAgreementSummary r = new ConsultantAgreementSummary();
@@ -1083,12 +1089,24 @@ public class ConsultantApplicationController {
             r.technologyTrack = app.getTechnologyTrack();
             r.status = app.getStatus();
             r.phase = app.getPhase();
+            // Build T — surface release state so the dashboard can route
+            // VERIFIED + released rows to the OTP-gated download instead
+            // of the passive "Sent for verification" pill.
+            r.consultantCopyReleased = Boolean.TRUE.equals(app.getConsultantCopyReleased());
+            r.downloadAvailable = r.consultantCopyReleased
+                    && app.getConsultantPdfPublicId() != null
+                    && !app.getConsultantPdfPublicId().isBlank();
+            r.consultantCopyReleasedAt = app.getConsultantCopyReleasedAt() == null
+                    ? null
+                    : app.getConsultantCopyReleasedAt().toString();
+
             String s = app.getStatus();
-            // Build K — post-submit states are status-only. The wizard
-            // is reachable solely in SUBMITTED / REVISION_REQUESTED;
-            // VERIFIED and COMPLETED have NO action (no view, no
-            // download). The dashboard renders the label as a passive
-            // pill in those states.
+            // Build K — post-submit states are status-only. Build T —
+            // VERIFIED + released and COMPLETED + released switch to the
+            // DOWNLOAD action so the dashboard row routes to the OTP-
+            // gated download screen. The ERM-signed PDF is never served
+            // to the consultant; the download path serves only the
+            // consultant-version copy.
             if (ConsultantApplication.Status.SUBMITTED.name().equals(s)) {
                 r.statusLabel = "Awaiting your signature";
                 r.action = "SIGN";
@@ -1098,11 +1116,21 @@ public class ConsultantApplicationController {
             } else if (ConsultantApplication.Status.UPDATED.name().equals(s)
                     || ConsultantApplication.Status.VERIFIED.name().equals(s)
                     || ConsultantApplication.Status.SIGNED.name().equals(s)) {
-                r.statusLabel = "Sent for verification";
-                r.action = "NONE";
+                if (r.downloadAvailable) {
+                    r.statusLabel = "Approved — download your copy";
+                    r.action = "DOWNLOAD";
+                } else {
+                    r.statusLabel = "Sent for verification";
+                    r.action = "NONE";
+                }
             } else if (ConsultantApplication.Status.COMPLETED.name().equals(s)) {
-                r.statusLabel = "Accepted";
-                r.action = "NONE";
+                if (r.downloadAvailable) {
+                    r.statusLabel = "Accepted — download your copy";
+                    r.action = "DOWNLOAD";
+                } else {
+                    r.statusLabel = "Accepted";
+                    r.action = "NONE";
+                }
             } else if (ConsultantApplication.Status.EXPIRED.name().equals(s)) {
                 // Build L — invite went stale (15-day window).
                 r.statusLabel = "Invitation expired";

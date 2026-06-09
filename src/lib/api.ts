@@ -4190,10 +4190,13 @@ export async function fetchErmPreviewPdfBlob(
 
 // Build K — post-submit experience is status-only. SIGN +
 // REVIEW_AND_SIGN open the wizard; NONE means "show the status pill,
-// no button". DOWNLOAD and VIEW are intentionally gone.
+// no button". Build T — DOWNLOAD is back: VERIFIED/COMPLETED rows
+// where the ERM has released a consultant-version copy route the
+// consultant into the OTP-gated download.
 export type ConsultantPortalAction =
   | "SIGN"
   | "REVIEW_AND_SIGN"
+  | "DOWNLOAD"
   | "NONE";
 
 export interface ConsultantAgreementSummary {
@@ -4207,6 +4210,13 @@ export interface ConsultantAgreementSummary {
   updatedAt: string | null;
   // Build M — current phase of the two-phase coaching agreement.
   phase: number | null;
+  // Build T — ERM "Approve consultant version" release flags. When
+  // downloadAvailable is true the dashboard surfaces the OTP-gated
+  // download action; the per-app status screen renders the matching
+  // download UI without re-checking the flag.
+  consultantCopyReleased?: boolean;
+  downloadAvailable?: boolean;
+  consultantCopyReleasedAt?: string | null;
 }
 
 /**
