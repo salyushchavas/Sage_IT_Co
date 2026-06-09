@@ -377,7 +377,9 @@ export default function ConsultantWizardPage() {
   useEffect(() => {
     if (!appId) return;
     if (!getConsultantToken()) {
-      router.replace("/consultant");
+      // Build V — per-app login. The consultant never types an email;
+      // the login page resolves it from this appId server-side.
+      router.replace(`/consultant/${encodeURIComponent(appId)}/login`);
       return;
     }
     let cancelled = false;

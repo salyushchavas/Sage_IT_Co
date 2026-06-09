@@ -3989,14 +3989,18 @@ export async function fetchAgreementChequeBlob(
 
 // ── Consultant portal (email-scoped session) ───────────────────
 //
-// The portal phase replaces the per-appId Phase D gate. A single
-// email-scoped session token authorises every agreement addressed to
-// the verified email. Token lives in sessionStorage under one global
-// key so it survives navigation between dashboard / fill / sign but
-// clears when the tab closes (within its ~2h life).
+// Token lives in sessionStorage under one global key so it survives
+// navigation between dashboard / fill / sign but clears when the tab
+// closes (within its ~2h life).
 //
-// The two portal-auth endpoints (/auth/request-otp, /auth/verify-otp)
-// are PUBLIC; everything else requires Authorization: Bearer <token>.
+// Build V — the portal-auth endpoints are appId-bound and PUBLIC:
+//   POST /api/consultant/applications/{appId}/auth/request-otp
+//   POST /api/consultant/applications/{appId}/auth/verify-otp
+//   GET  /api/consultant/applications/{appId}/auth/email-hint
+// The consultant never types an email; the backend resolves the
+// ERM-set address from the appId. The session token that verify
+// returns is still email-scoped, so the dashboard lists every
+// agreement addressed to the verified email.
 
 const CONSULTANT_TOKEN_KEY = "sage_consultant_token";
 
@@ -4051,17 +4055,16 @@ async function readApiResponse<T>(res: Response): Promise<ApiResponse<T>> {
 }
 
 /**
- * Portal Step 1 — PUBLIC, no token. The backend response is generic
- * either way (no enumeration); a code is sent only when the typed
- * email matches the {@code consultantEmail} on at least one actionable
- * agreement.
+ * Build V — appId-bound portal Step 1. PUBLIC, no token. The backend
+ * resolves the consultant email from the agreement row and sends the
+ * OTP there. NO email is accepted from the client — the consultant
+ * cannot redirect the code to a different address.
  */
-export async function requestConsultantPortalOtp(email: string) {
-  const res = await fetch(`${BASE_URL}/api/consultant/auth/request-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email }),
-  });
+export async function requestConsultantPortalOtp(applicationId: string) {
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/auth/request-otp`,
+    { method: "POST" },
+  );
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
@@ -4073,16 +4076,20 @@ export async function requestConsultantPortalOtp(email: string) {
 }
 
 /**
- * Portal Step 2 — PUBLIC, no token. On success stores the email-scoped
- * session token under the global key and returns it. Generic error on
- * any failure (invalid / expired / locked).
+ * Build V — appId-bound portal Step 2. PUBLIC, no token. Body is just
+ * the 6-digit code; the email is resolved server-side from the row.
+ * On success stores the email-scoped session token (the dashboard
+ * still lists every agreement addressed to the verified email).
  */
-export async function verifyConsultantPortalOtp(email: string, otp: string) {
-  const res = await fetch(`${BASE_URL}/api/consultant/auth/verify-otp`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, otp }),
-  });
+export async function verifyConsultantPortalOtp(applicationId: string, otp: string) {
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/auth/verify-otp`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ otp }),
+    },
+  );
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
@@ -4091,6 +4098,25 @@ export async function verifyConsultantPortalOtp(email: string, otp: string) {
     throw new Error(body?.message || "Invalid or expired code.");
   }
   setConsultantToken(body.data.token);
+  return body.data;
+}
+
+/**
+ * Build V — masked-email hint for the login page. PUBLIC, no token;
+ * the backend returns a neutral mask ("—") when the row is missing or
+ * cancelled so existence can't be probed.
+ */
+export async function fetchConsultantEmailHint(applicationId: string) {
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/auth/email-hint`,
+  );
+  if (res.status === 429) {
+    throw new Error("Too many requests. Try again in a minute.");
+  }
+  const body = await readApiResponse<{ maskedEmail: string }>(res);
+  if (!res.ok || !body?.success) {
+    throw new Error(body?.message || `Request failed (${res.status})`);
+  }
   return body.data;
 }
 
@@ -4117,7 +4143,11 @@ async function consultantFetch<T>(
   if (res.status === 401) {
     clearConsultantToken();
     if (typeof window !== "undefined") {
-      window.location.assign("/consultant");
+      // Build V — bounce to the per-agreement login (which resolves the
+      // email server-side from the appId), not the bare landing.
+      window.location.assign(
+        `/consultant/${encodeURIComponent(applicationId)}/login`,
+      );
     }
     throw new Error("Verification required.");
   }
@@ -4153,7 +4183,11 @@ async function consultantMultipartFetch(
   if (res.status === 401) {
     clearConsultantToken();
     if (typeof window !== "undefined") {
-      window.location.assign("/consultant");
+      // Build V — bounce to the per-agreement login (which resolves the
+      // email server-side from the appId), not the bare landing.
+      window.location.assign(
+        `/consultant/${encodeURIComponent(applicationId)}/login`,
+      );
     }
     throw new Error("Verification required.");
   }
@@ -4559,7 +4593,11 @@ export async function downloadConsultantCopy(
   if (res.status === 401) {
     clearConsultantToken();
     if (typeof window !== "undefined") {
-      window.location.assign("/consultant");
+      // Build V — bounce to the per-agreement login (which resolves the
+      // email server-side from the appId), not the bare landing.
+      window.location.assign(
+        `/consultant/${encodeURIComponent(applicationId)}/login`,
+      );
     }
     throw new Error("Verification required.");
   }

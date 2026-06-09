@@ -564,43 +564,63 @@ public class ConsultantApplicationController {
     // ── Consultant portal auth (PUBLIC — no session token) ──────────
 
     /**
-     * Step 1 of the portal gate. Email-only body; generic response
-     * either way (no enumeration). Backend sends an OTP only when the
-     * email matches the {@code consultantEmail} of at least one
-     * actionable agreement. Rate-limited per IP because the email is
-     * the only other input and shouldn't be keyable directly.
+     * Build V — appId-bound portal request-otp. The consultant lands
+     * via the per-agreement invitation link (carries {appId}); the
+     * backend derives the consultantEmail from the row and sends the
+     * OTP there. NO email is accepted from the client — the only way
+     * to make a code go to a non-ERM-set address is for the ERM to
+     * have set the wrong address in the first place.
      */
-    @PostMapping("/api/consultant/auth/request-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> portalRequestOtp(
-            @RequestBody(required = false) PortalOtpRequestBody body,
+    @PostMapping("/api/consultant/applications/{appId}/auth/request-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> portalRequestOtpForApp(
+            @PathVariable String appId,
             HttpServletRequest request) {
-        if (!rateLimiter.allowOtpRequest("portal|" + clientIp(request))) {
+        if (!rateLimiter.allowOtpRequest("portal|" + appId + "|" + clientIp(request))) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
-        String message = consultantService.requestPortalOtp(
-                body == null ? null : body.email, request);
+        String message = consultantService.requestPortalOtpForApp(appId, request);
         return ResponseEntity.ok(ApiResponse.success(Map.of("message", message)));
     }
 
     /**
-     * Step 2 of the portal gate. On success returns an email-scoped
-     * consultant session token (type=consultant, email, ~2h). Generic
-     * 400 on any failure; 5 wrong attempts invalidate the code.
+     * Build V — appId-bound verify-otp. Body carries only the 6-digit
+     * code; the email is resolved from the agreement row. Success
+     * returns an email-scoped consultant session token; the dashboard
+     * still lists every agreement addressed to the verified email.
      */
-    @PostMapping("/api/consultant/auth/verify-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> portalVerifyOtp(
+    @PostMapping("/api/consultant/applications/{appId}/auth/verify-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> portalVerifyOtpForApp(
+            @PathVariable String appId,
             @RequestBody(required = false) PortalOtpVerifyBody body,
             HttpServletRequest request) {
-        if (!rateLimiter.allowOtpVerify("portal|" + clientIp(request))) {
+        if (!rateLimiter.allowOtpVerify("portal|" + appId + "|" + clientIp(request))) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
-        String token = consultantService.verifyPortalOtp(
-                body == null ? null : body.email,
+        String token = consultantService.verifyPortalOtpForApp(
+                appId,
                 body == null ? null : body.otp,
                 request);
         return ResponseEntity.ok(ApiResponse.success(Map.of("token", token)));
+    }
+
+    /**
+     * Build V — masked-email hint for the login page so the consultant
+     * sees where the code will go (never the full address, never
+     * editable). NO authentication required; returns a neutral mask
+     * when the row is missing/cancelled so existence can't be probed.
+     */
+    @GetMapping("/api/consultant/applications/{appId}/auth/email-hint")
+    public ResponseEntity<ApiResponse<Map<String, String>>> portalEmailHint(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        if (!rateLimiter.allowRead(clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(Map.of(
+                "maskedEmail", consultantService.maskedConsultantEmail(appId))));
     }
 
     /**
@@ -1149,12 +1169,12 @@ public class ConsultantApplicationController {
         public String signatureImage;
     }
 
-    public static class PortalOtpRequestBody {
-        public String email;
-    }
-
+    /**
+     * Build V — portal verify-otp body. {@code otp} only; the email is
+     * resolved server-side from the {appId} path segment and is never
+     * accepted from the client.
+     */
     public static class PortalOtpVerifyBody {
-        public String email;
         public String otp;
     }
 

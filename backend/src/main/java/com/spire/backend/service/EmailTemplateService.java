@@ -687,7 +687,7 @@ public class EmailTemplateService {
      * receive an OTP.
      */
     public void sendConsultantApplicationCreated(ConsultantApplication application) {
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String displayName = application.getConsultantName() == null
                 || application.getConsultantName().isBlank()
                 ? "there"
@@ -745,7 +745,7 @@ public class EmailTemplateService {
      * re-review and decide whether to verify or push back again.
      */
     public void sendConsultantApplicationUpdated(ConsultantApplication application) {
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has updated your engagement details based on "
                         + "the changes you requested.")
@@ -830,7 +830,7 @@ public class EmailTemplateService {
      * appendix-driven form) instead of /review.
      */
     public void sendConsultantInitialFill(ConsultantApplication application) {
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has prepared your engagement agreement and "
                         + "needs you to complete a few details so the document "
@@ -907,7 +907,7 @@ public class EmailTemplateService {
      * they can request a fresh OTP and download their copy.
      */
     public void sendConsultantVersionReleased(ConsultantApplication application) {
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has approved and released your copy of "
                         + "the consultant agreement. You can now download a "
@@ -934,7 +934,7 @@ public class EmailTemplateService {
      */
     public void sendConsultantRevisionRequest(
             ConsultantApplication application, String remarks) {
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String safeRemarks = remarks == null || remarks.isBlank()
                 ? "(no remarks provided)"
                 : remarks;
@@ -964,7 +964,7 @@ public class EmailTemplateService {
      * notes that everything they previously filled is still in place.
      */
     public void sendConsultantPhase2Notification(ConsultantApplication application) {
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has advanced your engagement agreement "
                         + "to Phase 2 on the same document. Everything you "
@@ -1100,7 +1100,7 @@ public class EmailTemplateService {
                 wrap("Signed agreement (internal)", ermBody),
                 attachments);
 
-        String url = appUrl + "/consultant";
+        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String consultantBody = p("Hi " + escape(firstName(application)) + ",")
                 + p("Good news -- your " + brandName() + " engagement agreement "
                         + "has been accepted. Nothing else is needed from you.")

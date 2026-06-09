@@ -7,14 +7,12 @@ import { Loader2 } from "lucide-react";
 import { getConsultantToken } from "@/lib/api";
 
 /**
- * Bare /consultant/{appId} route. In the portal phase nothing useful
- * lives at this exact path -- the email invites point at /consultant
- * (the portal login). If anything still resolves an appId-suffixed URL
- * (an old saved link), we either:
- *   - send a verified consultant straight to the fill flow for that app
- *     (the email-match guard at the API layer will 404 if it isn't
- *     theirs); or
- *   - bounce an unverified visitor to the portal login.
+ * Build V — bare /consultant/{appId} route. Every invitation email
+ * now links to /consultant/{appId}/login, but this stub still routes
+ * older saved links sensibly:
+ *   - verified consultant → straight to the fill flow.
+ *   - unverified → the per-app login (the email is resolved server-
+ *     side from the appId; the consultant never types it).
  */
 export default function ConsultantAppRootPage() {
   const router = useRouter();
@@ -29,7 +27,7 @@ export default function ConsultantAppRootPage() {
     if (getConsultantToken()) {
       router.replace(`/consultant/${encodeURIComponent(appId)}/fill`);
     } else {
-      router.replace("/consultant");
+      router.replace(`/consultant/${encodeURIComponent(appId)}/login`);
     }
   }, [appId, router]);
 

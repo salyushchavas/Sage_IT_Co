@@ -234,31 +234,31 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Portal request-otp. NON-ENUMERATING: the response copy is the
-     * same whether the email is on record or not. A code is sent ONLY
-     * when {@code email} matches the on-record {@code consultantEmail}
-     * of at least one non-deleted, consultant-actionable agreement
-     * (SUBMITTED or REVISION_REQUESTED), and only when the 60s cooldown
-     * + hourly cap allow it. Any prior active challenge for the email
-     * is superseded so just one code is ever live per consultant.
+     * Build V — appId-bound portal request-otp. The consultant arrives
+     * via the per-agreement invitation link; we look up the row,
+     * derive the ERM-set consultantEmail server-side, and send the OTP
+     * THERE. The consultant never types an email anywhere — the only
+     * route for a code to reach a non-ERM-set address is for the
+     * ERM to have set the wrong one in the first place.
      *
-     * Audit OTP_SENT is recorded against every matching agreement so
-     * the per-ERM detail timeline still reflects the consultant's
-     * activity.
+     * Non-enumerating: the response copy is the same whether the row
+     * exists, is soft-deleted, or has no consultant email on file.
+     * Cooldown + hourly cap apply per email (so spamming this with
+     * different appIds for the same consultant still throttles).
      */
     @Transactional
-    public String requestPortalOtp(String email, HttpServletRequest request) {
-        String normalised = email == null ? "" : email.trim().toLowerCase();
-        if (normalised.isEmpty()) return OTP_GENERIC_SENT_MSG;
-
-        List<ConsultantApplication> matches = applicationRepository
-                .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
-                        normalised);
-        boolean anyActionable = matches.stream().anyMatch(
-                ConsultantApplicationService::isConsultantActionable);
-        if (matches.isEmpty() || !anyActionable) {
+    public String requestPortalOtpForApp(String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = applicationRepository
+                .findByApplicationId(applicationId)
+                .orElse(null);
+        if (app == null
+                || Boolean.TRUE.equals(app.getDeleted())
+                || ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())) {
             return OTP_GENERIC_SENT_MSG;
         }
+        String email = app.getConsultantEmail();
+        if (email == null || email.isBlank()) return OTP_GENERIC_SENT_MSG;
+        String normalised = email.trim().toLowerCase();
 
         LocalDateTime now = LocalDateTime.now();
         Optional<ConsultantVerification> latest =
@@ -292,39 +292,43 @@ public class ConsultantApplicationService {
                 .requestIp(ip)
                 .build());
 
-        // Pick a representative actionable agreement to drive the email
-        // template + audit event. Falls back to any match.
-        ConsultantApplication primary = matches.stream()
-                .filter(ConsultantApplicationService::isConsultantActionable)
-                .findFirst()
-                .orElse(matches.get(0));
-        for (ConsultantApplication match : matches) {
-            appendEvent(match.getId(),
-                    ConsultantApplicationEvent.EventType.OTP_SENT,
-                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                    Map.of("ip", ip == null ? "" : ip,
-                            "email", normalised),
-                    request);
-        }
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.OTP_SENT,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("ip", ip == null ? "" : ip,
+                        "email", normalised,
+                        "appId", applicationId),
+                request);
         try {
-            emailTemplateService.sendConsultantOtp(primary, code);
+            emailTemplateService.sendConsultantOtp(app, code);
         } catch (Exception e) {
-            log.warn("Failed to send consultant portal OTP to {}: {}",
-                    normalised, e.getMessage());
+            log.warn("Failed to send consultant portal OTP for {}: {}",
+                    applicationId, e.getMessage());
         }
         return OTP_GENERIC_SENT_MSG;
     }
 
     /**
-     * Portal verify-otp. On success: consume the challenge, audit on
-     * every agreement for this email, mint an email-scoped consultant
-     * token (no appId claim). On any failure: generic
-     * IllegalArgumentException -> 400. The 5th wrong attempt
-     * invalidates the challenge.
+     * Build V — appId-bound verify-otp. Resolves the email from the
+     * row, validates the supplied code, returns an email-scoped
+     * session token (so the consultant dashboard still lists every
+     * agreement addressed to them). The consultant never supplies an
+     * email here.
      */
     @Transactional
-    public String verifyPortalOtp(String email, String otp, HttpServletRequest request) {
-        String normalised = email == null ? "" : email.trim().toLowerCase();
+    public String verifyPortalOtpForApp(
+            String applicationId, String otp, HttpServletRequest request) {
+        ConsultantApplication app = applicationRepository
+                .findByApplicationId(applicationId)
+                .orElse(null);
+        if (app == null
+                || Boolean.TRUE.equals(app.getDeleted())
+                || ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())
+                || app.getConsultantEmail() == null
+                || app.getConsultantEmail().isBlank()) {
+            throw new IllegalArgumentException("Invalid or expired code.");
+        }
+        String normalised = app.getConsultantEmail().trim().toLowerCase();
         ConsultantVerification cv = verificationRepository
                 .findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(normalised)
                 .orElse(null);
@@ -340,19 +344,11 @@ public class ConsultantApplicationService {
                 cv.setConsumedAt(LocalDateTime.now());
             }
             verificationRepository.save(cv);
-            // No app context on a wrong attempt -- audit OTP_FAILED on
-            // every agreement for this email so the operator can see
-            // the failed attempts in the timeline.
-            List<ConsultantApplication> matches = applicationRepository
-                    .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
-                            normalised);
-            for (ConsultantApplication match : matches) {
-                appendEvent(match.getId(),
-                        ConsultantApplicationEvent.EventType.OTP_FAILED,
-                        ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                        Map.of("attempts", String.valueOf(cv.getAttempts())),
-                        request);
-            }
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.OTP_FAILED,
+                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                    Map.of("attempts", String.valueOf(cv.getAttempts())),
+                    request);
             throw new IllegalArgumentException("Invalid or expired code.");
         }
 
@@ -380,6 +376,41 @@ public class ConsultantApplicationService {
                     request);
         }
         return jwtService.generateConsultantToken(normalised);
+    }
+
+    /**
+     * Build V — masked email for the login page's "we'll send a code
+     * to" reassurance line. Format: first char + "•••" + first char of
+     * the local part after the @, e.g. "a•••@g•••.com". Returns a
+     * neutral "—" mask when the row is missing or has no email so the
+     * surface still doesn't leak existence.
+     */
+    @Transactional(readOnly = true)
+    public String maskedConsultantEmail(String applicationId) {
+        ConsultantApplication app = applicationRepository
+                .findByApplicationId(applicationId)
+                .orElse(null);
+        if (app == null
+                || Boolean.TRUE.equals(app.getDeleted())
+                || ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())
+                || app.getConsultantEmail() == null
+                || app.getConsultantEmail().isBlank()) {
+            return "—";
+        }
+        return maskEmail(app.getConsultantEmail().trim());
+    }
+
+    private static String maskEmail(String email) {
+        int at = email.indexOf('@');
+        if (at < 1 || at == email.length() - 1) return "•••";
+        String local = email.substring(0, at);
+        String domain = email.substring(at + 1);
+        int dot = domain.indexOf('.');
+        String dHead = dot > 0 ? domain.substring(0, dot) : domain;
+        String dTail = dot > 0 ? domain.substring(dot) : "";
+        String lMask = local.charAt(0) + "•••";
+        String dMask = (dHead.isEmpty() ? "•" : String.valueOf(dHead.charAt(0))) + "•••";
+        return lMask + "@" + dMask + dTail;
     }
 
     /**
