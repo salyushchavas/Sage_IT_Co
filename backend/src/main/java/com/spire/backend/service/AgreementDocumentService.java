@@ -523,15 +523,17 @@ public class AgreementDocumentService {
         c.put("signatureDate", resolveSignatureDate(app));
 
         // Build R — final signing IP, rendered as a faint trace line
-        // ("IP: <ip>") under the Date / Email line in each consultant
-        // signature block. The value is captured at consultantSubmit
-        // (overwritten on every re-sign so a revision-resubmit
-        // updates it). The template surgery
-        // (keepSignatureBlocksTogether / insertSigningIpLine) injects
-        // the gray 7pt paragraph; here we just provide the value.
-        // Pre-submit previews show "(pending)" since the IP isn't
-        // recorded until the consultant actually clicks submit.
+        // ("IP: <ip> · Signed: <utc>") under the Date / Email line in
+        // each consultant signature block. The IP + timestamp are
+        // captured TOGETHER at consultantSubmit (overwritten on every
+        // re-sign so a revision-resubmit updates both), so they
+        // always correspond to the same signing event. The template
+        // surgery (keepSignatureBlocksTogether / insertSigningIpLine)
+        // injects the gray 7pt paragraph; here we just provide the
+        // values. Pre-submit previews show "(pending)" since neither
+        // is recorded until the consultant actually clicks submit.
         c.put("finalSigningIp", resolveFinalSigningIp(app));
+        c.put("finalSigningAt", resolveFinalSigningAt(app));
 
         // Image placeholders -- separate entity fields. Each renders as
         // blank when the corresponding signature hasn't been captured.
@@ -570,8 +572,10 @@ public class AgreementDocumentService {
         // inline-clause read view in the wizard shows the date in
         // every signature block before submit.
         v.put("signatureDate", resolveSignatureDate(app));
-        // Build R — same final-signing-IP fallback as buildContext.
+        // Build R — same final-signing IP + timestamp fallback as
+        // buildContext; both captured at the same review-step submit.
         v.put("finalSigningIp", resolveFinalSigningIp(app));
+        v.put("finalSigningAt", resolveFinalSigningAt(app));
         return v;
     }
 
@@ -602,6 +606,31 @@ public class AgreementDocumentService {
     private static String resolveFinalSigningIp(ConsultantApplication app) {
         String ip = app.getFinalSigningIp();
         if (ip != null && !ip.isBlank()) return ip.trim();
+        return "(pending)";
+    }
+
+    /** UTC formatter used by the faint signing-timestamp stamp.
+     *  Matches the Certificate of Completion's timestamp shape so the
+     *  in-document IP/time stamp and the certificate stay consistent. */
+    private static final DateTimeFormatter SIGNING_AT_UTC_FMT =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'");
+
+    /**
+     * Build R — final signing timestamp paired with the captured IP
+     * in the faint trace line. Sourced from {@code finalSignedAt},
+     * which is set at the same instant as {@code finalSigningIp} in
+     * {@code consultantSubmit} (and overwritten together on re-sign),
+     * so the displayed IP and time always correspond to the same
+     * signing event. Formatted UTC for audit precision and
+     * consistency with the Certificate of Completion. "(pending)" on
+     * pre-submit previews — mirrors the IP fallback.
+     */
+    private static String resolveFinalSigningAt(ConsultantApplication app) {
+        LocalDateTime stamped = app.getFinalSignedAt();
+        if (stamped != null) {
+            return stamped.atZone(java.time.ZoneOffset.UTC)
+                    .format(SIGNING_AT_UTC_FMT);
+        }
         return "(pending)";
     }
 
@@ -650,8 +679,10 @@ public class AgreementDocumentService {
                 // ERM signature block (text -- the images themselves are
                 // signatureImage / ermSignatureImage below).
                 "ermName", "ermTitle", "ermEmail", "signatureDate",
-                // Build R — faint IP trace line under the Date/Email line.
-                "finalSigningIp",
+                // Build R — faint IP + timestamp trace line under the
+                // Date/Email line. Both render in the same gray 7pt
+                // paragraph; both are blank on the master template.
+                "finalSigningIp", "finalSigningAt",
         };
         for (String k : textKeys) c.put(k, LINE);
         // Signature images render as empty boxes in the preview.
@@ -1030,17 +1061,21 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Build R — inserts a faint IP trace paragraph immediately after
-     * every {@code "Date / Email: ${signatureDate} / ${primaryEmail}"}
+     * Build R — inserts a faint IP + signing-timestamp trace paragraph
+     * immediately after every
+     * {@code "Date / Email: ${signatureDate} / ${primaryEmail}"}
      * paragraph in the document. Renders as gray 7pt
      * ({@code w:sz="14"}, {@code w:color="808080"}) so it reads as
-     * roughly 50% opacity on white, present for security and
+     * roughly 50% opacity on white — present for security and
      * traceability but unobtrusive next to the main signature lines.
      *
-     * docx-stamper substitutes {@code ${finalSigningIp}} from the
-     * context map built by {@link #buildContext}; the value is
-     * captured at the review-step submit and overwritten on every
-     * re-sign so a revision-resubmit updates it.
+     * docx-stamper substitutes {@code ${finalSigningIp}} and
+     * {@code ${finalSigningAt}} from the context map built by
+     * {@link #buildContext}; both are captured TOGETHER at the
+     * review-step submit and overwritten together on every re-sign,
+     * so the rendered IP and timestamp always correspond to the same
+     * signing event. {@code finalSigningAt} is UTC for consistency
+     * with the Certificate of Completion timeline.
      *
      * Must run BEFORE {@link #keepSignatureBlocksTogether} so the new
      * paragraph rides into the consolidated single-row cell with the
@@ -1054,7 +1089,8 @@ public class AgreementDocumentService {
                     + "<w:sz w:val=\"14\"/>"
                     + "<w:color w:val=\"808080\"/>"
                     + "</w:rPr>"
-                    + "<w:t xml:space=\"preserve\">IP: ${finalSigningIp}</w:t>"
+                    + "<w:t xml:space=\"preserve\">IP: ${finalSigningIp}"
+                    + "  ·  Signed: ${finalSigningAt}</w:t>"
                     + "</w:r>"
                     + "</w:p>";
 
