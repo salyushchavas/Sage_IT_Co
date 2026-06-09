@@ -876,6 +876,57 @@ public class EmailTemplateService {
     }
 
     /**
+     * Build T — sent when the consultant requests a fresh OTP to
+     * download their released consultant-version agreement. Same code
+     * block treatment as the portal OTP but the copy is download-
+     * specific so the consultant can distinguish the two flows.
+     */
+    public void sendConsultantDownloadOtp(
+            ConsultantApplication application, String code) {
+        String codeBlock =
+                "<div style=\"margin:20px 0;padding:18px 0;text-align:center;"
+                + "font-family:'Courier New',monospace;font-size:34px;"
+                + "font-weight:bold;letter-spacing:10px;color:#1B2A5C;"
+                + "background:#f4f6fb;border-radius:10px;\">"
+                + escape(code) + "</div>";
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p("Use this code to download your " + brandName()
+                        + " consultant agreement:")
+                + codeBlock
+                + muted("This code expires in 10 minutes and can be used once. "
+                        + "If you didn't request it, you can safely ignore this email.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Your " + brandName() + " download verification code",
+                wrap("Download verification code", body));
+    }
+
+    /**
+     * Build T — sent the moment the ERM releases the consultant version
+     * of the agreement. Points the consultant back to the portal where
+     * they can request a fresh OTP and download their copy.
+     */
+    public void sendConsultantVersionReleased(ConsultantApplication application) {
+        String url = appUrl + "/consultant";
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p(brandName() + " has approved and released your copy of "
+                        + "the consultant agreement. You can now download a "
+                        + "PDF of the agreement and its Certificate of "
+                        + "Completion from your portal.")
+                + button("Open your portal", url)
+                + ctaFallback(url)
+                + receipt(
+                        "Application ID: " + application.getApplicationId(),
+                        "Verification: email OTP at download time")
+                + muted("For your security, we'll ask you to verify a fresh "
+                        + "6-digit code before the download starts.");
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Your " + brandName() + " consultant agreement is ready to download",
+                wrap("Your agreement copy is ready", body));
+    }
+
+    /**
      * Sent to the consultant when the ERM kicks the application back
      * for revisions after reviewing the signed submission. Includes the
      * ERM's remarks in a styled blockquote so the consultant knows

@@ -3353,6 +3353,19 @@ export interface ConsultantApplication {
   chequePublicId?: string | null;
   chequeUploadedAt?: string | null;
   chequeContentType?: string | null;
+  // Build T — ERM "Approve consultant version" release state. When
+  // consultantCopyReleased is true the consultant can download an
+  // OTP-gated PDF of their copy + Certificate of Completion.
+  consultantCopyReleased?: boolean | null;
+  consultantCopyReleasedAt?: string | null;
+  consultantCopyReleasedBy?: string | null;
+  consultantPdfPublicId?: string | null;
+  documentHash?: string | null;
+  // Build T — e-sign consent record captured at the gate before
+  // the wizard. consentGivenAt is the wizard-blocking gate signal.
+  consentGivenAt?: string | null;
+  consentIp?: string | null;
+  consentVersion?: string | null;
 }
 
 /**
@@ -4393,6 +4406,79 @@ export async function signConsultantApplication(
 export async function requestConsultantCopy(applicationId: string) {
   return consultantFetch<{ message: string }>(
     applicationId, "/request-copy",
+    { method: "POST" },
+  );
+}
+
+/**
+ * Build T — POST /api/consultant/applications/{appId}/consent.
+ * Records the consultant's e-sign consent at the gate shown BEFORE
+ * the wizard. Idempotent — calling twice returns the same persisted
+ * timestamp.
+ */
+export async function recordConsultantConsent(applicationId: string) {
+  return consultantFetch<ConsultantApplication>(
+    applicationId, "/consent",
+    { method: "POST" },
+  );
+}
+
+/**
+ * Build T — POST /api/consultant/applications/{appId}/request-download-otp.
+ * Issues a fresh OTP for the consultant-version PDF download. Generic
+ * response regardless of release state so a token holder can't probe
+ * for "is this released yet".
+ */
+export async function requestConsultantDownloadOtp(applicationId: string) {
+  return consultantFetch<{ message: string }>(
+    applicationId, "/request-download-otp",
+    { method: "POST" },
+  );
+}
+
+/**
+ * Build T — POST /api/consultant/applications/{appId}/download.
+ * Exchanges a fresh OTP for the consultant-version PDF blob (a Blob
+ * the caller turns into a saveable file). The returned Response is
+ * the raw fetch response; OK on success, 400 on OTP failure, 409
+ * if the row hasn't been released yet.
+ */
+export async function downloadConsultantCopy(
+  applicationId: string,
+  otp: string,
+): Promise<Response> {
+  const token = getConsultantToken();
+  const res = await fetch(
+    `${BASE_URL}/api/consultant/applications/${applicationId}/download`,
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ otp }),
+    },
+  );
+  if (res.status === 401) {
+    clearConsultantToken();
+    if (typeof window !== "undefined") {
+      window.location.assign("/consultant");
+    }
+    throw new Error("Verification required.");
+  }
+  return res;
+}
+
+/**
+ * Build T — ERM action POST /api/agreement-erm/applications/{appId}/approve-consultant-version.
+ * Releases the consultant-version PDF (consultant signatures only,
+ * with the appended Certificate of Completion). Distinct from
+ * {@link ermApproveAndSign}: this does NOT countersign and does NOT
+ * change the main state.
+ */
+export async function ermApproveConsultantVersion(applicationId: string) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/approve-consultant-version`,
     { method: "POST" },
   );
 }

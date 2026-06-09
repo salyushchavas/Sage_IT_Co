@@ -166,16 +166,17 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Build I — rasterises {@code pdfBytes} (typically from
+     * Rasterises {@code pdfBytes} (typically from
      * {@link #renderPdfBytes}) into a list of PNG byte arrays, one per
-     * PDF page, each stamped with a diagonal, semi-transparent
-     * watermark of {@code viewerEmail} + a UTC timestamp +
-     * "CONFIDENTIAL". The wizard shows these as the consultant review
-     * preview so the document cannot be downloaded as a PDF and every
-     * screenshot or photograph carries the viewer's identity.
+     * PDF page. Render DPI is intentionally modest (~110) so the
+     * bytes stay cheap to stream.
      *
-     * Render DPI is intentionally modest (~110) so the bytes stay
-     * cheap to stream and the watermark stays legible.
+     * Build T — the diagonal CONFIDENTIAL watermark was removed; the
+     * page images are now clean. The preview is still image-only (no
+     * downloadable PDF) and the scroll-gated attestation still gates
+     * the review submission. {@code viewerEmail} is retained on the
+     * signature for backward compatibility with the controller call
+     * but is no longer baked into the bytes.
      */
     public List<byte[]> renderWatermarkedPageImages(
             byte[] pdfBytes, String viewerEmail) throws IOException {
@@ -189,77 +190,17 @@ public class AgreementDocumentService {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDFRenderer renderer = new PDFRenderer(doc);
             int pageCount = doc.getNumberOfPages();
-            String stamp = watermarkText(viewerEmail);
             List<byte[]> pages = new ArrayList<>(pageCount);
             for (int i = 0; i < pageCount; i++) {
                 BufferedImage page = renderer.renderImageWithDPI(i, 110f);
-                BufferedImage stamped = applyWatermark(page, stamp);
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                ImageIO.write(stamped, "png", baos);
+                ImageIO.write(page, "png", baos);
                 pages.add(baos.toByteArray());
             }
-            log.info("Build I — rendered {} watermarked preview page(s) for {}",
+            log.info("Rendered {} clean preview page(s) for {}",
                     pageCount, viewerEmail);
             return pages;
         }
-    }
-
-    /** Build I — formats the watermark text shown on every page image. */
-    private static String watermarkText(String viewerEmail) {
-        String email = (viewerEmail == null || viewerEmail.isBlank())
-                ? "consultant" : viewerEmail.trim();
-        String ts = LocalDateTime.now(java.time.ZoneOffset.UTC)
-                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm 'UTC'"));
-        return "CONFIDENTIAL  •  " + email + "  •  " + ts;
-    }
-
-    /**
-     * Build I — bakes a repeating, diagonal, semi-transparent watermark
-     * across {@code page}. The rasterised page bytes are the only
-     * delivery vehicle, so once the watermark is on the image the
-     * consultant cannot strip it from the browser. A diagonal rotation
-     * + tiled layout makes a clean crop of the underlying text
-     * impractical.
-     */
-    private static BufferedImage applyWatermark(BufferedImage page, String text) {
-        int w = page.getWidth();
-        int h = page.getHeight();
-        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
-        Graphics2D g = out.createGraphics();
-        try {
-            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
-                    RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
-                    RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-            g.drawImage(page, 0, 0, null);
-            // Diagonal, repeating watermark. Rotated 30 deg counter-
-            // clockwise around the page centre.
-            g.setComposite(java.awt.AlphaComposite.getInstance(
-                    java.awt.AlphaComposite.SRC_OVER, 0.18f));
-            g.setColor(new java.awt.Color(0x1B, 0x2A, 0x5C)); // sage-navy
-            int fontSize = Math.max(18, Math.min(w, h) / 36);
-            g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, fontSize));
-            java.awt.geom.AffineTransform original = g.getTransform();
-            g.rotate(Math.toRadians(-30), w / 2.0, h / 2.0);
-            java.awt.FontMetrics fm = g.getFontMetrics();
-            int textW = fm.stringWidth(text);
-            int textH = fm.getHeight();
-            int stepX = textW + fontSize * 4;
-            int stepY = textH * 5;
-            // Cover the page generously past its bounds so the rotation
-            // doesn't leave bare corners.
-            int margin = Math.max(w, h) / 2;
-            for (int y = -margin; y < h + margin; y += stepY) {
-                int xShift = (y / stepY) % 2 == 0 ? 0 : stepX / 2;
-                for (int x = -margin + xShift; x < w + margin; x += stepX) {
-                    g.drawString(text, x, y);
-                }
-            }
-            g.setTransform(original);
-        } finally {
-            g.dispose();
-        }
-        return out;
     }
 
     /**
@@ -1446,6 +1387,26 @@ public class AgreementDocumentService {
     }
 
     // ── Cloudinary upload ───────────────────────────────────────────
+
+    /**
+     * Build T — upload an arbitrary PDF byte array under a custom
+     * public_id (the consultant-version PDF uses
+     * {@code agreements/{appId}-consultant} so it doesn't collide with
+     * the ERM-signed final PDF at {@code agreements/{appId}}).
+     */
+    public PdfUploadResult uploadPdfBytes(byte[] bytes, String publicId) throws IOException {
+        Map<?, ?> result = cloudinary.uploader().upload(bytes,
+                ObjectUtils.asMap(
+                        "public_id", publicId,
+                        "resource_type", "raw",
+                        "type", "authenticated",
+                        "overwrite", true));
+        Object url = result.get("secure_url");
+        if (url == null) {
+            throw new IOException("Cloudinary upload returned no secure_url");
+        }
+        return new PdfUploadResult(url.toString(), publicId, bytes);
+    }
 
     private PdfUploadResult uploadBytesToCloudinary(byte[] bytes, String appId) throws IOException {
         // type=authenticated: bare /raw/upload/agreements/{id} URLs

@@ -249,6 +249,23 @@ public class ConsultantApplicationController {
     }
 
     /**
+     * Build T — ERM releases the CONSULTANT-VERSION PDF (consultant
+     * signatures only, NO ERM signature) with an appended Certificate
+     * of Completion. Distinct from {@link #approveAndSign}: this does
+     * NOT countersign and does NOT move the row to COMPLETED — the
+     * state stays VERIFIED until the ERM separately countersigns.
+     */
+    @PostMapping("/api/agreement-erm/applications/{appId}/approve-consultant-version")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> approveConsultantVersion(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Consultant copy released",
+                consultantService.ermApproveConsultantVersion(appId, request)));
+    }
+
+    /**
      * Build M — owner ERM (or super-admin) advances a Phase-1
      * COMPLETED agreement to Phase 2 on the SAME document. Promoted
      * sections flip to required; data is preserved; signatures +
@@ -671,6 +688,80 @@ public class ConsultantApplicationController {
                 Map.of("message", "A copy is on its way to your inbox.")));
     }
 
+    /**
+     * Build T — captures the consultant's e-sign consent at the gate
+     * shown BEFORE the wizard. Idempotent: second call is a no-op
+     * server-side and the response reflects the persisted timestamp.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/consent")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantConsent(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                "Consent recorded",
+                consultantService.recordConsent(appId, request)));
+    }
+
+    /**
+     * Build T — request a fresh OTP to download the released
+     * consultant-version PDF. Generic response regardless of release
+     * state so a token holder can't probe.
+     */
+    @PostMapping("/api/consultant/applications/{appId}/request-download-otp")
+    public ResponseEntity<ApiResponse<Map<String, String>>> consultantRequestDownloadOtp(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowOtpRequest("download|" + appId + "|" + clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        String message = consultantService.requestDownloadOtp(appId, request);
+        return ResponseEntity.ok(ApiResponse.success(Map.of("message", message)));
+    }
+
+    /**
+     * Build T — exchange a fresh OTP for the consultant-version PDF
+     * bytes. ONLY serves the released consultant-version (the ERM-
+     * signed COMPLETED PDF is NEVER served by this path).
+     */
+    @PostMapping("/api/consultant/applications/{appId}/download")
+    public ResponseEntity<?> consultantDownload(
+            @PathVariable String appId,
+            @RequestBody(required = false) DownloadBody body,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowOtpVerify("download|" + appId + "|" + clientIp(request))) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        byte[] bytes;
+        try {
+            bytes = consultantService.downloadConsultantCopy(
+                    appId, body == null ? null : body.otp, request);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error(e.getMessage()));
+        } catch (IllegalStateException e) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(ApiResponse.error(e.getMessage()));
+        }
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        String filename = AgreementDocumentService.buildPdfFilename(app);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(bytes);
+    }
+
     // ── Consultant-side: two-stage workflow (Phase 3) ───────────────
 
     /**
@@ -958,6 +1049,11 @@ public class ConsultantApplicationController {
 
     public static class PortalOtpVerifyBody {
         public String email;
+        public String otp;
+    }
+
+    /** Build T — body for the consultant OTP-gated download exchange. */
+    public static class DownloadBody {
         public String otp;
     }
 

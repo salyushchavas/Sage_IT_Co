@@ -1249,6 +1249,31 @@ public class DataSeeder implements CommandLineRunner {
                 // ERM "Advance to Phase 2" action). NOT NULL DEFAULT 1
                 // so existing rows backfill cleanly.
                 {"phase SMALLINT NOT NULL DEFAULT 1", "phase"},
+                // Build T — ERM "Approve consultant version" releases a
+                // consultant-version PDF (consultant signatures only, no
+                // ERM signature) with an appended Certificate of
+                // Completion. The consultant downloads it OTP-gated.
+                // Distinct from the COMPLETED ERM-signed copy, which is
+                // not consultant-downloadable in this build.
+                {"consultant_copy_released BOOLEAN NOT NULL DEFAULT FALSE",
+                        "consultant_copy_released"},
+                {"consultant_copy_released_at TIMESTAMP",
+                        "consultant_copy_released_at"},
+                {"consultant_copy_released_by VARCHAR(36)",
+                        "consultant_copy_released_by"},
+                {"consultant_pdf_public_id VARCHAR(255)",
+                        "consultant_pdf_public_id"},
+                // Build T — SHA-256 of the released consultant-version
+                // PDF bytes. Printed on the Certificate of Completion
+                // so the recipient can verify integrity off-line.
+                {"document_hash VARCHAR(128)", "document_hash"},
+                // Build T — E-sign consent capture (E-SIGN Act +
+                // UETA equivalent). Recorded at the consent gate
+                // BEFORE the consultant fills/signs; surfaced on the
+                // certificate.
+                {"consent_given_at TIMESTAMP", "consent_given_at"},
+                {"consent_ip VARCHAR(64)", "consent_ip"},
+                {"consent_version VARCHAR(32)", "consent_version"},
         };
         for (String[] col : columns) {
             try {

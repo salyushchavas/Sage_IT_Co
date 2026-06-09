@@ -28,6 +28,7 @@ import {
   cancelConsultantApplication,
   ermAdvanceToPhase2,
   ermApproveAndSign,
+  ermApproveConsultantVersion,
   ermRequestRevision,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
@@ -160,7 +161,7 @@ type ModalKind = null | "revision" | "approve" | "send" | "editContact" | "advan
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
   const [modal, setModal] = useState<ModalKind>(null);
-  const [busy, setBusy] = useState<"resend" | "cancel" | null>(null);
+  const [busy, setBusy] = useState<"resend" | "cancel" | "releaseConsultant" | null>(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   // Phase B nicety — pre-fill the Approve & Sign name/title from the
@@ -239,6 +240,32 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
     }
   };
 
+  /**
+   * Build T — release the consultant-version PDF (consultant
+   * signatures only, with appended Certificate of Completion).
+   * Does NOT countersign; status stays VERIFIED.
+   */
+  const handleApproveConsultantVersion = async () => {
+    if (!confirm(
+      "Release a consultant-version PDF (with Certificate of Completion) "
+      + "for the consultant to download? This does not countersign the "
+      + "agreement.",
+    )) {
+      return;
+    }
+    setBusy("releaseConsultant");
+    setError("");
+    try {
+      await ermApproveConsultantVersion(app.applicationId);
+      setFeedback("Consultant version released. They can now download it after a fresh OTP.");
+      await onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't release consultant version");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <HeaderRow app={app} />
@@ -259,11 +286,13 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         app={app}
         onRequestRevision={() => setModal("revision")}
         onApproveAndSign={() => setModal("approve")}
+        onApproveConsultantVersion={handleApproveConsultantVersion}
         onSendEmail={() => setModal("send")}
         onResendInvite={handleResend}
         onCancel={handleCancel}
         resendBusy={busy === "resend"}
         cancelBusy={busy === "cancel"}
+        releaseConsultantBusy={busy === "releaseConsultant"}
         isLocked={isLocked}
         onAdvanceToPhase2={() => setModal("advancePhase2")}
       />
@@ -639,11 +668,13 @@ function StateActionBar({
   app,
   onRequestRevision,
   onApproveAndSign,
+  onApproveConsultantVersion,
   onSendEmail,
   onResendInvite,
   onCancel,
   resendBusy,
   cancelBusy,
+  releaseConsultantBusy,
   isLocked,
   onAdvanceToPhase2,
 }: {
@@ -651,11 +682,13 @@ function StateActionBar({
   app: ConsultantApplication;
   onRequestRevision: () => void;
   onApproveAndSign: () => void;
+  onApproveConsultantVersion: () => void;
   onSendEmail: () => void;
   onResendInvite: () => void;
   onCancel: () => void;
   resendBusy: boolean;
   cancelBusy: boolean;
+  releaseConsultantBusy: boolean;
   isLocked: boolean;
   onAdvanceToPhase2: () => void;
 }) {
@@ -699,11 +732,14 @@ function StateActionBar({
   }
 
   if (status === "VERIFIED") {
+    const released = Boolean(app.consultantCopyReleased);
     return (
       <BarShell badge="Ready for your review" tone="navy">
         <p className="text-xs text-gray-600 max-w-md">
           The consultant signed. Approve to apply your signature and generate
-          the final PDF, or send it back with revision remarks.
+          the final PDF, or send it back with revision remarks. You can
+          also release a consultant-version copy (no Sage signature) for
+          the consultant to download.
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -712,6 +748,25 @@ function StateActionBar({
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
           >
             <MessageSquare size={12} /> Request revision
+          </button>
+          <button
+            type="button"
+            onClick={onApproveConsultantVersion}
+            disabled={released || releaseConsultantBusy}
+            className={
+              "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border cursor-pointer "
+              + (released
+                ? "border-emerald-300 bg-emerald-50 text-emerald-700 cursor-default"
+                : "border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5 disabled:opacity-60 disabled:cursor-not-allowed")
+            }
+            title={released ? "Consultant version already released" : undefined}
+          >
+            <CheckCircle2 size={12} />
+            {released
+              ? "Consultant version released"
+              : releaseConsultantBusy
+                ? "Releasing…"
+                : "Approve consultant version"}
           </button>
           <button
             type="button"

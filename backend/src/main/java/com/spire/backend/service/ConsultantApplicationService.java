@@ -87,6 +87,7 @@ public class ConsultantApplicationService {
     private final EmailTemplateService emailTemplateService;
     private final ConsultantPdfService consultantPdfService;
     private final AgreementDocumentService agreementDocumentService;
+    private final ConsultantVersionService consultantVersionService;
     private final AgreementUserRepository agreementUserRepository;
     private final ConsultantVerificationRepository verificationRepository;
     private final PasswordEncoder passwordEncoder;
@@ -1276,6 +1277,294 @@ public class ConsultantApplicationService {
         }
 
         return app;
+    }
+
+    // ── Build T: ERM releases the consultant-version PDF ─────────────
+
+    /**
+     * Build T — ERM "Approve consultant version" action. Allowed only
+     * when status = VERIFIED (consultant submitted, ERM has not
+     * countersigned yet). The action:
+     *
+     *   - Renders the consultant-version PDF: the agreement with the
+     *     consultant's signatures present and the ERM signature
+     *     ABSENT, plus an appended Certificate of Completion (audit
+     *     trail, IPs, timestamps, SHA-256 hash).
+     *   - Uploads the bytes under {@code agreements/{appId}-consultant}
+     *     and persists {@code consultantPdfPublicId}, {@code documentHash},
+     *     {@code consultantCopyReleased=true}, and the release stamp.
+     *   - Audits CONSULTANT_VERSION_APPROVED with the ERM id.
+     *   - Does NOT change the main state machine. The row stays
+     *     VERIFIED until the ERM separately calls ermApproveAndSign,
+     *     which transitions to COMPLETED and produces the ERM-signed
+     *     PDF (which is NOT consultant-downloadable in this build).
+     */
+    @Transactional
+    public ConsultantApplication ermApproveConsultantVersion(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
+            throw new IllegalStateException(
+                    "Only VERIFIED applications can have a consultant version "
+                            + "released (status=" + app.getStatus() + ").");
+        }
+
+        ConsultantVersionService.ReleaseResult release;
+        try {
+            release = consultantVersionService
+                    .renderConsultantVersionWithCertificate(app);
+        } catch (Exception e) {
+            log.error("Consultant-version render failed for {}: {}",
+                    applicationId, e.getMessage(), e);
+            throw new IllegalStateException(
+                    "Couldn't render consultant-version PDF: " + e.getMessage(), e);
+        }
+
+        String publicId = "agreements/" + applicationId + "-consultant";
+        try {
+            agreementDocumentService.uploadPdfBytes(release.bytes(), publicId);
+        } catch (Exception e) {
+            log.error("Cloudinary upload of consultant-version failed for {}: {}",
+                    applicationId, e.getMessage(), e);
+            throw new IllegalStateException(
+                    "Couldn't store consultant-version PDF: " + e.getMessage(), e);
+        }
+
+        LocalDateTime now = LocalDateTime.now();
+        app.setConsultantPdfPublicId(publicId);
+        app.setDocumentHash(release.sha256Hex());
+        app.setConsultantCopyReleased(true);
+        app.setConsultantCopyReleasedAt(now);
+        // released_by uses the same sentinel/marker as the rest of the
+        // ERM flow; resolveActorErmId returns the auth'd user id when
+        // present, falling back to the global agreement-erm sentinel.
+        app.setConsultantCopyReleasedBy(resolveActorErmId(request));
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CONSULTANT_VERSION_APPROVED,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of(
+                        "publicId", publicId,
+                        "documentHash", release.sha256Hex(),
+                        "bytes", String.valueOf(release.bytes().length)),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantVersionReleased(app);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("template", "consultant_version_released"),
+                    null);
+        } catch (Exception e) {
+            log.warn("Couldn't notify consultant of released copy for {}: {}",
+                    applicationId, e.getMessage());
+        }
+
+        return app;
+    }
+
+    /**
+     * Build T — best-effort actor id resolution for release_by.
+     * Falls back to the global agreement-erm sentinel when the
+     * request carries no authenticated AgreementUser.
+     */
+    private String resolveActorErmId(HttpServletRequest request) {
+        try {
+            org.springframework.security.core.Authentication auth =
+                    org.springframework.security.core.context.SecurityContextHolder
+                            .getContext().getAuthentication();
+            if (auth != null && auth.getName() != null && !auth.getName().isBlank()) {
+                return auth.getName();
+            }
+        } catch (Exception ignored) {
+            // fall through
+        }
+        return null;
+    }
+
+    // ── Build T: e-sign consent capture ──────────────────────────────
+
+    /**
+     * Build T — records the consultant's e-sign consent at the consent
+     * gate (after OTP login, before the wizard). Idempotent: a second
+     * call with consent already present is a no-op (we don't overwrite
+     * the original timestamp/IP). Audits CONSENT_GIVEN once.
+     */
+    @Transactional
+    public ConsultantApplication recordConsent(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        // Idempotent — preserve the original record. Returning the
+        // unchanged entity is fine; the UI gates off consentGivenAt.
+        if (app.getConsentGivenAt() != null) {
+            return app;
+        }
+        LocalDateTime now = LocalDateTime.now();
+        String ip = clientIp(request);
+        app.setConsentGivenAt(now);
+        app.setConsentIp(ip);
+        app.setConsentVersion(ConsultantVersionService.CONSENT_VERSION);
+        applicationRepository.save(app);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CONSENT_GIVEN,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of(
+                        "version", ConsultantVersionService.CONSENT_VERSION,
+                        "ip", ip == null ? "" : ip),
+                request);
+        return app;
+    }
+
+    // ── Build T: consultant OTP-gated download of the released copy ──
+
+    /**
+     * Build T — issues a fresh OTP for the consultant to download
+     * their released consultant-version PDF. Reuses the consultant
+     * verification table + the same hash / cooldown / lockout rules
+     * as the portal OTP. Gated on consultantCopyReleased so the
+     * action is only callable in the released state.
+     *
+     * Returns the same generic message whether the OTP was actually
+     * issued (cooldown, hourly cap) or not — same non-enumeration
+     * stance as the portal request-otp.
+     */
+    @Transactional
+    public String requestDownloadOtp(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (!Boolean.TRUE.equals(app.getConsultantCopyReleased())) {
+            // Generic — doesn't leak release state to a token holder
+            // poking at a not-yet-released agreement.
+            return OTP_GENERIC_SENT_MSG;
+        }
+        String normalised = app.getConsultantEmail() == null
+                ? "" : app.getConsultantEmail().trim().toLowerCase();
+        if (normalised.isEmpty()) return OTP_GENERIC_SENT_MSG;
+
+        LocalDateTime now = LocalDateTime.now();
+        Optional<ConsultantVerification> latest =
+                verificationRepository.findFirstByEmailOrderByCreatedAtDesc(normalised);
+        if (latest.isPresent() && latest.get().getLastSentAt() != null
+                && latest.get().getLastSentAt()
+                        .isAfter(now.minusSeconds(OTP_RESEND_COOLDOWN_SECONDS))) {
+            return OTP_GENERIC_SENT_MSG;
+        }
+        long lastHour = verificationRepository.countByEmailAndLastSentAtAfter(
+                normalised, now.minusHours(1));
+        if (lastHour >= OTP_MAX_PER_HOUR) {
+            return OTP_GENERIC_SENT_MSG;
+        }
+
+        for (ConsultantVerification prior :
+                verificationRepository.findByEmailAndConsumedAtIsNull(normalised)) {
+            prior.setConsumedAt(now);
+            verificationRepository.save(prior);
+        }
+
+        String code = generateOtp();
+        String ip = clientIp(request);
+        verificationRepository.save(ConsultantVerification.builder()
+                .email(normalised)
+                .otpHash(passwordEncoder.encode(code))
+                .expiresAt(now.plusMinutes(OTP_TTL_MINUTES))
+                .attempts(0)
+                .lastSentAt(now)
+                .resendCount((int) lastHour + 1)
+                .requestIp(ip)
+                .build());
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.DOWNLOAD_OTP_SENT,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("ip", ip == null ? "" : ip,
+                        "email", normalised),
+                request);
+        try {
+            emailTemplateService.sendConsultantDownloadOtp(app, code);
+        } catch (Exception e) {
+            log.warn("Failed to send consultant download OTP to {}: {}",
+                    normalised, e.getMessage());
+        }
+        return OTP_GENERIC_SENT_MSG;
+    }
+
+    /**
+     * Build T — verifies the fresh download OTP, marks it consumed,
+     * returns the released consultant-version PDF bytes. Throws
+     * IllegalStateException when the row hasn't been released, and
+     * IllegalArgumentException on any OTP failure (consumed by the
+     * controller as 400).
+     */
+    @Transactional
+    public byte[] downloadConsultantCopy(
+            String applicationId, String otp, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (!Boolean.TRUE.equals(app.getConsultantCopyReleased())
+                || app.getConsultantPdfPublicId() == null
+                || app.getConsultantPdfPublicId().isBlank()) {
+            throw new IllegalStateException(
+                    "Your copy is not available yet.");
+        }
+        String normalised = app.getConsultantEmail() == null
+                ? "" : app.getConsultantEmail().trim().toLowerCase();
+        ConsultantVerification cv = verificationRepository
+                .findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(normalised)
+                .orElse(null);
+        if (cv == null
+                || cv.getExpiresAt().isBefore(LocalDateTime.now())
+                || cv.getAttempts() >= OTP_MAX_ATTEMPTS) {
+            throw new IllegalArgumentException("Invalid or expired code.");
+        }
+        if (otp == null || !passwordEncoder.matches(otp.trim(), cv.getOtpHash())) {
+            cv.setAttempts(cv.getAttempts() + 1);
+            if (cv.getAttempts() >= OTP_MAX_ATTEMPTS) {
+                cv.setConsumedAt(LocalDateTime.now());
+            }
+            verificationRepository.save(cv);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.OTP_FAILED,
+                    ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                    Map.of("attempts", String.valueOf(cv.getAttempts()),
+                            "purpose", "download"),
+                    request);
+            throw new IllegalArgumentException("Invalid or expired code.");
+        }
+        cv.setConsumedAt(LocalDateTime.now());
+        verificationRepository.save(cv);
+
+        // Fetch the bytes through a short-lived signed URL.
+        String url = agreementDocumentService.signedPdfUrl(
+                app.getConsultantPdfPublicId(),
+                java.time.Duration.ofMinutes(5));
+        byte[] bytes;
+        try {
+            java.net.URLConnection conn = new java.net.URL(url).openConnection();
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(30_000);
+            try (java.io.InputStream in = conn.getInputStream()) {
+                bytes = in.readAllBytes();
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch released consultant copy for {}: {}",
+                    applicationId, e.getMessage());
+            throw new IllegalStateException(
+                    "Couldn't fetch your copy. Please try again.", e);
+        }
+
+        String ip = clientIp(request);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CONSULTANT_DOWNLOAD,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("ip", ip == null ? "" : ip,
+                        "bytes", String.valueOf(bytes.length),
+                        "documentHash", app.getDocumentHash() == null
+                                ? "" : app.getDocumentHash()),
+                request);
+        return bytes;
     }
 
     // ── Build M: advance Phase-1 COMPLETED to Phase 2 ────────────────

@@ -454,6 +454,51 @@ public class ConsultantApplication {
     @Builder.Default
     private Integer phase = 1;
 
+    // ── Build T: consultant-version release (ERM "Approve consultant
+    //    version") + Certificate of Completion bookkeeping ───────────
+    //
+    // The ERM releases a CONSULTANT-VERSION copy of the agreement
+    // (consultant signatures only, NO ERM signature) with an appended
+    // Certificate of Completion. The bytes are stored against
+    // consultantPdfPublicId and the SHA-256 hash on documentHash. The
+    // released flag gates the consultant download path.
+    //
+    // This is INDEPENDENT of the ERM countersign flow. The COMPLETED
+    // (ERM-signed) PDF is never served to the consultant — it lives
+    // on finalPdfPublicId / finalPdfUrl as before.
+
+    @Column(name = "consultant_copy_released", nullable = false)
+    @Builder.Default
+    private Boolean consultantCopyReleased = false;
+
+    @Column(name = "consultant_copy_released_at")
+    private LocalDateTime consultantCopyReleasedAt;
+
+    @Column(name = "consultant_copy_released_by", length = 36)
+    private String consultantCopyReleasedBy;
+
+    @Column(name = "consultant_pdf_public_id", length = 255)
+    private String consultantPdfPublicId;
+
+    /** SHA-256 (hex) of the released consultant-version PDF bytes. */
+    @Column(name = "document_hash", length = 128)
+    private String documentHash;
+
+    // ── Build T: e-sign consent record ───────────────────────────────
+    //
+    // Captured at the consent gate BEFORE the consultant starts the
+    // wizard. consent_version pins the disclosure text that was shown,
+    // so a future copy change can be distinguished in audits.
+
+    @Column(name = "consent_given_at")
+    private LocalDateTime consentGivenAt;
+
+    @Column(name = "consent_ip", length = 64)
+    private String consentIp;
+
+    @Column(name = "consent_version", length = 32)
+    private String consentVersion;
+
     // ── Status enum (string-keyed; lives here so the service layer
     //    has a single source of truth). ──────────────────────────────
 

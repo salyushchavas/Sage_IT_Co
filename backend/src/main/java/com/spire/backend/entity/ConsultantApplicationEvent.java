@@ -96,7 +96,21 @@ public class ConsultantApplicationEvent {
         // Build M — ERM reopens a Phase-1 COMPLETED agreement for
         // Phase 2 on the same document. Metadata carries the promoted
         // sections + the actor's user id.
-        ADVANCED_TO_PHASE_2
+        ADVANCED_TO_PHASE_2,
+        // Build T — e-sign consent captured at the consent gate before
+        // the consultant starts the wizard. Metadata: consent version
+        // + IP.
+        CONSENT_GIVEN,
+        // Build T — ERM releases the consultant-version PDF (with
+        // appended Certificate of Completion). Distinct from
+        // APPROVED_AND_SIGNED, which is the ERM countersign.
+        CONSULTANT_VERSION_APPROVED,
+        // Build T — consultant requested a fresh OTP to download
+        // their released consultant-version PDF.
+        DOWNLOAD_OTP_SENT,
+        // Build T — consultant successfully downloaded the released
+        // consultant-version PDF (post-OTP verify).
+        CONSULTANT_DOWNLOAD
     }
 
     public enum ActorType {
