@@ -29,6 +29,7 @@ import {
 
 import SignaturePad from "@/components/common/SignaturePad";
 import AgreementClauseView from "@/components/consultant/AgreementClauseView";
+import { wizardFontClass } from "./fonts";
 import {
   AGREEMENT_SECTIONS,
   AFFIRMATION_FLAGS,
@@ -302,6 +303,18 @@ export default function ConsultantWizardPage() {
     missingSignature: boolean;
     missingFinalSignature: boolean;
   } | null>(null);
+
+  // Build S — reading progress for the document column. Bound to the
+  // section step's internal scroll container (or to 100% when the
+  // content fits without scrolling). Shown both as the left-edge rail
+  // on the document and as the "X% read" label in the progress strip.
+  const [readingProgress, setReadingProgress] = useState(0);
+  // Stable setter the SectionStep can pass down without retriggering
+  // effects on every parent re-render.
+  const handleReadingProgress = useCallback(
+    (pct: number) => setReadingProgress(pct),
+    [],
+  );
   const [templateOpen, setTemplateOpen] = useState(false);
   // Build G — Appendix 5 cheque upload state. True once the server
   // confirms the public_id is stored. Wizard mirrors the row.
@@ -749,32 +762,90 @@ export default function ConsultantWizardPage() {
   }
 
   return (
-    <main className="min-h-screen bg-[#F7F4EE] pb-24 lg:pb-12 antialiased">
+    <main
+      className={`${wizardFontClass} sage-wizard min-h-screen pb-24 lg:pb-12 antialiased`}
+      style={{
+        // Build S — color tokens scoped to the wizard route.
+        ["--navy" as string]: "#1B2A5C",
+        ["--navy-deep" as string]: "#0F1F44",
+        ["--ink" as string]: "#1d2433",
+        ["--copper" as string]: "#C87D5C",
+        ["--copper-deep" as string]: "#a8623f",
+        ["--copper-wash" as string]: "#faf1ea",
+        ["--page" as string]: "#eceef3",
+        ["--paper" as string]: "#ffffff",
+        ["--muted" as string]: "#5c6577",
+        ["--line" as string]: "#e4e7ee",
+        ["--ok" as string]: "#356b51",
+        ["--ok-wash" as string]: "#eef5f0",
+        background: "var(--page)",
+      } as React.CSSProperties}
+    >
       <meta name="robots" content="noindex,nofollow" />
+      <style>{`
+        .sage-wizard { font-family: var(--font-inter), ui-sans-serif, system-ui, sans-serif; color: var(--ink); }
+        .sage-wizard .display { font-family: var(--font-fraunces), ui-serif, Georgia, serif; }
+        .sage-wizard .legal { font-family: var(--font-newsreader), ui-serif, Georgia, serif; }
+        .sage-wizard .legal p { font-size: 17px; line-height: 1.72; text-wrap: pretty; }
+        .sage-wizard :focus-visible { outline: 2px solid var(--copper); outline-offset: 2px; border-radius: 4px; }
+      `}</style>
 
-      <header className="border-b border-stone-200/80 bg-white/80 backdrop-blur sticky top-0 z-30">
-        <div className="max-w-7xl mx-auto px-4 sm:px-8 h-14 flex items-center justify-between">
-          <span className="font-serif text-[15px] font-semibold tracking-tight text-sage-navy">
-            Sage IT
+      <header
+        className="border-b sticky top-0 z-30"
+        style={{ background: "var(--navy-deep)", borderColor: "rgba(255,255,255,0.06)" }}
+      >
+        <div className="max-w-[1320px] mx-auto px-5 sm:px-10 h-12 flex items-center justify-between">
+          <div className="flex items-center gap-3 min-w-0">
+            <span
+              className="display text-[15px] font-semibold tracking-tight text-white whitespace-nowrap"
+              aria-label="Sage IT Co"
+            >
+              SAGE <span className="text-[var(--copper)]">IT</span> CO
+            </span>
+            <span
+              aria-hidden
+              className="hidden sm:inline h-3 w-px"
+              style={{ background: "rgba(255,255,255,0.16)" }}
+            />
+            <span className="hidden sm:inline text-[12.5px] text-white/70 truncate">
+              Complete your agreement
+            </span>
+          </div>
+          <span className="text-[11.5px] text-white/65 inline-flex items-center gap-1.5 whitespace-nowrap">
+            {saveStatus.kind === "saving" ? (
+              <>
+                <Loader2 size={11} className="animate-spin" /> Auto-saving
+              </>
+            ) : saveStatus.kind === "error" ? (
+              <>
+                <AlertCircle size={11} className="text-red-300" /> Auto-save failed
+              </>
+            ) : saveStatus.kind === "paused" ? (
+              <>
+                <PauseCircle size={11} /> Auto-save paused
+              </>
+            ) : (
+              <>
+                <CheckCircle2 size={11} className="text-emerald-300" /> Auto-saved
+              </>
+            )}
           </span>
-          <span className="hidden sm:inline text-[12px] text-stone-500">
-            Consultant Agreement
-          </span>
-          <SaveStatusBadge status={saveStatus} />
         </div>
       </header>
 
       <Stepper
         sections={sectionStatus}
         currentStep={currentStep}
+        readPct={readingProgress}
         onJump={(i) => {
-          // Allow jumping to any earlier (complete) section, or to the
-          // current/next-incomplete; block forward leaps over gaps so
-          // the consultant can't skip a required affirmation.
+          // Jump-back only. Completed and the current step are
+          // navigable; upcoming sections are locked until prior ones
+          // are complete.
           if (i < currentStep) {
             setCurrentStep(i);
             return;
           }
+          if (i === currentStep) return;
           for (let j = 0; j <= i; j++) {
             if (j !== AGREEMENT_SECTIONS.length - 1 && !sectionStatus[j].complete) {
               setCurrentStep(j);
@@ -879,6 +950,7 @@ export default function ConsultantWizardPage() {
             canAdvance={canAdvance}
             submitting={submitting}
             isFirstStep={currentStep === 0}
+            onReadProgress={handleReadingProgress}
           />
         )}
         {submitError && (
@@ -929,54 +1001,77 @@ export default function ConsultantWizardPage() {
 // ── Stepper ──────────────────────────────────────────────────
 
 /**
- * Build P — non-overflowing step progress. A 10-segment progress bar
- * shows where the consultant is (completed / current / upcoming) plus
- * the CURRENT section name spelled out in full. A "Jump to section"
- * menu opens a popover with the same 10-section checklist; section
- * names never clip and the document below stays as wide as possible.
+ * Build S — segmented progress + section navigator. A 10-segment
+ * progress bar shows the consultant's place (completed = navy,
+ * current = copper, upcoming = light grey) and a current-section
+ * title button opens a hover-peek + jump-back popover. Upcoming
+ * sections are listed but locked; only completed + the current
+ * section are clickable.
  */
 function Stepper({
   sections,
   currentStep,
+  readPct,
   onJump,
 }: {
   sections: { id: string; title: string; step: number; complete: boolean }[];
   currentStep: number;
+  readPct: number;
   onJump: (i: number) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [peek, setPeek] = useState<number | null>(null);
   const current = sections[currentStep];
   const total = sections.length;
+  const closeMenu = useCallback(() => setMenuOpen(false), []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") closeMenu();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [menuOpen, closeMenu]);
+
   return (
     <nav
       aria-label="Agreement sections"
-      className="sticky top-14 z-20 border-b border-stone-200/80 bg-[#F7F4EE]/90 backdrop-blur"
+      className="sticky top-12 z-20 border-b backdrop-blur"
+      style={{
+        background: "rgba(255,255,255,0.92)",
+        borderColor: "var(--line)",
+      }}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-8 py-4">
-        <div className="flex items-center justify-between gap-4 flex-wrap">
-          <div className="min-w-0 flex-1">
-            <p className="text-xs text-stone-500">
-              Section {currentStep + 1} of {total}
-            </p>
-            <h2 className="font-serif text-[17px] sm:text-lg text-sage-navy mt-0.5 leading-snug [text-wrap:balance]">
-              {current?.title ?? ""}
-            </h2>
-          </div>
-          <div className="relative shrink-0">
+      <div className="max-w-[1320px] mx-auto px-5 sm:px-10 pt-3.5 pb-4">
+        <div className="flex items-baseline justify-between gap-4">
+          <div className="relative shrink-0 min-w-0">
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
               aria-haspopup="menu"
               aria-expanded={menuOpen}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-stone-300 bg-white text-stone-700 hover:border-sage-navy/40 hover:text-sage-navy motion-safe:transition-colors cursor-pointer"
+              className="group inline-flex items-baseline gap-2 text-left cursor-pointer max-w-full"
             >
-              Jump to section
+              <span
+                className="display font-semibold text-[18px] sm:text-[19px] truncate"
+                style={{ color: "var(--navy-deep)" }}
+              >
+                {current?.title ?? ""}
+              </span>
+              <span
+                className="text-[11.5px] uppercase tracking-[0.08em] whitespace-nowrap"
+                style={{ color: "var(--muted)" }}
+              >
+                Section {currentStep + 1} of {total}
+              </span>
               <ChevronDown
-                size={12}
+                size={13}
                 className={
-                  "motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out "
+                  "shrink-0 motion-safe:transition-transform motion-safe:duration-150 motion-safe:ease-out group-hover:text-[color:var(--copper)] "
                   + (menuOpen ? "rotate-180" : "")
                 }
+                style={{ color: "var(--muted)" }}
               />
             </button>
             {menuOpen && (
@@ -984,49 +1079,60 @@ function Stepper({
                 <div
                   className="fixed inset-0 z-10"
                   aria-hidden
-                  onClick={() => setMenuOpen(false)}
+                  onClick={closeMenu}
                 />
                 <div
                   role="menu"
-                  className="absolute right-0 top-full mt-2 z-20 w-[min(86vw,360px)] rounded-xl border border-stone-200 bg-white shadow-[0_10px_30px_-12px_rgba(15,31,68,0.18)] overflow-hidden"
+                  className="absolute left-0 top-full mt-2 z-20 w-[min(86vw,360px)] rounded-xl bg-white shadow-[0_18px_40px_-18px_rgba(15,31,68,0.28)] overflow-hidden"
+                  style={{ border: "1px solid var(--line)" }}
                 >
-                  <ol className="max-h-[60vh] overflow-y-auto">
+                  <ol className="max-h-[60vh] overflow-y-auto py-1">
                     {sections.map((s, i) => {
                       const active = i === currentStep;
+                      const locked = i > currentStep && !s.complete;
                       return (
                         <li key={s.id}>
                           <button
                             type="button"
                             onClick={() => {
-                              setMenuOpen(false);
+                              if (locked) return;
+                              closeMenu();
                               onJump(i);
                             }}
                             role="menuitem"
+                            disabled={locked}
                             className={
-                              "w-full flex items-center gap-3 px-4 py-2.5 text-left text-sm motion-safe:transition-colors "
+                              "w-full grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-2.5 text-left text-[14px] motion-safe:transition-colors "
                               + (active
-                                ? "bg-sage-navy/5 text-sage-navy"
-                                : "text-stone-700 hover:bg-stone-50")
+                                ? "bg-[color:var(--copper-wash)] text-[color:var(--navy-deep)]"
+                                : locked
+                                  ? "text-[color:var(--muted)] cursor-not-allowed"
+                                  : "text-[color:var(--ink)] hover:bg-[color:var(--page)] cursor-pointer")
                             }
                           >
                             <span
-                              className={
-                                "inline-flex items-center justify-center h-6 w-6 rounded-full text-[11px] font-medium tabular-nums "
-                                + (s.complete
-                                  ? "bg-sage-navy text-white"
-                                  : active
-                                    ? "bg-white border border-sage-navy text-sage-navy"
-                                    : "bg-stone-100 text-stone-600")
-                              }
+                              aria-hidden
+                              className="inline-flex items-center justify-center h-5 w-5"
                             >
                               {s.complete ? (
-                                <CheckCircle2 size={13} />
+                                <CheckCircle2 size={14} style={{ color: "var(--navy)" }} />
+                              ) : active ? (
+                                <span
+                                  className="h-2.5 w-2.5 rounded-full"
+                                  style={{ background: "var(--copper)" }}
+                                />
                               ) : (
-                                s.step
+                                <Lock size={12} style={{ color: "var(--muted)" }} />
                               )}
                             </span>
-                            <span className="font-serif text-[15px] leading-tight">
+                            <span className="display text-[14.5px] leading-snug truncate">
                               {s.title}
+                            </span>
+                            <span
+                              className="text-[11px] tabular-nums"
+                              style={{ color: "var(--muted)" }}
+                            >
+                              {String(s.step).padStart(2, "0")}
                             </span>
                           </button>
                         </li>
@@ -1037,31 +1143,66 @@ function Stepper({
               </>
             )}
           </div>
+          <span
+            className="text-[11.5px] tabular-nums whitespace-nowrap"
+            style={{ color: "var(--muted)" }}
+            aria-live="polite"
+          >
+            {readPct >= 100 ? "Fully read, you can continue." : `${Math.round(readPct)}% read`}
+          </span>
         </div>
-        <div
-          className="mt-4 grid gap-1.5"
-          style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}
-          aria-hidden
-        >
-          {sections.map((s, i) => {
-            const active = i === currentStep;
-            const past = i < currentStep;
-            return (
-              <span
-                key={s.id}
-                className={
-                  "h-1.5 rounded-full motion-safe:transition-colors motion-safe:duration-300 motion-safe:ease-out "
-                  + (s.complete
-                    ? "bg-sage-navy"
-                    : active
-                      ? "bg-sage-copper"
-                      : past
-                        ? "bg-sage-navy/30"
-                        : "bg-stone-200")
-                }
-              />
-            );
-          })}
+        <div className="mt-3 relative">
+          <div
+            className="grid gap-1.5"
+            style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}
+          >
+            {sections.map((s, i) => {
+              const active = i === currentStep;
+              const past = i < currentStep;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  onMouseEnter={() => setPeek(i)}
+                  onMouseLeave={() => setPeek((p) => (p === i ? null : p))}
+                  onFocus={() => setPeek(i)}
+                  onBlur={() => setPeek((p) => (p === i ? null : p))}
+                  onClick={() => {
+                    if (i > currentStep && !s.complete) return;
+                    onJump(i);
+                  }}
+                  aria-label={`Section ${s.step}: ${s.title}`}
+                  className="relative h-3 flex items-center cursor-pointer"
+                >
+                  <span
+                    className="h-1.5 w-full rounded-full motion-safe:transition-colors motion-safe:duration-300 motion-safe:ease-out"
+                    style={{
+                      background: s.complete
+                        ? "var(--navy)"
+                        : active
+                          ? "var(--copper)"
+                          : past
+                            ? "rgba(27,42,92,0.30)"
+                            : "var(--line)",
+                    }}
+                  />
+                </button>
+              );
+            })}
+          </div>
+          {peek !== null && (
+            <div
+              role="tooltip"
+              className="pointer-events-none absolute -top-9 z-20 px-2 py-1 rounded-md text-[11.5px] text-white whitespace-nowrap shadow-md motion-safe:transition-opacity"
+              style={{
+                left: `calc(${(peek + 0.5) * (100 / total)}% )`,
+                transform: "translateX(-50%)",
+                background: "var(--navy-deep)",
+              }}
+            >
+              {sections[peek].title}
+            </div>
+          )}
         </div>
       </div>
     </nav>
@@ -1096,6 +1237,7 @@ function SectionStep({
   canAdvance,
   submitting,
   isFirstStep,
+  onReadProgress,
 }: {
   section: AgreementSection;
   content: AgreementContent | null;
@@ -1122,6 +1264,7 @@ function SectionStep({
   canAdvance: boolean;
   submitting: boolean;
   isFirstStep: boolean;
+  onReadProgress: (pct: number) => void;
 }) {
   const isCoverStep = section.id === "cover";
   const appendixOptional = Boolean(
@@ -1135,106 +1278,224 @@ function SectionStep({
   const hasFields = section.fields.length > 0;
   const blocks = content?.sections?.[section.id];
 
+  // Build S — track scroll progress inside the document column so the
+  // header's "% read" label + the left-edge rail fill stay in sync.
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const recomputeProgress = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const scrollable = el.scrollHeight - el.clientHeight;
+    if (scrollable <= 1) {
+      onReadProgress(100);
+      return;
+    }
+    const pct = Math.min(100, (el.scrollTop / scrollable) * 100);
+    onReadProgress(pct);
+  }, [onReadProgress]);
+
+  useEffect(() => {
+    onReadProgress(0);
+    const t = window.setTimeout(recomputeProgress, 50);
+    return () => window.clearTimeout(t);
+  }, [section.id, onReadProgress, recomputeProgress]);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    const obs = new ResizeObserver(() => recomputeProgress());
+    obs.observe(el);
+    Array.from(el.querySelectorAll("p, h1, h2, h3, h4")).forEach((node) =>
+      obs.observe(node),
+    );
+    return () => obs.disconnect();
+  }, [recomputeProgress, blocks]);
+
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_380px] gap-6 lg:gap-10 items-start">
+    <div className="grid grid-cols-1 lg:grid-cols-[1.62fr_0.92fr] gap-6 lg:gap-10 items-start max-w-[1320px] mx-auto">
       {/* ── Reading column (dominant) ─────────────────────────── */}
       <article
-        className="bg-white border border-stone-200/80 rounded-2xl px-6 sm:px-10 lg:px-14 py-8 sm:py-10 lg:py-12 motion-safe:transition-opacity"
+        className="relative bg-[var(--paper)] rounded-[14px] motion-safe:transition-opacity"
         aria-labelledby="section-title"
+        style={{
+          border: "1px solid var(--line)",
+          boxShadow: "0 18px 36px -28px rgba(15,31,68,0.18)",
+        }}
       >
-        <p className="text-xs font-medium text-stone-500 tabular-nums">
-          Section {section.step}
-        </p>
-        <h1
-          id="section-title"
-          className="font-serif text-3xl sm:text-[34px] leading-[1.15] text-sage-navy mt-1.5 [text-wrap:balance]"
+        {/* Build S — slim left-edge reading-progress rail. Sits inside
+            the rounded border; copper→navy gradient on the filled
+            portion communicates "you've read this far". */}
+        <div
+          aria-hidden
+          className="absolute left-0 top-0 h-full w-[3px] overflow-hidden rounded-l-[14px]"
+          style={{ background: "var(--line)" }}
         >
-          {section.title}
-        </h1>
-        {(showOptionalBadge || showPhase2RequiredBadge) && (
-          <div className="mt-3 flex gap-2 flex-wrap">
-            {showOptionalBadge && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-stone-100 text-stone-700">
-                Optional. You can skip this section.
-              </span>
-            )}
-            {showPhase2RequiredBadge && (
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium bg-sage-copper/12 text-sage-copper-deep">
-                Required for Phase 2
-              </span>
-            )}
-          </div>
-        )}
+          <div
+            className="w-full motion-safe:transition-[height] motion-safe:duration-200 motion-safe:ease-out"
+            style={{
+              height: "var(--read, 0%)",
+              background:
+                "linear-gradient(180deg, var(--copper) 0%, var(--navy) 100%)",
+            }}
+          />
+        </div>
 
-        {/* Plain-English aside */}
-        <aside className="mt-6 rounded-xl bg-[#FBF1E8] px-5 py-4 max-w-[68ch]">
-          <p className="text-[11px] font-semibold tracking-wide text-sage-copper-deep">
-            In plain English
+        <div
+          ref={scrollerRef}
+          onScroll={recomputeProgress}
+          className="overflow-y-auto px-7 sm:px-12 lg:px-14 py-7 sm:py-10 lg:py-12 lg:max-h-[min(74vh,820px)]"
+          style={{ ["--read" as string]: `0%` }}
+          // Wire the rail fill height to the scroll position. We can't
+          // set this as React state without thrashing render cost; the
+          // onScroll handler updates the CSS variable directly.
+          onScrollCapture={(e) => {
+            const el = e.currentTarget;
+            const max = el.scrollHeight - el.clientHeight;
+            const pct = max <= 1 ? 100 : Math.min(100, (el.scrollTop / max) * 100);
+            el.style.setProperty("--read", `${pct}%`);
+          }}
+        >
+          <p
+            className="text-[11px] font-medium uppercase tracking-[0.16em]"
+            style={{ color: "var(--muted)" }}
+          >
+            Section {section.step}
           </p>
-          <p className="mt-1.5 font-serif text-[15.5px] leading-[1.6] text-stone-800 [text-wrap:pretty]">
-            {section.summary}
-          </p>
-          <p className="mt-3 text-[13px] leading-[1.55] text-stone-600 [text-wrap:pretty]">
-            <span className="font-semibold text-stone-700">Why this matters. </span>
-            {section.why}
-          </p>
-        </aside>
-
-        {/* Cover-step effective date callout */}
-        {isCoverStep && (
-          <div className="mt-6 inline-flex items-start gap-2 text-[13px] text-stone-600">
-            <Lock size={13} className="mt-0.5 shrink-0 text-stone-500" />
-            <span>
-              Effective date{" "}
-              <span className="font-semibold text-sage-navy tabular-nums">
-                {effectiveDateText || "to be set"}
-              </span>
-              . Set by Sage IT.
-            </span>
-          </div>
-        )}
-
-        {/* Formal clauses */}
-        {blocks && blocks.length > 0 ? (
-          <div className="mt-8 max-w-[68ch]">
-            <div className="text-[10px] font-medium tracking-[0.18em] text-stone-400 uppercase">
-              The contract text
+          <h1
+            id="section-title"
+            className="display font-semibold text-[30px] sm:text-[36px] leading-[1.12] mt-2 [text-wrap:balance]"
+            style={{ color: "var(--navy-deep)" }}
+          >
+            {section.title}
+          </h1>
+          {(showOptionalBadge || showPhase2RequiredBadge) && (
+            <div className="mt-3 flex gap-2 flex-wrap">
+              {showOptionalBadge && (
+                <span
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium"
+                  style={{ background: "var(--line)", color: "var(--muted)" }}
+                >
+                  Optional. You can skip this section.
+                </span>
+              )}
+              {showPhase2RequiredBadge && (
+                <span
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-medium"
+                  style={{
+                    background: "var(--copper-wash)",
+                    color: "var(--copper-deep)",
+                  }}
+                >
+                  Required for Phase 2
+                </span>
+              )}
             </div>
-            <div className="mt-3 border-t border-stone-200 pt-5">
-              <AgreementClauseView
-                blocks={blocks}
-                values={content.values}
-                fields={form.fields}
-                signature={form.signature}
-              />
-            </div>
-            <button
-              type="button"
-              onClick={onOpenTemplate}
-              className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+          )}
+
+          {/* Plain-English summary (copper-wash aside) */}
+          <aside
+            className="mt-7 rounded-[12px] px-5 sm:px-6 py-4 sm:py-5 max-w-[68ch]"
+            style={{ background: "var(--copper-wash)" }}
+          >
+            <p
+              className="text-[11px] font-semibold tracking-[0.12em] uppercase"
+              style={{ color: "var(--copper-deep)" }}
             >
-              <FileText size={12} /> View the formatted PDF
-            </button>
-          </div>
-        ) : (
-          <div className="mt-8 max-w-[68ch]">
-            <p className="font-serif text-[16px] leading-[1.65] text-stone-700">
+              In plain terms
+            </p>
+            <p
+              className="mt-2 display text-[16.5px] leading-[1.55] [text-wrap:pretty]"
+              style={{ color: "var(--ink)" }}
+            >
               {section.summary}
             </p>
-            <button
-              type="button"
-              onClick={onOpenTemplate}
-              className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+            <p
+              className="mt-3 text-[13px] leading-[1.55] [text-wrap:pretty]"
+              style={{ color: "var(--muted)" }}
             >
-              <FileText size={12} /> View the formatted PDF
-            </button>
-          </div>
-        )}
+              <span className="font-semibold" style={{ color: "var(--ink)" }}>
+                Why this matters.{" "}
+              </span>
+              {section.why}
+            </p>
+          </aside>
+
+          {isCoverStep && (
+            <div
+              className="mt-6 inline-flex items-start gap-2 text-[13px]"
+              style={{ color: "var(--muted)" }}
+            >
+              <Lock size={13} className="mt-0.5 shrink-0" />
+              <span>
+                Effective date{" "}
+                <span
+                  className="font-semibold tabular-nums"
+                  style={{ color: "var(--navy)" }}
+                >
+                  {effectiveDateText || "to be set"}
+                </span>
+                . Set by Sage IT.
+              </span>
+            </div>
+          )}
+
+          {blocks && blocks.length > 0 ? (
+            <div className="mt-8 max-w-[68ch] legal">
+              <div
+                className="text-[10px] font-medium tracking-[0.18em] uppercase"
+                style={{ color: "var(--muted)" }}
+              >
+                The contract
+              </div>
+              <div
+                className="mt-3 pt-5"
+                style={{ borderTop: "1px solid var(--line)" }}
+              >
+                <AgreementClauseView
+                  blocks={blocks}
+                  values={content.values}
+                  fields={form.fields}
+                  signature={form.signature}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={onOpenTemplate}
+                className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-medium motion-safe:transition-colors underline underline-offset-[3px]"
+                style={{ color: "var(--muted)" }}
+              >
+                <FileText size={12} /> View the formatted PDF
+              </button>
+            </div>
+          ) : (
+            <div className="mt-8 max-w-[68ch] legal">
+              <p
+                className="text-[16px] leading-[1.7]"
+                style={{ color: "var(--ink)" }}
+              >
+                {section.summary}
+              </p>
+              <button
+                type="button"
+                onClick={onOpenTemplate}
+                className="mt-6 inline-flex items-center gap-1.5 text-[12px] font-medium underline underline-offset-[3px]"
+                style={{ color: "var(--muted)" }}
+              >
+                <FileText size={12} /> View the formatted PDF
+              </button>
+            </div>
+          )}
+        </div>
       </article>
 
       {/* ── Sticky action rail ─────────────────────────────────── */}
-      <aside className="lg:sticky lg:top-[200px] lg:self-start">
-        <div className="bg-white border border-stone-200/80 rounded-2xl px-5 sm:px-6 py-5 space-y-5">
+      <aside
+        className="lg:sticky lg:top-[145px] lg:self-start min-w-0"
+        style={{ ["--rail-min" as string]: "330px" }}
+      >
+        <div
+          className="bg-white rounded-[14px] px-5 sm:px-6 py-5 space-y-5"
+          style={{ border: "1px solid var(--line)" }}
+        >
           {showAllOrNothingNotice && (
             <div className="rounded-md bg-[#FBF1E8] border border-sage-copper/30 px-3 py-2.5 text-[12px] text-sage-copper-deep flex items-start gap-2">
               <AlertCircle size={13} className="mt-0.5 shrink-0" />
@@ -1599,19 +1860,28 @@ function SignatureBlock({
   return (
     <div className="space-y-4">
       <div>
-        <h3 className="font-serif text-base text-sage-navy">
-          Sign your agreement
+        <h3
+          className="display text-[18px] font-semibold leading-tight"
+          style={{ color: "var(--navy)" }}
+        >
+          Sign once, applied throughout
         </h3>
-        <p className="text-[13px] text-stone-600 mt-1 leading-snug">
+        <p
+          className="text-[12.5px] mt-1 leading-snug"
+          style={{ color: "var(--muted)" }}
+        >
           Upload an image of your signature, or draw it instead. The same
-          signature applies to every block in the agreement.
+          signature applies to every signature block in the agreement.
         </p>
       </div>
 
       <div>
-        <label className="block text-[12px] font-medium text-stone-700 mb-1.5">
+        <label
+          className="block text-[12px] font-medium mb-1.5"
+          style={{ color: "var(--ink)" }}
+        >
           Your full legal name{" "}
-          <span className="text-sage-copper-deep" aria-hidden>
+          <span style={{ color: "var(--copper-deep)" }} aria-hidden>
             *
           </span>
         </label>
@@ -1619,7 +1889,19 @@ function SignatureBlock({
           type="text"
           value={legalName}
           onChange={(e) => onLegalName(e.target.value)}
-          className="w-full px-3 py-2.5 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors"
+          className="w-full px-3 py-2.5 text-[14px] rounded-md bg-white motion-safe:transition-colors focus:outline-none"
+          style={{
+            border: "1px solid var(--line)",
+            color: "var(--ink)",
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = "var(--copper)";
+            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(200,125,92,0.18)";
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "var(--line)";
+            e.currentTarget.style.boxShadow = "none";
+          }}
           placeholder="First Middle Last"
         />
       </div>
@@ -1637,7 +1919,8 @@ function SignatureBlock({
             <button
               type="button"
               onClick={() => setRedrawing(false)}
-              className="mt-2 text-[11px] font-semibold text-gray-500 hover:text-sage-navy"
+              className="mt-2 text-[11px] font-semibold motion-safe:transition-colors"
+              style={{ color: "var(--muted)" }}
             >
               Cancel re-draw
             </button>
@@ -1645,11 +1928,20 @@ function SignatureBlock({
         </div>
       ) : (
         <div>
-          <p className="text-[12px] font-medium text-stone-600 mb-1.5">
+          <p
+            className="text-[12px] font-medium mb-1.5"
+            style={{ color: "var(--muted)" }}
+          >
             Your captured signature
           </p>
           <div className="inline-flex items-center gap-3 flex-wrap">
-            <div className="inline-block rounded-md border border-dashed border-stone-300 bg-stone-50 p-2">
+            <div
+              className="inline-block rounded-md p-2"
+              style={{
+                border: "1px dashed var(--line)",
+                background: "var(--copper-wash)",
+              }}
+            >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={signature!}
@@ -1663,7 +1955,8 @@ function SignatureBlock({
                 setRedrawing(true);
                 onSignature(null);
               }}
-              className="text-[12px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors underline underline-offset-[3px] decoration-stone-300 hover:decoration-sage-navy"
+              className="text-[12px] font-medium motion-safe:transition-colors underline underline-offset-[3px]"
+              style={{ color: "var(--copper-deep)" }}
             >
               Replace signature
             </button>
@@ -2212,18 +2505,44 @@ function AffirmationBlock({
       className={
         "flex items-start gap-3 p-4 rounded-xl border cursor-pointer motion-safe:transition-colors "
         + (checked
-          ? "bg-sage-navy/5 border-sage-navy/40"
-          : "bg-white border-stone-300 hover:border-sage-navy/40 hover:bg-stone-50/60")
+          ? "border-[var(--ok)]/55"
+          : "bg-[var(--paper)] border-[var(--line)] hover:border-[var(--ok)]/40")
       }
+      style={checked ? { background: "var(--ok-wash)" } : undefined}
     >
       <input
         id={`affirm-${flag}`}
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 accent-sage-navy"
+        className="sr-only peer"
       />
-      <span className="text-[13.5px] leading-snug text-stone-800">
+      <span
+        aria-hidden="true"
+        className={
+          "mt-0.5 inline-flex items-center justify-center h-[18px] w-[18px] rounded-[4px] border motion-safe:transition-colors shrink-0 "
+          + (checked
+            ? "border-[var(--ok)] text-white"
+            : "border-stone-400 bg-white text-transparent")
+        }
+        style={checked ? { background: "var(--ok)" } : undefined}
+      >
+        <svg
+          viewBox="0 0 14 14"
+          className="h-[11px] w-[11px]"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2.4"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="2.5,7.5 5.8,10.5 11.5,3.8" />
+        </svg>
+      </span>
+      <span
+        className="text-[13.5px] leading-snug"
+        style={{ color: checked ? "var(--ok)" : "var(--ink)" }}
+      >
         I have read and understood this section and agree to its terms.
       </span>
     </label>
@@ -2268,11 +2587,22 @@ function ReviewStep({
   return (
     <div className="space-y-6">
       <div>
-        <p className="text-xs text-stone-500">Final step</p>
-        <h1 className="font-serif text-3xl sm:text-[34px] leading-[1.15] text-sage-navy mt-1 [text-wrap:balance]">
+        <p
+          className="text-[11px] font-medium uppercase tracking-[0.18em]"
+          style={{ color: "var(--copper-deep)" }}
+        >
+          Final step
+        </p>
+        <h1
+          className="display text-[30px] sm:text-[36px] leading-[1.1] font-semibold mt-2 [text-wrap:balance]"
+          style={{ color: "var(--navy)" }}
+        >
           Read the agreement, then sign and submit
         </h1>
-        <p className="text-[15px] text-stone-700 mt-3 max-w-[68ch] leading-[1.6]">
+        <p
+          className="text-[15px] mt-3 max-w-[68ch] leading-[1.6]"
+          style={{ color: "var(--ink)" }}
+        >
           Below is the actual agreement that will be filed once you submit.
           Your details and your primary signature are already in it. Read it
           carefully, tick the attestation, then sign and submit.
@@ -2493,12 +2823,16 @@ function ReviewStep({
           lg:hidden so the desktop layout needs its own Submit
           affordance. Mobile users still get the sticky FooterNav
           below the viewport. */}
-      <div className="flex items-center justify-between gap-3 pt-4 border-t border-stone-200 max-w-[min(100%,860px)]">
+      <div
+        className="flex items-center justify-between gap-3 pt-4 max-w-[min(100%,860px)]"
+        style={{ borderTop: "1px solid var(--line)" }}
+      >
         <button
           type="button"
           onClick={onBack}
           disabled={submitting}
-          className="inline-flex items-center gap-1 text-[13px] font-medium text-stone-500 hover:text-sage-navy motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          className="inline-flex items-center gap-1 text-[13px] font-medium motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          style={{ color: "var(--muted)" }}
         >
           <ArrowLeft size={13} /> Back
         </button>
@@ -2509,9 +2843,24 @@ function ReviewStep({
           className={
             "inline-flex items-center gap-1.5 px-5 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
             + (allComplete && !submitting
-              ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
-              : "bg-stone-100 text-stone-400 cursor-not-allowed")
+              ? "text-white"
+              : "cursor-not-allowed")
           }
+          style={
+            allComplete && !submitting
+              ? { background: "var(--navy)" }
+              : { background: "#eef0f5", color: "#9aa1ad" }
+          }
+          onMouseEnter={(e) => {
+            if (allComplete && !submitting) {
+              e.currentTarget.style.background = "var(--copper-deep)";
+            }
+          }}
+          onMouseLeave={(e) => {
+            if (allComplete && !submitting) {
+              e.currentTarget.style.background = "var(--navy)";
+            }
+          }}
         >
           {submitting ? (
             <Loader2 size={13} className="animate-spin" />
@@ -2543,15 +2892,27 @@ function FinalSignatureBlock({
   const shouldShowPad = !captured || redrawing;
 
   return (
-    <section className="bg-white border border-sage-navy/30 rounded-xl px-5 py-5 space-y-4 max-w-[min(100%,860px)]">
+    <section
+      className="rounded-xl px-5 py-5 space-y-4 max-w-[min(100%,860px)]"
+      style={{ background: "var(--paper)", border: "1px solid var(--navy)" }}
+    >
       <div>
-        <p className="text-[11px] font-medium text-sage-copper-deep">
+        <p
+          className="text-[11px] font-medium uppercase tracking-[0.16em]"
+          style={{ color: "var(--copper-deep)" }}
+        >
           Execution signature
         </p>
-        <h3 className="font-serif text-[18px] text-sage-navy mt-1 leading-snug [text-wrap:balance]">
+        <h3
+          className="display text-[20px] font-semibold mt-1 leading-snug [text-wrap:balance]"
+          style={{ color: "var(--navy)" }}
+        >
           After reading this, I am formally signing this acknowledgement.
         </h3>
-        <p className="text-[13.5px] text-stone-700 mt-2 leading-snug">
+        <p
+          className="text-[13.5px] mt-2 leading-snug"
+          style={{ color: "var(--ink)" }}
+        >
           Upload (or draw) your final signature here. It confirms that
           everything above matches what you intended and that you are
           executing the agreement.
@@ -2559,9 +2920,12 @@ function FinalSignatureBlock({
       </div>
 
       <div>
-        <label className="block text-[12px] font-medium text-stone-700 mb-1.5">
+        <label
+          className="block text-[12px] font-medium mb-1.5"
+          style={{ color: "var(--ink)" }}
+        >
           Your full legal name{" "}
-          <span className="text-sage-copper-deep" aria-hidden>
+          <span style={{ color: "var(--copper-deep)" }} aria-hidden>
             *
           </span>
         </label>
@@ -2569,7 +2933,19 @@ function FinalSignatureBlock({
           type="text"
           value={legalName}
           onChange={(e) => onLegalName(e.target.value)}
-          className="w-full px-3 py-2.5 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors"
+          className="w-full px-3 py-2.5 text-[14px] rounded-md bg-white motion-safe:transition-colors focus:outline-none"
+          style={{
+            border: "1px solid var(--line)",
+            color: "var(--ink)",
+          }}
+          onFocus={(e) => {
+            e.currentTarget.style.borderColor = "var(--copper)";
+            e.currentTarget.style.boxShadow = "0 0 0 3px rgba(200,125,92,0.18)";
+          }}
+          onBlur={(e) => {
+            e.currentTarget.style.borderColor = "var(--line)";
+            e.currentTarget.style.boxShadow = "none";
+          }}
           placeholder="First Middle Last"
         />
       </div>
@@ -2658,14 +3034,21 @@ function FooterNav({
   return (
     <nav
       aria-label="Wizard navigation"
-      className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-stone-200 z-30"
+      className="lg:hidden fixed bottom-0 left-0 right-0 z-30"
+      style={{
+        background: "var(--paper)",
+        borderTop: "1px solid var(--line)",
+        boxShadow: "0 -8px 22px -16px rgba(15,31,68,0.18)",
+        paddingBottom: "env(safe-area-inset-bottom, 0)",
+      }}
     >
       <div className="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between gap-3">
         <button
           type="button"
           onClick={onBack}
           disabled={currentStep === 0 || submitting}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-[13px] font-medium text-stone-700 hover:text-sage-navy motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-[13px] font-medium motion-safe:transition-colors disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer"
+          style={{ color: "var(--muted)" }}
         >
           <ArrowLeft size={13} /> Back
         </button>
@@ -2677,8 +3060,13 @@ function FooterNav({
             className={
               "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
               + (canAdvance && !submitting
-                ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
-                : "bg-stone-100 text-stone-400 cursor-not-allowed")
+                ? "text-white"
+                : "cursor-not-allowed")
+            }
+            style={
+              canAdvance && !submitting
+                ? { background: "var(--navy)" }
+                : { background: "#eef0f5", color: "#9aa1ad" }
             }
           >
             {submitting ? (
@@ -2696,15 +3084,23 @@ function FooterNav({
             className={
               "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
               + (canAdvance && !submitting
-                ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
-                : "bg-stone-100 text-stone-400 cursor-not-allowed")
+                ? "text-white"
+                : "cursor-not-allowed")
+            }
+            style={
+              canAdvance && !submitting
+                ? { background: "var(--navy)" }
+                : { background: "#eef0f5", color: "#9aa1ad" }
             }
           >
             Continue <ArrowRight size={13} />
           </button>
         )}
       </div>
-      <div className="px-4 pb-2 text-[11px] text-stone-500 flex items-center justify-between">
+      <div
+        className="px-4 pb-2 text-[11px] flex items-center justify-between"
+        style={{ color: "var(--muted)" }}
+      >
         <span className="tabular-nums">
           Section {currentStep + 1} of {total}
         </span>

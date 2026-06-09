@@ -94,13 +94,25 @@ function BlockView({
   if (block.kind === "heading") {
     if (block.level === 1) {
       return (
-        <h3 className="font-serif text-[20px] sm:text-[22px] font-semibold text-sage-navy mt-8 first:mt-0 leading-snug [text-wrap:balance]">
+        <h3
+          className="text-[21px] sm:text-[23px] font-semibold mt-8 first:mt-0 leading-snug [text-wrap:balance]"
+          style={{
+            fontFamily: "var(--font-fraunces), ui-serif, Georgia, serif",
+            color: "var(--navy)",
+          }}
+        >
           {segs(block.segments)}
         </h3>
       );
     }
     return (
-      <h4 className="font-serif text-[17px] font-semibold text-sage-navy mt-6 leading-snug [text-wrap:balance]">
+      <h4
+        className="text-[17.5px] font-semibold mt-6 leading-snug [text-wrap:balance]"
+        style={{
+          fontFamily: "var(--font-fraunces), ui-serif, Georgia, serif",
+          color: "var(--navy)",
+        }}
+      >
         {segs(block.segments)}
       </h4>
     );
@@ -109,14 +121,18 @@ function BlockView({
   if (block.kind === "table") {
     return (
       <div className="overflow-x-auto my-4">
-        <table className="w-full text-[13px] border border-stone-300 border-collapse">
+        <table
+          className="w-full text-[13px] border-collapse"
+          style={{ border: "1px solid var(--line)" }}
+        >
           <tbody>
             {(block.rows ?? []).map((row, ri) => (
               <tr key={ri}>
                 {row.map((cell, ci) => (
                   <td
                     key={ci}
-                    className="border border-stone-300 px-3 py-2 align-top text-stone-700"
+                    className="px-3 py-2 align-top"
+                    style={{ border: "1px solid var(--line)", color: "var(--ink)" }}
                   >
                     {segs(cell)}
                   </td>
@@ -134,7 +150,13 @@ function BlockView({
     return <div className="h-2" />;
   }
   return (
-    <p className="font-serif text-[16.5px] leading-[1.65] text-stone-800 whitespace-pre-wrap [text-wrap:pretty]">
+    <p
+      className="text-[16.5px] leading-[1.7] whitespace-pre-wrap [text-wrap:pretty]"
+      style={{
+        fontFamily: "var(--font-newsreader), ui-serif, Georgia, serif",
+        color: "var(--ink)",
+      }}
+    >
       {segs(block.segments)}
     </p>
   );
@@ -196,19 +218,33 @@ function SegmentView({
   return <Blank label={prettify(name)} />;
 }
 
-/** Filled inline value. Copper underline ties the delight moment to the brand. */
+/** Filled inline value. Copper underline + copper-wash tie the delight moment to the brand. */
 function Filled({ value }: { value: string }) {
   return (
-    <span className="font-semibold text-sage-navy whitespace-pre-wrap border-b border-sage-copper/60">
+    <span
+      className="font-semibold whitespace-pre-wrap px-[3px] rounded-[3px]"
+      style={{
+        color: "var(--navy)",
+        background: "var(--copper-wash)",
+        borderBottom: "1.5px solid var(--copper)",
+      }}
+    >
       {value}
     </span>
   );
 }
 
-/** Empty required placeholder. Calm copper dotted underline + chip background. */
+/** Empty required placeholder. Dashed copper underline + chip background. */
 function Blank({ label }: { label: string }) {
   return (
-    <span className="inline-flex items-center px-1.5 rounded bg-sage-copper/8 text-sage-copper-deep border-b border-dashed border-sage-copper/60 text-[14px] font-medium not-italic">
+    <span
+      className="inline-flex items-center px-1.5 rounded-[3px] text-[14px] font-medium not-italic"
+      style={{
+        color: "var(--copper-deep)",
+        background: "var(--copper-wash)",
+        borderBottom: "1.5px dashed var(--copper)",
+      }}
+    >
       {label}
     </span>
   );
