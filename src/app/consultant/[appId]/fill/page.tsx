@@ -308,14 +308,33 @@ function sectionForSpecialKey(key: string): AgreementSection | undefined {
 }
 
 function firstIncompleteIndex(
+  sections: readonly AgreementSection[],
   form: FormState,
   reqs: EffectiveRequirements,
   chequeEntries: ChequeEntry[],
 ): number {
-  for (let i = 0; i < AGREEMENT_SECTIONS.length - 1; i++) {
-    if (!isSectionComplete(AGREEMENT_SECTIONS[i], form, reqs, chequeEntries)) return i;
+  for (let i = 0; i < sections.length - 1; i++) {
+    if (!isSectionComplete(sections[i], form, reqs, chequeEntries)) return i;
   }
-  return AGREEMENT_SECTIONS.length - 1;
+  return sections.length - 1;
+}
+
+/**
+ * Build X — the consultant only sees CORE sections + ERM-required
+ * appendices. Any appendix the ERM left as not-required is hidden:
+ * absent from the wizard, the section navigator, the progress count,
+ * and the submit-error jumps. The filter lives at the SINGLE
+ * section-list source so every downstream consumer (Stepper, ReviewStep,
+ * MissingItemsPanel, bounds in setCurrentStep, etc.) inherits it for
+ * free — driven directly by the server-resolved effectiveRequirements
+ * so client + server agree on what's shown.
+ */
+function filterVisibleSections(
+  reqs: EffectiveRequirements,
+): readonly AgreementSection[] {
+  return AGREEMENT_SECTIONS.filter(
+    (s) => !s.appendixKey || reqs[s.appendixKey],
+  );
 }
 
 // ── Page ───────────────────────────────────────────────────────
@@ -426,11 +445,14 @@ export default function ConsultantWizardPage() {
         lastSavedRef.current = { ...initial };
         const entries = parseChequeList(data.cheques);
         setChequeEntries(entries);
-        // Resume at the first incomplete section (or step 0 for a
-        // brand-new application). REVISION_REQUESTED also resumes
-        // from whichever section still has gaps after the ERM kick.
+        // Build X — resume at the first incomplete section across the
+        // VISIBLE set (core + ERM-required appendices). Hidden
+        // appendices are not counted; if every visible non-review
+        // section is already complete, the consultant lands on Review.
+        const loadedReqs = effectiveRequirements(data);
+        const loadedVisible = filterVisibleSections(loadedReqs);
         setCurrentStep(firstIncompleteIndex(
-            initial, effectiveRequirements(data), entries));
+            loadedVisible, initial, loadedReqs, entries));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -687,6 +709,28 @@ export default function ConsultantWizardPage() {
     [app],
   );
 
+  // Build X — visible-section source: core sections + ONLY the
+  // appendices the ERM marked required. Everything downstream
+  // (wizard step indexing, navigator, progress count, scroll-gate,
+  // submit-error jumps, ReviewStep read-back) is derived from this
+  // list so a not-required appendix simply doesn't exist for the
+  // consultant.
+  const visibleSections = useMemo(
+    () => filterVisibleSections(reqs),
+    [reqs],
+  );
+
+  // Build X — if the ERM updates per-agreement requirements mid-flow
+  // (or a previously-required section is hidden on next load), clamp
+  // currentStep so it never points past the filtered list. Without
+  // the clamp the wizard would land on an undefined section and
+  // crash on first render after the change.
+  useEffect(() => {
+    if (currentStep > visibleSections.length - 1) {
+      setCurrentStep(Math.max(0, visibleSections.length - 1));
+    }
+  }, [visibleSections.length, currentStep]);
+
   // Submit ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
     if (!appId) return;
@@ -776,22 +820,26 @@ export default function ConsultantWizardPage() {
   }, [appId, computeDelta, form, reqs, chequeEntries, router]);
 
   // Step accessors ──────────────────────────────────────────────
-  const section = AGREEMENT_SECTIONS[currentStep];
+  // Build X — wizard step indexing flows through visibleSections only.
+  // A not-required appendix isn't in the list, so the consultant
+  // cannot land on it, see it in the navigator, or have it count
+  // toward "Section X of N".
+  const section = visibleSections[currentStep];
   const sectionStatus = useMemo(
     () =>
-      AGREEMENT_SECTIONS.map((s, i) => {
+      visibleSections.map((s, i) => {
         const complete =
-          i === AGREEMENT_SECTIONS.length - 1
-            ? AGREEMENT_SECTIONS.slice(0, -1).every((sec) =>
+          i === visibleSections.length - 1
+            ? visibleSections.slice(0, -1).every((sec) =>
                 isSectionComplete(sec, form, reqs, chequeEntries),
               ) && Boolean(form.finalSignature)
             : isSectionComplete(s, form, reqs, chequeEntries);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [form, reqs, chequeEntries],
+    [visibleSections, form, reqs, chequeEntries],
   );
   const canAdvance = isSectionComplete(section, form, reqs, chequeEntries);
-  const isReviewStep = currentStep === AGREEMENT_SECTIONS.length - 1;
+  const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
   // SEEN the generated PDF preview, AND the read-confirmation
@@ -799,13 +847,13 @@ export default function ConsultantWizardPage() {
   // button disabled.
   const allComplete = useMemo(
     () =>
-      AGREEMENT_SECTIONS.slice(0, -1).every((s) =>
+      visibleSections.slice(0, -1).every((s) =>
         isSectionComplete(s, form, reqs, chequeEntries),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [form, reqs, chequeEntries, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, attestation, previewSeen],
   );
 
   // Build W — live re-evaluation of the missing list. The backend
@@ -1056,7 +1104,7 @@ export default function ConsultantWizardPage() {
           // are complete. Sections flagged in sectionsWithMissing
           // (from a failed submit) are ALWAYS navigable so the
           // consultant can fix them from any later section.
-          const targetId = AGREEMENT_SECTIONS[i]?.id;
+          const targetId = visibleSections[i]?.id;
           if (targetId && sectionsWithMissing.has(targetId)) {
             setCurrentStep(i);
             return;
@@ -1067,7 +1115,7 @@ export default function ConsultantWizardPage() {
           }
           if (i === currentStep) return;
           for (let j = 0; j <= i; j++) {
-            if (j !== AGREEMENT_SECTIONS.length - 1 && !sectionStatus[j].complete) {
+            if (j !== visibleSections.length - 1 && !sectionStatus[j].complete) {
               setCurrentStep(j);
               return;
             }
@@ -1119,6 +1167,7 @@ export default function ConsultantWizardPage() {
             appId={appId}
             form={form}
             reqs={reqs}
+            visibleSections={visibleSections}
             onJumpToSection={(idx) => setCurrentStep(idx)}
             onFinalSignature={setFinalSignature}
             onLegalName={setLegalName}
@@ -1168,7 +1217,7 @@ export default function ConsultantWizardPage() {
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
             onNext={() =>
               setCurrentStep((s) =>
-                Math.min(AGREEMENT_SECTIONS.length - 1, s + 1),
+                Math.min(visibleSections.length - 1, s + 1),
               )
             }
             canAdvance={canAdvance}
@@ -1195,6 +1244,7 @@ export default function ConsultantWizardPage() {
           <div className="max-w-[min(100%,860px)] mt-6">
             <MissingItemsPanel
               missing={liveMissing}
+              visibleSections={visibleSections}
               onJumpToItem={(idx, anchorId) => {
                 setCurrentStep(idx);
                 window.setTimeout(() => {
@@ -1232,14 +1282,14 @@ export default function ConsultantWizardPage() {
 
       <FooterNav
         currentStep={currentStep}
-        total={AGREEMENT_SECTIONS.length}
+        total={visibleSections.length}
         canAdvance={isReviewStep ? allComplete : canAdvance}
         saveStatus={saveStatus}
         submitting={submitting}
         onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
         onNext={() =>
           setCurrentStep((s) =>
-            Math.min(AGREEMENT_SECTIONS.length - 1, s + 1),
+            Math.min(visibleSections.length - 1, s + 1),
           )
         }
         onSubmit={() => void handleSubmit()}
@@ -2802,6 +2852,7 @@ function fieldFriendlyLabel(key: string): string {
  */
 function MissingItemsPanel({
   missing,
+  visibleSections,
   onJumpToItem,
 }: {
   missing: {
@@ -2810,6 +2861,12 @@ function MissingItemsPanel({
     missingSignature: boolean;
     missingFinalSignature: boolean;
   };
+  /** Build X — the wizard's filtered section list. Jump targets are
+   *  indices into this list so they pair with setCurrentStep. A hidden
+   *  appendix would never produce a missing token (backend skips
+   *  not-required + untouched sections), but findIndex against this
+   *  list keeps the indexing consistent end-to-end. */
+  visibleSections: readonly AgreementSection[];
   /** Routes to {sectionIdx} and scroll/focuses {anchorId} if present. */
   onJumpToItem: (sectionIdx: number, anchorId?: string) => void;
 }) {
@@ -2838,7 +2895,7 @@ function MissingItemsPanel({
     const section =
       findSectionForFieldKey(key) ?? sectionForSpecialKey(key);
     if (!section) continue;
-    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === section.id);
+    const idx = visibleSections.findIndex((s) => s.id === section.id);
     if (idx < 0) continue;
     upsert(
       idx,
@@ -2852,7 +2909,7 @@ function MissingItemsPanel({
   for (const flag of missing.missingAffirmations) {
     const section = findSectionForAffirmation(flag as AffirmationFlag);
     if (!section) continue;
-    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === section.id);
+    const idx = visibleSections.findIndex((s) => s.id === section.id);
     if (idx < 0) continue;
     upsert(
       idx,
@@ -2862,13 +2919,13 @@ function MissingItemsPanel({
     );
   }
   if (missing.missingSignature) {
-    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === "main-agreement");
+    const idx = visibleSections.findIndex((s) => s.id === "main-agreement");
     if (idx >= 0) {
       upsert(idx, "The Agreement", "Your signature", "signature-block");
     }
   }
   if (missing.missingFinalSignature) {
-    const idx = AGREEMENT_SECTIONS.findIndex((s) => s.id === "review");
+    const idx = visibleSections.findIndex((s) => s.id === "review");
     if (idx >= 0) {
       upsert(
         idx,
@@ -3392,6 +3449,7 @@ function ReviewStep({
   appId,
   form,
   reqs,
+  visibleSections,
   onJumpToSection,
   onFinalSignature,
   onLegalName,
@@ -3409,6 +3467,9 @@ function ReviewStep({
   appId: string;
   form: FormState;
   reqs: EffectiveRequirements;
+  /** Build X — only the consultant's visible sections show in the
+   *  Review read-back. Hidden appendices never render here either. */
+  visibleSections: readonly AgreementSection[];
   onJumpToSection: (idx: number) => void;
   onFinalSignature: (dataUrl: string | null) => void;
   onLegalName: (value: string) => void;
@@ -3493,7 +3554,7 @@ function ReviewStep({
         )}
       </div>
 
-      {AGREEMENT_SECTIONS.slice(0, -1).map((section, idx) => {
+      {visibleSections.slice(0, -1).map((section, idx) => {
         const complete = isSectionComplete(section, form, reqs, chequeEntries);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
