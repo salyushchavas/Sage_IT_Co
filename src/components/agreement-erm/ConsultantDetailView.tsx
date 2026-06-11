@@ -35,6 +35,7 @@ import {
   ermApproveConsultantVersion,
   ermChequeViewUrl,
   ermWorkAuthViewUrl,
+  ermOfferLetterViewUrl,
   ermRequestRevision,
   ermSendForApproval,
   ermSendPdfToEmail,
@@ -1351,7 +1352,37 @@ function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
   );
 }
 
-// ── Consultant-filled 7 sections (read-only) ──────────────────
+// ── Build I — Phase 2 Employment offer letter (read-only) ─────────
+
+function OfferLetterCard({ app }: { app: ConsultantApplication }) {
+  if (!app.offerLetterPublicId) return null;
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+      <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
+        <h3 className="font-serif text-lg text-gray-900">Offer letter</h3>
+      </header>
+      <div className="px-5 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-gray-500 inline-flex items-center gap-1.5">
+          <CheckCircle2 size={13} className="text-emerald-600" />
+          Uploaded
+          {app.offerLetterUploadedAt
+            ? ` ${formatUsDate(app.offerLetterUploadedAt)}`
+            : ""}
+        </p>
+        <a
+          href={ermOfferLetterViewUrl(app.applicationId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer"
+        >
+          <FileText size={12} /> View document
+        </a>
+      </div>
+    </section>
+  );
+}
+
+// ── Consultant-filled sections (read-only) ────────────────────
 
 function ConsultantSections({ app }: { app: ConsultantApplication }) {
   return (
@@ -1360,6 +1391,7 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
         <ConsultantSectionCard key={section.id} section={section} app={app} />
       ))}
       <WorkAuthDocCard app={app} />
+      <OfferLetterCard app={app} />
       <SecurityChequeCard app={app} />
     </div>
   );

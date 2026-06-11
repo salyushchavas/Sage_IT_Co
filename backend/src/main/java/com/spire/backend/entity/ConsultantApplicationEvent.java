@@ -96,6 +96,8 @@ public class ConsultantApplicationEvent {
         // Build W — consultant uploads their Appendix 1 work-authorization
         // document (image/PDF).
         WORK_AUTH_UPLOADED,
+        // Build I — consultant uploads their Phase 2 Employment offer letter.
+        OFFER_LETTER_UPLOADED,
         // 3B — role-based approval workflow. SENT_FOR_APPROVAL when the
         // ERM routes a VERIFIED agreement to the phase's required
         // approvers (also on re-send after a revision); APPROVAL_APPROVED

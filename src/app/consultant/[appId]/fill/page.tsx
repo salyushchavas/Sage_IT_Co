@@ -59,6 +59,7 @@ import {
   signConsultantApplication,
   uploadConsultantChequeAt,
   uploadConsultantWorkAuthDoc,
+  uploadConsultantOfferLetter,
   type AgreementContent,
   type ChequeEntry,
   type ConsultantApplication,
@@ -237,6 +238,7 @@ function isSectionComplete(
   reqs: EffectiveRequirements,
   chequeEntries: ChequeEntry[],
   workAuthUploaded: boolean,
+  offerLetterUploaded: boolean,
 ): boolean {
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
@@ -249,10 +251,15 @@ function isSectionComplete(
       return false;
     }
   }
-  // Build W — Appendix 1 completeness: when the appendix applies, the
-  // work-authorization document must be uploaded.
+  // Build I — work-authorization document lives in Personal Information
+  // (cover) and is required for every consultant.
+  if (section.id === "cover" && !workAuthUploaded) {
+    return false;
+  }
+  // Build I — Appendix 1 (Phase 2 Employment) completeness: when it
+  // applies, the Offer Letter must be uploaded.
   if (section.id === "appendix1" && isSectionActive(section, form, reqs)) {
-    if (!workAuthUploaded) return false;
+    if (!offerLetterUploaded) return false;
   }
   // Build U — Appendix 5 completeness: when the appendix applies,
   // every cheque 0..count-1 needs a number AND an upload.
@@ -313,9 +320,11 @@ function firstIncompleteIndex(
   reqs: EffectiveRequirements,
   chequeEntries: ChequeEntry[],
   workAuthUploaded: boolean,
+  offerLetterUploaded: boolean,
 ): number {
   for (let i = 0; i < sections.length - 1; i++) {
-    if (!isSectionComplete(sections[i], form, reqs, chequeEntries, workAuthUploaded)) return i;
+    if (!isSectionComplete(sections[i], form, reqs, chequeEntries,
+        workAuthUploaded, offerLetterUploaded)) return i;
   }
   return sections.length - 1;
 }
@@ -413,6 +422,10 @@ export default function ConsultantWizardPage() {
   const [workAuthUploaded, setWorkAuthUploaded] = useState(false);
   const [workAuthUploadError, setWorkAuthUploadError] = useState("");
   const [workAuthUploading, setWorkAuthUploading] = useState(false);
+  // Build I — Phase 2 Employment offer-letter upload state.
+  const [offerLetterUploaded, setOfferLetterUploaded] = useState(false);
+  const [offerLetterUploadError, setOfferLetterUploadError] = useState("");
+  const [offerLetterUploading, setOfferLetterUploading] = useState(false);
   // Build G — review-step attestation gate. The consultant must
   // (a) load the generated PDF preview, (b) tick the attestation
   // checkbox, and (c) draw the final signature -- in any order --
@@ -474,8 +487,9 @@ export default function ConsultantWizardPage() {
         lastSavedRef.current = { ...initial };
         const entries = parseChequeList(data.cheques);
         setChequeEntries(entries);
-        // Build W — work-auth doc already on file?
+        // Build W/I — uploads already on file?
         setWorkAuthUploaded(Boolean(data.workAuthDocPublicId));
+        setOfferLetterUploaded(Boolean(data.offerLetterPublicId));
         // Build X — resume at the first incomplete section across the
         // VISIBLE set (core + ERM-required appendices). Hidden
         // appendices are not counted; if every visible non-review
@@ -488,8 +502,9 @@ export default function ConsultantWizardPage() {
             ? restrictedVisibleSections(loadedScope)
             : filterVisibleSections(loadedReqs);
         const loadedWorkAuth = Boolean(data.workAuthDocPublicId);
+        const loadedOffer = Boolean(data.offerLetterPublicId);
         setCurrentStep(firstIncompleteIndex(
-            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth));
+            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -766,6 +781,25 @@ export default function ConsultantWizardPage() {
     [appId],
   );
 
+  // Build I — Phase 2 Employment offer-letter upload.
+  const handleOfferLetterUpload = useCallback(
+    async (file: File) => {
+      if (!appId) return;
+      setOfferLetterUploadError("");
+      setOfferLetterUploading(true);
+      try {
+        await uploadConsultantOfferLetter(appId, file);
+        setOfferLetterUploaded(true);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Couldn't upload.";
+        setOfferLetterUploadError(msg);
+      } finally {
+        setOfferLetterUploading(false);
+      }
+    },
+    [appId],
+  );
+
   const setLegalName = useCallback(
     (value: string) => {
       setForm((prev) => {
@@ -919,14 +953,14 @@ export default function ConsultantWizardPage() {
         const complete =
           i === visibleSections.length - 1
             ? visibleSections.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded),
+                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded);
+            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded);
   const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -936,12 +970,12 @@ export default function ConsultantWizardPage() {
   const allComplete = useMemo(
     () =>
       visibleSections.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded),
+        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, attestation, previewSeen],
   );
 
   // Build W — live re-evaluation of the missing list. The backend
@@ -967,9 +1001,12 @@ export default function ConsultantWizardPage() {
         }
         return false;
       }
-      // Build W — work-auth doc has a non-form (upload) completion signal.
+      // Build W/I — uploads have a non-form (upload) completion signal.
       if (k === "workAuthDoc") {
         return !workAuthUploaded;
+      }
+      if (k === "offerLetter") {
+        return !offerLetterUploaded;
       }
       const value = form.fields[k] ?? "";
       const section = findSectionForFieldKey(k);
@@ -999,7 +1036,7 @@ export default function ConsultantWizardPage() {
       missingSignature: missingSig,
       missingFinalSignature: missingFinalSig,
     };
-  }, [submitMissing, form, chequeEntries, workAuthUploaded]);
+  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded]);
 
   // Build W — auto-dismiss the panel the moment the list empties.
   useEffect(() => {
@@ -1267,6 +1304,7 @@ export default function ConsultantWizardPage() {
             allComplete={allComplete}
             chequeEntries={chequeEntries}
             workAuthUploaded={workAuthUploaded}
+            offerLetterUploaded={offerLetterUploaded}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -1312,8 +1350,16 @@ export default function ConsultantWizardPage() {
             workAuthError={workAuthUploadError}
             onUploadWorkAuth={(f) => void handleWorkAuthUpload(f)}
             missingWorkAuth={
-              section.id === "appendix1"
+              section.id === "cover"
               && missingByField.has("workAuthDoc")
+            }
+            offerLetterUploaded={offerLetterUploaded}
+            offerLetterUploading={offerLetterUploading}
+            offerLetterError={offerLetterUploadError}
+            onUploadOfferLetter={(f) => void handleOfferLetterUpload(f)}
+            missingOfferLetter={
+              section.id === "appendix1"
+              && missingByField.has("offerLetter")
             }
             phase={app.phase ?? 1}
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
@@ -1680,6 +1726,11 @@ function SectionStep({
   workAuthError,
   onUploadWorkAuth,
   missingWorkAuth,
+  offerLetterUploaded,
+  offerLetterUploading,
+  offerLetterError,
+  onUploadOfferLetter,
+  missingOfferLetter,
   phase,
   onBack,
   onNext,
@@ -1715,12 +1766,18 @@ function SectionStep({
     index: number,
     patch: { number?: string; date?: string },
   ) => void;
-  /** Build W — Appendix 1 work-authorization document upload. */
+  /** Build I — work-authorization document upload (Personal Information). */
   workAuthUploaded: boolean;
   workAuthUploading: boolean;
   workAuthError: string;
   onUploadWorkAuth: (file: File) => void;
   missingWorkAuth: boolean;
+  /** Build I — Phase 2 Employment offer-letter upload. */
+  offerLetterUploaded: boolean;
+  offerLetterUploading: boolean;
+  offerLetterError: string;
+  onUploadOfferLetter: (file: File) => void;
+  missingOfferLetter: boolean;
   phase: number;
   onBack: () => void;
   onNext: () => void;
@@ -2033,14 +2090,32 @@ function SectionStep({
             </div>
           )}
 
-          {section.id === "appendix1" && (
+          {section.id === "cover" && (
             <div id="field-workAuthDoc">
-              <WorkAuthUploadBlock
+              <DocUploadBlock
+                title="Work-authorization document"
+                description="Upload a copy of your current work-authorization document — an image or PDF (≤10 MB)."
+                inputId="workauth-file"
                 uploaded={workAuthUploaded}
                 uploading={workAuthUploading}
                 error={workAuthError}
                 onUpload={onUploadWorkAuth}
                 needsAttention={missingWorkAuth}
+              />
+            </div>
+          )}
+
+          {section.id === "appendix1" && (
+            <div id="field-offerLetter">
+              <DocUploadBlock
+                title="Offer letter"
+                description="Upload your offer letter — an image or PDF (≤10 MB)."
+                inputId="offerletter-file"
+                uploaded={offerLetterUploaded}
+                uploading={offerLetterUploading}
+                error={offerLetterError}
+                onUpload={onUploadOfferLetter}
+                needsAttention={missingOfferLetter}
               />
             </div>
           )}
@@ -3316,23 +3391,29 @@ function ConsultantImagesPreview({
 // ── Build U: Appendix 5 multi-cheque list ────────────────────
 
 /**
- * Build W — Appendix 1 work-authorization document upload tile. A
- * single required image/PDF upload (≤10 MB); "uploaded ✓" once stored.
+ * Build W/I — reusable required document-upload tile (image/PDF ≤10 MB);
+ * "uploaded ✓" once stored. Used for the work-authorization document
+ * (Personal Information) and the offer letter (Phase 2 Employment).
  */
-function WorkAuthUploadBlock({
+function DocUploadBlock({
+  title,
+  description,
+  inputId,
   uploaded,
   uploading,
   error,
   onUpload,
   needsAttention,
 }: {
+  title: string;
+  description: string;
+  inputId: string;
   uploaded: boolean;
   uploading: boolean;
   error: string;
   onUpload: (file: File) => void;
   needsAttention: boolean;
 }) {
-  const inputId = "workauth-file";
   return (
     <section
       className={
@@ -3346,12 +3427,11 @@ function WorkAuthUploadBlock({
     >
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
-          Work-authorization document{" "}
+          {title}{" "}
           <span className="text-sage-copper-deep" aria-hidden>*</span>
         </p>
         <p className="mt-1 text-[12px] text-stone-500">
-          Upload a copy of your current work-authorization document — an
-          image or PDF (≤10 MB).
+          {description}
         </p>
       </div>
       <div className="flex items-center gap-3 flex-wrap">
@@ -3672,6 +3752,7 @@ function ReviewStep({
   allComplete,
   chequeEntries,
   workAuthUploaded,
+  offerLetterUploaded,
   attestation,
   onAttestation,
   previewSeen,
@@ -3692,8 +3773,9 @@ function ReviewStep({
   onLegalName: (value: string) => void;
   allComplete: boolean;
   chequeEntries: ChequeEntry[];
-  /** Build W — Appendix 1 work-auth doc uploaded? (non-form signal). */
+  /** Build W/I — uploads present? (non-form completion signals). */
   workAuthUploaded: boolean;
+  offerLetterUploaded: boolean;
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -3774,7 +3856,7 @@ function ReviewStep({
       </div>
 
       {visibleSections.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix

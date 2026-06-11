@@ -529,6 +529,25 @@ public class ConsultantApplication {
     @Column(name = "work_auth_doc_content_type", length = 64)
     private String workAuthDocContentType;
 
+    // ── Build I: Phase 2 Employment "Offer Letter" upload ─────────────
+    //
+    // The consultant uploads their offer letter (image/PDF) in the Phase 2
+    // Employment section (Appendix 1) via
+    // POST /consultant/applications/{appId}/offer-letter. Bytes land in
+    // Cloudinary at {@code agreements/<appId>-offerletter}
+    // (type=authenticated); REQUIRED whenever Appendix 1 applies. Both this
+    // and the work-auth doc are appended to the final agreement PDF.
+
+    @Column(name = "offer_letter_public_id")
+    private String offerLetterPublicId;
+
+    @Column(name = "offer_letter_uploaded_at")
+    private LocalDateTime offerLetterUploadedAt;
+
+    /** Original Content-Type of the offer letter (image/* | application/pdf). */
+    @Column(name = "offer_letter_content_type", length = 64)
+    private String offerLetterContentType;
+
     /**
      * Build U — multiple-cheque support. JSON-in-TEXT array of
      * {@code [{"index": 0, "number": "1001", "date": "2026-09-15",

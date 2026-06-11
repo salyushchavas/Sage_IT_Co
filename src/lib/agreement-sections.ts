@@ -248,6 +248,16 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         required: true,
         placeholder: "78701 or 78701-1234",
       },
+      // Build I — work-authorization supporting document, sitting with the
+      // (ERM-set) Work Authorization status. Required for EVERY work-auth
+      // type. Upload via a dedicated endpoint; tracks "uploaded ✓" state.
+      {
+        key: "workAuthDoc",
+        label: "Work-authorization document",
+        type: "file",
+        required: true,
+        help: "Upload a copy of your current work-authorization document (image or PDF).",
+      },
     ],
     requiresSignature: false,
     requiresAffirmation: false,
@@ -274,19 +284,23 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
       "Records the technology / skill track Sage IT will coach you on, plus any custom scope notes. You also confirm you understand the Phase 1 services described in the main agreement.",
     why: "Records your skill track and confirms you understand the Phase 1 services and key acknowledgments.",
     fields: [
+      // Build I — Service Track is now ERM-set at create and locked;
+      // the consultant sees both read-only (Custom Scope may be blank).
       {
         key: "technologyTrack",
         label: "Technology / skill track",
         type: "text",
-        required: true,
-        placeholder: "e.g. ServiceNow, Salesforce, Data Analytics",
+        required: false,
+        readOnly: true,
+        help: "Set by Sage IT on this agreement.",
       },
       {
         key: "customScopeNotes",
         label: "Custom scope or notes",
         type: "textarea",
-        required: true,
-        help: "Any custom scope notes specific to your engagement. Enter 'N/A' if none.",
+        required: false,
+        readOnly: true,
+        help: "Set by Sage IT on this agreement.",
       },
     ],
     requiresSignature: false,
@@ -357,15 +371,14 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         required: true,
         options: PAYROLL_CYCLE_OPTIONS,
       },
-      // Build W — required upload of the consultant's work-authorization
-      // copy (image/PDF). Bytes upload via a dedicated endpoint; the
-      // wizard tracks "uploaded ✓" state, not a value string.
+      // Build I — required Offer Letter upload (image/PDF) after the
+      // Phase 2 Employment fields. Tracks "uploaded ✓" state, not a value.
       {
-        key: "workAuthDoc",
-        label: "Work-authorization document",
+        key: "offerLetter",
+        label: "Offer letter",
         type: "file",
         required: true,
-        help: "Upload a copy of your current work-authorization document (image or PDF).",
+        help: "Upload your offer letter (image or PDF) once you've accepted the role.",
       },
     ],
     requiresSignature: false,

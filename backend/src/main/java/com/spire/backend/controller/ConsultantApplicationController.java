@@ -131,6 +131,8 @@ public class ConsultantApplicationController {
                 body.requireSsn,
                 body.achDebitDates,
                 body.achDebitAmounts,
+                body.technologyTrack,
+                body.customScopeNotes,
                 body.payload,
                 // Authenticated agreement user, stamped as the owner.
                 AgreementAuthz.userId(request),
@@ -613,6 +615,84 @@ public class ConsultantApplicationController {
         boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
         String ext = isPdf ? ".pdf" : ".img";
         String filename = "SageITCO-WorkAuth_" + appId + ext;
+        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
+                ? "attachment" : "inline";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .contentLength(doc.bytes().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        dispositionMode + "; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(doc.bytes());
+    }
+
+    // ── Build I — Phase 2 Employment offer-letter upload ──────────────
+
+    /** Consultant uploads their Phase 2 Employment offer letter. */
+    @PostMapping("/api/consultant/applications/{appId}/offer-letter")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadOfferLetter(
+            @PathVariable String appId,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadOfferLetter(
+                    appId, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "Offer letter uploaded.")));
+    }
+
+    /** Consultant-side preview of their uploaded offer letter. */
+    @GetMapping("/api/consultant/applications/{appId}/offer-letter")
+    public ResponseEntity<byte[]> consultantViewOfferLetter(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamOfferLetter(appId, disposition);
+    }
+
+    /** ERM-side inline view / download of the offer letter. */
+    @GetMapping("/api/agreement-erm/applications/{appId}/offer-letter")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewOfferLetter(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamOfferLetter(appId, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamOfferLetter(String appId, String disposition) {
+        ConsultantApplicationService.ChequeBytes doc;
+        try {
+            doc = consultantService.fetchOfferLetterBytes(appId);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        if (doc == null || doc.bytes() == null || doc.bytes().length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String contentType = doc.contentType();
+        if (contentType == null || contentType.isBlank()) {
+            contentType = "application/octet-stream";
+        }
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String ext = isPdf ? ".pdf" : ".img";
+        String filename = "SageITCO-OfferLetter_" + appId + ext;
         String dispositionMode = "attachment".equalsIgnoreCase(disposition)
                 ? "attachment" : "inline";
         return ResponseEntity.ok()
@@ -1254,6 +1334,11 @@ public class ConsultantApplicationController {
         // placeholders.
         public String achDebitDates;
         public String achDebitAmounts;
+        // Build I — ERM-set Service Track (Exhibit A). technologyTrack
+        // required to send; customScopeNotes optional. Read-only to the
+        // consultant; rendered via ${technologyTrack}/${customScopeNotes}.
+        public String technologyTrack;
+        public String customScopeNotes;
         // Legacy free-form payload, preserved for backward compat
         // with the existing /agreement-erm/new form. New flow ignores it.
         public JsonNode payload;

@@ -144,6 +144,8 @@ public class ConsultantApplicationService {
             Boolean requireSsn,
             String achDebitDates,
             String achDebitAmounts,
+            String technologyTrack,
+            String customScopeNotes,
             JsonNode payload,
             String ownerErmId,
             HttpServletRequest request
@@ -206,6 +208,10 @@ public class ConsultantApplicationService {
                 // Build Y — ERM-filled single ACH debit date(s)/amount(s).
                 .achDebitDates(achDatesValue)
                 .achDebitAmounts(achAmountsValue)
+                // Build I — ERM-set Service Track (Exhibit A); read-only to
+                // the consultant; rendered into the agreement.
+                .technologyTrack(blankToNull(technologyTrack))
+                .customScopeNotes(blankToNull(customScopeNotes))
                 // Build G — effective date is the creation date. Was
                 // formerly set at ermApproveAndSign; moving it here so
                 // the consultant sees a stable "Effective: MM-DD-YYYY"
@@ -2584,7 +2590,8 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix1"); // Build Y (B5)
+        // Build I — the work-auth doc now lives in Personal Information (cover).
+        assertSectionWritable(app, "cover"); // Build Y (B5)
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Work-authorization file is empty.");
         }
@@ -2648,6 +2655,81 @@ public class ConsultantApplicationService {
         try (java.io.InputStream in = conn.getInputStream()) {
             byte[] bytes = in.readAllBytes();
             return new ChequeBytes(bytes, app.getWorkAuthDocContentType());
+        }
+    }
+
+    /**
+     * Build I — Phase 2 Employment offer-letter upload. Mirrors
+     * {@link #uploadWorkAuthDoc}: validates type/size, stores at
+     * {@code agreements/{appId}-offerletter} (type=authenticated), persists
+     * the public_id + content type + timestamp. Latest replaces prior.
+     */
+    @Transactional
+    public ConsultantApplication uploadOfferLetter(
+            String applicationId,
+            byte[] bytes,
+            String contentType,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix1"); // Build Y (B5)
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("Offer letter file is empty.");
+        }
+        if (bytes.length > MAX_CHEQUE_BYTES) {
+            throw new IllegalArgumentException("Offer letter file is too large (>10 MB).");
+        }
+        String normalisedType = contentType == null ? "" : contentType.toLowerCase();
+        boolean isImage = normalisedType.startsWith("image/");
+        boolean isPdf = normalisedType.equals("application/pdf");
+        if (!isImage && !isPdf) {
+            throw new IllegalArgumentException(
+                    "Offer letter must be an image (JPG/PNG/HEIC) or PDF.");
+        }
+        String publicId = "agreements/" + applicationId + "-offerletter";
+        try {
+            cloudinary.uploader().upload(bytes,
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "public_id", publicId,
+                            "resource_type", isPdf ? "raw" : "image",
+                            "type", "authenticated",
+                            "overwrite", true));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(
+                    "Couldn't store offer letter: " + e.getMessage(), e);
+        }
+        app.setOfferLetterPublicId(publicId);
+        app.setOfferLetterContentType(normalisedType);
+        app.setOfferLetterUploadedAt(LocalDateTime.now());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.OFFER_LETTER_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("publicId", publicId,
+                        "contentType", normalisedType,
+                        "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /** Build I — streams the uploaded offer-letter bytes (re-signed URL). */
+    public ChequeBytes fetchOfferLetterBytes(String applicationId) throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        String publicId = app.getOfferLetterPublicId();
+        if (publicId == null || publicId.isBlank()) return null;
+        boolean isPdf = "application/pdf".equalsIgnoreCase(app.getOfferLetterContentType());
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
+        java.net.URLConnection conn = new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (java.io.InputStream in = conn.getInputStream()) {
+            byte[] bytes = in.readAllBytes();
+            return new ChequeBytes(bytes, app.getOfferLetterContentType());
         }
     }
 
@@ -3239,8 +3321,14 @@ public class ConsultantApplicationService {
                 && !app.getAddressZip().trim().matches("\\d{5}(-\\d{4})?")) {
             missing.add("addressZip");
         }
-        addIfBlank(missing, "technologyTrack", app.getTechnologyTrack());
-        addIfBlank(missing, "customScopeNotes", app.getCustomScopeNotes());
+        // Build I — work-authorization document now lives in Personal
+        // Information and is required for EVERY work-auth type (CORE).
+        if (app.getWorkAuthDocPublicId() == null
+                || app.getWorkAuthDocPublicId().isBlank()) {
+            missing.add("workAuthDoc");
+        }
+        // Build I — Service Track is ERM-set at create (read-only to the
+        // consultant), so it's no longer part of the consultant gate.
 
         // Appendix 1 -- employment (per require_appendix1; all-or-nothing
         // if optional but touched). implementationPartner is never required.
@@ -3251,11 +3339,11 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "roleTitle", app.getRoleTitle());
             if (app.getVerifiedStartDate() == null) missing.add("verifiedStartDate");
             addIfBlank(missing, "payrollCycle", app.getPayrollCycle());
-            // Build W — work-authorization document upload is required
-            // whenever Appendix 1 applies.
-            if (app.getWorkAuthDocPublicId() == null
-                    || app.getWorkAuthDocPublicId().isBlank()) {
-                missing.add("workAuthDoc");
+            // Build I — Offer Letter upload is required whenever Appendix 1
+            // (Phase 2 Employment) applies.
+            if (app.getOfferLetterPublicId() == null
+                    || app.getOfferLetterPublicId().isBlank()) {
+                missing.add("offerLetter");
             }
         }
 

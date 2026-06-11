@@ -53,6 +53,11 @@ import java.util.function.Function;
 // PDF.
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.multipdf.PDFMergerUtility;
 import org.apache.pdfbox.rendering.PDFRenderer;
 
 /**
@@ -121,9 +126,134 @@ public class AgreementDocumentService {
     public record PdfUploadResult(String secureUrl, String publicId, byte[] bytes) {}
 
     public PdfUploadResult generateAgreementPdf(ConsultantApplication app) throws Exception {
-        byte[] bytes = renderPdfBytes(app, null);
+        // Build I — final/stored PDF includes the consultant's uploaded
+        // attachments (work-auth doc + offer letter) appended after the
+        // agreement body. (Lightweight in-place previews skip this.)
+        byte[] bytes = appendAttachments(renderPdfBytes(app, null), app);
         PdfUploadResult uploaded = uploadBytesToCloudinary(bytes, app.getApplicationId());
         return new PdfUploadResult(uploaded.secureUrl(), uploaded.publicId(), bytes);
+    }
+
+    /**
+     * Build I — append the consultant's uploaded documents to the agreement
+     * PDF as labeled attachment page(s), AFTER the body/appendices and
+     * BEFORE any Certificate of Completion (the caller appends the cert
+     * last). Order: Work Authorization → Offer Letter. Image uploads are
+     * drawn onto a page with aspect preserved; PDF uploads are merged
+     * page-for-page. Best-effort: a single bad attachment is skipped (logged)
+     * rather than failing the whole agreement render. Callers compute the
+     * SHA-256 over the returned bytes so the hash covers the attachments.
+     */
+    public byte[] appendAttachments(byte[] body, ConsultantApplication app) {
+        boolean hasWorkAuth = app.getWorkAuthDocPublicId() != null
+                && !app.getWorkAuthDocPublicId().isBlank();
+        boolean hasOffer = app.getOfferLetterPublicId() != null
+                && !app.getOfferLetterPublicId().isBlank();
+        if (!hasWorkAuth && !hasOffer) return body;
+        try (PDDocument doc = Loader.loadPDF(body)) {
+            if (hasWorkAuth) {
+                appendOneAttachment(doc, "Attachment — Work Authorization Document",
+                        app.getWorkAuthDocPublicId(), app.getWorkAuthDocContentType());
+            }
+            if (hasOffer) {
+                appendOneAttachment(doc, "Attachment — Offer Letter",
+                        app.getOfferLetterPublicId(), app.getOfferLetterContentType());
+            }
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        } catch (Exception e) {
+            log.warn("Failed to append attachments for {}: {}",
+                    app.getApplicationId(), e.getMessage());
+            return body; // never block the agreement PDF on an attachment hiccup
+        }
+    }
+
+    /** Append one upload: prepare its content first, then a divider + the content. */
+    private void appendOneAttachment(
+            PDDocument doc, String label, String publicId, String contentType) {
+        try {
+            byte[] bytes = fetchAttachmentBytes(publicId, contentType);
+            if (bytes == null || bytes.length == 0) return;
+            boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+            if (isPdf) {
+                try (PDDocument src = Loader.loadPDF(bytes)) {
+                    addAttachmentDivider(doc, label);
+                    new PDFMergerUtility().appendDocument(doc, src);
+                }
+            } else {
+                // Decode the image first; only add the divider if it's usable.
+                PDImageXObject img = PDImageXObject.createFromByteArray(doc, bytes, label);
+                addAttachmentDivider(doc, label);
+                addImagePage(doc, img);
+            }
+        } catch (Exception e) {
+            log.warn("Skipping attachment '{}' ({}): {}", label, publicId, e.getMessage());
+        }
+    }
+
+    private void addAttachmentDivider(PDDocument doc, String label) throws IOException {
+        PDPage page = new PDPage(PDRectangle.LETTER);
+        doc.addPage(page);
+        float w = PDRectangle.LETTER.getWidth();
+        float h = PDRectangle.LETTER.getHeight();
+        try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+            // sage-navy header band (#1B2A5C)
+            cs.setNonStrokingColor(0x1B / 255f, 0x2A / 255f, 0x5C / 255f);
+            cs.addRect(0, h - 96f, w, 96f);
+            cs.fill();
+            cs.beginText();
+            cs.setNonStrokingColor(1f, 1f, 1f);
+            cs.setFont(CertFonts.HELVETICA_BOLD, 16);
+            cs.newLineAtOffset(54f, h - 56f);
+            cs.showText(label);
+            cs.endText();
+            // copper sub-line (#C87D5C)
+            cs.beginText();
+            cs.setNonStrokingColor(0xC8 / 255f, 0x7D / 255f, 0x5C / 255f);
+            cs.setFont(CertFonts.HELVETICA, 10);
+            cs.newLineAtOffset(54f, h - 130f);
+            cs.showText("Uploaded by the consultant and attached to this agreement.");
+            cs.endText();
+        }
+    }
+
+    private void addImagePage(PDDocument doc, PDImageXObject img) throws IOException {
+        PDPage page = new PDPage(PDRectangle.LETTER);
+        doc.addPage(page);
+        float pw = PDRectangle.LETTER.getWidth();
+        float ph = PDRectangle.LETTER.getHeight();
+        float margin = 36f;
+        float maxW = pw - 2 * margin;
+        float maxH = ph - 2 * margin;
+        float iw = img.getWidth();
+        float ih = img.getHeight();
+        float scale = Math.min(maxW / iw, maxH / ih);
+        if (scale > 1f) scale = 1f; // never upscale past native resolution
+        float dw = iw * scale;
+        float dh = ih * scale;
+        float x = (pw - dw) / 2f;
+        float y = (ph - dh) / 2f;
+        try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
+            cs.drawImage(img, x, y, dw, dh);
+        }
+    }
+
+    /** Fetch an authenticated Cloudinary upload's bytes by public_id. */
+    private byte[] fetchAttachmentBytes(String publicId, String contentType) throws IOException {
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
+        URLConnection conn = new URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (InputStream in = conn.getInputStream()) {
+            return in.readAllBytes();
+        }
     }
 
     /**

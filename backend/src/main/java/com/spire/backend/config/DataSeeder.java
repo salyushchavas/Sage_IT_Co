@@ -1321,6 +1321,10 @@ public class DataSeeder implements CommandLineRunner {
                 {"ach_debit_schedule TEXT", "ach_debit_schedule"},
                 // Build Y — ERM section-picker revision scope (JSON).
                 {"revision_sections TEXT", "revision_sections"},
+                // Build I — Phase 2 Employment "Offer Letter" upload.
+                {"offer_letter_public_id VARCHAR(255)", "offer_letter_public_id"},
+                {"offer_letter_uploaded_at TIMESTAMP", "offer_letter_uploaded_at"},
+                {"offer_letter_content_type VARCHAR(64)", "offer_letter_content_type"},
         };
         for (String[] col : columns) {
             try {

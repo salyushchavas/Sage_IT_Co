@@ -96,8 +96,14 @@ public class ConsultantVersionService {
         byte[] body = agreementDocumentService.renderPdfBytes(
                 app, AgreementDocumentService.ermPreviewOverrides());
 
+        // Build I — append the consultant's uploaded documents (work-auth
+        // doc, offer letter) AFTER the body and BEFORE the certificate, so
+        // the Certificate of Completion stays the final page and the hash
+        // (step 3) covers the attachments.
+        byte[] withAttachments = agreementDocumentService.appendAttachments(body, app);
+
         // 2. Append the certificate page.
-        byte[] combined = appendCertificatePage(body, app);
+        byte[] combined = appendCertificatePage(withAttachments, app);
 
         // 3. Hash the bytes the consultant will receive.
         String sha256 = sha256Hex(combined);

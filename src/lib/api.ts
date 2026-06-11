@@ -3306,10 +3306,14 @@ export interface ConsultantApplication {
   roleTitle: string | null;
   verifiedStartDate: string | null;
   payrollCycle: string | null;
-  // Build W — Appendix 1 work-authorization document upload.
+  // Build W/I — work-authorization document (now in Personal Information).
   workAuthDocPublicId: string | null;
   workAuthDocContentType: string | null;
   workAuthDocUploadedAt: string | null;
+  // Build I — Phase 2 Employment offer-letter upload.
+  offerLetterPublicId: string | null;
+  offerLetterContentType: string | null;
+  offerLetterUploadedAt: string | null;
   // Appendix 2 -- ACH (optional)
   achAccountType: string | null;
   achBankName: string | null;
@@ -3837,6 +3841,10 @@ export async function createConsultantApplication(data: {
   // e.g. "15th of every month" / "$416.67"); read-only to the consultant.
   achDebitDates?: string;
   achDebitAmounts?: string;
+  // Build I — ERM-set Service Track (Exhibit A); Track required, Scope
+  // optional; read-only to the consultant.
+  technologyTrack?: string;
+  customScopeNotes?: string;
   // Legacy JSON-textarea payload. New /agreement-erm/new form does
   // not send it; preserved so the detail-view edit panel and any
   // other in-flight caller keeps compiling.
@@ -4338,6 +4346,21 @@ export async function uploadConsultantWorkAuthDoc(
 /** Build W — ERM-side work-authorization document viewer URL. */
 export function ermWorkAuthViewUrl(applicationId: string): string {
   return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/workauth?disposition=inline`;
+}
+
+/** Build I — upload the Phase 2 Employment offer letter. */
+export async function uploadConsultantOfferLetter(
+  applicationId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, "/offer-letter", form);
+}
+
+/** Build I — ERM-side offer-letter viewer URL. */
+export function ermOfferLetterViewUrl(applicationId: string): string {
+  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/offer-letter?disposition=inline`;
 }
 
 /**

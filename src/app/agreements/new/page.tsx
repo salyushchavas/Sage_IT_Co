@@ -50,6 +50,10 @@ interface FormState {
   // (e.g. "15th of every month" / "$416.67"); read-only to the consultant.
   achDebitDates: string;
   achDebitAmounts: string;
+  // Build I — Service Track (ERM-set, locked). Technology/Skill Track is
+  // required to send; Custom Scope is optional. Read-only to the consultant.
+  technologyTrack: string;
+  customScopeNotes: string;
 }
 
 // Build W — the eight ERM-selectable work-authorization options, shared
@@ -75,6 +79,8 @@ const EMPTY: FormState = {
   requireSsn: false,
   achDebitDates: "",
   achDebitAmounts: "",
+  technologyTrack: "",
+  customScopeNotes: "",
 };
 
 /**
@@ -104,7 +110,7 @@ export default function NewConsultantApplicationPage() {
   }, [router]);
 
   const setText = <K extends keyof FormState>(key: K) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) =>
+    (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
       setForm((s) => ({ ...s, [key]: e.target.value }));
 
   const toggleFlag = <K extends keyof FormState>(key: K) => () =>
@@ -130,9 +136,12 @@ export default function NewConsultantApplicationPage() {
     rateAmount2: form.rateAmount2.trim(),
     visaStatus: form.visaStatus.trim(),
     visaStatusOther: form.visaStatusOther.trim(),
+    // Build I — Service Track (ERM-set). Track required, Scope optional.
+    technologyTrack: form.technologyTrack.trim(),
+    customScopeNotes: form.customScopeNotes.trim(),
   };
 
-  // Middle name is optional; everything else here is required.
+  // Middle name + custom scope are optional; everything else is required.
   const requiredTextValues = [
     trimmedStrings.firstName,
     trimmedStrings.lastName,
@@ -142,6 +151,7 @@ export default function NewConsultantApplicationPage() {
     trimmedStrings.ratePeriod2,
     trimmedStrings.rateAmount2,
     trimmedStrings.visaStatus,
+    trimmedStrings.technologyTrack,
   ];
   // Build W — when "Others" is chosen, the custom value is required.
   const visaOtherOk =
@@ -313,6 +323,35 @@ export default function NewConsultantApplicationPage() {
                 </p>
               </Field>
             </div>
+          </section>
+
+          <section className="space-y-3">
+            <SectionHeader title="Service track" />
+            <p className="text-[11px] text-gray-500">
+              Set the engagement scope. These render in Exhibit A and are
+              read-only to the consultant.
+            </p>
+            <Field label="Technology / skill track" required>
+              <input
+                type="text"
+                value={form.technologyTrack}
+                onChange={setText("technologyTrack")}
+                disabled={isSubmitting}
+                required
+                placeholder="e.g. ServiceNow, Salesforce, Data Analytics"
+                className={inputClass}
+              />
+            </Field>
+            <Field label="Custom scope / notes">
+              <textarea
+                value={form.customScopeNotes}
+                onChange={setText("customScopeNotes")}
+                disabled={isSubmitting}
+                rows={3}
+                placeholder="Optional — any custom scope specific to this engagement."
+                className={inputClass + " min-h-[72px]"}
+              />
+            </Field>
           </section>
 
           <section className="space-y-3">
