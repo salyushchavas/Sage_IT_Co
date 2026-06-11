@@ -138,18 +138,19 @@ public class AgreementDocumentService {
      * Build I — append the consultant's uploaded documents to the agreement
      * PDF as labeled attachment page(s), AFTER the body/appendices and
      * BEFORE any Certificate of Completion (the caller appends the cert
-     * last). Order: Work Authorization → Offer Letter. Image uploads are
-     * drawn onto a page with aspect preserved; PDF uploads are merged
-     * page-for-page. Best-effort: a single bad attachment is skipped (logged)
-     * rather than failing the whole agreement render. Callers compute the
-     * SHA-256 over the returned bytes so the hash covers the attachments.
+     * last). Order: Work Authorization → Offer Letter → Driver's License /
+     * State ID → SSN (when present). Image uploads are drawn onto a page
+     * with aspect preserved; PDF uploads are merged page-for-page.
+     * Best-effort: a single bad attachment is skipped (logged) rather than
+     * failing the whole agreement render. Callers compute the SHA-256 over
+     * the returned bytes so the hash covers the attachments.
      */
     public byte[] appendAttachments(byte[] body, ConsultantApplication app) {
-        boolean hasWorkAuth = app.getWorkAuthDocPublicId() != null
-                && !app.getWorkAuthDocPublicId().isBlank();
-        boolean hasOffer = app.getOfferLetterPublicId() != null
-                && !app.getOfferLetterPublicId().isBlank();
-        if (!hasWorkAuth && !hasOffer) return body;
+        boolean hasWorkAuth = nonBlank(app.getWorkAuthDocPublicId());
+        boolean hasOffer = nonBlank(app.getOfferLetterPublicId());
+        boolean hasDl = nonBlank(app.getDlDocPublicId());
+        boolean hasSsn = nonBlank(app.getSsnDocPublicId());
+        if (!hasWorkAuth && !hasOffer && !hasDl && !hasSsn) return body;
         try (PDDocument doc = Loader.loadPDF(body)) {
             if (hasWorkAuth) {
                 appendOneAttachment(doc, "Attachment — Work Authorization Document",
@@ -159,6 +160,14 @@ public class AgreementDocumentService {
                 appendOneAttachment(doc, "Attachment — Offer Letter",
                         app.getOfferLetterPublicId(), app.getOfferLetterContentType());
             }
+            if (hasDl) {
+                appendOneAttachment(doc, "Attachment — Driver's License / State ID",
+                        app.getDlDocPublicId(), app.getDlDocContentType());
+            }
+            if (hasSsn) {
+                appendOneAttachment(doc, "Attachment — SSN Document",
+                        app.getSsnDocPublicId(), app.getSsnDocContentType());
+            }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
             return out.toByteArray();
@@ -167,6 +176,10 @@ public class AgreementDocumentService {
                     app.getApplicationId(), e.getMessage());
             return body; // never block the agreement PDF on an attachment hiccup
         }
+    }
+
+    private static boolean nonBlank(String s) {
+        return s != null && !s.isBlank();
     }
 
     /** Append one upload: prepare its content first, then a divider + the content. */
@@ -610,7 +623,9 @@ public class AgreementDocumentService {
         // Appendix 3 -- background check (sensitive PII).
         c.put("bgFullLegalName", nz.apply(app.getBgFullLegalName()));
         c.put("bgOtherNamesUsed", nz.apply(app.getBgOtherNamesUsed()));
-        c.put("bgCurrentAddress", nz.apply(app.getBgCurrentAddress()));
+        // Build J — assembled from the structured current-address columns
+        // (legacy single block as fallback).
+        c.put("bgCurrentAddress", assembledCurrentAddress(app));
         c.put("bgDateOfBirth", fd.apply(app.getBgDateOfBirth()));
         c.put("bgFullSsn", nz.apply(app.getBgFullSsn()));
         // Build G — Appendix 3 renders "Driver's License: 12345" or
@@ -627,8 +642,10 @@ public class AgreementDocumentService {
                         : idTypeLabel + ": " + dl);
 
         // Appendix 4 -- portal access (optional).
-        c.put("portalPlatform", nz.apply(app.getPortalPlatform()));
-        c.put("portalUsername", nz.apply(app.getPortalUsername()));
+        // Build J — flatten the repeatable platform+username entries into the
+        // existing placeholders (position-aligned, comma-joined).
+        c.put("portalPlatform", derivePortalField(app, "platform", app.getPortalPlatform()));
+        c.put("portalUsername", derivePortalField(app, "username", app.getPortalUsername()));
         c.put("portalAuthorizedActions", nz.apply(app.getPortalAuthorizedActions()));
         c.put("portalEffectiveDate", fd.apply(app.getPortalEffectiveDate()));
         c.put("portalRevocationContact", nz.apply(app.getPortalRevocationContact()));
@@ -806,15 +823,28 @@ public class AgreementDocumentService {
      * legacy single-block {@code residenceAddress} for old rows.
      */
     static String assembledAddress(ConsultantApplication app) {
-        String line1 = trimToEmpty(app.getAddressLine1());
-        String line2 = trimToEmpty(app.getAddressLine2());
-        String city = trimToEmpty(app.getAddressCity());
-        String state = trimToEmpty(app.getAddressState());
-        String zip = trimToEmpty(app.getAddressZip());
+        return assembleUsAddress(
+                app.getAddressLine1(), app.getAddressLine2(), app.getAddressCity(),
+                app.getAddressState(), app.getAddressZip(), app.getResidenceAddress());
+    }
+
+    /**
+     * Build W/J — assemble a US-format address ("Line1[, Line2], City, ST
+     * ZIP") from structured parts, falling back to a legacy single-block
+     * value when no structured part is present. Shared by the residence
+     * address and the Background Check current address.
+     */
+    private static String assembleUsAddress(
+            String l1, String l2, String c, String st, String z, String legacy) {
+        String line1 = trimToEmpty(l1);
+        String line2 = trimToEmpty(l2);
+        String city = trimToEmpty(c);
+        String state = trimToEmpty(st);
+        String zip = trimToEmpty(z);
         boolean anyStructured = !(line1.isEmpty() && line2.isEmpty()
                 && city.isEmpty() && state.isEmpty() && zip.isEmpty());
         if (!anyStructured) {
-            return trimToEmpty(app.getResidenceAddress());
+            return trimToEmpty(legacy);
         }
         StringBuilder sb = new StringBuilder();
         if (!line1.isEmpty()) sb.append(line1);
@@ -878,6 +908,58 @@ public class AgreementDocumentService {
             }
         }
         return legacy == null ? "" : legacy;
+    }
+
+    /**
+     * Build J — join a per-entry field ("platform" or "username") from the
+     * portal_entries JSON into a comma-separated string for the existing
+     * {@code ${portalPlatform}} / {@code ${portalUsername}} placeholders.
+     * Position-aligned with the sibling field (same row order). Falls back
+     * to the legacy single value for old rows.
+     */
+    private static String derivePortalField(ConsultantApplication app, String key, String legacy) {
+        String json = app.getPortalEntries();
+        if (json != null && !json.isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.ObjectMapper m =
+                        new com.fasterxml.jackson.databind.ObjectMapper();
+                com.fasterxml.jackson.databind.JsonNode arr = m.readTree(json);
+                if (arr.isArray()) {
+                    StringBuilder sb = new StringBuilder();
+                    for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                        String platform = n.path("platform").asText("").trim();
+                        String username = n.path("username").asText("").trim();
+                        // Only render rows that have BOTH, so platform and
+                        // username lists stay index-aligned.
+                        if (platform.isEmpty() || username.isEmpty()) continue;
+                        if (sb.length() > 0) sb.append(", ");
+                        sb.append(n.path(key).asText("").trim());
+                    }
+                    if (sb.length() > 0) return sb.toString();
+                }
+            } catch (Exception ignored) {
+                /* fall through to legacy */
+            }
+        }
+        return legacy == null ? "" : legacy;
+    }
+
+    /**
+     * Build J — assemble the Background Check current address from its
+     * structured columns, falling back to the legacy single-block
+     * {@code bg_current_address} for old rows.
+     */
+    static String assembledCurrentAddress(ConsultantApplication app) {
+        // Build J — "Same as residence" is authoritative: the current address
+        // IS the residence address (no reliance on the copied snapshot, which
+        // could go stale if the residence was edited after the toggle).
+        if (Boolean.TRUE.equals(app.getBgCurrentSameAsResidence())) {
+            return assembledAddress(app);
+        }
+        return assembleUsAddress(
+                app.getBgCurrentAddressLine1(), app.getBgCurrentAddressLine2(),
+                app.getBgCurrentAddressCity(), app.getBgCurrentAddressState(),
+                app.getBgCurrentAddressZip(), app.getBgCurrentAddress());
     }
 
     private static String resolveFinalSigningIp(ConsultantApplication app) {

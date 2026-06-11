@@ -690,9 +690,131 @@ public class ConsultantApplicationController {
         if (contentType == null || contentType.isBlank()) {
             contentType = "application/octet-stream";
         }
+        return streamDoc(doc, "SageITCO-OfferLetter_" + appId, disposition);
+    }
+
+    // ── Build J — Background Check document uploads (DL/State-ID + SSN) ──
+
+    /** Consultant uploads their Driver's-License / State-ID document. */
+    @PostMapping("/api/consultant/applications/{appId}/dl-doc")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadDlDoc(
+            @PathVariable String appId,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadDlDoc(appId, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "Driver's License / State ID document uploaded.")));
+    }
+
+    @GetMapping("/api/consultant/applications/{appId}/dl-doc")
+    public ResponseEntity<byte[]> consultantViewDlDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamDlDoc(appId, disposition);
+    }
+
+    @GetMapping("/api/agreement-erm/applications/{appId}/dl-doc")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewDlDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamDlDoc(appId, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamDlDoc(String appId, String disposition) {
+        ConsultantApplicationService.ChequeBytes doc;
+        try {
+            doc = consultantService.fetchDlDocBytes(appId);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        return streamDoc(doc, "SageITCO-IDDoc_" + appId, disposition);
+    }
+
+    /** Consultant uploads their (optional) SSN document. */
+    @PostMapping("/api/consultant/applications/{appId}/ssn-doc")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadSsnDoc(
+            @PathVariable String appId,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadSsnDoc(appId, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "SSN document uploaded.")));
+    }
+
+    @GetMapping("/api/consultant/applications/{appId}/ssn-doc")
+    public ResponseEntity<byte[]> consultantViewSsnDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamSsnDoc(appId, disposition);
+    }
+
+    @GetMapping("/api/agreement-erm/applications/{appId}/ssn-doc")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewSsnDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamSsnDoc(appId, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamSsnDoc(String appId, String disposition) {
+        ConsultantApplicationService.ChequeBytes doc;
+        try {
+            doc = consultantService.fetchSsnDocBytes(appId);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        return streamDoc(doc, "SageITCO-SSNDoc_" + appId, disposition);
+    }
+
+    /** Shared streamer for an uploaded document (inline by default). */
+    private ResponseEntity<byte[]> streamDoc(
+            ConsultantApplicationService.ChequeBytes doc, String filenameBase, String disposition) {
+        if (doc == null || doc.bytes() == null || doc.bytes().length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String contentType = doc.contentType();
+        if (contentType == null || contentType.isBlank()) {
+            contentType = "application/octet-stream";
+        }
         boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
-        String ext = isPdf ? ".pdf" : ".img";
-        String filename = "SageITCO-OfferLetter_" + appId + ext;
+        String filename = filenameBase + (isPdf ? ".pdf" : ".img");
         String dispositionMode = "attachment".equalsIgnoreCase(disposition)
                 ? "attachment" : "inline";
         return ResponseEntity.ok()

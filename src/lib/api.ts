@@ -3314,6 +3314,13 @@ export interface ConsultantApplication {
   offerLetterPublicId: string | null;
   offerLetterContentType: string | null;
   offerLetterUploadedAt: string | null;
+  // Build J — Background Check uploads (DL/State-ID required; SSN optional).
+  dlDocPublicId: string | null;
+  dlDocContentType: string | null;
+  dlDocUploadedAt: string | null;
+  ssnDocPublicId: string | null;
+  ssnDocContentType: string | null;
+  ssnDocUploadedAt: string | null;
   // Appendix 2 -- ACH (optional)
   achAccountType: string | null;
   achBankName: string | null;
@@ -3329,12 +3336,21 @@ export interface ConsultantApplication {
   bgFullLegalName: string | null;
   bgOtherNamesUsed: string | null;
   bgCurrentAddress: string | null;
+  // Build J — structured current address + same-as-residence toggle.
+  bgCurrentAddressLine1: string | null;
+  bgCurrentAddressLine2: string | null;
+  bgCurrentAddressCity: string | null;
+  bgCurrentAddressState: string | null;
+  bgCurrentAddressZip: string | null;
+  bgCurrentSameAsResidence: boolean | null;
   bgDateOfBirth: string | null;
   bgFullSsn: string | null;
   bgDriverLicense: string | null;
   // Appendix 4 -- portal access
   portalPlatform: string | null;
   portalUsername: string | null;
+  // Build J — repeatable platform+username entries (JSON-in-TEXT).
+  portalEntries: string | null;
   portalAuthorizedActions: string | null;
   portalEffectiveDate: string | null;
   portalRevocationContact: string | null;
@@ -3504,11 +3520,20 @@ export interface ConsultantFillPayload {
   bgFullLegalName?: string;
   bgOtherNamesUsed?: string;
   bgCurrentAddress?: string;
+  // Build J — structured current address + same-as-residence toggle.
+  bgCurrentAddressLine1?: string;
+  bgCurrentAddressLine2?: string;
+  bgCurrentAddressCity?: string;
+  bgCurrentAddressState?: string;
+  bgCurrentAddressZip?: string;
+  bgCurrentSameAsResidence?: boolean;
   bgDateOfBirth?: string;
   bgFullSsn?: string;
   bgDriverLicense?: string;
   portalPlatform?: string;
   portalUsername?: string;
+  // Build J — repeatable platform+username entries (JSON-in-TEXT).
+  portalEntries?: string;
   portalAuthorizedActions?: string;
   portalEffectiveDate?: string;
   portalRevocationContact?: string;
@@ -4361,6 +4386,57 @@ export async function uploadConsultantOfferLetter(
 /** Build I — ERM-side offer-letter viewer URL. */
 export function ermOfferLetterViewUrl(applicationId: string): string {
   return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/offer-letter?disposition=inline`;
+}
+
+/** Build J — upload the Background Check Driver's-License / State-ID document. */
+export async function uploadConsultantDlDoc(
+  applicationId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, "/dl-doc", form);
+}
+
+/** Build J — upload the (optional) Background Check SSN document. */
+export async function uploadConsultantSsnDoc(
+  applicationId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, "/ssn-doc", form);
+}
+
+/** Build J — ERM-side viewer URLs for the Background Check documents. */
+export function ermDlDocViewUrl(applicationId: string): string {
+  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/dl-doc?disposition=inline`;
+}
+export function ermSsnDocViewUrl(applicationId: string): string {
+  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/ssn-doc?disposition=inline`;
+}
+
+/** Build J — one repeatable Portal Access entry (platform + username). */
+export interface PortalEntry {
+  platform: string;
+  username: string;
+}
+
+/** Build J — parse the portal_entries JSON column into a typed list. */
+export function parsePortalEntries(json: string | null | undefined): PortalEntry[] {
+  if (!json || !json.trim()) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((e) => ({
+        platform: typeof e?.platform === "string" ? e.platform : "",
+        username: typeof e?.username === "string" ? e.username : "",
+      }))
+      .filter((e) => e.platform.length > 0 || e.username.length > 0);
+  } catch {
+    return [];
+  }
 }
 
 /**

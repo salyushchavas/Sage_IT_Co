@@ -1091,6 +1091,19 @@ public class ConsultantApplicationService {
                 }
             }
         }
+        // Build J — enforce the Portal Access soft cap (10) server-side too,
+        // so a direct API call can't persist an unbounded list.
+        if (patch.portalEntries != null && !patch.portalEntries.isBlank()) {
+            try {
+                JsonNode arr = objectMapper.readTree(patch.portalEntries);
+                if (arr.isArray() && arr.size() > 10) {
+                    throw new IllegalArgumentException(
+                            "Portal access is limited to 10 entries.");
+                }
+            } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
+                // malformed JSON — syncPortalLegacyColumns will no-op safely
+            }
+        }
         boolean changed = patch.applyTo(app);
         if (!changed) {
             return app;
@@ -1104,6 +1117,26 @@ public class ConsultantApplicationService {
                     blankToNull(app.getMiddleName()),
                     blankToNull(app.getLastName()));
             if (composed != null) app.setConsultantName(composed);
+        }
+        // Build J — mirror the ACH JSON+legacy pattern: keep the flattened
+        // legacy columns in sync so the ERM read-back + template render off
+        // simple values while the JSON/structured fields stay the source.
+        if (patch.portalEntries != null) {
+            syncPortalLegacyColumns(app);
+        }
+        boolean currentAddrTouched = patch.bgCurrentAddressLine1 != null
+                || patch.bgCurrentAddressLine2 != null || patch.bgCurrentAddressCity != null
+                || patch.bgCurrentAddressState != null || patch.bgCurrentAddressZip != null
+                || patch.bgCurrentSameAsResidence != null;
+        // When "Same as residence" is on, a residence edit also changes the
+        // resolved current address — keep the legacy column fresh.
+        boolean residenceTouchedWhileSameAs =
+                Boolean.TRUE.equals(app.getBgCurrentSameAsResidence())
+                && (patch.addressLine1 != null || patch.addressLine2 != null
+                        || patch.addressCity != null || patch.addressState != null
+                        || patch.addressZip != null);
+        if (currentAddrTouched || residenceTouchedWhileSameAs) {
+            app.setBgCurrentAddress(AgreementDocumentService.assembledCurrentAddress(app));
         }
         applicationRepository.save(app);
         appendEvent(app.getId(),
@@ -1386,10 +1419,12 @@ public class ConsultantApplicationService {
                 "achNoticeEmail", "achDebitDates", "achDebitAmounts",
                 "affirmedAppendix2"}) m.put(f, "appendix2");
         for (String f : new String[]{"bgFullLegalName", "bgOtherNamesUsed",
-                "bgCurrentAddress", "bgDateOfBirth", "bgFullSsn", "idType",
+                "bgCurrentAddress", "bgCurrentAddressLine1", "bgCurrentAddressLine2",
+                "bgCurrentAddressCity", "bgCurrentAddressState", "bgCurrentAddressZip",
+                "bgCurrentSameAsResidence", "bgDateOfBirth", "bgFullSsn", "idType",
                 "bgDriverLicense", "affirmedAppendix3"}) m.put(f, "appendix3");
         for (String f : new String[]{"portalPlatform", "portalUsername",
-                "portalAuthorizedActions", "portalEffectiveDate",
+                "portalEntries", "portalAuthorizedActions", "portalEffectiveDate",
                 "portalRevocationContact", "affirmedAppendix4"}) m.put(f, "appendix4");
         for (String f : new String[]{"securityCheckCount", "securityCheckBank",
                 "securityCheckHolderName", "securityCheckAmount",
@@ -2359,11 +2394,20 @@ public class ConsultantApplicationService {
         public String bgFullLegalName;
         public String bgOtherNamesUsed;
         public String bgCurrentAddress;
+        // Build J — structured current address + same-as-residence toggle.
+        public String bgCurrentAddressLine1;
+        public String bgCurrentAddressLine2;
+        public String bgCurrentAddressCity;
+        public String bgCurrentAddressState;
+        public String bgCurrentAddressZip;
+        public Boolean bgCurrentSameAsResidence;
         public java.time.LocalDate bgDateOfBirth;
         public String bgFullSsn;
         public String bgDriverLicense;
         public String portalPlatform;
         public String portalUsername;
+        // Build J — repeatable platform+username entries (JSON-in-TEXT).
+        public String portalEntries;
         public String portalAuthorizedActions;
         public java.time.LocalDate portalEffectiveDate;
         public String portalRevocationContact;
@@ -2424,11 +2468,18 @@ public class ConsultantApplicationService {
             if (bgFullLegalName != null)          { app.setBgFullLegalName(bgFullLegalName); changed = true; }
             if (bgOtherNamesUsed != null)         { app.setBgOtherNamesUsed(bgOtherNamesUsed); changed = true; }
             if (bgCurrentAddress != null)         { app.setBgCurrentAddress(bgCurrentAddress); changed = true; }
+            if (bgCurrentAddressLine1 != null)    { app.setBgCurrentAddressLine1(bgCurrentAddressLine1); changed = true; }
+            if (bgCurrentAddressLine2 != null)    { app.setBgCurrentAddressLine2(bgCurrentAddressLine2); changed = true; }
+            if (bgCurrentAddressCity != null)     { app.setBgCurrentAddressCity(bgCurrentAddressCity); changed = true; }
+            if (bgCurrentAddressState != null)    { app.setBgCurrentAddressState(bgCurrentAddressState); changed = true; }
+            if (bgCurrentAddressZip != null)      { app.setBgCurrentAddressZip(bgCurrentAddressZip); changed = true; }
+            if (bgCurrentSameAsResidence != null) { app.setBgCurrentSameAsResidence(bgCurrentSameAsResidence); changed = true; }
             if (bgDateOfBirth != null)            { app.setBgDateOfBirth(bgDateOfBirth); changed = true; }
             if (bgFullSsn != null)                { app.setBgFullSsn(bgFullSsn); changed = true; }
             if (bgDriverLicense != null)          { app.setBgDriverLicense(bgDriverLicense); changed = true; }
             if (portalPlatform != null)           { app.setPortalPlatform(portalPlatform); changed = true; }
             if (portalUsername != null)           { app.setPortalUsername(portalUsername); changed = true; }
+            if (portalEntries != null)            { app.setPortalEntries(portalEntries); changed = true; }
             if (portalAuthorizedActions != null)  { app.setPortalAuthorizedActions(portalAuthorizedActions); changed = true; }
             if (portalEffectiveDate != null)      { app.setPortalEffectiveDate(portalEffectiveDate); changed = true; }
             if (portalRevocationContact != null)  { app.setPortalRevocationContact(portalRevocationContact); changed = true; }
@@ -2485,11 +2536,18 @@ public class ConsultantApplicationService {
             if (bgFullLegalName != null) names.add("bgFullLegalName");
             if (bgOtherNamesUsed != null) names.add("bgOtherNamesUsed");
             if (bgCurrentAddress != null) names.add("bgCurrentAddress");
+            if (bgCurrentAddressLine1 != null) names.add("bgCurrentAddressLine1");
+            if (bgCurrentAddressLine2 != null) names.add("bgCurrentAddressLine2");
+            if (bgCurrentAddressCity != null) names.add("bgCurrentAddressCity");
+            if (bgCurrentAddressState != null) names.add("bgCurrentAddressState");
+            if (bgCurrentAddressZip != null) names.add("bgCurrentAddressZip");
+            if (bgCurrentSameAsResidence != null) names.add("bgCurrentSameAsResidence");
             if (bgDateOfBirth != null) names.add("bgDateOfBirth");
             if (bgFullSsn != null) names.add("bgFullSsn");
             if (bgDriverLicense != null) names.add("bgDriverLicense");
             if (portalPlatform != null) names.add("portalPlatform");
             if (portalUsername != null) names.add("portalUsername");
+            if (portalEntries != null) names.add("portalEntries");
             if (portalAuthorizedActions != null) names.add("portalAuthorizedActions");
             if (portalEffectiveDate != null) names.add("portalEffectiveDate");
             if (portalRevocationContact != null) names.add("portalRevocationContact");
@@ -2731,6 +2789,108 @@ public class ConsultantApplicationService {
             byte[] bytes = in.readAllBytes();
             return new ChequeBytes(bytes, app.getOfferLetterContentType());
         }
+    }
+
+    /**
+     * Build J — shared validate + store for a Background Check document
+     * upload. Mirrors {@link #uploadOfferLetter}; the caller persists the
+     * returned public_id/content-type on the right columns.
+     */
+    private String storeBgDoc(byte[] bytes, String contentType, String publicId, String label) {
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException(label + " file is empty.");
+        }
+        if (bytes.length > MAX_CHEQUE_BYTES) {
+            throw new IllegalArgumentException(label + " file is too large (>10 MB).");
+        }
+        String normalisedType = contentType == null ? "" : contentType.toLowerCase();
+        boolean isImage = normalisedType.startsWith("image/");
+        boolean isPdf = normalisedType.equals("application/pdf");
+        if (!isImage && !isPdf) {
+            throw new IllegalArgumentException(
+                    label + " must be an image (JPG/PNG/HEIC) or PDF.");
+        }
+        try {
+            cloudinary.uploader().upload(bytes,
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "public_id", publicId,
+                            "resource_type", isPdf ? "raw" : "image",
+                            "type", "authenticated",
+                            "overwrite", true));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(
+                    "Couldn't store " + label.toLowerCase() + ": " + e.getMessage(), e);
+        }
+        return normalisedType;
+    }
+
+    private ChequeBytes fetchBgDoc(String publicId, String contentType) throws java.io.IOException {
+        if (publicId == null || publicId.isBlank()) return null;
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
+        java.net.URLConnection conn = new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (java.io.InputStream in = conn.getInputStream()) {
+            return new ChequeBytes(in.readAllBytes(), contentType);
+        }
+    }
+
+    /** Build J — Driver's-License / State-ID document upload (Appendix 3). */
+    @Transactional
+    public ConsultantApplication uploadDlDoc(
+            String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix3"); // Build Y (B5)
+        String publicId = "agreements/" + applicationId + "-dldoc";
+        String normalisedType = storeBgDoc(bytes, contentType, publicId, "Driver's License / State ID document");
+        app.setDlDocPublicId(publicId);
+        app.setDlDocContentType(normalisedType);
+        app.setDlDocUploadedAt(LocalDateTime.now());
+        applicationRepository.save(app);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.DL_DOC_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("publicId", publicId, "contentType", normalisedType, "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /** Build J — streams the uploaded DL/State-ID document (re-signed URL). */
+    public ChequeBytes fetchDlDocBytes(String applicationId) throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        return fetchBgDoc(app.getDlDocPublicId(), app.getDlDocContentType());
+    }
+
+    /** Build J — SSN document upload (Appendix 3). ALWAYS optional. */
+    @Transactional
+    public ConsultantApplication uploadSsnDoc(
+            String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix3"); // Build Y (B5)
+        String publicId = "agreements/" + applicationId + "-ssndoc";
+        String normalisedType = storeBgDoc(bytes, contentType, publicId, "SSN document");
+        app.setSsnDocPublicId(publicId);
+        app.setSsnDocContentType(normalisedType);
+        app.setSsnDocUploadedAt(LocalDateTime.now());
+        applicationRepository.save(app);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.SSN_DOC_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("publicId", publicId, "contentType", normalisedType, "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /** Build J — streams the uploaded SSN document (re-signed URL). */
+    public ChequeBytes fetchSsnDocBytes(String applicationId) throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        return fetchBgDoc(app.getSsnDocPublicId(), app.getSsnDocContentType());
     }
 
     // ── Build W — small name helpers ──────────────────────────────────
@@ -3261,19 +3421,87 @@ public class ConsultantApplicationService {
         return nonBlank(app.getBgFullLegalName())
                 || nonBlank(app.getBgOtherNamesUsed())
                 || nonBlank(app.getBgCurrentAddress())
+                // Build J — structured current address parts also count
+                // (incl. the optional line 2) + the same-as toggle.
+                || nonBlank(app.getBgCurrentAddressLine1())
+                || nonBlank(app.getBgCurrentAddressLine2())
+                || nonBlank(app.getBgCurrentAddressCity())
+                || nonBlank(app.getBgCurrentAddressState())
+                || nonBlank(app.getBgCurrentAddressZip())
+                || Boolean.TRUE.equals(app.getBgCurrentSameAsResidence())
                 || app.getBgDateOfBirth() != null
                 || nonBlank(app.getBgFullSsn())
                 || nonBlank(app.getBgDriverLicense())
+                // Document uploads do NOT mark the section touched (consistent
+                // with the work-auth / offer-letter uploads) — only entered
+                // form data + the affirmation do.
                 || Boolean.TRUE.equals(app.getAffirmedAppendix3());
     }
 
     private static boolean isAppendix4Touched(ConsultantApplication app) {
         return nonBlank(app.getPortalPlatform())
                 || nonBlank(app.getPortalUsername())
+                // Build J — repeatable entries also count as touched.
+                || nonBlank(app.getPortalEntries())
                 || nonBlank(app.getPortalAuthorizedActions())
                 || app.getPortalEffectiveDate() != null
                 || nonBlank(app.getPortalRevocationContact())
                 || Boolean.TRUE.equals(app.getAffirmedAppendix4());
+    }
+
+    /**
+     * Build J — true when {@code portal_entries} JSON contains at least one
+     * entry with BOTH a non-blank platform AND username. Falls back to the
+     * legacy single portal_platform/portal_username pair for old rows.
+     */
+    /**
+     * Build J — flatten the portal_entries JSON into the legacy
+     * portal_platform / portal_username columns (only complete rows,
+     * position-aligned, comma-joined) so the ERM read-back + template
+     * render off simple values. Mirrors the ACH JSON→legacy sync.
+     */
+    private void syncPortalLegacyColumns(ConsultantApplication app) {
+        String json = app.getPortalEntries();
+        java.util.List<String> platforms = new java.util.ArrayList<>();
+        java.util.List<String> usernames = new java.util.ArrayList<>();
+        if (json != null && !json.isBlank()) {
+            try {
+                JsonNode arr = objectMapper.readTree(json);
+                if (arr.isArray()) {
+                    for (JsonNode e : arr) {
+                        String p = e.path("platform").asText("").trim();
+                        String u = e.path("username").asText("").trim();
+                        if (p.isEmpty() || u.isEmpty()) continue;
+                        platforms.add(p);
+                        usernames.add(u);
+                    }
+                }
+            } catch (Exception ignored) {
+                return; // leave legacy columns untouched on malformed JSON
+            }
+        }
+        app.setPortalPlatform(platforms.isEmpty() ? null : String.join(", ", platforms));
+        app.setPortalUsername(usernames.isEmpty() ? null : String.join(", ", usernames));
+    }
+
+    private boolean hasCompletePortalEntry(ConsultantApplication app) {
+        String json = app.getPortalEntries();
+        if (json != null && !json.isBlank()) {
+            try {
+                JsonNode arr = objectMapper.readTree(json);
+                if (arr.isArray()) {
+                    for (JsonNode e : arr) {
+                        if (nonBlank(e.path("platform").asText(""))
+                                && nonBlank(e.path("username").asText(""))) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // fall through to legacy check
+            }
+        }
+        return nonBlank(app.getPortalPlatform()) && nonBlank(app.getPortalUsername());
     }
 
     private static boolean isAppendix5Touched(ConsultantApplication app) {
@@ -3371,13 +3599,28 @@ public class ConsultantApplicationService {
         if (app3Active) {
             addIfBlank(missing, "bgFullLegalName", app.getBgFullLegalName());
             addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
-            addIfBlank(missing, "bgCurrentAddress", app.getBgCurrentAddress());
+            // Build J — structured current address (mirrors residence:
+            // line1 + city + state + zip required, line2 optional). When
+            // "Same as residence" is on, the residence address (validated as
+            // CORE above) is authoritative, so the structured current-address
+            // fields are NOT separately required.
+            if (!Boolean.TRUE.equals(app.getBgCurrentSameAsResidence())) {
+                addIfBlank(missing, "bgCurrentAddressLine1", app.getBgCurrentAddressLine1());
+                addIfBlank(missing, "bgCurrentAddressCity", app.getBgCurrentAddressCity());
+                addIfBlank(missing, "bgCurrentAddressState", app.getBgCurrentAddressState());
+                addIfBlank(missing, "bgCurrentAddressZip", app.getBgCurrentAddressZip());
+            }
             if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
             String t = app.getIdType();
             if (t == null || (!"DL".equals(t) && !"STATE_ID".equals(t))) {
                 missing.add("idType");
             }
             addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
+            // Build J — DL / State-ID document required when Appendix 3 applies.
+            if (app.getDlDocPublicId() == null || app.getDlDocPublicId().isBlank()) {
+                missing.add("dlDoc");
+            }
+            // Build J — SSN document is ALWAYS optional; never validated here.
             if (Boolean.TRUE.equals(app.getRequireSsn())) {
                 addIfBlank(missing, "bgFullSsn", app.getBgFullSsn());
             }
@@ -3386,8 +3629,11 @@ public class ConsultantApplicationService {
         // Appendix 4 -- portal access.
         boolean app4Required = Boolean.TRUE.equals(app.getRequireAppendix4());
         if (app4Required || isAppendix4Touched(app) || forced.contains("appendix4")) {
-            addIfBlank(missing, "portalPlatform", app.getPortalPlatform());
-            addIfBlank(missing, "portalUsername", app.getPortalUsername());
+            // Build J — at least one COMPLETE platform+username entry is
+            // required (the repeatable list replaces the single pair).
+            if (!hasCompletePortalEntry(app)) {
+                missing.add("portalEntries");
+            }
             addIfBlank(missing, "portalAuthorizedActions", app.getPortalAuthorizedActions());
             if (app.getPortalEffectiveDate() == null) missing.add("portalEffectiveDate");
             addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());

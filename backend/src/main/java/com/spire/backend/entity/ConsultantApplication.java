@@ -290,15 +290,41 @@ public class ConsultantApplication {
 
     @Column(name = "bg_full_legal_name") private String bgFullLegalName;
     @Column(name = "bg_other_names_used") private String bgOtherNamesUsed;
+    // Legacy single free-text current address. Build J keeps it populated
+    // (assembled from the structured fields below) so the existing
+    // ${bgCurrentAddress} placeholder renders unchanged.
     @Column(name = "bg_current_address", columnDefinition = "TEXT") private String bgCurrentAddress;
+    // Build J — structured current address (mirrors the residence address).
+    @Column(name = "bg_current_address_line1") private String bgCurrentAddressLine1;
+    @Column(name = "bg_current_address_line2") private String bgCurrentAddressLine2;
+    @Column(name = "bg_current_address_city") private String bgCurrentAddressCity;
+    @Column(name = "bg_current_address_state", length = 8) private String bgCurrentAddressState;
+    @Column(name = "bg_current_address_zip", length = 16) private String bgCurrentAddressZip;
+    // Build J — "Same as residence address" toggle (UI re-lock on reload).
+    @Column(name = "bg_current_same_as_residence") private Boolean bgCurrentSameAsResidence;
     @Column(name = "bg_date_of_birth") private LocalDate bgDateOfBirth;
     @Column(name = "bg_full_ssn", columnDefinition = "TEXT") private String bgFullSsn;
     @Column(name = "bg_driver_license", columnDefinition = "TEXT") private String bgDriverLicense;
+
+    // ── Build J: Background Check document uploads ────────────────────
+    // DL / State-ID doc (required when Appendix 3 applies) + SSN doc
+    // (always optional). Same Cloudinary/append pipeline as Build I.
+    @Column(name = "dl_doc_public_id") private String dlDocPublicId;
+    @Column(name = "dl_doc_uploaded_at") private LocalDateTime dlDocUploadedAt;
+    @Column(name = "dl_doc_content_type", length = 64) private String dlDocContentType;
+    @Column(name = "ssn_doc_public_id") private String ssnDocPublicId;
+    @Column(name = "ssn_doc_uploaded_at") private LocalDateTime ssnDocUploadedAt;
+    @Column(name = "ssn_doc_content_type", length = 64) private String ssnDocContentType;
 
     // ── Appendix 4: portal access (optional) ─────────────────────────
 
     @Column(name = "portal_platform") private String portalPlatform;
     @Column(name = "portal_username") private String portalUsername;
+    // Build J — repeatable platform+username entries (JSON-in-TEXT, mirrors
+    // the cheques pattern): [{"platform":"LinkedIn","username":"john.doe"}, …].
+    // The legacy portal_platform/portal_username above hold the flattened,
+    // comma-joined views for the existing template placeholders.
+    @Column(name = "portal_entries", columnDefinition = "TEXT") private String portalEntries;
     @Column(name = "portal_authorized_actions", columnDefinition = "TEXT") private String portalAuthorizedActions;
     @Column(name = "portal_effective_date") private LocalDate portalEffectiveDate;
     @Column(name = "portal_revocation_contact") private String portalRevocationContact;

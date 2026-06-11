@@ -24,8 +24,10 @@ import {
   Lock,
   Mail,
   PauseCircle,
+  Plus,
   ShieldCheck,
   Sparkles,
+  Trash2,
   X,
 } from "lucide-react";
 
@@ -60,6 +62,10 @@ import {
   uploadConsultantChequeAt,
   uploadConsultantWorkAuthDoc,
   uploadConsultantOfferLetter,
+  uploadConsultantDlDoc,
+  uploadConsultantSsnDoc,
+  parsePortalEntries,
+  type PortalEntry,
   type AgreementContent,
   type ChequeEntry,
   type ConsultantApplication,
@@ -109,6 +115,44 @@ const ALL_FIELD_KEYS: readonly string[] = Array.from(
   ),
 );
 
+// Build J — persisted keys that aren't standard section fields:
+//   portalEntries            — JSON list of {platform, username} (appendix4)
+//   bgCurrentSameAsResidence — boolean toggle (appendix3)
+// They live in form.fields as strings and round-trip through the same
+// auto-save delta (the boolean is coerced on the wire — see computeDelta).
+const EXTRA_PERSISTED_KEYS = ["portalEntries", "bgCurrentSameAsResidence"] as const;
+
+// Build J — the structured Background Check current-address fields that get
+// copied + locked when "Same as residence address" is checked.
+const CURRENT_ADDRESS_KEYS = new Set([
+  "bgCurrentAddressLine1",
+  "bgCurrentAddressLine2",
+  "bgCurrentAddressCity",
+  "bgCurrentAddressState",
+  "bgCurrentAddressZip",
+]);
+
+// Build J — current-address field → the residence field it mirrors when
+// "Same as residence" is on (used for live display + validation skip).
+const RESIDENCE_KEY_FOR: Record<string, string> = {
+  bgCurrentAddressLine1: "addressLine1",
+  bgCurrentAddressLine2: "addressLine2",
+  bgCurrentAddressCity: "addressCity",
+  bgCurrentAddressState: "addressState",
+  bgCurrentAddressZip: "addressZip",
+};
+const PERSISTED_FIELD_KEYS: readonly string[] = [
+  ...ALL_FIELD_KEYS,
+  ...EXTRA_PERSISTED_KEYS,
+];
+
+/** Section id that owns an extra persisted key (for revision-scope filtering). */
+function sectionIdForPersistedKey(key: string): string | undefined {
+  if (key === "portalEntries") return "appendix4";
+  if (key === "bgCurrentSameAsResidence") return "appendix3";
+  return findSectionForFieldKey(key)?.id;
+}
+
 function emptyAffirmations(): Record<AffirmationFlag, boolean> {
   const out = {} as Record<AffirmationFlag, boolean>;
   for (const flag of AFFIRMATION_FLAGS) out[flag] = false;
@@ -117,8 +161,19 @@ function emptyAffirmations(): Record<AffirmationFlag, boolean> {
 
 function buildInitialState(app: ConsultantApplication | null): FormState {
   const fields: Record<string, string> = {};
-  for (const key of ALL_FIELD_KEYS) {
-    const v = app?.[key as keyof ConsultantApplication];
+  for (const key of PERSISTED_FIELD_KEYS) {
+    let v = app?.[key as keyof ConsultantApplication];
+    // Build J — migrate pre-Build-J portal data: if there are no JSON
+    // entries yet but the legacy single platform/username pair exists,
+    // seed one entry so the consultant sees + can edit it (and it isn't
+    // lost on the next save).
+    if (key === "portalEntries" && (v == null || !String(v).trim())) {
+      const platform = (app?.portalPlatform ?? "").trim();
+      const username = (app?.portalUsername ?? "").trim();
+      if (platform || username) {
+        v = JSON.stringify([{ platform, username }]);
+      }
+    }
     fields[key] = v == null ? "" : String(v);
   }
   const affirmations = emptyAffirmations();
@@ -161,8 +216,8 @@ function isFieldValueValid(field: SectionField, value: string): boolean {
   if (field.type === "id-type") {
     return trimmed === "DL" || trimmed === "STATE_ID";
   }
-  // Build W — US ZIP: 5 digits, optionally ZIP+4.
-  if (field.key === "addressZip") {
+  // Build W/J — US ZIP: 5 digits, optionally ZIP+4 (residence + current).
+  if (field.key === "addressZip" || field.key === "bgCurrentAddressZip") {
     return /^\d{5}(-\d{4})?$/.test(trimmed);
   }
   return true;
@@ -183,6 +238,11 @@ function digitsOnly(raw: string, maxLen: number): string {
  */
 function isAppendixTouched(section: AgreementSection, form: FormState): boolean {
   if (!section.appendixKey) return false;
+  // Build J — portal platform+username entries live outside section.fields.
+  if (section.id === "appendix4") {
+    const entries = parsePortalEntries(form.fields["portalEntries"]);
+    if (entries.some((e) => e.platform.trim() || e.username.trim())) return true;
+  }
   for (const field of section.fields) {
     if (field.readOnly) continue;
     // implementationPartner doesn't count toward "touched" -- the ERM
@@ -228,6 +288,14 @@ function isFieldRequired(
   if (field.readOnly) return false;
   if (!field.required) return false;
   if (field.key === "bgFullSsn" && !reqs.ssn) return false;
+  // Build J — when "Same as residence" is on, the current-address fields
+  // are not separately required (the residence address is authoritative).
+  if (
+    CURRENT_ADDRESS_KEYS.has(field.key)
+    && form.fields["bgCurrentSameAsResidence"] === "true"
+  ) {
+    return false;
+  }
   if (!isSectionActive(section, form, reqs)) return false;
   return true;
 }
@@ -239,6 +307,7 @@ function isSectionComplete(
   chequeEntries: ChequeEntry[],
   workAuthUploaded: boolean,
   offerLetterUploaded: boolean,
+  dlDocUploaded: boolean,
 ): boolean {
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
@@ -260,6 +329,20 @@ function isSectionComplete(
   // applies, the Offer Letter must be uploaded.
   if (section.id === "appendix1" && isSectionActive(section, form, reqs)) {
     if (!offerLetterUploaded) return false;
+  }
+  // Build J — Appendix 3 completeness: when it applies, the DL / State-ID
+  // document must be uploaded (the SSN document is always optional).
+  if (section.id === "appendix3" && isSectionActive(section, form, reqs)) {
+    if (!dlDocUploaded) return false;
+  }
+  // Build J — Appendix 4 completeness: at least one COMPLETE platform +
+  // username entry is required when the section applies.
+  if (section.id === "appendix4" && isSectionActive(section, form, reqs)) {
+    const entries = parsePortalEntries(form.fields["portalEntries"]);
+    const hasComplete = entries.some(
+      (e) => e.platform.trim().length > 0 && e.username.trim().length > 0,
+    );
+    if (!hasComplete) return false;
   }
   // Build U — Appendix 5 completeness: when the appendix applies,
   // every cheque 0..count-1 needs a number AND an upload.
@@ -311,6 +394,10 @@ function sectionForSpecialKey(key: string): AgreementSection | undefined {
   if (key === "cheques" || key === "chequeUpload") {
     return AGREEMENT_SECTIONS.find((s) => s.id === "appendix5");
   }
+  // Build J — the repeatable portal entries token isn't a config field.
+  if (key === "portalEntries") {
+    return AGREEMENT_SECTIONS.find((s) => s.id === "appendix4");
+  }
   return undefined;
 }
 
@@ -321,10 +408,11 @@ function firstIncompleteIndex(
   chequeEntries: ChequeEntry[],
   workAuthUploaded: boolean,
   offerLetterUploaded: boolean,
+  dlDocUploaded: boolean,
 ): number {
   for (let i = 0; i < sections.length - 1; i++) {
     if (!isSectionComplete(sections[i], form, reqs, chequeEntries,
-        workAuthUploaded, offerLetterUploaded)) return i;
+        workAuthUploaded, offerLetterUploaded, dlDocUploaded)) return i;
   }
   return sections.length - 1;
 }
@@ -426,6 +514,13 @@ export default function ConsultantWizardPage() {
   const [offerLetterUploaded, setOfferLetterUploaded] = useState(false);
   const [offerLetterUploadError, setOfferLetterUploadError] = useState("");
   const [offerLetterUploading, setOfferLetterUploading] = useState(false);
+  // Build J — Background Check upload state (DL/State-ID required; SSN optional).
+  const [dlDocUploaded, setDlDocUploaded] = useState(false);
+  const [dlDocUploadError, setDlDocUploadError] = useState("");
+  const [dlDocUploading, setDlDocUploading] = useState(false);
+  const [ssnDocUploaded, setSsnDocUploaded] = useState(false);
+  const [ssnDocUploadError, setSsnDocUploadError] = useState("");
+  const [ssnDocUploading, setSsnDocUploading] = useState(false);
   // Build G — review-step attestation gate. The consultant must
   // (a) load the generated PDF preview, (b) tick the attestation
   // checkbox, and (c) draw the final signature -- in any order --
@@ -487,9 +582,11 @@ export default function ConsultantWizardPage() {
         lastSavedRef.current = { ...initial };
         const entries = parseChequeList(data.cheques);
         setChequeEntries(entries);
-        // Build W/I — uploads already on file?
+        // Build W/I/J — uploads already on file?
         setWorkAuthUploaded(Boolean(data.workAuthDocPublicId));
         setOfferLetterUploaded(Boolean(data.offerLetterPublicId));
+        setDlDocUploaded(Boolean(data.dlDocPublicId));
+        setSsnDocUploaded(Boolean(data.ssnDocPublicId));
         // Build X — resume at the first incomplete section across the
         // VISIBLE set (core + ERM-required appendices). Hidden
         // appendices are not counted; if every visible non-review
@@ -503,8 +600,9 @@ export default function ConsultantWizardPage() {
             : filterVisibleSections(loadedReqs);
         const loadedWorkAuth = Boolean(data.workAuthDocPublicId);
         const loadedOffer = Boolean(data.offerLetterPublicId);
+        const loadedDl = Boolean(data.dlDocPublicId);
         setCurrentStep(firstIncompleteIndex(
-            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer));
+            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer, loadedDl));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -547,13 +645,18 @@ export default function ConsultantWizardPage() {
       // change for a section outside the scope (the backend would reject
       // it anyway; this keeps out-of-scope values off the wire).
       const restricted = restrictedScopeSet.size > 0;
-      for (const key of ALL_FIELD_KEYS) {
+      for (const key of PERSISTED_FIELD_KEYS) {
         if (current.fields[key] !== snap.fields[key]) {
           if (restricted) {
-            const sec = findSectionForFieldKey(key);
-            if (!sec || !restrictedScopeSet.has(sec.id)) continue;
+            const secId = sectionIdForPersistedKey(key);
+            if (!secId || !restrictedScopeSet.has(secId)) continue;
           }
-          (delta as Record<string, string>)[key] = current.fields[key];
+          // Build J — bgCurrentSameAsResidence is a boolean on the wire.
+          if (key === "bgCurrentSameAsResidence") {
+            (delta as Record<string, boolean>)[key] = current.fields[key] === "true";
+          } else {
+            (delta as Record<string, string>)[key] = current.fields[key];
+          }
         }
       }
       for (const flag of AFFIRMATION_FLAGS) {
@@ -800,6 +903,42 @@ export default function ConsultantWizardPage() {
     [appId],
   );
 
+  // Build J — Background Check DL/State-ID document upload (required).
+  const handleDlDocUpload = useCallback(
+    async (file: File) => {
+      if (!appId) return;
+      setDlDocUploadError("");
+      setDlDocUploading(true);
+      try {
+        await uploadConsultantDlDoc(appId, file);
+        setDlDocUploaded(true);
+      } catch (e) {
+        setDlDocUploadError(e instanceof Error ? e.message : "Couldn't upload.");
+      } finally {
+        setDlDocUploading(false);
+      }
+    },
+    [appId],
+  );
+
+  // Build J — Background Check SSN document upload (optional, never blocks).
+  const handleSsnDocUpload = useCallback(
+    async (file: File) => {
+      if (!appId) return;
+      setSsnDocUploadError("");
+      setSsnDocUploading(true);
+      try {
+        await uploadConsultantSsnDoc(appId, file);
+        setSsnDocUploaded(true);
+      } catch (e) {
+        setSsnDocUploadError(e instanceof Error ? e.message : "Couldn't upload.");
+      } finally {
+        setSsnDocUploading(false);
+      }
+    },
+    [appId],
+  );
+
   const setLegalName = useCallback(
     (value: string) => {
       setForm((prev) => {
@@ -953,14 +1092,14 @@ export default function ConsultantWizardPage() {
         const complete =
           i === visibleSections.length - 1
             ? visibleSections.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded),
+                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded);
+            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded);
   const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -970,12 +1109,12 @@ export default function ConsultantWizardPage() {
   const allComplete = useMemo(
     () =>
       visibleSections.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded),
+        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, attestation, previewSeen],
   );
 
   // Build W — live re-evaluation of the missing list. The backend
@@ -1001,12 +1140,22 @@ export default function ConsultantWizardPage() {
         }
         return false;
       }
-      // Build W/I — uploads have a non-form (upload) completion signal.
+      // Build W/I/J — uploads have a non-form (upload) completion signal.
       if (k === "workAuthDoc") {
         return !workAuthUploaded;
       }
       if (k === "offerLetter") {
         return !offerLetterUploaded;
+      }
+      if (k === "dlDoc") {
+        return !dlDocUploaded;
+      }
+      // Build J — Appendix 4 needs ≥1 complete platform+username entry.
+      if (k === "portalEntries") {
+        const entries = parsePortalEntries(form.fields["portalEntries"]);
+        return !entries.some(
+          (e) => e.platform.trim().length > 0 && e.username.trim().length > 0,
+        );
       }
       const value = form.fields[k] ?? "";
       const section = findSectionForFieldKey(k);
@@ -1036,7 +1185,7 @@ export default function ConsultantWizardPage() {
       missingSignature: missingSig,
       missingFinalSignature: missingFinalSig,
     };
-  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded]);
+  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded]);
 
   // Build W — auto-dismiss the panel the moment the list empties.
   useEffect(() => {
@@ -1305,6 +1454,7 @@ export default function ConsultantWizardPage() {
             chequeEntries={chequeEntries}
             workAuthUploaded={workAuthUploaded}
             offerLetterUploaded={offerLetterUploaded}
+            dlDocUploaded={dlDocUploaded}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -1360,6 +1510,22 @@ export default function ConsultantWizardPage() {
             missingOfferLetter={
               section.id === "appendix1"
               && missingByField.has("offerLetter")
+            }
+            dlDocUploaded={dlDocUploaded}
+            dlDocUploading={dlDocUploading}
+            dlDocError={dlDocUploadError}
+            onUploadDlDoc={(f) => void handleDlDocUpload(f)}
+            missingDlDoc={
+              section.id === "appendix3"
+              && missingByField.has("dlDoc")
+            }
+            ssnDocUploaded={ssnDocUploaded}
+            ssnDocUploading={ssnDocUploading}
+            ssnDocError={ssnDocUploadError}
+            onUploadSsnDoc={(f) => void handleSsnDocUpload(f)}
+            missingPortalEntries={
+              section.id === "appendix4"
+              && missingByField.has("portalEntries")
             }
             phase={app.phase ?? 1}
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
@@ -1731,6 +1897,16 @@ function SectionStep({
   offerLetterError,
   onUploadOfferLetter,
   missingOfferLetter,
+  dlDocUploaded,
+  dlDocUploading,
+  dlDocError,
+  onUploadDlDoc,
+  missingDlDoc,
+  ssnDocUploaded,
+  ssnDocUploading,
+  ssnDocError,
+  onUploadSsnDoc,
+  missingPortalEntries,
   phase,
   onBack,
   onNext,
@@ -1778,6 +1954,18 @@ function SectionStep({
   offerLetterError: string;
   onUploadOfferLetter: (file: File) => void;
   missingOfferLetter: boolean;
+  /** Build J — Background Check DL/State-ID (required) + SSN (optional) uploads. */
+  dlDocUploaded: boolean;
+  dlDocUploading: boolean;
+  dlDocError: string;
+  onUploadDlDoc: (file: File) => void;
+  missingDlDoc: boolean;
+  ssnDocUploaded: boolean;
+  ssnDocUploading: boolean;
+  ssnDocError: string;
+  onUploadSsnDoc: (file: File) => void;
+  /** Build J — Appendix 4 needs ≥1 complete portal entry (flag on submit). */
+  missingPortalEntries: boolean;
   phase: number;
   onBack: () => void;
   onNext: () => void;
@@ -1802,6 +1990,21 @@ function SectionStep({
     phase === 2 && Boolean(section.appendixKey) && !appendixOptional;
   const hasFields = section.fields.length > 0;
   const blocks = content?.sections?.[section.id];
+
+  // Build J — "Same as residence address" toggle for the Background Check
+  // current address. When on, the residence values are copied into the
+  // current-address fields and those fields are locked.
+  const sameAsResidence = form.fields["bgCurrentSameAsResidence"] === "true";
+  const onToggleSameAsResidence = (checked: boolean) => {
+    if (checked) {
+      onField("bgCurrentAddressLine1", form.fields["addressLine1"] ?? "");
+      onField("bgCurrentAddressLine2", form.fields["addressLine2"] ?? "");
+      onField("bgCurrentAddressCity", form.fields["addressCity"] ?? "");
+      onField("bgCurrentAddressState", form.fields["addressState"] ?? "");
+      onField("bgCurrentAddressZip", form.fields["addressZip"] ?? "");
+    }
+    onField("bgCurrentSameAsResidence", checked ? "true" : "false");
+  };
 
   // Build S — track scroll progress inside the document column so the
   // header's "% read" label + the left-edge rail fill stay in sync.
@@ -2059,6 +2262,26 @@ function SectionStep({
             </div>
           )}
 
+          {section.id === "appendix3" && (
+            <label className="flex items-start gap-2.5 rounded-md border border-stone-200 bg-stone-50 px-3 py-2.5 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={sameAsResidence}
+                onChange={(e) => onToggleSameAsResidence(e.target.checked)}
+                className="mt-0.5 h-4 w-4 accent-sage-navy"
+              />
+              <span className="text-[12px] text-stone-700">
+                <span className="font-semibold text-sage-navy">
+                  Current address is the same as my residence address
+                </span>
+                <span className="block text-stone-500">
+                  Uses your residence address as your current address (kept in
+                  sync). Uncheck to enter a different address.
+                </span>
+              </span>
+            </label>
+          )}
+
           {hasFields && (
             <div>
               <h3 className="font-serif text-base text-sage-navy">
@@ -2076,7 +2299,9 @@ function SectionStep({
                     value={
                       field.key === "consultantEmail"
                         ? consultantEmail
-                        : form.fields[field.key] ?? ""
+                        : sameAsResidence && CURRENT_ADDRESS_KEYS.has(field.key)
+                          ? form.fields[RESIDENCE_KEY_FOR[field.key]] ?? ""
+                          : form.fields[field.key] ?? ""
                     }
                     onChange={(v) => onField(field.key, v)}
                     onBlur={() => onTouched(field.key)}
@@ -2084,6 +2309,7 @@ function SectionStep({
                     revealed={revealed.has(field.key)}
                     onRevealToggle={(on) => onRevealed(field.key, on)}
                     needsAttention={missingFieldKeys.has(field.key)}
+                    locked={sameAsResidence && CURRENT_ADDRESS_KEYS.has(field.key)}
                   />
                 ))}
               </div>
@@ -2116,6 +2342,45 @@ function SectionStep({
                 error={offerLetterError}
                 onUpload={onUploadOfferLetter}
                 needsAttention={missingOfferLetter}
+              />
+            </div>
+          )}
+
+          {section.id === "appendix3" && (
+            <div className="space-y-4">
+              <div id="field-dlDoc">
+                <DocUploadBlock
+                  title="Driver's License / State ID document"
+                  description="Upload a copy of your Driver's License or State ID — an image or PDF (≤10 MB)."
+                  inputId="dldoc-file"
+                  uploaded={dlDocUploaded}
+                  uploading={dlDocUploading}
+                  error={dlDocError}
+                  onUpload={onUploadDlDoc}
+                  needsAttention={missingDlDoc}
+                />
+              </div>
+              <div id="field-ssnDoc">
+                <DocUploadBlock
+                  title="SSN document (optional)"
+                  description="Optional — upload a copy of your SSN card or document if you have one (≤10 MB). You can submit without it."
+                  inputId="ssndoc-file"
+                  uploaded={ssnDocUploaded}
+                  uploading={ssnDocUploading}
+                  error={ssnDocError}
+                  onUpload={onUploadSsnDoc}
+                  needsAttention={false}
+                />
+              </div>
+            </div>
+          )}
+
+          {section.id === "appendix4" && (
+            <div id="field-portalEntries">
+              <PortalEntriesBlock
+                value={form.fields["portalEntries"] ?? ""}
+                onChange={(json) => onField("portalEntries", json)}
+                needsAttention={missingPortalEntries}
               />
             </div>
           )}
@@ -2202,6 +2467,7 @@ function FieldInput({
   revealed,
   onRevealToggle,
   needsAttention = false,
+  locked = false,
 }: {
   field: SectionField;
   /** Per-app required (honours readOnly, field.required, SSN gate, optional-section gate). */
@@ -2214,7 +2480,11 @@ function FieldInput({
   onRevealToggle: (on: boolean) => void;
   /** Build W — flagged by a failed submit; render the copper "needs attention" border. */
   needsAttention?: boolean;
+  /** Build J — dynamically disabled (e.g. "Same as residence" lock). */
+  locked?: boolean;
 }) {
+  // Build J — effective read-only = statically ERM-set OR dynamically locked.
+  const ro = field.readOnly || locked;
   const wide =
     field.type === "textarea" ||
     field.key === "residenceAddress" ||
@@ -2233,7 +2503,7 @@ function FieldInput({
           ? "Account number must be exactly 10 digits."
           : field.type === "ssn"
             ? "Use letters and numbers only (no spaces or symbols)."
-            : field.key === "addressZip"
+            : field.key === "addressZip" || field.key === "bgCurrentAddressZip"
               ? "Enter a 5-digit ZIP (optionally ZIP+4)."
             : field.type === "id-type"
               ? "Pick one."
@@ -2246,7 +2516,7 @@ function FieldInput({
       ? "border-red-300 bg-red-50/40"
       : needsAttention
         ? "border-[var(--copper)] bg-[color:var(--copper-wash)]/60"
-        : field.readOnly
+        : ro
           ? "border-stone-200 bg-stone-100 text-stone-600 cursor-not-allowed"
           : "border-stone-300");
 
@@ -2264,7 +2534,7 @@ function FieldInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={field.placeholder}
-        readOnly={field.readOnly}
+        readOnly={ro}
         className={baseInputClasses + " min-h-[80px]"}
       />
     );
@@ -2285,12 +2555,15 @@ function FieldInput({
             <button
               key={code}
               type="button"
+              disabled={ro}
               onClick={() => {
+                if (ro) return;
                 onChange(code);
                 onBlur();
               }}
               className={
                 pillBase
+                + (ro ? "opacity-60 cursor-not-allowed " : "")
                 + (selected
                   ? "bg-sage-navy text-white border-sage-navy"
                   : "bg-white text-gray-700 border-stone-300 hover:border-sage-navy/50")
@@ -2308,7 +2581,7 @@ function FieldInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        disabled={field.readOnly}
+        disabled={ro}
         className={baseInputClasses}
       >
         <option value="">Select…</option>
@@ -2326,7 +2599,7 @@ function FieldInput({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
-        readOnly={field.readOnly}
+        readOnly={ro}
         className={baseInputClasses}
       />
     );
@@ -2367,7 +2640,7 @@ function FieldInput({
           onChange={(e) => handleSensitiveChange(e.target.value)}
           onBlur={onBlur}
           placeholder={ph}
-          readOnly={field.readOnly}
+          readOnly={ro}
           className={baseInputClasses + " pr-9"}
         />
         <button
@@ -2394,7 +2667,7 @@ function FieldInput({
         onChange={(e) => onChange(e.target.value)}
         onBlur={onBlur}
         placeholder={field.placeholder}
-        readOnly={field.readOnly}
+        readOnly={ro}
         className={baseInputClasses}
       />
     );
@@ -3485,6 +3758,115 @@ function DocUploadBlock({
 }
 
 /**
+ * Build J — repeatable Portal Access platform+username entries. Stores a
+ * JSON array string via {@code onChange}; rows include partials while the
+ * consultant types (the backend renders only complete platform+username
+ * pairs). At least one complete entry is required when Appendix 4 applies.
+ */
+const PORTAL_ENTRY_CAP = 10;
+function PortalEntriesBlock({
+  value,
+  onChange,
+  needsAttention,
+}: {
+  value: string;
+  onChange: (json: string) => void;
+  needsAttention: boolean;
+}) {
+  const rows: PortalEntry[] = (() => {
+    if (!value || !value.trim()) return [{ platform: "", username: "" }];
+    try {
+      const arr = JSON.parse(value);
+      if (Array.isArray(arr) && arr.length > 0) {
+        return arr.map((e) => ({
+          platform: typeof e?.platform === "string" ? e.platform : "",
+          username: typeof e?.username === "string" ? e.username : "",
+        }));
+      }
+    } catch {
+      /* fall through */
+    }
+    return [{ platform: "", username: "" }];
+  })();
+
+  const commit = (next: PortalEntry[]) =>
+    onChange(JSON.stringify(next.length > 0 ? next : [{ platform: "", username: "" }]));
+  const update = (i: number, field: "platform" | "username", v: string) =>
+    commit(rows.map((r, idx) => (idx === i ? { ...r, [field]: v } : r)));
+  const add = () => {
+    if (rows.length < PORTAL_ENTRY_CAP) commit([...rows, { platform: "", username: "" }]);
+  };
+  const remove = (i: number) => commit(rows.filter((_, idx) => idx !== i));
+
+  const inputClass =
+    "w-full px-3 py-2.5 text-[14px] rounded-md border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper " +
+    (needsAttention ? "border-[var(--copper)] bg-[color:var(--copper-wash)]/60" : "border-stone-300");
+
+  return (
+    <section
+      className={
+        "rounded-xl border p-4 space-y-3 "
+        + (needsAttention
+          ? "border-[var(--copper)] bg-[color:var(--copper-wash)]/60"
+          : "bg-white border-stone-200")
+      }
+    >
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
+          Authorized platforms{" "}
+          <span className="text-sage-copper-deep" aria-hidden>*</span>
+        </p>
+        <p className="mt-1 text-[12px] text-stone-500">
+          Add each platform we may access on your behalf, with the username /
+          login ID for that platform. At least one is required.
+        </p>
+      </div>
+      <div className="space-y-3">
+        {rows.map((row, i) => (
+          <div key={i} className="flex items-start gap-2">
+            <div className="flex-1 grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                type="text"
+                value={row.platform}
+                onChange={(e) => update(i, "platform", e.target.value)}
+                placeholder="Platform (e.g. LinkedIn, Dice)"
+                className={inputClass}
+              />
+              <input
+                type="text"
+                value={row.username}
+                onChange={(e) => update(i, "username", e.target.value)}
+                placeholder="Username / login ID"
+                className={inputClass}
+              />
+            </div>
+            {rows.length > 1 && (
+              <button
+                type="button"
+                onClick={() => remove(i)}
+                aria-label="Remove platform"
+                className="mt-1 shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-md border border-stone-200 text-stone-500 hover:text-red-600 hover:border-red-200 cursor-pointer"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+      {rows.length < PORTAL_ENTRY_CAP && (
+        <button
+          type="button"
+          onClick={add}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-200 bg-white hover:bg-stone-50 text-sage-navy cursor-pointer"
+        >
+          <Plus size={13} /> Add platform
+        </button>
+      )}
+    </section>
+  );
+}
+
+/**
  * Build U — renders one input group per cheque (driven by the
  * consultant's "Number of cheques" entry). Each group has its own
  * cheque-number and file upload. Replaces the previous single
@@ -3753,6 +4135,7 @@ function ReviewStep({
   chequeEntries,
   workAuthUploaded,
   offerLetterUploaded,
+  dlDocUploaded,
   attestation,
   onAttestation,
   previewSeen,
@@ -3773,9 +4156,10 @@ function ReviewStep({
   onLegalName: (value: string) => void;
   allComplete: boolean;
   chequeEntries: ChequeEntry[];
-  /** Build W/I — uploads present? (non-form completion signals). */
+  /** Build W/I/J — uploads present? (non-form completion signals). */
   workAuthUploaded: boolean;
   offerLetterUploaded: boolean;
+  dlDocUploaded: boolean;
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -3856,7 +4240,7 @@ function ReviewStep({
       </div>
 
       {visibleSections.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix

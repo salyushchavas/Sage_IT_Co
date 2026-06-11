@@ -98,6 +98,10 @@ public class ConsultantApplicationEvent {
         WORK_AUTH_UPLOADED,
         // Build I — consultant uploads their Phase 2 Employment offer letter.
         OFFER_LETTER_UPLOADED,
+        // Build J — Background Check uploads: DL/State-ID doc (required) and
+        // SSN doc (optional).
+        DL_DOC_UPLOADED,
+        SSN_DOC_UPLOADED,
         // 3B — role-based approval workflow. SENT_FOR_APPROVAL when the
         // ERM routes a VERIFIED agreement to the phase's required
         // approvers (also on re-send after a revision); APPROVAL_APPROVED

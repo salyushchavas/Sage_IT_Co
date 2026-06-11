@@ -480,11 +480,42 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         required: true,
         help: "Maiden name, nicknames, or aliases. Enter 'N/A' if none.",
       },
+      // Build J — structured current address (mirrors residence address).
+      // The "Same as residence address" toggle is rendered above these
+      // in the wizard (copies + locks the residence values).
       {
-        key: "bgCurrentAddress",
-        label: "Current address",
-        type: "textarea",
+        key: "bgCurrentAddressLine1",
+        label: "Address line 1",
+        type: "text",
         required: true,
+        placeholder: "Street address",
+      },
+      {
+        key: "bgCurrentAddressLine2",
+        label: "Address line 2",
+        type: "text",
+        required: false,
+        placeholder: "Apt, suite, unit (optional)",
+      },
+      {
+        key: "bgCurrentAddressCity",
+        label: "City",
+        type: "text",
+        required: true,
+      },
+      {
+        key: "bgCurrentAddressState",
+        label: "State",
+        type: "select",
+        required: true,
+        options: US_STATE_OPTIONS,
+      },
+      {
+        key: "bgCurrentAddressZip",
+        label: "ZIP code",
+        type: "text",
+        required: true,
+        placeholder: "78701 or 78701-1234",
       },
       {
         key: "bgDateOfBirth",
@@ -518,6 +549,22 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         sensitive: true,
         help: "Include the issuing state.",
       },
+      // Build J — DL/State-ID document upload (required) sits with the ID
+      // number; SSN document upload (optional) sits with the SSN.
+      {
+        key: "dlDoc",
+        label: "Driver's License / State ID document",
+        type: "file",
+        required: true,
+        help: "Upload a copy of your Driver's License or State ID (image or PDF).",
+      },
+      {
+        key: "ssnDoc",
+        label: "SSN document (optional)",
+        type: "file",
+        required: false,
+        help: "Optional — upload a copy of your SSN card or document if you have one (image or PDF). You can submit without it.",
+      },
     ],
     requiresSignature: false,
     requiresAffirmation: true,
@@ -533,19 +580,9 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
       "Grants Sage IT limited, revocable access to specified job-search portals so we can help you navigate listings and applications. Scope of access is defined by you, and you can revoke it at any time.",
     why: "Authorizes limited, revocable access to specified job-search portals for navigation support.",
     fields: [
-      {
-        key: "portalPlatform",
-        label: "Authorized platform",
-        type: "text",
-        required: true,
-        placeholder: "e.g. LinkedIn Recruiter, Dice, Indeed",
-      },
-      {
-        key: "portalUsername",
-        label: "Username / login ID",
-        type: "text",
-        required: true,
-      },
+      // Build J — platform + username are now a REPEATABLE list, rendered by
+      // a dedicated add/remove block in the wizard (PortalEntriesBlock), not
+      // as single fields here. The remaining fields stay section-level.
       {
         key: "portalAuthorizedActions",
         label: "Authorized actions",

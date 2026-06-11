@@ -36,6 +36,8 @@ import {
   ermChequeViewUrl,
   ermWorkAuthViewUrl,
   ermOfferLetterViewUrl,
+  ermDlDocViewUrl,
+  ermSsnDocViewUrl,
   ermRequestRevision,
   ermSendForApproval,
   ermSendPdfToEmail,
@@ -1382,6 +1384,43 @@ function OfferLetterCard({ app }: { app: ConsultantApplication }) {
   );
 }
 
+// ── Build J — Background Check document uploads (read-only) ───────
+
+function UploadedDocCard({
+  title,
+  uploaded,
+  uploadedAt,
+  href,
+}: {
+  title: string;
+  uploaded: boolean;
+  uploadedAt: string | null;
+  href: string;
+}) {
+  if (!uploaded) return null;
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+      <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
+        <h3 className="font-serif text-lg text-gray-900">{title}</h3>
+      </header>
+      <div className="px-5 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-gray-500 inline-flex items-center gap-1.5">
+          <CheckCircle2 size={13} className="text-emerald-600" />
+          Uploaded{uploadedAt ? ` ${formatUsDate(uploadedAt)}` : ""}
+        </p>
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer"
+        >
+          <FileText size={12} /> View document
+        </a>
+      </div>
+    </section>
+  );
+}
+
 // ── Consultant-filled sections (read-only) ────────────────────
 
 function ConsultantSections({ app }: { app: ConsultantApplication }) {
@@ -1392,6 +1431,18 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
       ))}
       <WorkAuthDocCard app={app} />
       <OfferLetterCard app={app} />
+      <UploadedDocCard
+        title="Driver's License / State ID document"
+        uploaded={Boolean(app.dlDocPublicId)}
+        uploadedAt={app.dlDocUploadedAt}
+        href={ermDlDocViewUrl(app.applicationId)}
+      />
+      <UploadedDocCard
+        title="SSN document"
+        uploaded={Boolean(app.ssnDocPublicId)}
+        uploadedAt={app.ssnDocUploadedAt}
+        href={ermSsnDocViewUrl(app.applicationId)}
+      />
       <SecurityChequeCard app={app} />
     </div>
   );

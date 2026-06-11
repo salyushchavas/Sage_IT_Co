@@ -1325,6 +1325,22 @@ public class DataSeeder implements CommandLineRunner {
                 {"offer_letter_public_id VARCHAR(255)", "offer_letter_public_id"},
                 {"offer_letter_uploaded_at TIMESTAMP", "offer_letter_uploaded_at"},
                 {"offer_letter_content_type VARCHAR(64)", "offer_letter_content_type"},
+                // Build J — Background Check structured current address.
+                {"bg_current_address_line1 VARCHAR(255)", "bg_current_address_line1"},
+                {"bg_current_address_line2 VARCHAR(255)", "bg_current_address_line2"},
+                {"bg_current_address_city VARCHAR(120)", "bg_current_address_city"},
+                {"bg_current_address_state VARCHAR(8)", "bg_current_address_state"},
+                {"bg_current_address_zip VARCHAR(16)", "bg_current_address_zip"},
+                {"bg_current_same_as_residence BOOLEAN", "bg_current_same_as_residence"},
+                // Build J — Background Check document uploads (DL/State-ID + SSN).
+                {"dl_doc_public_id VARCHAR(255)", "dl_doc_public_id"},
+                {"dl_doc_uploaded_at TIMESTAMP", "dl_doc_uploaded_at"},
+                {"dl_doc_content_type VARCHAR(64)", "dl_doc_content_type"},
+                {"ssn_doc_public_id VARCHAR(255)", "ssn_doc_public_id"},
+                {"ssn_doc_uploaded_at TIMESTAMP", "ssn_doc_uploaded_at"},
+                {"ssn_doc_content_type VARCHAR(64)", "ssn_doc_content_type"},
+                // Build J — repeatable Portal Access platform+username entries.
+                {"portal_entries TEXT", "portal_entries"},
         };
         for (String[] col : columns) {
             try {
