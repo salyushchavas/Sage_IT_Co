@@ -3806,12 +3806,6 @@ export const adminArchiveApplication = adminDeleteApplication;
 
 // ── Agreement-ERM operations ────────────────────────────────────
 
-/** Build Y — one ERM-filled ACH debit row (date is ISO yyyy-MM-dd). */
-export interface AchDebitRow {
-  date: string;
-  amount: string;
-}
-
 export async function createConsultantApplication(data: {
   consultantEmail: string;
   consultantName?: string;
@@ -3839,8 +3833,10 @@ export async function createConsultantApplication(data: {
   requireAppendix4?: boolean;
   requireAppendix5?: boolean;
   requireSsn?: boolean;
-  // Build Y — ERM-filled ACH debit schedule (repeatable date/amount rows).
-  achDebitSchedule?: AchDebitRow[];
+  // Build Y — ERM-filled ACH debit schedule (single free-text fields,
+  // e.g. "15th of every month" / "$416.67"); read-only to the consultant.
+  achDebitDates?: string;
+  achDebitAmounts?: string;
   // Legacy JSON-textarea payload. New /agreement-erm/new form does
   // not send it; preserved so the detail-view edit panel and any
   // other in-flight caller keeps compiling.

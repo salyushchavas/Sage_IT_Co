@@ -8,9 +8,7 @@ import {
   ArrowLeft,
   FilePlus2,
   Loader2,
-  Plus,
   Save,
-  Trash2,
 } from "lucide-react";
 
 import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
@@ -48,9 +46,10 @@ interface FormState {
   // enabled when Appendix 3 is also required (Required iff requireSsn
   // AND Appendix 3 active).
   requireSsn: boolean;
-  // Build Y — ERM-filled ACH debit schedule (repeatable date/amount rows).
-  // date is an ISO yyyy-MM-dd from the date input; rendered MM-DD-YYYY.
-  achDebitRows: { date: string; amount: string }[];
+  // Build Y — ERM-filled ACH debit schedule. Single free-text fields
+  // (e.g. "15th of every month" / "$416.67"); read-only to the consultant.
+  achDebitDates: string;
+  achDebitAmounts: string;
 }
 
 // Build W — the eight ERM-selectable work-authorization options, shared
@@ -74,7 +73,8 @@ const EMPTY: FormState = {
   requireAppendix4: false,
   requireAppendix5: false,
   requireSsn: false,
-  achDebitRows: [],
+  achDebitDates: "",
+  achDebitAmounts: "",
 };
 
 /**
@@ -118,25 +118,6 @@ export default function NewConsultantApplicationPage() {
       }
       return next;
     });
-
-  // Build Y — ACH debit schedule row management (ERM-filled).
-  const addAchRow = () =>
-    setForm((s) => ({
-      ...s,
-      achDebitRows: [...s.achDebitRows, { date: "", amount: "" }],
-    }));
-  const updateAchRow = (i: number, field: "date" | "amount", value: string) =>
-    setForm((s) => ({
-      ...s,
-      achDebitRows: s.achDebitRows.map((r, idx) =>
-        idx === i ? { ...r, [field]: value } : r,
-      ),
-    }));
-  const removeAchRow = (i: number) =>
-    setForm((s) => ({
-      ...s,
-      achDebitRows: s.achDebitRows.filter((_, idx) => idx !== i),
-    }));
 
   const trimmedStrings = {
     firstName: form.firstName.trim(),
@@ -191,10 +172,6 @@ export default function NewConsultantApplicationPage() {
 
     setIsSubmitting(true);
     try {
-      // Build Y — only ship rows where both date + amount are present.
-      const achDebitSchedule = form.achDebitRows
-        .map((r) => ({ date: r.date.trim(), amount: r.amount.trim() }))
-        .filter((r) => r.date.length > 0 && r.amount.length > 0);
       const app = await createConsultantApplication({
         ...trimmedStrings,
         requireAppendix1: form.requireAppendix1,
@@ -203,7 +180,9 @@ export default function NewConsultantApplicationPage() {
         requireAppendix4: form.requireAppendix4,
         requireAppendix5: form.requireAppendix5,
         requireSsn: form.requireSsn,
-        ...(achDebitSchedule.length > 0 ? { achDebitSchedule } : {}),
+        // Build Y — single ERM-filled debit date/amount free-text.
+        achDebitDates: form.achDebitDates.trim(),
+        achDebitAmounts: form.achDebitAmounts.trim(),
       });
       router.replace(`/agreements/${app.applicationId}`);
     } catch (err) {
@@ -396,56 +375,31 @@ export default function NewConsultantApplicationPage() {
           <section className="space-y-3">
             <SectionHeader title="ACH debit schedule (optional)" />
             <p className="text-[11px] text-gray-500">
-              Pre-fill the Appendix 2 debit schedule. Add one row per
-              scheduled debit; dates render as MM-DD-YYYY and are read-only
+              Pre-fill the Appendix 2 debit date(s) and amount(s).
+              Free-text (e.g. &ldquo;15th of every month&rdquo;); read-only
               to the consultant.
             </p>
-            <div className="space-y-2">
-              {form.achDebitRows.length === 0 && (
-                <p className="text-[11px] text-gray-400 italic">
-                  No debit rows yet.
-                </p>
-              )}
-              {form.achDebitRows.map((row, i) => (
-                <div key={i} className="flex items-end gap-2">
-                  <Field label={i === 0 ? "Debit date" : ""}>
-                    <input
-                      type="date"
-                      value={row.date}
-                      onChange={(e) => updateAchRow(i, "date", e.target.value)}
-                      disabled={isSubmitting}
-                      className={inputClass}
-                    />
-                  </Field>
-                  <Field label={i === 0 ? "Amount" : ""}>
-                    <input
-                      type="text"
-                      value={row.amount}
-                      onChange={(e) => updateAchRow(i, "amount", e.target.value)}
-                      disabled={isSubmitting}
-                      placeholder="$416.67"
-                      className={inputClass}
-                    />
-                  </Field>
-                  <button
-                    type="button"
-                    onClick={() => removeAchRow(i)}
-                    disabled={isSubmitting}
-                    aria-label="Remove debit row"
-                    className="mb-0.5 shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-md border border-gray-200 text-gray-500 hover:text-red-600 hover:border-red-200 cursor-pointer disabled:opacity-50"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              ))}
-              <button
-                type="button"
-                onClick={addAchRow}
-                disabled={isSubmitting}
-                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-sage-navy cursor-pointer disabled:opacity-50"
-              >
-                <Plus size={13} /> Add debit row
-              </button>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <Field label="Debit date(s)">
+                <input
+                  type="text"
+                  value={form.achDebitDates}
+                  onChange={setText("achDebitDates")}
+                  disabled={isSubmitting}
+                  placeholder="e.g. 15th of every month"
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Debit amount(s)">
+                <input
+                  type="text"
+                  value={form.achDebitAmounts}
+                  onChange={setText("achDebitAmounts")}
+                  disabled={isSubmitting}
+                  placeholder="e.g. $416.67"
+                  className={inputClass}
+                />
+              </Field>
             </div>
           </section>
 

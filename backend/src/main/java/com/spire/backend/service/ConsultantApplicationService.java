@@ -142,7 +142,8 @@ public class ConsultantApplicationService {
             Boolean requireAppendix4,
             Boolean requireAppendix5,
             Boolean requireSsn,
-            JsonNode achDebitSchedule,
+            String achDebitDates,
+            String achDebitAmounts,
             JsonNode payload,
             String ownerErmId,
             HttpServletRequest request
@@ -153,38 +154,12 @@ public class ConsultantApplicationService {
         LocalDateTime now = LocalDateTime.now();
         String payloadJson = stringify(payload);
 
-        // Build Y — ERM-filled ACH debit schedule (multi-row). Persist the
-        // JSON rows and flatten to the legacy comma-joined columns (dates
-        // MM-DD-YYYY) so the existing ${achDebitDates}/${achDebitAmounts}
-        // placeholders render unchanged; read-only to the consultant.
-        String achScheduleJson = null;
-        String achDatesJoined = null;
-        String achAmountsJoined = null;
-        if (achDebitSchedule != null && achDebitSchedule.isArray()
-                && achDebitSchedule.size() > 0) {
-            java.util.List<String> dates = new java.util.ArrayList<>();
-            java.util.List<String> amounts = new java.util.ArrayList<>();
-            com.fasterxml.jackson.databind.node.ArrayNode clean = objectMapper.createArrayNode();
-            for (JsonNode row : achDebitSchedule) {
-                String d = blankToNull(row.path("date").asText(""));
-                String a = blankToNull(row.path("amount").asText(""));
-                // Only keep rows with BOTH a date AND an amount so the
-                // flattened columns stay index-aligned (date[i]↔amount[i]),
-                // even when a malformed/direct API request sends partials.
-                if (d == null || a == null) continue;
-                dates.add(formatIsoToUs(d));
-                amounts.add(a);
-                com.fasterxml.jackson.databind.node.ObjectNode o = objectMapper.createObjectNode();
-                o.put("date", d);
-                o.put("amount", a);
-                clean.add(o);
-            }
-            if (!dates.isEmpty()) {
-                achScheduleJson = clean.toString();
-                achDatesJoined = String.join(", ", dates);
-                achAmountsJoined = String.join(", ", amounts);
-            }
-        }
+        // Build Y — ERM-filled ACH debit schedule: single free-text date(s)
+        // + amount(s) (e.g. "15th of every month" / "$416.67"). Stored on
+        // the existing ${achDebitDates}/${achDebitAmounts} columns; read-
+        // only to the consultant.
+        String achDatesValue = blankToNull(achDebitDates);
+        String achAmountsValue = blankToNull(achDebitAmounts);
 
         // Build W — structured name. Compose consultant_name from
         // First + Middle? + Last; fall back to the single legacy field.
@@ -228,10 +203,9 @@ public class ConsultantApplicationService {
                 .requireAppendix4(Boolean.TRUE.equals(requireAppendix4))
                 .requireAppendix5(Boolean.TRUE.equals(requireAppendix5))
                 .requireSsn(Boolean.TRUE.equals(requireSsn))
-                // Build Y — ERM-filled ACH debit schedule (+ flattened views).
-                .achDebitSchedule(achScheduleJson)
-                .achDebitDates(achDatesJoined)
-                .achDebitAmounts(achAmountsJoined)
+                // Build Y — ERM-filled single ACH debit date(s)/amount(s).
+                .achDebitDates(achDatesValue)
+                .achDebitAmounts(achAmountsValue)
                 // Build G — effective date is the creation date. Was
                 // formerly set at ermApproveAndSign; moving it here so
                 // the consultant sees a stable "Effective: MM-DD-YYYY"
@@ -2686,14 +2660,6 @@ public class ConsultantApplicationService {
         return t.isEmpty() ? null : t;
     }
 
-    /** Build Y — reformat an ISO yyyy-MM-dd date as MM-DD-YYYY (passthrough otherwise). */
-    private static String formatIsoToUs(String iso) {
-        if (iso == null) return null;
-        java.util.regex.Matcher m = java.util.regex.Pattern
-                .compile("^(\\d{4})-(\\d{2})-(\\d{2})").matcher(iso.trim());
-        if (m.find()) return m.group(2) + "-" + m.group(3) + "-" + m.group(1);
-        return iso.trim();
-    }
 
     /**
      * Compose "First Middle? Last" from already-trimmed (or null) parts.

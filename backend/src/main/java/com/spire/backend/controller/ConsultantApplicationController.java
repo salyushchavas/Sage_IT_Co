@@ -129,7 +129,8 @@ public class ConsultantApplicationController {
                 body.requireAppendix4,
                 body.requireAppendix5,
                 body.requireSsn,
-                body.achDebitSchedule,
+                body.achDebitDates,
+                body.achDebitAmounts,
                 body.payload,
                 // Authenticated agreement user, stamped as the owner.
                 AgreementAuthz.userId(request),
@@ -1247,10 +1248,12 @@ public class ConsultantApplicationController {
         // Appendix 3 is being completed (i.e. required, or
         // optional-but-touched).
         public Boolean requireSsn;
-        // Build Y — ERM-filled ACH debit schedule: a JSON array of
-        // {date (ISO yyyy-MM-dd), amount} rows. Persisted + flattened to
-        // ${achDebitDates}/${achDebitAmounts} (read-only to the consultant).
-        public JsonNode achDebitSchedule;
+        // Build Y — ERM-filled single ACH debit date(s)/amount(s) free-text
+        // (e.g. "15th of every month" / "$416.67"); read-only to the
+        // consultant, rendered into the ${achDebitDates}/${achDebitAmounts}
+        // placeholders.
+        public String achDebitDates;
+        public String achDebitAmounts;
         // Legacy free-form payload, preserved for backward compat
         // with the existing /agreement-erm/new form. New flow ignores it.
         public JsonNode payload;
