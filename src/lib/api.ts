@@ -3796,6 +3796,23 @@ export async function adminResetUserPassword(id: string, newPassword: string) {
   );
 }
 
+// Build K2 — super-admin changes a user's role / deletes a user.
+export async function adminChangeUserRole(
+  id: string,
+  role: Exclude<AgreementUserRole, "SUPER_ADMIN">,
+) {
+  return agreementAdminFetch<AgreementUserDto>(
+    `/api/agreements/admin/users/${id}/role`,
+    { method: "PATCH", body: JSON.stringify({ role }) },
+  );
+}
+
+export async function adminDeleteUser(id: string) {
+  return agreementAdminFetch<null>(`/api/agreements/admin/users/${id}`, {
+    method: "DELETE",
+  });
+}
+
 // Build K — per-ERM Manager/Accounts assignments (super-admin only).
 export interface ErmAssignments {
   managerIds: string[];

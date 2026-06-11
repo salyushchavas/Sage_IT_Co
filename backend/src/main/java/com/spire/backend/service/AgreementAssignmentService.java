@@ -1,9 +1,11 @@
 package com.spire.backend.service;
 
+import com.spire.backend.entity.AgreementApproval;
 import com.spire.backend.entity.AgreementErmAssignment;
 import com.spire.backend.entity.AgreementUser;
 import com.spire.backend.entity.AgreementUserRole;
 import com.spire.backend.exception.ResourceNotFoundException;
+import com.spire.backend.repository.AgreementApprovalRepository;
 import com.spire.backend.repository.AgreementErmAssignmentRepository;
 import com.spire.backend.repository.AgreementUserRepository;
 import lombok.RequiredArgsConstructor;
@@ -26,6 +28,7 @@ public class AgreementAssignmentService {
 
     private final AgreementErmAssignmentRepository assignmentRepository;
     private final AgreementUserRepository userRepository;
+    private final AgreementApprovalRepository approvalRepository;
 
     /** The approver users currently assigned to an ERM for a role (active only, by name). */
     @Transactional(readOnly = true)
@@ -90,6 +93,25 @@ public class AgreementAssignmentService {
                     .approverUserId(id)
                     .role(role)
                     .build());
+        }
+    }
+
+    /**
+     * Build K2 — drop every assignment link involving a user (as the ERM or
+     * as an approver) and un-route any PENDING approval gate routed to them
+     * (revert to role-wide), so a role change or deletion never strands an
+     * approval or leaves a dangling assignment. Idempotent.
+     */
+    @Transactional
+    public void purgeUserLinks(String userId) {
+        assignmentRepository.deleteByErmUserId(userId);
+        assignmentRepository.deleteByApproverUserId(userId);
+        List<AgreementApproval> pending = approvalRepository
+                .findByApproverUserIdAndStatus(userId, AgreementApproval.Decision.PENDING);
+        for (AgreementApproval row : pending) {
+            row.setApproverUserId(null);
+            row.setApproverName(null);
+            approvalRepository.save(row);
         }
     }
 }

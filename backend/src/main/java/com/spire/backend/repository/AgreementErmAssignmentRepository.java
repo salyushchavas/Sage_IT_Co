@@ -19,4 +19,11 @@ public interface AgreementErmAssignmentRepository
 
     @Transactional
     void deleteByErmUserIdAndRole(String ermUserId, AgreementUserRole role);
+
+    // Build K2 — purge every link for a user being re-roled or deleted.
+    @Transactional
+    void deleteByErmUserId(String ermUserId);
+
+    @Transactional
+    void deleteByApproverUserId(String approverUserId);
 }

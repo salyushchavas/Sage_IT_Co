@@ -43,6 +43,7 @@ public class AgreementAdminController {
     private final PasswordEncoder passwordEncoder;
     private final ConsultantApplicationService consultantService;
     private final com.spire.backend.service.AgreementAssignmentService assignmentService;
+    private final com.spire.backend.repository.ConsultantApplicationRepository applicationRepository;
 
     @GetMapping("/users")
     public ResponseEntity<ApiResponse<List<AgreementUserDto>>> listUsers(
@@ -187,6 +188,72 @@ public class AgreementAdminController {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user = agreementUserRepository.save(user);
         return ResponseEntity.ok(ApiResponse.success(AgreementUserDto.from(user)));
+    }
+
+    /**
+     * Build K2 — super-admin changes a console user's role (ERM / MANAGER /
+     * ACCOUNTS). Re-roling purges the user's assignment links and un-routes
+     * any pending approval gates routed to them (so nothing is stranded).
+     */
+    @PatchMapping("/users/{id}/role")
+    @Transactional
+    public ResponseEntity<ApiResponse<AgreementUserDto>> changeRole(
+            @PathVariable String id,
+            @RequestBody RoleBody body,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        AgreementUser user = agreementUserRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
+        if (user.getRole() == AgreementUserRole.SUPER_ADMIN) {
+            throw new IllegalStateException("The super-admin's role cannot be changed.");
+        }
+        if (id.equals(AgreementAuthz.userId(request))) {
+            throw new IllegalStateException("You cannot change your own role.");
+        }
+        AgreementUserRole newRole = parseAssignableRole(body == null ? null : body.role);
+        if (user.getRole() == newRole) {
+            return ResponseEntity.ok(ApiResponse.success(AgreementUserDto.from(user)));
+        }
+        // The old role's assignment links + routed gates no longer apply.
+        assignmentService.purgeUserLinks(id);
+        user.setRole(newRole);
+        user = agreementUserRepository.save(user);
+        return ResponseEntity.ok(ApiResponse.success("Role updated", AgreementUserDto.from(user)));
+    }
+
+    /**
+     * Build K2 — super-admin deletes a console user (frees the email).
+     * Blocked for the super-admin, the caller's own account, and any ERM
+     * that still owns live agreements (disable instead, to avoid orphaning
+     * them). Purges assignment links + un-routes pending gates first.
+     */
+    @DeleteMapping("/users/{id}")
+    @Transactional
+    public ResponseEntity<ApiResponse<Void>> deleteUser(
+            @PathVariable String id,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        AgreementUser user = agreementUserRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
+        if (user.getRole() == AgreementUserRole.SUPER_ADMIN) {
+            throw new IllegalStateException("The super-admin account cannot be deleted.");
+        }
+        if (id.equals(AgreementAuthz.userId(request))) {
+            throw new IllegalStateException("You cannot delete your own account.");
+        }
+        long owned = applicationRepository.countByOwnerErmIdAndDeletedFalse(id);
+        if (owned > 0) {
+            throw new IllegalStateException(
+                    "This user owns " + owned + " agreement(s). Disable the user instead of "
+                    + "deleting — deleting would hide those agreements.");
+        }
+        assignmentService.purgeUserLinks(id);
+        agreementUserRepository.delete(user);
+        return ResponseEntity.ok(ApiResponse.success("User deleted", null));
+    }
+
+    public static class RoleBody {
+        public String role;
     }
 
     // ── Build K — per-ERM Manager / Accounts assignments ─────────────

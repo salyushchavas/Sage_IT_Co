@@ -65,6 +65,9 @@ public interface ConsultantApplicationRepository
 
     long countByErmUserIdAndStatus(Long ermUserId, String status);
 
+    /** Build K2 — live agreements owned by an ERM (delete-user safety check). */
+    long countByOwnerErmIdAndDeletedFalse(String ownerErmId);
+
     // 3B — approval status boards. All live rows in the given statuses
     // (super-admin) or just the owning ERM's (per-ERM isolation), newest
     // activity first.

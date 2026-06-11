@@ -15,6 +15,8 @@ import {
   Loader2,
   RefreshCw,
   ShieldCheck,
+  Trash2,
+  UserCog,
   UserPlus,
   Users,
   X,
@@ -24,7 +26,9 @@ import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
 import AgreementsByErmView from "@/components/agreement-erm/AgreementsByErmView";
 import {
   AdminApiError,
+  adminChangeUserRole,
   adminCreateUser,
+  adminDeleteUser,
   adminGetErmAssignments,
   adminListUsers,
   adminResetUserPassword,
@@ -57,6 +61,8 @@ export default function AgreementsAdminPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<AgreementUserDto | null>(null);
   const [assignTarget, setAssignTarget] = useState<AgreementUserDto | null>(null);
+  const [roleTarget, setRoleTarget] = useState<AgreementUserDto | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<AgreementUserDto | null>(null);
   const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>("users");
@@ -236,7 +242,7 @@ export default function AgreementsAdminPage() {
                         {formatDate(u.lastLoginAt)}
                       </td>
                       <td className="px-4 py-2">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-2 flex-wrap">
                           {/* Build K — assign Managers/Accounts to an ERM. */}
                           {u.role === "ERM" && (
                             <button
@@ -247,6 +253,16 @@ export default function AgreementsAdminPage() {
                               <Users size={11} /> Assign team
                             </button>
                           )}
+                          {/* Build K2 — change role (not super-admin, not self). */}
+                          {!isSuperAdmin && !isSelf && (
+                            <button
+                              type="button"
+                              onClick={() => setRoleTarget(u)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+                            >
+                              <UserCog size={11} /> Role
+                            </button>
+                          )}
                           {/* Reset is for ERMs only (server blocks super-admins). */}
                           {!isSuperAdmin && (
                             <button
@@ -255,6 +271,16 @@ export default function AgreementsAdminPage() {
                               className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
                             >
                               <KeyRound size={11} /> Reset
+                            </button>
+                          )}
+                          {/* Build K2 — delete (not super-admin, not self). */}
+                          {!isSuperAdmin && !isSelf && (
+                            <button
+                              type="button"
+                              onClick={() => setDeleteTarget(u)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-red-200 bg-white hover:bg-red-50 text-red-700 cursor-pointer"
+                            >
+                              <Trash2 size={11} /> Delete
                             </button>
                           )}
                           {/* Hide the disable toggle on the super-admin's own row. */}
@@ -318,6 +344,28 @@ export default function AgreementsAdminPage() {
           erm={assignTarget}
           allUsers={users}
           onClose={() => setAssignTarget(null)}
+        />
+      )}
+
+      {roleTarget && (
+        <ChangeRoleModal
+          user={roleTarget}
+          onClose={() => setRoleTarget(null)}
+          onDone={() => {
+            setRoleTarget(null);
+            void loadUsers();
+          }}
+        />
+      )}
+
+      {deleteTarget && (
+        <DeleteUserModal
+          user={deleteTarget}
+          onClose={() => setDeleteTarget(null)}
+          onDone={() => {
+            setDeleteTarget(null);
+            void loadUsers();
+          }}
         />
       )}
       </>
@@ -887,6 +935,182 @@ function AssignTeamModal({
           >
             {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
             Save assignments
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Build K2 — assignable role options (SUPER_ADMIN is never user-assignable).
+const ROLE_OPTIONS: { value: "ERM" | "MANAGER" | "ACCOUNTS"; label: string }[] = [
+  { value: "ERM", label: "ERM — creates & manages agreements" },
+  { value: "MANAGER", label: "Manager — approval gate (Phase 1 + 2)" },
+  { value: "ACCOUNTS", label: "Accounts — approval gate (Phase 2)" },
+];
+
+// Build K2 — super-admin changes a user's role.
+function ChangeRoleModal({
+  user,
+  onClose,
+  onDone,
+}: {
+  user: AgreementUserDto;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [role, setRole] = useState<"ERM" | "MANAGER" | "ACCOUNTS">(
+    user.role === "MANAGER" || user.role === "ACCOUNTS" ? user.role : "ERM",
+  );
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const changed = role !== user.role;
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await adminChangeUserRole(user.id, role);
+      onDone();
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Couldn't change role.");
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-gray-100 flex items-start justify-between">
+          <div>
+            <h3 className="font-serif text-lg text-gray-900">Change role</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {user.fullName} &middot; {user.email}
+            </p>
+          </div>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 sm:px-6 py-4 space-y-3">
+          <div>
+            <label className="block text-xs font-semibold text-gray-700 mb-1">Role</label>
+            <select
+              value={role}
+              onChange={(e) => setRole(e.target.value as "ERM" | "MANAGER" | "ACCOUNTS")}
+              className="w-full px-3 py-2.5 text-[14px] rounded-md border border-gray-300 bg-white focus:outline-none focus:ring-2 focus:ring-sage-navy/30"
+            >
+              {ROLE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          {changed && (
+            <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2 inline-flex items-start gap-1.5">
+              <AlertCircle size={12} className="mt-0.5 shrink-0" />
+              Changing the role clears this user&apos;s team assignments and
+              un-routes any pending approvals routed to them.
+            </p>
+          )}
+          {error && (
+            <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+              <AlertCircle size={12} /> {error}
+            </p>
+          )}
+        </div>
+        <div className="px-5 sm:px-6 py-3 border-t border-gray-100 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 rounded-md text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!changed || saving}
+            onClick={() => void handleSave()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            Save role
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Build K2 — super-admin deletes a console user (frees the email).
+function DeleteUserModal({
+  user,
+  onClose,
+  onDone,
+}: {
+  user: AgreementUserDto;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleDelete = async () => {
+    setDeleting(true);
+    setError("");
+    try {
+      await adminDeleteUser(user.id);
+      onDone();
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Couldn't delete user.");
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-gray-100 flex items-start justify-between">
+          <h3 className="font-serif text-lg text-gray-900">Delete user</h3>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 sm:px-6 py-4 space-y-3">
+          <p className="text-[13px] text-gray-700">
+            Permanently delete <span className="font-semibold">{user.fullName}</span>{" "}
+            ({user.email})? This frees the email for reuse and removes their team
+            assignments. Past approval decisions stay in the audit trail.
+          </p>
+          <p className="text-[11px] text-gray-500">
+            Prefer <span className="font-semibold">Disable</span> if you only want
+            to revoke access. An ERM that still owns agreements can&apos;t be
+            deleted.
+          </p>
+          {error && (
+            <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+              <AlertCircle size={12} /> {error}
+            </p>
+          )}
+        </div>
+        <div className="px-5 sm:px-6 py-3 border-t border-gray-100 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 rounded-md text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={deleting}
+            onClick={() => void handleDelete()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-red-600 text-white hover:bg-red-700 cursor-pointer disabled:opacity-50"
+          >
+            {deleting ? <Loader2 size={12} className="animate-spin" /> : <Trash2 size={12} />}
+            Delete user
           </button>
         </div>
       </div>
