@@ -1416,6 +1416,28 @@ public class DataSeeder implements CommandLineRunner {
                         + "unsupported dialect): {}", idx[0], e.getMessage());
             }
         }
+
+        // Build K3 — drop stale Hibernate-generated enum CHECK constraints.
+        // When an @Enumerated(STRING) column's table is first created,
+        // Hibernate bakes a CHECK (col IN (<values-at-creation>)). ddl-auto=
+        // update NEVER updates it, so once an enum gains values, inserts with
+        // the new values are rejected (e.g. agreement_user.role only allowed
+        // {SUPER_ADMIN, ERM} until MANAGER + ACCOUNTS were added, breaking
+        // Manager/Accounts user creation). The columns are plain VARCHARs;
+        // valid values are enforced in the application layer. Idempotent.
+        String[][] staleEnumChecks = {
+                {"agreement_user", "agreement_user_role_check"},
+        };
+        for (String[] c : staleEnumChecks) {
+            try {
+                jdbcTemplate.execute(
+                        "ALTER TABLE " + c[0] + " DROP CONSTRAINT IF EXISTS " + c[1]);
+                log.info("Ensured stale enum check {} is dropped", c[1]);
+            } catch (Exception e) {
+                log.debug("Couldn't drop constraint {} (likely already gone or "
+                        + "unsupported dialect): {}", c[1], e.getMessage());
+            }
+        }
     }
 
     /**
