@@ -502,8 +502,19 @@ function CreateUserModal({
       });
       onCreated(email.trim().toLowerCase(), password);
     } catch (e) {
-      if (e instanceof AdminApiError && e.status === 409) {
-        setEmailTaken(true);
+      // Build K3 — only the genuine "email already in use" conflict should
+      // show the inline email error. Every other server error (incl. other
+      // 409s like a data-integrity failure) is surfaced verbatim instead of
+      // being mislabeled as a duplicate email.
+      if (e instanceof AdminApiError) {
+        const msg = e.message ?? "";
+        const isEmailConflict =
+          /email/i.test(msg) && /(in use|exist|taken|already|duplicate)/i.test(msg);
+        if (isEmailConflict) {
+          setEmailTaken(true);
+        } else {
+          setError(msg || `Couldn't create user (status ${e.status}).`);
+        }
       } else {
         setError(e instanceof Error ? e.message : "Couldn't create user.");
       }
