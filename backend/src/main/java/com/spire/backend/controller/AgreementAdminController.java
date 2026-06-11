@@ -42,6 +42,7 @@ public class AgreementAdminController {
     private final AgreementUserRepository agreementUserRepository;
     private final PasswordEncoder passwordEncoder;
     private final ConsultantApplicationService consultantService;
+    private final com.spire.backend.service.AgreementAssignmentService assignmentService;
 
     @GetMapping("/users")
     public ResponseEntity<ApiResponse<List<AgreementUserDto>>> listUsers(
@@ -186,6 +187,52 @@ public class AgreementAdminController {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user = agreementUserRepository.save(user);
         return ResponseEntity.ok(ApiResponse.success(AgreementUserDto.from(user)));
+    }
+
+    // ── Build K — per-ERM Manager / Accounts assignments ─────────────
+
+    /** The ERM's currently assigned manager + accounts user-ids. */
+    @GetMapping("/users/{ermId}/assignments")
+    public ResponseEntity<ApiResponse<AssignmentsDto>> getAssignments(
+            @PathVariable String ermId,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        AgreementUser erm = agreementUserRepository.findById(ermId)
+                .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", ermId));
+        if (erm.getRole() != AgreementUserRole.ERM) {
+            throw new IllegalArgumentException("Assignments only apply to ERM users.");
+        }
+        return ResponseEntity.ok(ApiResponse.success(activeAssignments(ermId)));
+    }
+
+    /** Active-only assigned ids, so the admin view matches the ERM's pickers. */
+    private AssignmentsDto activeAssignments(String ermId) {
+        AssignmentsDto dto = new AssignmentsDto();
+        dto.managerIds = assignmentService.assignedApprovers(ermId, AgreementUserRole.MANAGER)
+                .stream().map(AgreementUser::getId).toList();
+        dto.accountsIds = assignmentService.assignedApprovers(ermId, AgreementUserRole.ACCOUNTS)
+                .stream().map(AgreementUser::getId).toList();
+        return dto;
+    }
+
+    /** Replace the ERM's assigned managers + accounts (super-admin only). */
+    @PutMapping("/users/{ermId}/assignments")
+    @Transactional
+    public ResponseEntity<ApiResponse<AssignmentsDto>> setAssignments(
+            @PathVariable String ermId,
+            @RequestBody AssignmentsDto body,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        assignmentService.replaceAssignments(ermId, AgreementUserRole.MANAGER,
+                body == null ? null : body.managerIds);
+        assignmentService.replaceAssignments(ermId, AgreementUserRole.ACCOUNTS,
+                body == null ? null : body.accountsIds);
+        return ResponseEntity.ok(ApiResponse.success("Assignments saved", activeAssignments(ermId)));
+    }
+
+    public static class AssignmentsDto {
+        public List<String> managerIds;
+        public List<String> accountsIds;
     }
 
     // ── DTOs ────────────────────────────────────────────────────────

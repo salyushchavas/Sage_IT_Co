@@ -25,8 +25,10 @@ import AgreementsByErmView from "@/components/agreement-erm/AgreementsByErmView"
 import {
   AdminApiError,
   adminCreateUser,
+  adminGetErmAssignments,
   adminListUsers,
   adminResetUserPassword,
+  adminSetErmAssignments,
   adminSetUserStatus,
   fetchMe,
   getAgreementErmToken,
@@ -54,6 +56,7 @@ export default function AgreementsAdminPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [resetTarget, setResetTarget] = useState<AgreementUserDto | null>(null);
+  const [assignTarget, setAssignTarget] = useState<AgreementUserDto | null>(null);
   const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
   const [tab, setTab] = useState<AdminTab>("users");
@@ -234,6 +237,16 @@ export default function AgreementsAdminPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center justify-end gap-2">
+                          {/* Build K — assign Managers/Accounts to an ERM. */}
+                          {u.role === "ERM" && (
+                            <button
+                              type="button"
+                              onClick={() => setAssignTarget(u)}
+                              className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-sage-navy/20 bg-white hover:bg-sage-navy/5 text-sage-navy cursor-pointer"
+                            >
+                              <Users size={11} /> Assign team
+                            </button>
+                          )}
                           {/* Reset is for ERMs only (server blocks super-admins). */}
                           {!isSuperAdmin && (
                             <button
@@ -297,6 +310,14 @@ export default function AgreementsAdminPage() {
             setResetTarget(null);
             setRevealed({ email, password, kind: "reset" });
           }}
+        />
+      )}
+
+      {assignTarget && (
+        <AssignTeamModal
+          erm={assignTarget}
+          allUsers={users}
+          onClose={() => setAssignTarget(null)}
         />
       )}
       </>
@@ -710,6 +731,165 @@ function ModalField({
         {required && <span className="text-red-500"> *</span>}
       </label>
       {children}
+    </div>
+  );
+}
+
+// Build K — assign Managers + Accounts to an ERM (super-admin only).
+function AssignTeamModal({
+  erm,
+  allUsers,
+  onClose,
+}: {
+  erm: AgreementUserDto;
+  allUsers: AgreementUserDto[];
+  onClose: () => void;
+}) {
+  const [managerIds, setManagerIds] = useState<Set<string>>(new Set());
+  const [accountsIds, setAccountsIds] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const managers = allUsers.filter((u) => u.role === "MANAGER" && u.active);
+  const accounts = allUsers.filter((u) => u.role === "ACCOUNTS" && u.active);
+
+  useEffect(() => {
+    let cancelled = false;
+    adminGetErmAssignments(erm.id)
+      .then((a) => {
+        if (cancelled) return;
+        setManagerIds(new Set(a.managerIds));
+        setAccountsIds(new Set(a.accountsIds));
+      })
+      .catch((e) =>
+        setError(e instanceof AdminApiError ? e.message : "Couldn't load assignments."),
+      )
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [erm.id]);
+
+  const toggle = (set: Set<string>, setter: (s: Set<string>) => void, id: string) => {
+    const next = new Set(set);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setter(next);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError("");
+    try {
+      await adminSetErmAssignments(erm.id, {
+        managerIds: Array.from(managerIds),
+        accountsIds: Array.from(accountsIds),
+      });
+      onClose();
+    } catch (e) {
+      setError(e instanceof AdminApiError ? e.message : "Couldn't save assignments.");
+      setSaving(false);
+    }
+  };
+
+  const renderList = (
+    title: string,
+    options: AgreementUserDto[],
+    selected: Set<string>,
+    setter: (s: Set<string>) => void,
+  ) => (
+    <div>
+      <p className="text-xs font-semibold uppercase tracking-wider text-sage-navy mb-2">
+        {title}
+      </p>
+      {options.length === 0 ? (
+        <p className="text-xs text-gray-400 italic">
+          No active {title.toLowerCase()} users exist yet.
+        </p>
+      ) : (
+        <div className="space-y-1.5 max-h-44 overflow-y-auto pr-1">
+          {options.map((u) => (
+            <label
+              key={u.id}
+              className="flex items-start gap-2 px-2 py-1.5 rounded-md border border-gray-100 hover:bg-gray-50 cursor-pointer"
+            >
+              <input
+                type="checkbox"
+                checked={selected.has(u.id)}
+                onChange={() => toggle(selected, setter, u.id)}
+                className="mt-0.5 h-4 w-4 accent-sage-navy"
+              />
+              <span className="text-[13px] leading-tight">
+                <span className="font-medium text-gray-900">{u.fullName}</span>
+                <span className="block text-[11px] text-gray-500">{u.email}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-lg bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-gray-100 flex items-start justify-between">
+          <div>
+            <h3 className="font-serif text-lg text-gray-900">Assign team</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              {erm.fullName} &middot; {erm.email}
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-gray-400 hover:text-gray-600 cursor-pointer"
+          >
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 sm:px-6 py-4 space-y-4">
+          <p className="text-[12px] text-gray-500">
+            Choose which Managers and Accounts this ERM can route agreements
+            to. These drive the approval pickers when the ERM sends for
+            approval.
+          </p>
+          {loading ? (
+            <div className="py-8 flex justify-center text-gray-400">
+              <Loader2 size={20} className="animate-spin" />
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+              {renderList("Managers", managers, managerIds, setManagerIds)}
+              {renderList("Accounts", accounts, accountsIds, setAccountsIds)}
+            </div>
+          )}
+          {error && (
+            <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+              <AlertCircle size={12} /> {error}
+            </p>
+          )}
+        </div>
+        <div className="px-5 sm:px-6 py-3 border-t border-gray-100 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 rounded-md text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={loading || saving}
+            onClick={() => void handleSave()}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-50"
+          >
+            {saving ? <Loader2 size={12} className="animate-spin" /> : <Check size={12} />}
+            Save assignments
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

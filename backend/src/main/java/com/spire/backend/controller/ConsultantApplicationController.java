@@ -272,10 +272,32 @@ public class ConsultantApplicationController {
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<ConsultantApplication>> sendForApproval(
             @PathVariable String appId,
+            @RequestBody(required = false) SendForApprovalBody body,
             HttpServletRequest request) {
         return ResponseEntity.ok(ApiResponse.success(
                 "Sent for approval",
-                consultantService.sendForApproval(appId, request)));
+                consultantService.sendForApproval(
+                        appId,
+                        body == null ? null : body.managerUserId,
+                        body == null ? null : body.accountsUserId,
+                        request)));
+    }
+
+    /** Build K — the approvers this ERM may route the agreement to (for the pickers). */
+    @GetMapping("/api/agreement-erm/applications/{appId}/eligible-approvers")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> eligibleApprovers(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                consultantService.eligibleApprovers(appId, request)));
+    }
+
+    public static class SendForApprovalBody {
+        /** Build K — chosen MANAGER approver (Phase 1 + 2). */
+        public String managerUserId;
+        /** Build K — chosen ACCOUNTS approver (Phase 2 only). */
+        public String accountsUserId;
     }
 
     @PostMapping("/api/agreement-erm/applications/{appId}/approve-and-sign")

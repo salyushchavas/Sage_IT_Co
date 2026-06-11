@@ -3241,6 +3241,9 @@ export interface AgreementApproval {
   note: string | null;
   phase: number;
   round: number;
+  // Build K — the specific approver this gate was routed to (null on legacy).
+  approverUserId: string | null;
+  approverName: string | null;
   decidedBy: string | null;
   decidedByName: string | null;
   decidedAt: string | null;
@@ -3790,6 +3793,25 @@ export async function adminResetUserPassword(id: string, newPassword: string) {
   return agreementAdminFetch<AgreementUserDto>(
     `/api/agreements/admin/users/${id}/password`,
     { method: "PATCH", body: JSON.stringify({ newPassword }) },
+  );
+}
+
+// Build K — per-ERM Manager/Accounts assignments (super-admin only).
+export interface ErmAssignments {
+  managerIds: string[];
+  accountsIds: string[];
+}
+
+export async function adminGetErmAssignments(ermId: string) {
+  return agreementAdminFetch<ErmAssignments>(
+    `/api/agreements/admin/users/${ermId}/assignments`,
+  );
+}
+
+export async function adminSetErmAssignments(ermId: string, body: ErmAssignments) {
+  return agreementAdminFetch<ErmAssignments>(
+    `/api/agreements/admin/users/${ermId}/assignments`,
+    { method: "PUT", body: JSON.stringify(body) },
   );
 }
 
@@ -4544,11 +4566,38 @@ export interface ApproverDetailEnvelope {
   myRole: ApproverRole;
 }
 
-/** ERM routes a consultant-signed agreement to the phase's approvers (also re-send). */
-export async function ermSendForApproval(applicationId: string) {
+/** Build K — one approver option for the send-for-approval picker. */
+export interface ApproverOption {
+  id: string;
+  name: string;
+  email: string;
+}
+
+export interface EligibleApprovers {
+  phase: number;
+  managers: ApproverOption[];
+  accounts: ApproverOption[];
+}
+
+/** Build K — the approvers this ERM may route the agreement to (drives the pickers). */
+export async function ermFetchEligibleApprovers(applicationId: string) {
+  return agreementErmFetch<EligibleApprovers>(
+    `/api/agreement-erm/applications/${applicationId}/eligible-approvers`,
+  );
+}
+
+/**
+ * ERM routes a consultant-signed agreement to the phase's approvers (also
+ * re-send). Build K — the chosen manager (Phase 1+2) + accounts (Phase 2)
+ * are required; routing is bound to those specific users.
+ */
+export async function ermSendForApproval(
+  applicationId: string,
+  routing?: { managerUserId?: string; accountsUserId?: string },
+) {
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/send-for-approval`,
-    { method: "POST" },
+    { method: "POST", body: JSON.stringify(routing ?? {}) },
   );
 }
 

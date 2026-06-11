@@ -40,6 +40,8 @@ import {
   ermSsnDocViewUrl,
   ermRequestRevision,
   ermSendForApproval,
+  ermFetchEligibleApprovers,
+  type EligibleApprovers,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
   fetchErmPreviewPdfBlob,
@@ -232,7 +234,7 @@ const SECTIONS: readonly SectionDef[] = [
   },
 ];
 
-type ModalKind = null | "revision" | "approve" | "send" | "editContact" | "advancePhase2";
+type ModalKind = null | "revision" | "approve" | "send" | "editContact" | "advancePhase2" | "sendApproval";
 
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
@@ -349,15 +351,20 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
    * approvers (Phase 1 = Manager; Phase 2 = Manager + Accounts). Also the
    * re-send action from APPROVAL_REVISION_REQUESTED (resets the gates).
    */
-  const handleSendForApproval = async () => {
+  const handleSendForApproval = async (routing: {
+    managerUserId?: string;
+    accountsUserId?: string;
+  }) => {
     setBusy("sendApproval");
     setError("");
     try {
-      await ermSendForApproval(app.applicationId);
+      await ermSendForApproval(app.applicationId, routing);
+      setModal(null);
       setFeedback("Sent for approval.");
       await onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't send for approval");
+      throw e;
     } finally {
       setBusy(null);
     }
@@ -385,7 +392,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         onRequestRevision={() => setModal("revision")}
         onApproveAndSign={() => setModal("approve")}
         onApproveConsultantVersion={handleApproveConsultantVersion}
-        onSendForApproval={handleSendForApproval}
+        onSendForApproval={() => setModal("sendApproval")}
         onSendEmail={() => setModal("send")}
         onResendInvite={handleResend}
         onCancel={handleCancel}
@@ -486,6 +493,15 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
             );
             await onRefresh();
           }}
+        />
+      )}
+
+      {modal === "sendApproval" && (
+        <SendForApprovalModal
+          app={app}
+          busy={busy === "sendApproval"}
+          onClose={() => setModal(null)}
+          onSend={handleSendForApproval}
         />
       )}
     </div>
@@ -2006,6 +2022,171 @@ function ModalShell({
  * preserves filled data, clears signatures + affirmations, and
  * transitions COMPLETED → SUBMITTED.
  */
+// Build K — directed approval routing. The ERM picks one Manager (Phase 1
+// + 2) and one Accounts (Phase 2) from their assigned set: a dropdown when
+// several are assigned, a pre-selected read-only row when exactly one, and a
+// blocking message when none. A selection is required to send.
+function SendForApprovalModal({
+  app,
+  busy,
+  onClose,
+  onSend,
+}: {
+  app: ConsultantApplication;
+  busy: boolean;
+  onClose: () => void;
+  onSend: (routing: { managerUserId?: string; accountsUserId?: string }) => Promise<void>;
+}) {
+  const [eligible, setEligible] = useState<EligibleApprovers | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [managerId, setManagerId] = useState("");
+  const [accountsId, setAccountsId] = useState("");
+  const [sendError, setSendError] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    ermFetchEligibleApprovers(app.applicationId)
+      .then((e) => {
+        if (cancelled) return;
+        setEligible(e);
+        if (e.managers.length === 1) setManagerId(e.managers[0].id);
+        if (e.accounts.length === 1) setAccountsId(e.accounts[0].id);
+      })
+      .catch((err) =>
+        setLoadError(err instanceof Error ? err.message : "Couldn't load approvers."),
+      )
+      .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [app.applicationId]);
+
+  const phase2 = (eligible?.phase ?? 1) >= 2;
+  const managerBlocked = !!eligible && eligible.managers.length === 0;
+  const accountsBlocked = phase2 && !!eligible && eligible.accounts.length === 0;
+  const canSend =
+    !loading
+    && !loadError
+    && !managerBlocked
+    && !accountsBlocked
+    && managerId.length > 0
+    && (!phase2 || accountsId.length > 0);
+
+  const renderPicker = (
+    label: string,
+    options: { id: string; name: string; email: string }[],
+    value: string,
+    setter: (v: string) => void,
+    roleWord: string,
+  ) => {
+    if (options.length === 0) {
+      return (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2.5 text-[12px] text-red-700 inline-flex items-start gap-1.5">
+          <AlertCircle size={13} className="mt-0.5 shrink-0" />
+          <span>No {roleWord} assigned — ask an admin to assign one.</span>
+        </div>
+      );
+    }
+    if (options.length === 1) {
+      const only = options[0];
+      return (
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy mb-1">{label}</p>
+          <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2.5">
+            <p className="text-[13px] font-medium text-gray-900">{only.name}</p>
+            <p className="text-[11px] text-gray-500">{only.email}</p>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy mb-1">{label}</p>
+        <select
+          value={value}
+          onChange={(e) => setter(e.target.value)}
+          className="w-full px-3 py-2.5 text-[14px] rounded-md border border-stone-300 bg-white focus:outline-none focus:ring-2 focus:ring-sage-copper/40"
+        >
+          <option value="">Select a {roleWord}…</option>
+          {options.map((o) => (
+            <option key={o.id} value={o.id}>
+              {o.name} ({o.email})
+            </option>
+          ))}
+        </select>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden">
+        <div className="px-5 sm:px-6 pt-5 pb-3 border-b border-gray-100 flex items-start justify-between">
+          <h3 className="font-serif text-lg text-gray-900">Send for approval</h3>
+          <button type="button" onClick={onClose} className="text-gray-400 hover:text-gray-600 cursor-pointer">
+            <X size={18} />
+          </button>
+        </div>
+        <div className="px-5 sm:px-6 py-4 space-y-4">
+          {loading ? (
+            <div className="py-8 flex justify-center text-gray-400">
+              <Loader2 size={20} className="animate-spin" />
+            </div>
+          ) : loadError ? (
+            <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+              <AlertCircle size={12} /> {loadError}
+            </p>
+          ) : (
+            <>
+              <p className="text-[12px] text-gray-500">
+                Route this agreement to {phase2 ? "a Manager and an Accounts approver" : "a Manager"}.
+                {phase2 ? " Both must approve." : ""}
+              </p>
+              {renderPicker("Manager", eligible?.managers ?? [], managerId, setManagerId, "manager")}
+              {phase2 &&
+                renderPicker("Accounts", eligible?.accounts ?? [], accountsId, setAccountsId, "accounts")}
+            </>
+          )}
+          {sendError && (
+            <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+              <AlertCircle size={12} /> {sendError}
+            </p>
+          )}
+        </div>
+        <div className="px-5 sm:px-6 py-3 border-t border-gray-100 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-3 py-2 rounded-md text-xs font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            disabled={!canSend || busy}
+            onClick={() => {
+              setSendError("");
+              void onSend({
+                managerUserId: managerId,
+                accountsUserId: phase2 ? accountsId : undefined,
+              }).catch((e) =>
+                setSendError(
+                  e instanceof Error ? e.message : "Couldn't send for approval.",
+                ),
+              );
+            }}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-50"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+            Send for approval
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function AdvanceToPhase2Modal({
   app,
   onClose,

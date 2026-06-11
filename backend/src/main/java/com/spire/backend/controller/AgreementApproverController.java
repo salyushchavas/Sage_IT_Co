@@ -69,7 +69,8 @@ public class AgreementApproverController {
             @RequestParam(value = "role", required = false) String role,
             HttpServletRequest request) {
         ApproverRole gate = resolveRole(request, role);
-        List<ConsultantApplication> apps = consultantService.approverQueue(gate);
+        List<ConsultantApplication> apps = consultantService.approverQueue(
+                gate, AgreementAuthz.userId(request));
         List<Map<String, Object>> out = new ArrayList<>();
         for (ConsultantApplication app : apps) {
             Map<String, Object> row = new LinkedHashMap<>();
@@ -88,7 +89,7 @@ public class AgreementApproverController {
             @RequestParam(value = "role", required = false) String role,
             HttpServletRequest request) {
         ApproverRole gate = resolveRole(request, role);
-        ConsultantApplication app = consultantService.getForApprover(appId, gate);
+        ConsultantApplication app = consultantService.getForApprover(appId, gate, AgreementAuthz.userId(request));
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("application", app);
         view.put("approvals", consultantService.listApprovals(appId));
@@ -103,7 +104,7 @@ public class AgreementApproverController {
             @RequestParam(value = "role", required = false) String role,
             HttpServletRequest request) {
         ApproverRole gate = resolveRole(request, role);
-        ConsultantApplication app = consultantService.getForApprover(appId, gate);
+        ConsultantApplication app = consultantService.getForApprover(appId, gate, AgreementAuthz.userId(request));
         byte[] bytes;
         try {
             bytes = agreementDocumentService.renderPdfBytes(
@@ -134,7 +135,7 @@ public class AgreementApproverController {
             @RequestParam(value = "role", required = false) String role,
             HttpServletRequest request) {
         ApproverRole gate = resolveRole(request, role);
-        ConsultantApplication app = consultantService.getForApprover(appId, gate);
+        ConsultantApplication app = consultantService.getForApprover(appId, gate, AgreementAuthz.userId(request));
         String viewerEmail = (String) request.getAttribute(AgreementAuthz.ATTR_EMAIL);
         List<String> pages;
         try {

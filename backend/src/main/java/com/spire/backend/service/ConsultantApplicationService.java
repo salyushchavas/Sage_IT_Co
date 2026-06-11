@@ -91,6 +91,7 @@ public class ConsultantApplicationService {
     private final ConsultantVersionService consultantVersionService;
     private final AgreementUserRepository agreementUserRepository;
     private final com.spire.backend.repository.AgreementApprovalRepository approvalRepository;
+    private final AgreementAssignmentService assignmentService;
     private final ConsultantVerificationRepository verificationRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -1530,7 +1531,10 @@ public class ConsultantApplicationService {
      */
     @Transactional
     public ConsultantApplication sendForApproval(
-            String applicationId, HttpServletRequest request) {
+            String applicationId,
+            String managerUserId,
+            String accountsUserId,
+            HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
         String st = app.getStatus();
@@ -1551,7 +1555,46 @@ public class ConsultantApplicationService {
         Integer prevRound = approvalRepository.maxRound(app.getId());
         int round = (prevRound == null ? 0 : prevRound) + 1;
         var approvers = requiredApprovers(phase);
+
+        // Build K — directed routing: resolve + validate the chosen approver
+        // for each required role from the OWNER ERM's assigned set.
+        String ownerErmId = app.getOwnerErmId();
+        java.util.Map<com.spire.backend.entity.AgreementApproval.ApproverRole, AgreementUser> chosen =
+                new java.util.HashMap<>();
         for (var role : approvers) {
+            AgreementUserRole urole =
+                    role == com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER
+                            ? AgreementUserRole.MANAGER : AgreementUserRole.ACCOUNTS;
+            String picked = urole == AgreementUserRole.MANAGER ? managerUserId : accountsUserId;
+            java.util.List<AgreementUser> assigned =
+                    assignmentService.assignedApprovers(ownerErmId, urole);
+            if (assigned.isEmpty()) {
+                throw new IllegalStateException(
+                        "No " + urole.name().toLowerCase() + " assigned — ask an admin to assign one.");
+            }
+            if (picked == null || picked.isBlank()) {
+                throw new IllegalArgumentException(
+                        "Select a " + urole.name().toLowerCase() + " to send for approval.");
+            }
+            AgreementUser match = assigned.stream()
+                    .filter(u -> u.getId().equals(picked)).findFirst().orElse(null);
+            if (match == null) {
+                // Distinguish "assigned but deactivated" from "never assigned"
+                // (assigned* lists are active-only) so the message is actionable.
+                if (assignmentService.assignedApproverIds(ownerErmId, urole).contains(picked)) {
+                    throw new IllegalArgumentException(
+                            "The selected " + urole.name().toLowerCase()
+                                    + " is no longer active. Ask an admin to reactivate or assign another.");
+                }
+                throw new IllegalArgumentException(
+                        "The selected " + urole.name().toLowerCase()
+                                + " is not assigned to this ERM.");
+            }
+            chosen.put(role, match);
+        }
+
+        for (var role : approvers) {
+            AgreementUser appr = chosen.get(role);
             approvalRepository.save(
                     com.spire.backend.entity.AgreementApproval.builder()
                             .applicationId(app.getId())
@@ -1559,6 +1602,8 @@ public class ConsultantApplicationService {
                             .status(com.spire.backend.entity.AgreementApproval.Decision.PENDING)
                             .phase(phase)
                             .round(round)
+                            .approverUserId(appr.getId())
+                            .approverName(appr.getFullName())
                             .build());
         }
         app.setStatus(ConsultantApplication.Status.AWAITING_APPROVALS.name());
@@ -1569,10 +1614,39 @@ public class ConsultantApplicationService {
                 ConsultantApplicationEvent.ActorType.ERM,
                 AGREEMENT_ERM_USER_ID,
                 Map.of("phase", phase, "round", round,
-                        "approvers", approvers.toString(),
+                        "approvers", approvers.stream().map(Enum::name).toList(),
+                        "routedTo", chosen.values().stream()
+                                .map(AgreementUser::getFullName).toList(),
                         "resend", resend),
                 request);
         return app;
+    }
+
+    /**
+     * Build K — the approvers an ERM may route this agreement to: their
+     * assigned, active MANAGER (always) + ACCOUNTS (Phase 2). Used to drive
+     * the send-for-approval pickers.
+     */
+    @Transactional(readOnly = true)
+    public java.util.Map<String, Object> eligibleApprovers(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        int phase = app.getPhase() == null ? 1 : app.getPhase();
+        String ownerErmId = app.getOwnerErmId();
+        java.util.function.Function<AgreementUser, java.util.Map<String, Object>> slim =
+                u -> java.util.Map.of("id", u.getId(),
+                        "name", u.getFullName() == null ? "" : u.getFullName(),
+                        "email", u.getEmail() == null ? "" : u.getEmail());
+        java.util.Map<String, Object> out = new java.util.LinkedHashMap<>();
+        out.put("phase", phase);
+        out.put("managers", assignmentService.assignedApprovers(ownerErmId, AgreementUserRole.MANAGER)
+                .stream().map(slim).toList());
+        out.put("accounts", phase >= 2
+                ? assignmentService.assignedApprovers(ownerErmId, AgreementUserRole.ACCOUNTS)
+                        .stream().map(slim).toList()
+                : java.util.List.of());
+        return out;
     }
 
     /**
@@ -1605,10 +1679,19 @@ public class ConsultantApplicationService {
         }
         com.spire.backend.entity.AgreementApproval row = approvalRepository
                 .findFirstByApplicationIdAndRoleAndRound(app.getId(), role, round)
-                .orElseThrow(() -> new IllegalStateException(
-                        "You are not a required approver for this agreement."));
+                // Build K — 404 (not 409) so it's indistinguishable from a gate
+                // routed to a different approver (no gate-existence probing).
+                .orElseThrow(() -> new com.spire.backend.exception.ResourceNotFoundException(
+                        "ConsultantApplication", "applicationId", applicationId));
         if (row.getStatus() != com.spire.backend.entity.AgreementApproval.Decision.PENDING) {
             throw new IllegalStateException("This gate has already been decided.");
+        }
+        // Build K — when the gate is routed to a specific approver, only that
+        // approver may decide it (null-approver rows stay role-wide).
+        String deciderId = com.spire.backend.security.AgreementAuthz.userId(request);
+        if (row.getApproverUserId() != null && !row.getApproverUserId().equals(deciderId)) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
         }
         if (!approve && (note == null || note.isBlank())) {
             throw new IllegalArgumentException(
@@ -1661,14 +1744,27 @@ public class ConsultantApplicationService {
         return app;
     }
 
-    /** The apps currently awaiting THIS approver role's gate (current round). */
+    /**
+     * The apps currently awaiting THIS approver role's gate (current round).
+     * Build K — when {@code approverUserId} is non-null, the queue is
+     * filtered to agreements routed specifically to that user; rows with a
+     * null {@code approverUserId} (legacy/pre-Build-K) stay role-wide so
+     * in-flight approvals are never stranded.
+     */
     @Transactional(readOnly = true)
     public java.util.List<ConsultantApplication> approverQueue(
-            com.spire.backend.entity.AgreementApproval.ApproverRole role) {
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
         var pending = approvalRepository.findByStatusAndRole(
                 com.spire.backend.entity.AgreementApproval.Decision.PENDING, role);
         java.util.List<ConsultantApplication> out = new java.util.ArrayList<>();
         for (var row : pending) {
+            // Build K — directed routing: a routed row is visible only to its
+            // chosen approver; a null-approver row is role-wide (fallback).
+            if (row.getApproverUserId() != null
+                    && !row.getApproverUserId().equals(approverUserId)) {
+                continue;
+            }
             ConsultantApplication app =
                     applicationRepository.findById(row.getApplicationId()).orElse(null);
             if (app == null || Boolean.TRUE.equals(app.getDeleted())) continue;
@@ -1693,16 +1789,23 @@ public class ConsultantApplicationService {
     @Transactional(readOnly = true)
     public ConsultantApplication getForApprover(
             String applicationId,
-            com.spire.backend.entity.AgreementApproval.ApproverRole role) {
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
         ConsultantApplication app = getByApplicationId(applicationId);
         if (Boolean.TRUE.equals(app.getDeleted())) {
             throw new com.spire.backend.exception.ResourceNotFoundException(
                     "ConsultantApplication", "applicationId", applicationId);
         }
         Integer round = approvalRepository.maxRound(app.getId());
-        boolean isGate = round != null && approvalRepository
-                .findFirstByApplicationIdAndRoleAndRound(app.getId(), role, round).isPresent();
-        if (!isGate) {
+        var gate = round == null ? java.util.Optional
+                .<com.spire.backend.entity.AgreementApproval>empty()
+                : approvalRepository.findFirstByApplicationIdAndRoleAndRound(app.getId(), role, round);
+        // Build K — the routed approver (or any holder of the role when the
+        // row is unrouted/legacy) may view; otherwise 404 (no ID probing).
+        boolean canView = gate.isPresent()
+                && (gate.get().getApproverUserId() == null
+                    || gate.get().getApproverUserId().equals(approverUserId));
+        if (!canView) {
             throw new com.spire.backend.exception.ResourceNotFoundException(
                     "ConsultantApplication", "applicationId", applicationId);
         }

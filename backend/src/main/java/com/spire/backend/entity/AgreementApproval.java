@@ -82,6 +82,16 @@ public class AgreementApproval {
     @Builder.Default
     private Integer round = 1;
 
+    // Build K — directed routing: the specific approver this gate is routed
+    // to (chosen by the ERM at send time from their assigned set). NULL on
+    // legacy/pre-Build-K rows, which fall back to role-wide visibility.
+    @Column(name = "approver_user_id", length = 36)
+    private String approverUserId;
+
+    /** Denormalised display name of the routed approver (for badges/board). */
+    @Column(name = "approver_name", length = 255)
+    private String approverName;
+
     /** AgreementUser id of the approver who decided (null while PENDING). */
     @Column(name = "decided_by", length = 36)
     private String decidedBy;
