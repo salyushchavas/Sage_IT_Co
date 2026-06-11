@@ -3236,6 +3236,10 @@ export interface ConsultantApplication {
   ownerName?: string | null;
   consultantEmail: string;
   consultantName: string | null;
+  // Build W — structured name (composed into consultantName server-side).
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
   consultantPhone: string | null;
   payload: string | null;
   status: ConsultantApplicationStatus;
@@ -3259,7 +3263,15 @@ export interface ConsultantApplication {
   // Consultant personal block (required at fill-in time)
   primaryPhone: string | null;
   workAuthorizationCategory: string | null;
+  // Build W — custom value when workAuthorizationCategory === "Others".
+  workAuthorizationOther: string | null;
   residenceAddress: string | null;
+  // Build W — structured US billing address.
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressCity: string | null;
+  addressState: string | null;
+  addressZip: string | null;
   effectiveDate: string | null; // ISO yyyy-MM-dd
   // Exhibit A
   technologyTrack: string | null;
@@ -3271,6 +3283,10 @@ export interface ConsultantApplication {
   roleTitle: string | null;
   verifiedStartDate: string | null;
   payrollCycle: string | null;
+  // Build W — Appendix 1 work-authorization document upload.
+  workAuthDocPublicId: string | null;
+  workAuthDocContentType: string | null;
+  workAuthDocUploadedAt: string | null;
   // Appendix 2 -- ACH (optional)
   achAccountType: string | null;
   achBankName: string | null;
@@ -3305,6 +3321,8 @@ export interface ConsultantApplication {
   ermTitle: string | null;
   ermSignatureUrl: string | null;
   signatureDate: string | null;
+  // Build W — ERM countersign date (null until the ERM signs).
+  ermSignatureDate: string | null;
   // Revision tracking
   currentRevisionRemarks: string | null;
   revisionCount: number | null;
@@ -3421,9 +3439,19 @@ export function parseChequeList(raw: string | null | undefined): ChequeEntry[] {
  * entity (idempotent partial save).
  */
 export interface ConsultantFillPayload {
+  // Build W — structured name (consultant can correct spelling).
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
   primaryPhone?: string;
   workAuthorizationCategory?: string;
   residenceAddress?: string;
+  // Build W — structured US billing address.
+  addressLine1?: string;
+  addressLine2?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressZip?: string;
   effectiveDate?: string;
   technologyTrack?: string;
   customScopeNotes?: string;
@@ -3749,6 +3777,10 @@ export const adminArchiveApplication = adminDeleteApplication;
 export async function createConsultantApplication(data: {
   consultantEmail: string;
   consultantName?: string;
+  // Build W — structured name; server composes consultantName from these.
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
   consultantPhone?: string;
   // Phase 3: the rate card the ERM seeds at create time. Free-form
   // strings (e.g. period="Months 1-12", amount="$2,400") rendered
@@ -3761,6 +3793,8 @@ export async function createConsultantApplication(data: {
   // per-appendix requirement flags. Drive the wizard's effective
   // requirements + the submit-time gate.
   visaStatus?: string;
+  // Build W — custom value when visaStatus === "Others".
+  visaStatusOther?: string;
   requireAppendix1?: boolean;
   requireAppendix2?: boolean;
   requireAppendix3?: boolean;
@@ -4228,6 +4262,24 @@ export async function uploadConsultantChequeAt(
   const form = new FormData();
   form.append("file", file);
   await consultantMultipartFetch(applicationId, `/cheques/${index}`, form);
+}
+
+/**
+ * Build W — upload the Appendix 1 work-authorization document. Stored
+ * server-side at {@code agreements/{appId}-workauth}.
+ */
+export async function uploadConsultantWorkAuthDoc(
+  applicationId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, "/workauth", form);
+}
+
+/** Build W — ERM-side work-authorization document viewer URL. */
+export function ermWorkAuthViewUrl(applicationId: string): string {
+  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/workauth?disposition=inline`;
 }
 
 /**

@@ -1285,6 +1285,38 @@ public class DataSeeder implements CommandLineRunner {
                         "consultant_download_count"},
                 {"consultant_last_downloaded_at TIMESTAMP",
                         "consultant_last_downloaded_at"},
+                // Build W — structured name (First/Middle/Last). The
+                // service composes consultant_name from these on save;
+                // legacy rows keep their single consultant_name value.
+                {"first_name VARCHAR(120)", "first_name"},
+                {"middle_name VARCHAR(120)", "middle_name"},
+                {"last_name VARCHAR(120)", "last_name"},
+                // Build W — work-authorization custom value (used only
+                // when work_authorization_category = 'Others').
+                {"work_authorization_other VARCHAR(255)",
+                        "work_authorization_other"},
+                // Build W — structured US billing address. The render
+                // layer assembles ${residenceAddress} from these;
+                // residence_address stays as a legacy fallback.
+                {"address_line1 VARCHAR(255)", "address_line1"},
+                {"address_line2 VARCHAR(255)", "address_line2"},
+                {"address_city VARCHAR(120)", "address_city"},
+                {"address_state VARCHAR(8)", "address_state"},
+                {"address_zip VARCHAR(16)", "address_zip"},
+                // Build W — Appendix 1 work-authorization document
+                // upload. Bytes in Cloudinary; only the public_id +
+                // timestamp + content type persisted. Required when
+                // Appendix 1 applies (gated in the submit validator).
+                {"work_auth_doc_public_id VARCHAR(255)",
+                        "work_auth_doc_public_id"},
+                {"work_auth_doc_uploaded_at TIMESTAMP",
+                        "work_auth_doc_uploaded_at"},
+                {"work_auth_doc_content_type VARCHAR(64)",
+                        "work_auth_doc_content_type"},
+                // Build W — ERM countersign date, distinct from the
+                // consultant signature_date. Null until the ERM signs so
+                // no date renders under the unsigned ERM block.
+                {"erm_signature_date TIMESTAMP", "erm_signature_date"},
         };
         for (String[] col : columns) {
             try {

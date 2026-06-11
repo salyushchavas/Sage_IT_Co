@@ -93,6 +93,9 @@ public class ConsultantApplicationEvent {
         APPLICATION_ARCHIVED,
         // Build G — consultant uploads their Appendix 5 security cheque.
         CHEQUE_UPLOADED,
+        // Build W — consultant uploads their Appendix 1 work-authorization
+        // document (image/PDF).
+        WORK_AUTH_UPLOADED,
         // Build M — ERM reopens a Phase-1 COMPLETED agreement for
         // Phase 2 on the same document. Metadata carries the promoted
         // sections + the actor's user id.

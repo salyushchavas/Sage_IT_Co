@@ -122,13 +122,28 @@ export interface AgreementSection {
 
 // ── Option lists ────────────────────────────────────────────────
 
-const WORK_AUTHORIZATION_OPTIONS = [
-  "F-1 STEM OPT",
-  "F-1 OPT",
-  "H-1B",
-  "Green Card",
-  "U.S. Citizen",
-  "Other",
+// Build W — the eight ERM-selectable work-authorization categories.
+// "Others" reveals a required free-text field on the ERM create form;
+// the custom value is what renders in the agreement/PDF.
+export const WORK_AUTHORIZATION_OPTIONS = [
+  "H1B",
+  "OPT-EAD",
+  "STEM-OPT-EAD",
+  "H4-EAD",
+  "GC",
+  "Citizen",
+  "EAD",
+  "Others",
+] as const;
+
+// Build W — US states + DC + territories for the structured billing
+// address state dropdown (two-letter USPS codes).
+export const US_STATE_OPTIONS = [
+  "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "DC", "FL", "GA",
+  "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA",
+  "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY",
+  "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX",
+  "UT", "VT", "VA", "WA", "WV", "WI", "WY", "PR", "VI", "GU", "AS", "MP",
 ] as const;
 
 const PAYROLL_CYCLE_OPTIONS = [
@@ -151,12 +166,26 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
       "A quick read-back of your name, contact details, and work-authorization status so we can address the agreement to you accurately.",
     why: "Confirms who you are, how to reach you, and your work-authorization status — needed for the agreement and any verification.",
     fields: [
+      // Build W — structured name (First + Middle? + Last). Composed
+      // into the full legal name on the contract.
       {
-        key: "consultantName",
-        label: "Full legal name",
+        key: "firstName",
+        label: "First name",
         type: "text",
         required: true,
         help: "Prefilled from your invitation; correct it here if the spelling is off.",
+      },
+      {
+        key: "middleName",
+        label: "Middle name (optional)",
+        type: "text",
+        required: false,
+      },
+      {
+        key: "lastName",
+        label: "Last name",
+        type: "text",
+        required: true,
       },
       {
         key: "consultantEmail",
@@ -182,14 +211,42 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         readOnly: true,
         help: "Set by Sage IT when they sent this agreement. To change it, ask your Sage IT contact.",
       },
+      // Build W — structured US billing address (Line 1, Line 2,
+      // City, State, ZIP). Assembled into the agreement/PDF.
       {
-        key: "residenceAddress",
-        label: "Residence address",
-        type: "textarea",
+        key: "addressLine1",
+        label: "Address line 1",
+        type: "text",
         required: true,
-        help: "One block — street, unit, city, state, ZIP, country.",
-        placeholder:
-          "123 Main St, Apt 2\nAustin, TX 78701\nUnited States",
+        placeholder: "123 Main St",
+      },
+      {
+        key: "addressLine2",
+        label: "Address line 2 (optional)",
+        type: "text",
+        required: false,
+        placeholder: "Apt, suite, unit",
+      },
+      {
+        key: "addressCity",
+        label: "City",
+        type: "text",
+        required: true,
+        placeholder: "Austin",
+      },
+      {
+        key: "addressState",
+        label: "State",
+        type: "select",
+        required: true,
+        options: US_STATE_OPTIONS,
+      },
+      {
+        key: "addressZip",
+        label: "ZIP code",
+        type: "text",
+        required: true,
+        placeholder: "78701 or 78701-1234",
       },
     ],
     requiresSignature: false,
@@ -299,6 +356,16 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         type: "select",
         required: true,
         options: PAYROLL_CYCLE_OPTIONS,
+      },
+      // Build W — required upload of the consultant's work-authorization
+      // copy (image/PDF). Bytes upload via a dedicated endpoint; the
+      // wizard tracks "uploaded ✓" state, not a value string.
+      {
+        key: "workAuthDoc",
+        label: "Work-authorization document",
+        type: "file",
+        required: true,
+        help: "Upload a copy of your current work-authorization document (image or PDF).",
       },
     ],
     requiresSignature: false,
@@ -410,12 +477,15 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         sensitive: true,
       },
       {
+        // Build W — SSN is now strictly alphanumeric (letters + digits,
+        // no hyphens/spaces/symbols). The "ssn" field type is retained
+        // but its mask/validation are alphanumeric (see fill page).
         key: "bgFullSsn",
         label: "Social Security Number",
         type: "ssn",
         required: true,
         sensitive: true,
-        placeholder: "XXX-XX-XXXX",
+        placeholder: "Letters and numbers only",
       },
       {
         key: "idType",

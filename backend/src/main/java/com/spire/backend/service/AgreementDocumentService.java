@@ -433,16 +433,21 @@ public class AgreementDocumentService {
         // -- we map them to the closest existing fields. signedLegalName
         // is set by the consultant at sign time; before that, fall back
         // to the consultantName the ERM seeded the row with.
+        // Build W — composed First + Middle? + Last; the consultant's
+        // typed signing name (signedLegalName) still wins when present.
         String participantName = app.getSignedLegalName() != null
                 && !app.getSignedLegalName().isBlank()
                 ? app.getSignedLegalName()
-                : app.getConsultantName();
+                : composeFullName(app);
         c.put("effectiveDate", fd.apply(app.getEffectiveDate()));
         c.put("participantFullLegalName", nz.apply(participantName));
         c.put("primaryEmail", nz.apply(app.getConsultantEmail()));
         c.put("primaryPhone", nz.apply(app.getPrimaryPhone()));
-        c.put("workAuthorizationCategory", nz.apply(app.getWorkAuthorizationCategory()));
-        c.put("residenceAddress", nz.apply(app.getResidenceAddress()));
+        // Build W — render the custom value when the ERM picked "Others".
+        c.put("workAuthorizationCategory", effectiveWorkAuth(app));
+        // Build W — assemble the structured US billing address;
+        // fall back to the legacy single-block column for old rows.
+        c.put("residenceAddress", assembledAddress(app));
 
         // Rate card (Section 11 + Appendix 1).
         c.put("ratePeriod1", nz.apply(app.getRatePeriod1()));
@@ -509,8 +514,9 @@ public class AgreementDocumentService {
         c.put("securityCheckBank", nz.apply(app.getSecurityCheckBank()));
         c.put("securityCheckHolderName", nz.apply(app.getSecurityCheckHolderName()));
         c.put("securityCheckAmount", nz.apply(app.getSecurityCheckAmount()));
-        c.put("securityCheckDates", deriveChequeField(app, "date",
-                app.getSecurityCheckDates()));
+        // Build W — the cheque DATE was removed from the form; render it
+        // empty so no stale per-cheque date appears in the PDF.
+        c.put("securityCheckDates", "");
 
         // ERM signature block. ermName/ermTitle come from the Approve &
         // Sign input (the signer confirms them); ermEmail is resolved
@@ -518,6 +524,10 @@ public class AgreementDocumentService {
         c.put("ermName", nz.apply(app.getErmName()));
         c.put("ermTitle", nz.apply(app.getErmTitle()));
         c.put("ermEmail", resolveOwnerEmail(app));
+        // Build W — the ERM "Date:" line. Blank until the ERM actually
+        // countersigns (no today-fallback), so nothing renders under the
+        // unsigned ERM signature while the consultant signs/views.
+        c.put("ermSignatureDate", resolveErmSignatureDate(app));
         // Build Q — the consultant signs at the review step; the
         // preview renders BEFORE submit, so the persisted
         // signatureDate is still null. Fall back to today's date so
@@ -567,6 +577,10 @@ public class AgreementDocumentService {
         Function<String, String> nz = s -> s == null ? "" : s;
         v.put("effectiveDate", app.getEffectiveDate() == null
                 ? "" : app.getEffectiveDate().format(US_SHORT_DATE_FMT));
+        // Build W — work authorization is ERM-set; expose the EFFECTIVE
+        // value (the custom free-text when "Others") so the inline clause
+        // view shows the real status, not the literal word "Others".
+        v.put("workAuthorizationCategory", effectiveWorkAuth(app));
         v.put("ratePeriod1", nz.apply(app.getRatePeriod1()));
         v.put("rateAmount1", nz.apply(app.getRateAmount1()));
         v.put("ratePeriod2", nz.apply(app.getRatePeriod2()));
@@ -578,6 +592,9 @@ public class AgreementDocumentService {
         // inline-clause read view in the wizard shows the date in
         // every signature block before submit.
         v.put("signatureDate", resolveSignatureDate(app));
+        // Build W — ERM "Date:" line. Blank until the ERM countersigns,
+        // so the consultant's inline read view shows no ERM date.
+        v.put("ermSignatureDate", resolveErmSignatureDate(app));
         // Build R — same final-signing IP + timestamp fallback as
         // buildContext; both captured at the same review-step submit.
         v.put("finalSigningIp", resolveFinalSigningIp(app));
@@ -599,6 +616,99 @@ public class AgreementDocumentService {
             return stamped.toLocalDate().format(US_SHORT_DATE_FMT);
         }
         return LocalDate.now().format(US_SHORT_DATE_FMT);
+    }
+
+    /**
+     * Build W — the ERM countersign date for the ERM "Date:" line.
+     * Unlike the consultant's date, there is NO today-fallback: an empty
+     * string renders until the ERM actually signs, so no date appears
+     * under the unsigned ERM signature while the consultant signs/views.
+     */
+    private static String resolveErmSignatureDate(ConsultantApplication app) {
+        LocalDateTime stamped = app.getErmSignatureDate();
+        if (stamped != null) {
+            return stamped.toLocalDate().format(US_SHORT_DATE_FMT);
+        }
+        return "";
+    }
+
+    /**
+     * Build W — compose the full legal name from the structured
+     * First + Middle? + Last columns, falling back to the legacy single
+     * {@code consultantName} for rows captured before the split.
+     */
+    static String composeFullName(ConsultantApplication app) {
+        String first = trimToEmpty(app.getFirstName());
+        String middle = trimToEmpty(app.getMiddleName());
+        String last = trimToEmpty(app.getLastName());
+        if (first.isEmpty() && last.isEmpty()) {
+            return trimToEmpty(app.getConsultantName());
+        }
+        StringBuilder sb = new StringBuilder(first);
+        if (!middle.isEmpty()) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(middle);
+        }
+        if (!last.isEmpty()) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(last);
+        }
+        return sb.toString().trim();
+    }
+
+    /**
+     * Build W — the work-authorization value to render: the ERM's custom
+     * free-text when the category is "Others", otherwise the category
+     * itself. Empty when nothing is set.
+     */
+    static String effectiveWorkAuth(ConsultantApplication app) {
+        String cat = trimToEmpty(app.getWorkAuthorizationCategory());
+        if ("Others".equalsIgnoreCase(cat)) {
+            String other = trimToEmpty(app.getWorkAuthorizationOther());
+            return other.isEmpty() ? cat : other;
+        }
+        return cat;
+    }
+
+    /**
+     * Build W — assemble a US-format billing address from the structured
+     * columns ("Line1[, Line2], City, ST ZIP"), falling back to the
+     * legacy single-block {@code residenceAddress} for old rows.
+     */
+    static String assembledAddress(ConsultantApplication app) {
+        String line1 = trimToEmpty(app.getAddressLine1());
+        String line2 = trimToEmpty(app.getAddressLine2());
+        String city = trimToEmpty(app.getAddressCity());
+        String state = trimToEmpty(app.getAddressState());
+        String zip = trimToEmpty(app.getAddressZip());
+        boolean anyStructured = !(line1.isEmpty() && line2.isEmpty()
+                && city.isEmpty() && state.isEmpty() && zip.isEmpty());
+        if (!anyStructured) {
+            return trimToEmpty(app.getResidenceAddress());
+        }
+        StringBuilder sb = new StringBuilder();
+        if (!line1.isEmpty()) sb.append(line1);
+        if (!line2.isEmpty()) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(line2);
+        }
+        // City, ST ZIP — comma before city, space-separated state + zip.
+        String cityStateZip = city;
+        if (!state.isEmpty()) {
+            cityStateZip = cityStateZip.isEmpty() ? state : cityStateZip + ", " + state;
+        }
+        if (!zip.isEmpty()) {
+            cityStateZip = cityStateZip.isEmpty() ? zip : cityStateZip + " " + zip;
+        }
+        if (!cityStateZip.isEmpty()) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(cityStateZip);
+        }
+        return sb.toString().trim();
+    }
+
+    private static String trimToEmpty(String s) {
+        return s == null ? "" : s.trim();
     }
 
     /**
@@ -716,6 +826,8 @@ public class AgreementDocumentService {
                 // ERM signature block (text -- the images themselves are
                 // signatureImage / ermSignatureImage below).
                 "ermName", "ermTitle", "ermEmail", "signatureDate",
+                // Build W — ERM "Date:" line (own placeholder).
+                "ermSignatureDate",
                 // Build R — faint IP + timestamp trace line under the
                 // Date/Email line. Both render in the same gray 7pt
                 // paragraph; both are blank on the master template.

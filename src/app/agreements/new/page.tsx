@@ -16,9 +16,14 @@ import {
   createConsultantApplication,
   getAgreementErmToken,
 } from "@/lib/api";
+import { WORK_AUTHORIZATION_OPTIONS } from "@/lib/agreement-sections";
 
 interface FormState {
-  consultantName: string;
+  // Build W — structured name (First required, Middle optional, Last
+  // required). Composed into the full legal name server-side.
+  firstName: string;
+  middleName: string;
+  lastName: string;
   consultantEmail: string;
   ratePeriod1: string;
   rateAmount1: string;
@@ -27,6 +32,8 @@ interface FormState {
   // F-4: ERM-set visa status, persisted on the workAuthCategory column.
   // Locked + visible to the consultant on the cover step.
   visaStatus: string;
+  // Build W — custom value, required only when visaStatus === "Others".
+  visaStatusOther: string;
   // F-4: per-appendix requirement flags. The ERM ticks whichever
   // appendices apply to THIS consultant; the wizard + submit gate use
   // them to decide required vs optional-skippable.
@@ -41,23 +48,21 @@ interface FormState {
   requireSsn: boolean;
 }
 
-const VISA_OPTIONS = [
-  "F-1 STEM OPT",
-  "F-1 OPT",
-  "H-1B",
-  "Green Card",
-  "U.S. Citizen",
-  "Other",
-] as const;
+// Build W — the eight ERM-selectable work-authorization options, shared
+// with the consultant read-only view via agreement-sections.
+const VISA_OPTIONS = WORK_AUTHORIZATION_OPTIONS;
 
 const EMPTY: FormState = {
-  consultantName: "",
+  firstName: "",
+  middleName: "",
+  lastName: "",
   consultantEmail: "",
   ratePeriod1: "",
   rateAmount1: "",
   ratePeriod2: "",
   rateAmount2: "",
   visaStatus: "",
+  visaStatusOther: "",
   requireAppendix1: false,
   requireAppendix2: false,
   requireAppendix3: false,
@@ -109,17 +114,22 @@ export default function NewConsultantApplicationPage() {
     });
 
   const trimmedStrings = {
-    consultantName: form.consultantName.trim(),
+    firstName: form.firstName.trim(),
+    middleName: form.middleName.trim(),
+    lastName: form.lastName.trim(),
     consultantEmail: form.consultantEmail.trim(),
     ratePeriod1: form.ratePeriod1.trim(),
     rateAmount1: form.rateAmount1.trim(),
     ratePeriod2: form.ratePeriod2.trim(),
     rateAmount2: form.rateAmount2.trim(),
     visaStatus: form.visaStatus.trim(),
+    visaStatusOther: form.visaStatusOther.trim(),
   };
 
+  // Middle name is optional; everything else here is required.
   const requiredTextValues = [
-    trimmedStrings.consultantName,
+    trimmedStrings.firstName,
+    trimmedStrings.lastName,
     trimmedStrings.consultantEmail,
     trimmedStrings.ratePeriod1,
     trimmedStrings.rateAmount1,
@@ -127,7 +137,12 @@ export default function NewConsultantApplicationPage() {
     trimmedStrings.rateAmount2,
     trimmedStrings.visaStatus,
   ];
-  const allRequiredFilled = requiredTextValues.every((v) => v.length > 0);
+  // Build W — when "Others" is chosen, the custom value is required.
+  const visaOtherOk =
+    trimmedStrings.visaStatus !== "Others"
+    || trimmedStrings.visaStatusOther.length > 0;
+  const allRequiredFilled =
+    requiredTextValues.every((v) => v.length > 0) && visaOtherOk;
   const emailLooksValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmedStrings.consultantEmail);
   const periodsMatch =
     trimmedStrings.ratePeriod1.length > 0 &&
@@ -207,14 +222,35 @@ export default function NewConsultantApplicationPage() {
           <section className="space-y-3">
             <SectionHeader title="Consultant" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <Field label="Full legal name" required>
+              <Field label="First name" required>
                 <input
                   type="text"
-                  value={form.consultantName}
-                  onChange={setText("consultantName")}
+                  value={form.firstName}
+                  onChange={setText("firstName")}
                   disabled={isSubmitting}
                   required
-                  placeholder="Jane Q. Consultant"
+                  placeholder="Jane"
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Middle name">
+                <input
+                  type="text"
+                  value={form.middleName}
+                  onChange={setText("middleName")}
+                  disabled={isSubmitting}
+                  placeholder="(optional)"
+                  className={inputClass}
+                />
+              </Field>
+              <Field label="Last name" required>
+                <input
+                  type="text"
+                  value={form.lastName}
+                  onChange={setText("lastName")}
+                  disabled={isSubmitting}
+                  required
+                  placeholder="Consultant"
                   className={inputClass}
                 />
               </Field>
@@ -251,6 +287,17 @@ export default function NewConsultantApplicationPage() {
                     </option>
                   ))}
                 </select>
+                {form.visaStatus === "Others" && (
+                  <input
+                    type="text"
+                    value={form.visaStatusOther}
+                    onChange={setText("visaStatusOther")}
+                    disabled={isSubmitting}
+                    required
+                    placeholder="Specify the work-authorization status"
+                    className={inputClass + " mt-2"}
+                  />
+                )}
                 <p className="mt-1 text-[11px] text-gray-500">
                   Locked on the consultant&apos;s view. They&apos;ll see
                   it but cannot change it.

@@ -125,12 +125,16 @@ public class ConsultantApplicationService {
     public ConsultantApplication createApplication(
             String consultantEmail,
             String consultantName,
+            String firstName,
+            String middleName,
+            String lastName,
             String consultantPhone,
             String ratePeriod1,
             String rateAmount1,
             String ratePeriod2,
             String rateAmount2,
             String visaStatus,
+            String visaStatusOther,
             Boolean requireAppendix1,
             Boolean requireAppendix2,
             Boolean requireAppendix3,
@@ -147,6 +151,22 @@ public class ConsultantApplicationService {
         LocalDateTime now = LocalDateTime.now();
         String payloadJson = stringify(payload);
 
+        // Build W — structured name. Compose consultant_name from
+        // First + Middle? + Last; fall back to the single legacy field.
+        String fn = blankToNull(firstName);
+        String mn = blankToNull(middleName);
+        String ln = blankToNull(lastName);
+        String composed = composeName(fn, mn, ln);
+        String effectiveName = composed != null
+                ? composed
+                : blankToNull(consultantName);
+
+        // Build W — work-authorization custom value only for "Others".
+        String cat = blankToNull(visaStatus);
+        String catOther = "Others".equalsIgnoreCase(cat == null ? "" : cat)
+                ? blankToNull(visaStatusOther)
+                : null;
+
         ConsultantApplication app = ConsultantApplication.builder()
                 .applicationId(applicationId)
                 .ermUserId(AGREEMENT_ERM_USER_ID)
@@ -154,18 +174,19 @@ public class ConsultantApplicationService {
                 // Not yet used to filter reads (next phase).
                 .ownerErmId(ownerErmId)
                 .consultantEmail(consultantEmail.trim().toLowerCase())
-                .consultantName(consultantName)
+                .consultantName(effectiveName)
+                .firstName(fn)
+                .middleName(mn)
+                .lastName(ln)
                 .consultantPhone(consultantPhone)
                 .ratePeriod1(ratePeriod1)
                 .rateAmount1(rateAmount1)
                 .ratePeriod2(ratePeriod2)
                 .rateAmount2(rateAmount2)
-                // F-4: ERM-set visa is persisted on the existing
-                // workAuthCategory column (no new column).
-                .workAuthorizationCategory(
-                        visaStatus == null || visaStatus.isBlank()
-                                ? null
-                                : visaStatus.trim())
+                // F-4: ERM-set visa on workAuthCategory. Build W adds the
+                // custom "Others" free-text on work_authorization_other.
+                .workAuthorizationCategory(cat)
+                .workAuthorizationOther(catOther)
                 .requireAppendix1(Boolean.TRUE.equals(requireAppendix1))
                 .requireAppendix2(Boolean.TRUE.equals(requireAppendix2))
                 .requireAppendix3(Boolean.TRUE.equals(requireAppendix3))
@@ -594,7 +615,12 @@ public class ConsultantApplicationService {
         if (consultantEmail != null && !consultantEmail.isBlank()) {
             app.setConsultantEmail(consultantEmail.trim().toLowerCase());
         }
-        if (consultantName != null) app.setConsultantName(consultantName);
+        if (consultantName != null) {
+            app.setConsultantName(consultantName);
+            // Build W — keep the structured name parts coherent so the
+            // PDF/clauses (which compose from first/middle/last) match.
+            syncNameParts(app, consultantName);
+        }
         if (consultantPhone != null) app.setConsultantPhone(consultantPhone);
         if (payload != null) {
             String payloadJson = stringify(payload);
@@ -734,6 +760,8 @@ public class ConsultantApplicationService {
         app.setConsultantEmail(newEmail.toLowerCase());
         if (newName != null && !newName.isBlank()) {
             app.setConsultantName(newName);
+            // Build W — sync structured parts (see updateApplication).
+            syncNameParts(app, newName);
         }
         applicationRepository.save(app);
 
@@ -1030,6 +1058,16 @@ public class ConsultantApplicationService {
         if (!changed) {
             return app;
         }
+        // Build W — keep the composed consultant_name in sync whenever
+        // the consultant edits any part of their structured name.
+        if (patch.firstName != null || patch.middleName != null
+                || patch.lastName != null) {
+            String composed = composeName(
+                    blankToNull(app.getFirstName()),
+                    blankToNull(app.getMiddleName()),
+                    blankToNull(app.getLastName()));
+            if (composed != null) app.setConsultantName(composed);
+        }
         applicationRepository.save(app);
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CONSULTANT_FILLED,
@@ -1260,7 +1298,10 @@ public class ConsultantApplicationService {
         app.setErmName(ermName);
         app.setErmTitle(ermTitle);
         app.setErmSignatureUrl(ermSigUrl);
-        app.setSignatureDate(now);
+        // Build W — stamp the ERM's OWN countersign date (no longer
+        // overwrites the consultant's signatureDate). The ERM "Date:"
+        // line stays blank until exactly this moment.
+        app.setErmSignatureDate(now);
         app.setStatus(ConsultantApplication.Status.COMPLETED.name());
         applicationRepository.save(app);
 
@@ -1815,9 +1856,21 @@ public class ConsultantApplicationService {
      * one from its request DTO without leaking entity-side setters.
      */
     public static class ConsultantFillPatch {
+        // Build W — structured name (consultant may correct the spelling
+        // on the cover step). consultant_name is recomposed in
+        // consultantFill from these.
+        public String firstName;
+        public String middleName;
+        public String lastName;
         public String primaryPhone;
         public String workAuthorizationCategory;
         public String residenceAddress;
+        // Build W — structured US billing address.
+        public String addressLine1;
+        public String addressLine2;
+        public String addressCity;
+        public String addressState;
+        public String addressZip;
         public java.time.LocalDate effectiveDate;
         public String technologyTrack;
         public String customScopeNotes;
@@ -1872,9 +1925,17 @@ public class ConsultantApplicationService {
         /** Returns true iff at least one non-null field was applied. */
         boolean applyTo(ConsultantApplication app) {
             boolean changed = false;
+            if (firstName != null)                { app.setFirstName(firstName); changed = true; }
+            if (middleName != null)               { app.setMiddleName(middleName); changed = true; }
+            if (lastName != null)                 { app.setLastName(lastName); changed = true; }
             if (primaryPhone != null)             { app.setPrimaryPhone(primaryPhone); changed = true; }
             if (workAuthorizationCategory != null){ app.setWorkAuthorizationCategory(workAuthorizationCategory); changed = true; }
             if (residenceAddress != null)         { app.setResidenceAddress(residenceAddress); changed = true; }
+            if (addressLine1 != null)             { app.setAddressLine1(addressLine1); changed = true; }
+            if (addressLine2 != null)             { app.setAddressLine2(addressLine2); changed = true; }
+            if (addressCity != null)              { app.setAddressCity(addressCity); changed = true; }
+            if (addressState != null)             { app.setAddressState(addressState); changed = true; }
+            if (addressZip != null)               { app.setAddressZip(addressZip); changed = true; }
             if (effectiveDate != null)            { app.setEffectiveDate(effectiveDate); changed = true; }
             if (technologyTrack != null)          { app.setTechnologyTrack(technologyTrack); changed = true; }
             if (customScopeNotes != null)         { app.setCustomScopeNotes(customScopeNotes); changed = true; }
@@ -1925,9 +1986,17 @@ public class ConsultantApplicationService {
         /** Names of every field the caller actually sent (non-null). */
         List<String> touchedFieldNames() {
             List<String> names = new java.util.ArrayList<>();
+            if (firstName != null) names.add("firstName");
+            if (middleName != null) names.add("middleName");
+            if (lastName != null) names.add("lastName");
             if (primaryPhone != null) names.add("primaryPhone");
             if (workAuthorizationCategory != null) names.add("workAuthorizationCategory");
             if (residenceAddress != null) names.add("residenceAddress");
+            if (addressLine1 != null) names.add("addressLine1");
+            if (addressLine2 != null) names.add("addressLine2");
+            if (addressCity != null) names.add("addressCity");
+            if (addressState != null) names.add("addressState");
+            if (addressZip != null) names.add("addressZip");
             if (effectiveDate != null) names.add("effectiveDate");
             if (technologyTrack != null) names.add("technologyTrack");
             if (customScopeNotes != null) names.add("customScopeNotes");
@@ -2036,6 +2105,145 @@ public class ConsultantApplicationService {
                         "bytes", bytes.length),
                 request);
         return app;
+    }
+
+    /**
+     * Build W — Appendix 1 work-authorization document upload. Mirrors
+     * {@link #uploadCheque}: validates type/size, stores the bytes in
+     * Cloudinary at {@code agreements/{appId}-workauth}
+     * (type=authenticated), and persists the public_id + content type +
+     * timestamp on the row. Subsequent uploads overwrite.
+     */
+    @Transactional
+    public ConsultantApplication uploadWorkAuthDoc(
+            String applicationId,
+            byte[] bytes,
+            String contentType,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (bytes == null || bytes.length == 0) {
+            throw new IllegalArgumentException("Work-authorization file is empty.");
+        }
+        if (bytes.length > MAX_CHEQUE_BYTES) {
+            throw new IllegalArgumentException(
+                    "Work-authorization file is too large (>10 MB).");
+        }
+        String normalisedType = contentType == null ? "" : contentType.toLowerCase();
+        boolean isImage = normalisedType.startsWith("image/");
+        boolean isPdf = normalisedType.equals("application/pdf");
+        if (!isImage && !isPdf) {
+            throw new IllegalArgumentException(
+                    "Work-authorization document must be an image (JPG/PNG/HEIC) or PDF.");
+        }
+        String publicId = "agreements/" + applicationId + "-workauth";
+        try {
+            cloudinary.uploader().upload(bytes,
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "public_id", publicId,
+                            "resource_type", isPdf ? "raw" : "image",
+                            "type", "authenticated",
+                            "overwrite", true));
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(
+                    "Couldn't store work-authorization document: " + e.getMessage(), e);
+        }
+        app.setWorkAuthDocPublicId(publicId);
+        app.setWorkAuthDocContentType(normalisedType);
+        app.setWorkAuthDocUploadedAt(LocalDateTime.now());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.WORK_AUTH_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("publicId", publicId,
+                        "contentType", normalisedType,
+                        "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /**
+     * Build W — streams the bytes of the uploaded work-authorization
+     * document, re-signing the delivery URL on every call (same pattern
+     * as the cheque / final PDF). Returns null when none uploaded.
+     */
+    public ChequeBytes fetchWorkAuthDocBytes(String applicationId) throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        String publicId = app.getWorkAuthDocPublicId();
+        if (publicId == null || publicId.isBlank()) return null;
+        boolean isPdf = "application/pdf".equalsIgnoreCase(app.getWorkAuthDocContentType());
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
+        java.net.URLConnection conn = new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (java.io.InputStream in = conn.getInputStream()) {
+            byte[] bytes = in.readAllBytes();
+            return new ChequeBytes(bytes, app.getWorkAuthDocContentType());
+        }
+    }
+
+    // ── Build W — small name helpers ──────────────────────────────────
+
+    /** Trim a string, returning null when null/blank. */
+    private static String blankToNull(String s) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.isEmpty() ? null : t;
+    }
+
+    /**
+     * Compose "First Middle? Last" from already-trimmed (or null) parts.
+     * Returns null when both first and last are absent.
+     */
+    private static String composeName(String first, String middle, String last) {
+        if ((first == null || first.isEmpty())
+                && (last == null || last.isEmpty())) {
+            return null;
+        }
+        StringBuilder sb = new StringBuilder();
+        if (first != null && !first.isEmpty()) sb.append(first);
+        if (middle != null && !middle.isEmpty()) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(middle);
+        }
+        if (last != null && !last.isEmpty()) {
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(last);
+        }
+        String out = sb.toString().trim();
+        return out.isEmpty() ? null : out;
+    }
+
+    /**
+     * Build W — decompose a single full name into First / Middle / Last
+     * and write the structured columns, so any path that edits the
+     * composed {@code consultantName} keeps the parts (which the PDF
+     * composes from) coherent. One token → first only; two → first +
+     * last; three+ → first, middle (the span between), last.
+     */
+    private static void syncNameParts(ConsultantApplication app, String fullName) {
+        String t = blankToNull(fullName);
+        if (t == null) return;
+        String[] parts = t.split("\\s+");
+        if (parts.length == 1) {
+            app.setFirstName(parts[0]);
+            app.setMiddleName(null);
+            app.setLastName(null);
+        } else if (parts.length == 2) {
+            app.setFirstName(parts[0]);
+            app.setMiddleName(null);
+            app.setLastName(parts[1]);
+        } else {
+            app.setFirstName(parts[0]);
+            app.setLastName(parts[parts.length - 1]);
+            app.setMiddleName(String.join(" ",
+                    java.util.Arrays.copyOfRange(parts, 1, parts.length - 1)));
+        }
     }
 
     /**
@@ -2534,10 +2742,20 @@ public class ConsultantApplicationService {
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
         // CORE (always required).
-        addIfBlank(missing, "consultantName", app.getConsultantName());
+        // Build W — structured name: first + last required, middle optional.
+        addIfBlank(missing, "firstName", app.getFirstName());
+        addIfBlank(missing, "lastName", app.getLastName());
         addIfBlank(missing, "consultantEmail", app.getConsultantEmail());
         addIfBlank(missing, "primaryPhone", app.getPrimaryPhone());
-        addIfBlank(missing, "residenceAddress", app.getResidenceAddress());
+        // Build W — structured US billing address (line2 optional).
+        addIfBlank(missing, "addressLine1", app.getAddressLine1());
+        addIfBlank(missing, "addressCity", app.getAddressCity());
+        addIfBlank(missing, "addressState", app.getAddressState());
+        addIfBlank(missing, "addressZip", app.getAddressZip());
+        if (nonBlank(app.getAddressZip())
+                && !app.getAddressZip().trim().matches("\\d{5}(-\\d{4})?")) {
+            missing.add("addressZip");
+        }
         addIfBlank(missing, "technologyTrack", app.getTechnologyTrack());
         addIfBlank(missing, "customScopeNotes", app.getCustomScopeNotes());
 
@@ -2550,6 +2768,12 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "roleTitle", app.getRoleTitle());
             if (app.getVerifiedStartDate() == null) missing.add("verifiedStartDate");
             addIfBlank(missing, "payrollCycle", app.getPayrollCycle());
+            // Build W — work-authorization document upload is required
+            // whenever Appendix 1 applies.
+            if (app.getWorkAuthDocPublicId() == null
+                    || app.getWorkAuthDocPublicId().isBlank()) {
+                missing.add("workAuthDoc");
+            }
         }
 
         // Appendix 2 -- ACH.
@@ -2638,8 +2862,10 @@ public class ConsultantApplicationService {
             }
         }
         if (app3Active && Boolean.TRUE.equals(app.getRequireSsn())) {
+            // Build W — SSN is strictly alphanumeric (A-Z, a-z, 0-9);
+            // no hyphens, spaces, or symbols.
             if (nonBlank(app.getBgFullSsn())
-                    && !app.getBgFullSsn().matches("\\d{3}-\\d{2}-\\d{4}")) {
+                    && !app.getBgFullSsn().trim().matches("[A-Za-z0-9]+")) {
                 missing.add("bgFullSsn");
             }
         }

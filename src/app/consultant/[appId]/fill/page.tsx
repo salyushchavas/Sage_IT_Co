@@ -57,11 +57,13 @@ import {
   saveConsultantFill,
   signConsultantApplication,
   uploadConsultantChequeAt,
+  uploadConsultantWorkAuthDoc,
   type AgreementContent,
   type ChequeEntry,
   type ConsultantApplication,
   type ConsultantFillPayload,
 } from "@/lib/api";
+import { formatUsDate } from "@/lib/dates";
 
 /**
  * Guided, document-paired signing wizard. Iterates the F-1 section
@@ -151,33 +153,24 @@ function isFieldValueValid(field: SectionField, value: string): boolean {
     return /^\d{10}$/.test(trimmed.replace(/\D/g, ""));
   }
   if (field.type === "ssn") {
-    return /^\d{3}-\d{2}-\d{4}$/.test(trimmed);
+    // Build W — SSN is strictly alphanumeric (A-Z, a-z, 0-9 only).
+    return /^[A-Za-z0-9]+$/.test(trimmed);
   }
   if (field.type === "id-type") {
     return trimmed === "DL" || trimmed === "STATE_ID";
   }
+  // Build W — US ZIP: 5 digits, optionally ZIP+4.
+  if (field.key === "addressZip") {
+    return /^\d{5}(-\d{4})?$/.test(trimmed);
+  }
   return true;
 }
 
-/** Build G — formats an ISO yyyy-MM-dd date string as MM-DD-YYYY. */
-function formatUsDate(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!match) return iso;
-  return `${match[2]}-${match[3]}-${match[1]}`;
-}
+/** Build W — formatUsDate now lives in @/lib/dates (single source). */
 
 /** Build G — digit-only auto-mask for routing/account inputs. */
 function digitsOnly(raw: string, maxLen: number): string {
   return raw.replace(/\D/g, "").slice(0, maxLen);
-}
-
-/** Build G — XXX-XX-XXXX auto-mask for SSN input. */
-function formatSsn(raw: string): string {
-  const digits = raw.replace(/\D/g, "").slice(0, 9);
-  if (digits.length <= 3) return digits;
-  if (digits.length <= 5) return `${digits.slice(0, 3)}-${digits.slice(3)}`;
-  return `${digits.slice(0, 3)}-${digits.slice(3, 5)}-${digits.slice(5)}`;
 }
 
 /**
@@ -242,6 +235,7 @@ function isSectionComplete(
   form: FormState,
   reqs: EffectiveRequirements,
   chequeEntries: ChequeEntry[],
+  workAuthUploaded: boolean,
 ): boolean {
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
@@ -253,6 +247,11 @@ function isSectionComplete(
     if (!isFieldValueValid(field, form.fields[field.key] ?? "")) {
       return false;
     }
+  }
+  // Build W — Appendix 1 completeness: when the appendix applies, the
+  // work-authorization document must be uploaded.
+  if (section.id === "appendix1" && isSectionActive(section, form, reqs)) {
+    if (!workAuthUploaded) return false;
   }
   // Build U — Appendix 5 completeness: when the appendix applies,
   // every cheque 0..count-1 needs a number AND an upload.
@@ -312,9 +311,10 @@ function firstIncompleteIndex(
   form: FormState,
   reqs: EffectiveRequirements,
   chequeEntries: ChequeEntry[],
+  workAuthUploaded: boolean,
 ): number {
   for (let i = 0; i < sections.length - 1; i++) {
-    if (!isSectionComplete(sections[i], form, reqs, chequeEntries)) return i;
+    if (!isSectionComplete(sections[i], form, reqs, chequeEntries, workAuthUploaded)) return i;
   }
   return sections.length - 1;
 }
@@ -384,6 +384,12 @@ export default function ConsultantWizardPage() {
   const [chequeEntries, setChequeEntries] = useState<ChequeEntry[]>([]);
   const [chequeUploadError, setChequeUploadError] = useState("");
   const [chequeUploadingIndex, setChequeUploadingIndex] = useState<number | null>(null);
+  // Build W — Appendix 1 work-authorization document upload state.
+  // "uploaded" is a non-form completion signal (like the cheque list):
+  // a non-null work_auth_doc_public_id on the row.
+  const [workAuthUploaded, setWorkAuthUploaded] = useState(false);
+  const [workAuthUploadError, setWorkAuthUploadError] = useState("");
+  const [workAuthUploading, setWorkAuthUploading] = useState(false);
   // Build G — review-step attestation gate. The consultant must
   // (a) load the generated PDF preview, (b) tick the attestation
   // checkbox, and (c) draw the final signature -- in any order --
@@ -445,14 +451,17 @@ export default function ConsultantWizardPage() {
         lastSavedRef.current = { ...initial };
         const entries = parseChequeList(data.cheques);
         setChequeEntries(entries);
+        // Build W — work-auth doc already on file?
+        setWorkAuthUploaded(Boolean(data.workAuthDocPublicId));
         // Build X — resume at the first incomplete section across the
         // VISIBLE set (core + ERM-required appendices). Hidden
         // appendices are not counted; if every visible non-review
         // section is already complete, the consultant lands on Review.
         const loadedReqs = effectiveRequirements(data);
         const loadedVisible = filterVisibleSections(loadedReqs);
+        const loadedWorkAuth = Boolean(data.workAuthDocPublicId);
         setCurrentStep(firstIncompleteIndex(
-            loadedVisible, initial, loadedReqs, entries));
+            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -692,6 +701,25 @@ export default function ConsultantWizardPage() {
     [appId],
   );
 
+  // Build W — Appendix 1 work-authorization document upload.
+  const handleWorkAuthUpload = useCallback(
+    async (file: File) => {
+      if (!appId) return;
+      setWorkAuthUploadError("");
+      setWorkAuthUploading(true);
+      try {
+        await uploadConsultantWorkAuthDoc(appId, file);
+        setWorkAuthUploaded(true);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : "Couldn't upload.";
+        setWorkAuthUploadError(msg);
+      } finally {
+        setWorkAuthUploading(false);
+      }
+    },
+    [appId],
+  );
+
   const setLegalName = useCallback(
     (value: string) => {
       setForm((prev) => {
@@ -831,14 +859,14 @@ export default function ConsultantWizardPage() {
         const complete =
           i === visibleSections.length - 1
             ? visibleSections.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeEntries),
+                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeEntries);
+            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [visibleSections, form, reqs, chequeEntries],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded);
   const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -848,12 +876,12 @@ export default function ConsultantWizardPage() {
   const allComplete = useMemo(
     () =>
       visibleSections.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeEntries),
+        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [visibleSections, form, reqs, chequeEntries, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, attestation, previewSeen],
   );
 
   // Build W — live re-evaluation of the missing list. The backend
@@ -878,6 +906,10 @@ export default function ConsultantWizardPage() {
           }
         }
         return false;
+      }
+      // Build W — work-auth doc has a non-form (upload) completion signal.
+      if (k === "workAuthDoc") {
+        return !workAuthUploaded;
       }
       const value = form.fields[k] ?? "";
       const section = findSectionForFieldKey(k);
@@ -907,7 +939,7 @@ export default function ConsultantWizardPage() {
       missingSignature: missingSig,
       missingFinalSignature: missingFinalSig,
     };
-  }, [submitMissing, form, chequeEntries]);
+  }, [submitMissing, form, chequeEntries, workAuthUploaded]);
 
   // Build W — auto-dismiss the panel the moment the list empties.
   useEffect(() => {
@@ -1173,6 +1205,7 @@ export default function ConsultantWizardPage() {
             onLegalName={setLegalName}
             allComplete={allComplete}
             chequeEntries={chequeEntries}
+            workAuthUploaded={workAuthUploaded}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -1212,6 +1245,14 @@ export default function ConsultantWizardPage() {
             onUploadChequeAt={(index, f) => void handleChequeUploadAt(index, f)}
             onChequeMetadataChange={(index, patch) =>
               void handleChequeMetadataChange(index, patch)
+            }
+            workAuthUploaded={workAuthUploaded}
+            workAuthUploading={workAuthUploading}
+            workAuthError={workAuthUploadError}
+            onUploadWorkAuth={(f) => void handleWorkAuthUpload(f)}
+            missingWorkAuth={
+              section.id === "appendix1"
+              && missingByField.has("workAuthDoc")
             }
             phase={app.phase ?? 1}
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
@@ -1573,6 +1614,11 @@ function SectionStep({
   chequeUploadError,
   onUploadChequeAt,
   onChequeMetadataChange,
+  workAuthUploaded,
+  workAuthUploading,
+  workAuthError,
+  onUploadWorkAuth,
+  missingWorkAuth,
   phase,
   onBack,
   onNext,
@@ -1608,6 +1654,12 @@ function SectionStep({
     index: number,
     patch: { number?: string; date?: string },
   ) => void;
+  /** Build W — Appendix 1 work-authorization document upload. */
+  workAuthUploaded: boolean;
+  workAuthUploading: boolean;
+  workAuthError: string;
+  onUploadWorkAuth: (file: File) => void;
+  missingWorkAuth: boolean;
   phase: number;
   onBack: () => void;
   onNext: () => void;
@@ -1910,6 +1962,18 @@ function SectionStep({
             </div>
           )}
 
+          {section.id === "appendix1" && (
+            <div id="field-workAuthDoc">
+              <WorkAuthUploadBlock
+                uploaded={workAuthUploaded}
+                uploading={workAuthUploading}
+                error={workAuthError}
+                onUpload={onUploadWorkAuth}
+                needsAttention={missingWorkAuth}
+              />
+            </div>
+          )}
+
           {section.id === "appendix5" && (
             <div id="field-cheques">
               <ChequeListBlock
@@ -2022,7 +2086,9 @@ function FieldInput({
         : field.type === "account"
           ? "Account number must be exactly 10 digits."
           : field.type === "ssn"
-            ? "Enter the SSN as XXX-XX-XXXX."
+            ? "Use letters and numbers only (no spaces or symbols)."
+            : field.key === "addressZip"
+              ? "Enter a 5-digit ZIP (optionally ZIP+4)."
             : field.type === "id-type"
               ? "Pick one."
               : "This field is required."
@@ -2127,7 +2193,8 @@ function FieldInput({
     const handleSensitiveChange = (raw: string) => {
       if (field.type === "routing") return onChange(digitsOnly(raw, 9));
       if (field.type === "account") return onChange(digitsOnly(raw, 10));
-      if (field.type === "ssn") return onChange(formatSsn(raw));
+      // Build W — SSN is strictly alphanumeric; strip everything else.
+      if (field.type === "ssn") return onChange(raw.replace(/[^A-Za-z0-9]/g, ""));
       return onChange(raw);
     };
     const ph =
@@ -2137,7 +2204,7 @@ function FieldInput({
         : field.type === "account"
           ? "10 digits"
           : field.type === "ssn"
-            ? "XXX-XX-XXXX"
+            ? "Letters and numbers only"
             : undefined);
     control = (
       <div className="relative">
@@ -2146,7 +2213,6 @@ function FieldInput({
           inputMode={
             field.type === "routing"
             || field.type === "account"
-            || field.type === "ssn"
               ? "numeric"
               : undefined
           }
@@ -3179,11 +3245,100 @@ function ConsultantImagesPreview({
 // ── Build U: Appendix 5 multi-cheque list ────────────────────
 
 /**
+ * Build W — Appendix 1 work-authorization document upload tile. A
+ * single required image/PDF upload (≤10 MB); "uploaded ✓" once stored.
+ */
+function WorkAuthUploadBlock({
+  uploaded,
+  uploading,
+  error,
+  onUpload,
+  needsAttention,
+}: {
+  uploaded: boolean;
+  uploading: boolean;
+  error: string;
+  onUpload: (file: File) => void;
+  needsAttention: boolean;
+}) {
+  const inputId = "workauth-file";
+  return (
+    <section
+      className={
+        "rounded-xl border p-4 space-y-3 "
+        + (uploaded
+          ? "bg-emerald-50/40 border-emerald-300"
+          : needsAttention
+            ? "border-[var(--copper)] bg-[color:var(--copper-wash)]/60"
+            : "bg-white border-stone-200")
+      }
+    >
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
+          Work-authorization document{" "}
+          <span className="text-sage-copper-deep" aria-hidden>*</span>
+        </p>
+        <p className="mt-1 text-[12px] text-stone-500">
+          Upload a copy of your current work-authorization document — an
+          image or PDF (≤10 MB).
+        </p>
+      </div>
+      <div className="flex items-center gap-3 flex-wrap">
+        <label
+          htmlFor={inputId}
+          className={
+            "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border cursor-pointer motion-safe:transition-colors "
+            + (uploading
+              ? "bg-stone-100 text-gray-400 border-stone-200 cursor-wait"
+              : uploaded
+                ? "bg-white text-sage-navy border-stone-300 hover:bg-stone-50"
+                : "bg-sage-navy text-white border-sage-navy hover:bg-sage-navy-deep")
+          }
+        >
+          {uploading ? (
+            <>
+              <Loader2 size={12} className="animate-spin" /> Uploading…
+            </>
+          ) : (
+            <>
+              <FileText size={12} />
+              {uploaded ? "Replace file" : "Choose file"}
+            </>
+          )}
+        </label>
+        {uploaded && !uploading && (
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800">
+            <CheckCircle2 size={13} /> Uploaded
+          </span>
+        )}
+        <input
+          id={inputId}
+          type="file"
+          accept="image/*,application/pdf"
+          disabled={uploading}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) onUpload(f);
+            e.currentTarget.value = "";
+          }}
+          className="hidden"
+        />
+      </div>
+      {error && (
+        <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
+          <AlertCircle size={11} /> {error}
+        </p>
+      )}
+    </section>
+  );
+}
+
+/**
  * Build U — renders one input group per cheque (driven by the
  * consultant's "Number of cheques" entry). Each group has its own
- * cheque-number, cheque-date, and file upload. Replaces the previous
- * single ChequeUploadBlock + free-text "Check numbers" / "Check
- * dates" inputs.
+ * cheque-number and file upload. Replaces the previous single
+ * ChequeUploadBlock + free-text "Check numbers" inputs. (Build W
+ * removed the per-cheque date field.)
  */
 function ChequeListBlock({
   count,
@@ -3275,7 +3430,8 @@ function ChequeListBlock({
             <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
               Cheque {i + 1}
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {/* Build W — cheque DATE field removed; only number + upload. */}
+            <div className="grid grid-cols-1 gap-3">
               <label className="block text-[12px]">
                 <span className="font-medium text-stone-700">
                   Cheque number <span className="text-sage-copper-deep" aria-hidden>*</span>
@@ -3287,17 +3443,6 @@ function ChequeListBlock({
                     onMetadataChange(i, { number: e.target.value })
                   }
                   placeholder="e.g. 1001"
-                  className="mt-1 w-full px-3 py-2 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper"
-                />
-              </label>
-              <label className="block text-[12px]">
-                <span className="font-medium text-stone-700">Cheque date</span>
-                <input
-                  type="date"
-                  value={entry?.date ?? ""}
-                  onChange={(e) =>
-                    onMetadataChange(i, { date: e.target.value })
-                  }
                   className="mt-1 w-full px-3 py-2 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper"
                 />
               </label>
@@ -3455,6 +3600,7 @@ function ReviewStep({
   onLegalName,
   allComplete,
   chequeEntries,
+  workAuthUploaded,
   attestation,
   onAttestation,
   previewSeen,
@@ -3475,6 +3621,8 @@ function ReviewStep({
   onLegalName: (value: string) => void;
   allComplete: boolean;
   chequeEntries: ChequeEntry[];
+  /** Build W — Appendix 1 work-auth doc uploaded? (non-form signal). */
+  workAuthUploaded: boolean;
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -3555,7 +3703,7 @@ function ReviewStep({
       </div>
 
       {visibleSections.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeEntries);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix

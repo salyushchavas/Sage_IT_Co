@@ -113,12 +113,16 @@ public class ConsultantApplicationController {
         ConsultantApplication app = consultantService.createApplication(
                 body.consultantEmail,
                 body.consultantName,
+                body.firstName,
+                body.middleName,
+                body.lastName,
                 body.consultantPhone,
                 body.ratePeriod1,
                 body.rateAmount1,
                 body.ratePeriod2,
                 body.rateAmount2,
                 body.visaStatus,
+                body.visaStatusOther,
                 body.requireAppendix1,
                 body.requireAppendix2,
                 body.requireAppendix3,
@@ -503,6 +507,84 @@ public class ConsultantApplicationController {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
         consultantService.assertErmCanAccess(app, request);
         return streamChequeAt(appId, index, disposition);
+    }
+
+    // ── Build W — Appendix 1 work-authorization document upload ───────
+
+    /** Consultant uploads their Appendix 1 work-authorization copy. */
+    @PostMapping("/api/consultant/applications/{appId}/workauth")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadWorkAuthDoc(
+            @PathVariable String appId,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowWrite(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadWorkAuthDoc(
+                    appId, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "Work-authorization document uploaded.")));
+    }
+
+    /** Consultant-side preview of their uploaded work-authorization doc. */
+    @GetMapping("/api/consultant/applications/{appId}/workauth")
+    public ResponseEntity<byte[]> consultantViewWorkAuthDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamWorkAuthDoc(appId, disposition);
+    }
+
+    /** ERM-side inline view / download of the work-authorization doc. */
+    @GetMapping("/api/agreement-erm/applications/{appId}/workauth")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewWorkAuthDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamWorkAuthDoc(appId, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamWorkAuthDoc(String appId, String disposition) {
+        ConsultantApplicationService.ChequeBytes doc;
+        try {
+            doc = consultantService.fetchWorkAuthDocBytes(appId);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        if (doc == null || doc.bytes() == null || doc.bytes().length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+        String contentType = doc.contentType();
+        if (contentType == null || contentType.isBlank()) {
+            contentType = "application/octet-stream";
+        }
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String ext = isPdf ? ".pdf" : ".img";
+        String filename = "SageITCO-WorkAuth_" + appId + ext;
+        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
+                ? "attachment" : "inline";
+        return ResponseEntity.ok()
+                .contentType(MediaType.parseMediaType(contentType))
+                .contentLength(doc.bytes().length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        dispositionMode + "; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(doc.bytes());
     }
 
     private ResponseEntity<byte[]> streamChequeAt(String appId, int index, String disposition) {
@@ -1088,7 +1170,12 @@ public class ConsultantApplicationController {
 
     public static class CreateBody {
         public String consultantEmail;
+        // Build W — structured name. consultantName kept for back-compat
+        // (composed server-side from first/middle/last when provided).
         public String consultantName;
+        public String firstName;
+        public String middleName;
+        public String lastName;
         public String consultantPhone;
         // Rate card -- two free-form pairs (e.g. period="hourly",
         // amount="$60") set by the ERM at create time and rendered
@@ -1099,8 +1186,10 @@ public class ConsultantApplicationController {
         public String rateAmount2;
         // F-4: ERM-set visa / work-authorization status. Persisted into
         // workAuthCategory; the wizard renders it read-only on the
-        // cover step.
+        // cover step. Build W — visaStatusOther carries the custom value
+        // when visaStatus == "Others".
         public String visaStatus;
+        public String visaStatusOther;
         // F-4: per-agreement requirement flags. The ERM ticks which
         // appendices THIS consultant must complete; the wizard +
         // submit validation use these to decide required vs

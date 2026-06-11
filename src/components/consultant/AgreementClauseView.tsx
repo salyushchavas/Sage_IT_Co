@@ -26,12 +26,33 @@ const FIELD_LABELS: Record<string, string> = (() => {
 
 // Template placeholder names that don't match their entity field key 1:1.
 const PLACEHOLDER_ALIAS: Record<string, string> = {
-  participantFullLegalName: "consultantName",
   primaryEmail: "consultantEmail",
 };
 
 function fieldKeyFor(name: string): string {
   return PLACEHOLDER_ALIAS[name] ?? name;
+}
+
+// Build W — compose the full legal name live from the structured parts.
+function composeNameFromFields(fields: Record<string, string>): string {
+  const first = (fields["firstName"] ?? "").trim();
+  const middle = (fields["middleName"] ?? "").trim();
+  const last = (fields["lastName"] ?? "").trim();
+  return [first, middle, last].filter((p) => p.length > 0).join(" ").trim();
+}
+
+// Build W — assemble the US-format billing address live from the
+// structured parts ("Line1[, Line2], City, ST ZIP").
+function assembleAddressFromFields(fields: Record<string, string>): string {
+  const line1 = (fields["addressLine1"] ?? "").trim();
+  const line2 = (fields["addressLine2"] ?? "").trim();
+  const city = (fields["addressCity"] ?? "").trim();
+  const state = (fields["addressState"] ?? "").trim();
+  const zip = (fields["addressZip"] ?? "").trim();
+  let cityStateZip = city;
+  if (state) cityStateZip = cityStateZip ? `${cityStateZip}, ${state}` : state;
+  if (zip) cityStateZip = cityStateZip ? `${cityStateZip} ${zip}` : zip;
+  return [line1, line2, cityStateZip].filter((p) => p.length > 0).join(", ").trim();
 }
 
 function prettify(name: string): string {
@@ -178,6 +199,35 @@ function SegmentView({
   }
 
   const name = seg.name ?? "";
+
+  // Build W — composed full legal name, live from the structured parts.
+  if (name === "participantFullLegalName") {
+    const full = composeNameFromFields(fields);
+    return full ? <Filled value={full} /> : <Blank label="your full legal name" />;
+  }
+
+  // Build W — assembled US billing address, live from the parts.
+  if (name === "residenceAddress") {
+    const addr = assembleAddressFromFields(fields);
+    return addr ? <Filled value={addr} /> : <Blank label="your address" />;
+  }
+
+  // Build W — work authorization is ERM-set; the EFFECTIVE value (custom
+  // text when "Others") comes from the per-app values.
+  if (name === "workAuthorizationCategory") {
+    const eff =
+      (values["workAuthorizationCategory"] ?? "").trim()
+      || (fields["workAuthorizationCategory"] ?? "").trim();
+    return eff ? <Filled value={eff} /> : <Blank label="work authorization" />;
+  }
+
+  // Build W — ERM signature date: blank (render nothing) until the ERM
+  // countersigns, so no date shows under the unsigned ERM signature.
+  if (name === "ermSignatureDate") {
+    const v = (values["ermSignatureDate"] ?? "").trim();
+    return v ? <Filled value={v} /> : <></>;
+  }
+
   const key = fieldKeyFor(name);
 
   // 1. Consultant-editable → live from form state.

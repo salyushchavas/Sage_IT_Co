@@ -91,8 +91,28 @@ public class ConsultantApplication {
     @Column(name = "consultant_email", nullable = false, length = 255)
     private String consultantEmail;
 
+    /**
+     * Composed full legal name (First + Middle? + Last), kept as the
+     * single source the PDF / clauses / filename read through
+     * {@code ${participantFullLegalName}}. Build W splits capture into
+     * the three structured columns below; the service composes this
+     * column from them on every create / fill so existing render paths
+     * stay untouched. Legacy rows keep whatever single value they hold.
+     */
     @Column(name = "consultant_name", length = 255)
     private String consultantName;
+
+    // ── Build W: structured name (First required, Middle optional,
+    //    Last required). Composed into consultantName on save. ─────────
+
+    @Column(name = "first_name", length = 120)
+    private String firstName;
+
+    @Column(name = "middle_name", length = 120)
+    private String middleName;
+
+    @Column(name = "last_name", length = 120)
+    private String lastName;
 
     @Column(name = "consultant_phone", length = 32)
     private String consultantPhone;
@@ -200,7 +220,33 @@ public class ConsultantApplication {
 
     @Column(name = "primary_phone") private String primaryPhone;
     @Column(name = "work_authorization_category") private String workAuthorizationCategory;
+    /**
+     * Build W: free-text custom value used ONLY when
+     * {@code workAuthorizationCategory == "Others"}. ERM-set; the
+     * render layer substitutes this for the category when Others is
+     * chosen so the PDF/clauses show the real status, not the literal
+     * word "Others".
+     */
+    @Column(name = "work_authorization_other") private String workAuthorizationOther;
+
+    /**
+     * Build W: legacy single-block residence address. No longer
+     * collected from the form — kept (never dropped) so old rows stay
+     * readable. New rows leave it null and use the structured columns
+     * below; the render layer assembles the US-format address from
+     * them and falls back to this column for legacy rows.
+     */
     @Column(name = "residence_address", columnDefinition = "TEXT") private String residenceAddress;
+
+    // ── Build W: structured US billing address. Assembled into the
+    //    ${residenceAddress} placeholder by the render layer. ──────────
+
+    @Column(name = "address_line1", length = 255) private String addressLine1;
+    @Column(name = "address_line2", length = 255) private String addressLine2;
+    @Column(name = "address_city", length = 120) private String addressCity;
+    @Column(name = "address_state", length = 8) private String addressState;
+    @Column(name = "address_zip", length = 16) private String addressZip;
+
     @Column(name = "effective_date") private LocalDate effectiveDate;
 
     // ── Exhibit A (scope of engagement) ──────────────────────────────
@@ -260,7 +306,21 @@ public class ConsultantApplication {
     @Column(name = "erm_name") private String ermName;
     @Column(name = "erm_title") private String ermTitle;
     @Column(name = "erm_signature_url", columnDefinition = "TEXT") private String ermSignatureUrl;
+    /**
+     * CONSULTANT signing date — set at consultantSubmit and rendered on
+     * the consultant "Date / Email:" line of every signature block.
+     * (Build W: no longer overwritten by the ERM countersign — that now
+     * uses {@link #ermSignatureDate}.)
+     */
     @Column(name = "signature_date") private LocalDateTime signatureDate;
+    /**
+     * Build W — ERM countersign date. Set ONLY when the ERM signs
+     * ({@code ermApproveAndSign}); null until then. Rendered on the ERM
+     * "Date:" line via {@code ${ermSignatureDate}}. Stays blank while
+     * the consultant signs/views so no date shows under the (still
+     * unsigned) ERM signature.
+     */
+    @Column(name = "erm_signature_date") private LocalDateTime ermSignatureDate;
 
     // ── Revision tracking ────────────────────────────────────────────
     //
@@ -424,6 +484,26 @@ public class ConsultantApplication {
     /** Original Content-Type of the uploaded cheque (image/* | application/pdf). */
     @Column(name = "cheque_content_type", length = 64)
     private String chequeContentType;
+
+    // ── Build W: Appendix 1 work-authorization document upload ────────
+    //
+    // The consultant uploads a copy of their work-authorization document
+    // (image/PDF) in Appendix 1 via
+    // POST /consultant/applications/{appId}/workauth. Bytes land in
+    // Cloudinary at {@code agreements/<appId>-workauth}
+    // (resource_type=auto, type=authenticated); the public_id is
+    // persisted here so the ERM can stream a re-signed inline view.
+    // REQUIRED whenever Appendix 1 applies to this consultant.
+
+    @Column(name = "work_auth_doc_public_id")
+    private String workAuthDocPublicId;
+
+    @Column(name = "work_auth_doc_uploaded_at")
+    private LocalDateTime workAuthDocUploadedAt;
+
+    /** Original Content-Type of the work-auth doc (image/* | application/pdf). */
+    @Column(name = "work_auth_doc_content_type", length = 64)
+    private String workAuthDocContentType;
 
     /**
      * Build U — multiple-cheque support. JSON-in-TEXT array of

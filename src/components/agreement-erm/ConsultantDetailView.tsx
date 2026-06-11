@@ -14,6 +14,7 @@ import {
   Eye,
   EyeOff,
   ExternalLink,
+  FileText,
   Globe,
   Link2,
   Loader2,
@@ -32,6 +33,7 @@ import {
   ermApproveAndSign,
   ermApproveConsultantVersion,
   ermChequeViewUrl,
+  ermWorkAuthViewUrl,
   ermRequestRevision,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
@@ -45,8 +47,52 @@ import {
   type ConsultantApplicationDetailEnvelope,
   type Phase2PromotionPayload,
 } from "@/lib/api";
+import { formatUsDate, formatUsDateTime } from "@/lib/dates";
 import AgreementStatusPill from "./AgreementStatusPill";
 import AgreementEventTimeline from "./AgreementEventTimeline";
+
+// Build W — derive the displayed work-authorization (custom text when
+// the ERM chose "Others") and assemble the US-format billing address
+// from the structured columns (fallback to the legacy single block).
+function displayWorkAuth(app: ConsultantApplication): string | null {
+  const cat = (app.workAuthorizationCategory ?? "").trim();
+  if (cat.toLowerCase() === "others") {
+    const other = (app.workAuthorizationOther ?? "").trim();
+    return other || cat;
+  }
+  return cat || null;
+}
+
+function displayAddress(app: ConsultantApplication): string | null {
+  const line1 = (app.addressLine1 ?? "").trim();
+  const line2 = (app.addressLine2 ?? "").trim();
+  const city = (app.addressCity ?? "").trim();
+  const state = (app.addressState ?? "").trim();
+  const zip = (app.addressZip ?? "").trim();
+  const any = line1 || line2 || city || state || zip;
+  if (!any) return (app.residenceAddress ?? "").trim() || null;
+  let csz = city;
+  if (state) csz = csz ? `${csz}, ${state}` : state;
+  if (zip) csz = csz ? `${csz} ${zip}` : zip;
+  return [line1, line2, csz].filter((p) => p.length > 0).join(", ");
+}
+
+// Build W — resolve a field's displayed value: a compute() override, a
+// MM-DD-YYYY date, or the raw column. Returns null when empty.
+function resolveFieldValue(
+  field: FieldDef,
+  app: ConsultantApplication,
+): string | null {
+  let raw: string | null;
+  if (field.compute) {
+    raw = field.compute(app);
+  } else {
+    const v = app[field.key];
+    raw = typeof v === "string" ? v : v == null ? null : String(v);
+  }
+  if (raw == null || raw.length === 0) return null;
+  return field.isDate ? formatUsDate(raw) || raw : raw;
+}
 
 interface Props {
   detail: ConsultantApplicationDetailEnvelope;
@@ -62,6 +108,11 @@ interface FieldDef {
   pii?: boolean;
   /** Render this field full-width on md+. */
   wide?: boolean;
+  /** Build W — render the value as a MM-DD-YYYY date. */
+  isDate?: boolean;
+  /** Build W — derive the displayed value from the whole app (e.g.
+   *  assembled address, effective work-auth) instead of one column. */
+  compute?: (app: ConsultantApplication) => string | null;
 }
 
 interface SectionDef {
@@ -77,10 +128,19 @@ const SECTIONS: readonly SectionDef[] = [
     id: "personal",
     title: "Personal information",
     fields: [
-      { key: "effectiveDate", label: "Effective date" },
+      { key: "effectiveDate", label: "Effective date", isDate: true },
       { key: "primaryPhone", label: "Primary phone" },
-      { key: "workAuthorizationCategory", label: "Work authorization" },
-      { key: "residenceAddress", label: "Residence address", wide: true },
+      {
+        key: "workAuthorizationCategory",
+        label: "Work authorization",
+        compute: displayWorkAuth,
+      },
+      {
+        key: "residenceAddress",
+        label: "Residence address",
+        wide: true,
+        compute: displayAddress,
+      },
     ],
   },
   {
@@ -99,7 +159,7 @@ const SECTIONS: readonly SectionDef[] = [
       { key: "implementationPartner", label: "Implementation partner" },
       { key: "endClient", label: "End client" },
       { key: "roleTitle", label: "Role / position" },
-      { key: "verifiedStartDate", label: "Verified start date" },
+      { key: "verifiedStartDate", label: "Verified start date", isDate: true },
       { key: "payrollCycle", label: "Payroll cycle" },
     ],
   },
@@ -127,7 +187,7 @@ const SECTIONS: readonly SectionDef[] = [
       { key: "bgFullLegalName", label: "Full legal name" },
       { key: "bgOtherNamesUsed", label: "Other names" },
       { key: "bgCurrentAddress", label: "Current address", wide: true },
-      { key: "bgDateOfBirth", label: "Date of birth" },
+      { key: "bgDateOfBirth", label: "Date of birth", isDate: true },
       { key: "bgFullSsn", label: "Full SSN", pii: true },
       { key: "idType", label: "ID type" },
       { key: "bgDriverLicense", label: "Driver's License / State ID", pii: true },
@@ -141,7 +201,7 @@ const SECTIONS: readonly SectionDef[] = [
       { key: "portalPlatform", label: "Platform" },
       { key: "portalUsername", label: "Username" },
       { key: "portalAuthorizedActions", label: "Authorized actions", wide: true },
-      { key: "portalEffectiveDate", label: "Effective date" },
+      { key: "portalEffectiveDate", label: "Effective date", isDate: true },
       { key: "portalRevocationContact", label: "Revocation contact" },
     ],
   },
@@ -1073,6 +1133,39 @@ function ReadOnlyRow({
   );
 }
 
+// ── Build W — Appendix 1 work-authorization document (read-only) ──
+
+function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
+  const has = Boolean(app.workAuthDocPublicId);
+  if (!has) return null;
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+      <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
+        <h3 className="font-serif text-lg text-gray-900">
+          Work-authorization document
+        </h3>
+      </header>
+      <div className="px-5 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
+        <p className="text-xs text-gray-500 inline-flex items-center gap-1.5">
+          <CheckCircle2 size={13} className="text-emerald-600" />
+          Uploaded
+          {app.workAuthDocUploadedAt
+            ? ` ${formatUsDate(app.workAuthDocUploadedAt)}`
+            : ""}
+        </p>
+        <a
+          href={ermWorkAuthViewUrl(app.applicationId)}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer"
+        >
+          <FileText size={12} /> View document
+        </a>
+      </div>
+    </section>
+  );
+}
+
 // ── Consultant-filled 7 sections (read-only) ──────────────────
 
 function ConsultantSections({ app }: { app: ConsultantApplication }) {
@@ -1081,6 +1174,7 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
       {SECTIONS.map((section) => (
         <ConsultantSectionCard key={section.id} section={section} app={app} />
       ))}
+      <WorkAuthDocCard app={app} />
       <SecurityChequeCard app={app} />
     </div>
   );
@@ -1321,10 +1415,9 @@ function ConsultantSectionCard({
   section: SectionDef;
   app: ConsultantApplication;
 }) {
-  const populatedFields = section.fields.filter((f) => {
-    const v = app[f.key];
-    return typeof v === "string" && v.length > 0;
-  });
+  const populatedFields = section.fields.filter(
+    (f) => resolveFieldValue(f, app) !== null,
+  );
   const allEmpty = populatedFields.length === 0;
 
   return (
@@ -1356,7 +1449,7 @@ function ConsultantSectionCard({
               <ReadOnlyField
                 key={field.key}
                 field={field}
-                value={(app[field.key] as string | null | undefined) ?? null}
+                value={resolveFieldValue(field, app)}
               />
             ))}
           </div>
@@ -1443,8 +1536,8 @@ function SignaturesPreview({ app }: { app: ConsultantApplication }) {
               app.ermName ? `${app.ermName}${app.ermTitle ? ` · ${app.ermTitle}` : ""}` : "—"
             }
             metaSecondary={
-              app.signatureDate
-                ? `Counter-signed ${fmtDateTime(app.signatureDate)}`
+              app.ermSignatureDate
+                ? `Counter-signed ${fmtDateTime(app.ermSignatureDate)}`
                 : "Counter-signed"
             }
           />
@@ -2101,10 +2194,7 @@ function SendEmailModal({
 
 function fmtDateTime(iso: string | null | undefined) {
   if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  // Build W — MM-DD-YYYY (+ HH:mm) for consistency across the agreement.
+  return formatUsDateTime(iso) || "—";
 }
 
