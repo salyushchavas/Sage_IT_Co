@@ -119,12 +119,16 @@ public class AgreementAdminController {
             throw new IllegalStateException("Email already in use.");
         }
 
+        // 3A — the super-admin may mint ERM, MANAGER, or ACCOUNTS users.
+        // SUPER_ADMIN is env-bootstrapped only and can't be created here.
+        AgreementUserRole role = parseAssignableRole(body == null ? null : body.role);
+
         AgreementUser user = AgreementUser.builder()
                 .email(email.toLowerCase())
                 .passwordHash(passwordEncoder.encode(tempPassword))
                 .fullName(fullName)
                 .title(title)
-                .role(AgreementUserRole.ERM)
+                .role(role)
                 .active(true)
                 .createdBy(AgreementAuthz.userId(request))
                 .build();
@@ -191,6 +195,29 @@ public class AgreementAdminController {
         public String fullName;
         public String title;
         public String temporaryPassword;
+        /** 3A — "ERM" | "MANAGER" | "ACCOUNTS"; defaults to ERM. */
+        public String role;
+    }
+
+    /**
+     * 3A — resolve the requested role for a new console user. Accepts
+     * ERM / MANAGER / ACCOUNTS (case-insensitive); defaults to ERM; never
+     * allows minting another SUPER_ADMIN through the console.
+     */
+    private static AgreementUserRole parseAssignableRole(String raw) {
+        if (raw == null || raw.isBlank()) return AgreementUserRole.ERM;
+        AgreementUserRole role;
+        try {
+            role = AgreementUserRole.valueOf(raw.trim().toUpperCase());
+        } catch (IllegalArgumentException e) {
+            throw new IllegalArgumentException(
+                    "Role must be ERM, MANAGER, or ACCOUNTS.");
+        }
+        if (role == AgreementUserRole.SUPER_ADMIN) {
+            throw new IllegalArgumentException(
+                    "SUPER_ADMIN cannot be created through the console.");
+        }
+        return role;
     }
 
     public static class StatusBody {

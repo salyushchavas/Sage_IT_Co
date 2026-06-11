@@ -4,6 +4,9 @@ import com.spire.backend.entity.AgreementUserRole;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.security.access.AccessDeniedException;
 
+import java.util.EnumSet;
+import java.util.Set;
+
 /**
  * Small helpers for reading the authenticated agreement user's identity
  * off the request and enforcing the super-admin guard.
@@ -24,7 +27,44 @@ public final class AgreementAuthz {
 
     public static final String ROLE_SUPER_ADMIN = "SUPER_ADMIN";
 
+    /**
+     * 3A — fine-grained agreement permissions. One role per user; the
+     * permission set is DERIVED from the role via {@link #permissionsFor}.
+     * Controllers gate sensitive actions with {@link #requirePermission}.
+     */
+    public enum Permission {
+        /** agreement.approve.manager — Approve + Request-Revision at the Manager gate. */
+        APPROVE_MANAGER,
+        /** agreement.approve.accounts — Approve + Request-Revision at the Accounts gate. */
+        APPROVE_ACCOUNTS,
+        /** agreement.countersign — ERM final countersign (now gated behind approvals). */
+        COUNTERSIGN
+    }
+
     private AgreementAuthz() {}
+
+    /** The permissions implied by a console role. SUPER_ADMIN holds all. */
+    public static Set<Permission> permissionsFor(AgreementUserRole role) {
+        if (role == null) return EnumSet.noneOf(Permission.class);
+        return switch (role) {
+            case SUPER_ADMIN -> EnumSet.allOf(Permission.class);
+            case ERM -> EnumSet.of(Permission.COUNTERSIGN);
+            case MANAGER -> EnumSet.of(Permission.APPROVE_MANAGER);
+            case ACCOUNTS -> EnumSet.of(Permission.APPROVE_ACCOUNTS);
+        };
+    }
+
+    /** True iff the calling agreement user's role grants {@code perm}. */
+    public static boolean hasPermission(HttpServletRequest request, Permission perm) {
+        return permissionsFor(roleEnum(request)).contains(perm);
+    }
+
+    /** Throws 403 unless the caller's role grants {@code perm}. */
+    public static void requirePermission(HttpServletRequest request, Permission perm) {
+        if (!hasPermission(request, perm)) {
+            throw new AccessDeniedException("Permission required: " + perm);
+        }
+    }
 
     public static String userId(HttpServletRequest request) {
         Object v = request.getAttribute(ATTR_USER_ID);

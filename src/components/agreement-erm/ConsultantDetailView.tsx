@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   Ban,
   CheckCircle2,
+  ClipboardCheck,
   ChevronDown,
   ChevronRight,
   Clock,
@@ -35,6 +36,7 @@ import {
   ermChequeViewUrl,
   ermWorkAuthViewUrl,
   ermRequestRevision,
+  ermSendForApproval,
   ermSendPdfToEmail,
   fetchAgreementPdfBlob,
   fetchErmPreviewPdfBlob,
@@ -42,6 +44,8 @@ import {
   parseChequeList,
   resendConsultantInvite,
   updateConsultantContact,
+  type AgreementApproval,
+  type ApproverRole,
   type ChequeEntry,
   type ConsultantApplication,
   type ConsultantApplicationDetailEnvelope,
@@ -223,7 +227,9 @@ type ModalKind = null | "revision" | "approve" | "send" | "editContact" | "advan
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
   const [modal, setModal] = useState<ModalKind>(null);
-  const [busy, setBusy] = useState<"resend" | "cancel" | "releaseConsultant" | null>(null);
+  const [busy, setBusy] = useState<
+    "resend" | "cancel" | "releaseConsultant" | "sendApproval" | null
+  >(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
   // Phase B nicety — pre-fill the Approve & Sign name/title from the
@@ -328,6 +334,25 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
     }
   };
 
+  /**
+   * 3B — route the consultant-signed agreement to the phase's required
+   * approvers (Phase 1 = Manager; Phase 2 = Manager + Accounts). Also the
+   * re-send action from APPROVAL_REVISION_REQUESTED (resets the gates).
+   */
+  const handleSendForApproval = async () => {
+    setBusy("sendApproval");
+    setError("");
+    try {
+      await ermSendForApproval(app.applicationId);
+      setFeedback("Sent for approval.");
+      await onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't send for approval");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <HeaderRow app={app} />
@@ -346,15 +371,18 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
       <StateActionBar
         status={status}
         app={app}
+        approvals={detail.approvals ?? []}
         onRequestRevision={() => setModal("revision")}
         onApproveAndSign={() => setModal("approve")}
         onApproveConsultantVersion={handleApproveConsultantVersion}
+        onSendForApproval={handleSendForApproval}
         onSendEmail={() => setModal("send")}
         onResendInvite={handleResend}
         onCancel={handleCancel}
         resendBusy={busy === "resend"}
         cancelBusy={busy === "cancel"}
         releaseConsultantBusy={busy === "releaseConsultant"}
+        sendApprovalBusy={busy === "sendApproval"}
         isLocked={isLocked}
         onAdvanceToPhase2={() => setModal("advancePhase2")}
       />
@@ -369,7 +397,12 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
 
       <ErmFilledCard app={app} />
 
-      {status === "VERIFIED" && <ErmPdfPreview appId={app.applicationId} />}
+      {(status === "VERIFIED"
+        || status === "AWAITING_APPROVALS"
+        || status === "APPROVAL_REVISION_REQUESTED"
+        || status === "READY_TO_SIGN") && (
+        <ErmPdfPreview appId={app.applicationId} />
+      )}
 
       <ConsultantSections app={app} />
 
@@ -727,32 +760,88 @@ function HeaderRow({ app }: { app: ConsultantApplication }) {
 
 // ── State-aware action bar ─────────────────────────────────────
 
+/**
+ * 3B — per-approver gate badges for the CURRENT round (Manager / Accounts),
+ * shown in the ERM action bar so each gate's status is visible separately.
+ */
+function ApproverBadges({ approvals }: { approvals: AgreementApproval[] }) {
+  if (!approvals || approvals.length === 0) return null;
+  const maxRound = approvals.reduce((m, a) => Math.max(m, a.round), 0);
+  const current = approvals
+    .filter((a) => a.round === maxRound)
+    .slice()
+    .sort((a, b) => {
+      const order: ApproverRole[] = ["MANAGER", "ACCOUNTS"];
+      return order.indexOf(a.role) - order.indexOf(b.role);
+    });
+  if (current.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-2">
+      {current.map((a) => {
+        const label = a.role === "ACCOUNTS" ? "Accounts" : "Manager";
+        const tone =
+          a.status === "APPROVED"
+            ? "bg-emerald-50 border-emerald-200 text-emerald-700"
+            : a.status === "REVISION_REQUESTED"
+              ? "bg-orange-50 border-orange-200 text-orange-700"
+              : "bg-gray-50 border-gray-200 text-gray-600";
+        const word =
+          a.status === "APPROVED"
+            ? "Approved"
+            : a.status === "REVISION_REQUESTED"
+              ? "Revision requested"
+              : "Pending";
+        return (
+          <span
+            key={a.id}
+            className={
+              "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold "
+              + tone
+            }
+          >
+            {label}: {word}
+            {a.decidedByName && (
+              <span className="font-normal text-gray-500">· {a.decidedByName}</span>
+            )}
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 function StateActionBar({
   status,
   app,
+  approvals,
   onRequestRevision,
   onApproveAndSign,
   onApproveConsultantVersion,
+  onSendForApproval,
   onSendEmail,
   onResendInvite,
   onCancel,
   resendBusy,
   cancelBusy,
   releaseConsultantBusy,
+  sendApprovalBusy,
   isLocked,
   onAdvanceToPhase2,
 }: {
   status: ConsultantApplication["status"];
   app: ConsultantApplication;
+  approvals: AgreementApproval[];
   onRequestRevision: () => void;
   onApproveAndSign: () => void;
   onApproveConsultantVersion: () => void;
+  onSendForApproval: () => void;
   onSendEmail: () => void;
   onResendInvite: () => void;
   onCancel: () => void;
   resendBusy: boolean;
   cancelBusy: boolean;
   releaseConsultantBusy: boolean;
+  sendApprovalBusy: boolean;
   isLocked: boolean;
   onAdvanceToPhase2: () => void;
 }) {
@@ -800,10 +889,11 @@ function StateActionBar({
     return (
       <BarShell badge="Ready for your review" tone="navy">
         <p className="text-xs text-gray-600 max-w-md">
-          The consultant signed. Approve to apply your signature and generate
-          the final PDF, or send it back with revision remarks. You can
-          also release a consultant-version copy (no Sage signature) for
-          the consultant to download.
+          The consultant signed. Release a consultant-version copy, then send
+          the agreement for approval — Phase {app.phase ?? 1} requires{" "}
+          {(app.phase ?? 1) >= 2 ? "Manager + Accounts" : "Manager"} sign-off
+          before you can countersign. You can also send it back to the
+          consultant with revision remarks.
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -831,6 +921,94 @@ function StateActionBar({
               : releaseConsultantBusy
                 ? "Releasing…"
                 : "Approve consultant version"}
+          </button>
+          <button
+            type="button"
+            onClick={onSendForApproval}
+            disabled={!released || sendApprovalBusy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+            title={released ? undefined : "Release the consultant version first"}
+          >
+            <ClipboardCheck size={12} />
+            {sendApprovalBusy ? "Sending…" : "Send for approval"}
+          </button>
+        </div>
+      </BarShell>
+    );
+  }
+
+  if (status === "AWAITING_APPROVALS") {
+    return (
+      <BarShell badge="Awaiting approvals" tone="navy">
+        <p className="text-xs text-gray-600 max-w-md">
+          Sent to the Phase {app.phase ?? 1} approvers. You can countersign
+          once every required approver has approved.
+        </p>
+        <ApproverBadges approvals={approvals} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onRequestRevision}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
+          >
+            <MessageSquare size={12} /> Send to consultant for revision
+          </button>
+        </div>
+      </BarShell>
+    );
+  }
+
+  if (status === "APPROVAL_REVISION_REQUESTED") {
+    return (
+      <BarShell badge="Approval revision requested" tone="copper">
+        {app.currentRevisionRemarks && (
+          <blockquote className="text-sm text-gray-700 italic border-l-4 border-sage-copper-deep pl-3 mt-1">
+            {app.currentRevisionRemarks}
+          </blockquote>
+        )}
+        <ApproverBadges approvals={approvals} />
+        <p className="text-[11px] text-gray-500 max-w-md">
+          Address the note (edit ERM-side details, or send to the consultant),
+          then re-send for approval — this resets every required approver to
+          pending for a fresh review.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onSendForApproval}
+            disabled={sendApprovalBusy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 cursor-pointer shadow-sm"
+          >
+            <ClipboardCheck size={12} />
+            {sendApprovalBusy ? "Re-sending…" : "Re-send for approval"}
+          </button>
+          <button
+            type="button"
+            onClick={onRequestRevision}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
+          >
+            <MessageSquare size={12} /> Send to consultant
+          </button>
+        </div>
+      </BarShell>
+    );
+  }
+
+  if (status === "READY_TO_SIGN") {
+    return (
+      <BarShell badge="Ready to sign" tone="navy">
+        <p className="text-xs text-gray-600 max-w-md">
+          All required approvers have approved. Apply your signature to
+          generate the final PDF and complete the agreement.
+        </p>
+        <ApproverBadges approvals={approvals} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onRequestRevision}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
+          >
+            <MessageSquare size={12} /> Request revision
           </button>
           <button
             type="button"

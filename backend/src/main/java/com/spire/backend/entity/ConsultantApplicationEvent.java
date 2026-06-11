@@ -96,6 +96,13 @@ public class ConsultantApplicationEvent {
         // Build W — consultant uploads their Appendix 1 work-authorization
         // document (image/PDF).
         WORK_AUTH_UPLOADED,
+        // 3B — role-based approval workflow. SENT_FOR_APPROVAL when the
+        // ERM routes a VERIFIED agreement to the phase's required
+        // approvers (also on re-send after a revision); APPROVAL_APPROVED
+        // / APPROVAL_REVISION_REQUESTED carry the approver role + note.
+        SENT_FOR_APPROVAL,
+        APPROVAL_APPROVED,
+        APPROVAL_REVISION_REQUESTED,
         // Build M — ERM reopens a Phase-1 COMPLETED agreement for
         // Phase 2 on the same document. Metadata carries the promoted
         // sections + the actor's user id.

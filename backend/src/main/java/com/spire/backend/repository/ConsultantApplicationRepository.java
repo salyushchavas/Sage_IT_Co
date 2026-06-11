@@ -64,4 +64,14 @@ public interface ConsultantApplicationRepository
             List<String> statuses, LocalDateTime cutoff);
 
     long countByErmUserIdAndStatus(Long ermUserId, String status);
+
+    // 3B — approval status boards. All live rows in the given statuses
+    // (super-admin) or just the owning ERM's (per-ERM isolation), newest
+    // activity first.
+    List<ConsultantApplication>
+            findByStatusInAndDeletedFalseOrderByUpdatedAtDesc(List<String> statuses);
+
+    List<ConsultantApplication>
+            findByOwnerErmIdAndStatusInAndDeletedFalseOrderByUpdatedAtDesc(
+                    String ownerErmId, List<String> statuses);
 }

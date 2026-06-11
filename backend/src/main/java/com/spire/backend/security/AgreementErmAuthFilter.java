@@ -81,8 +81,27 @@ public class AgreementErmAuthFilter extends OncePerRequestFilter {
 
         try {
             String email = jwtService.extractSubject(token);
-            List<SimpleGrantedAuthority> authorities = List.of(
-                    new SimpleGrantedAuthority("ROLE_AGREEMENT_ERM"));
+            String role = jwtService.extractAgreementRole(token);
+
+            // 3A — role-derived authorities. Every console user gets the
+            // base ROLE_AGREEMENT_USER (identity endpoint). ERM +
+            // SUPER_ADMIN keep ROLE_AGREEMENT_ERM (the management +
+            // countersign surface). MANAGER / ACCOUNTS get their approver
+            // authority; SUPER_ADMIN additionally holds both approver
+            // authorities so it can act on any gate.
+            java.util.List<SimpleGrantedAuthority> authorities =
+                    new java.util.ArrayList<>();
+            authorities.add(new SimpleGrantedAuthority("ROLE_AGREEMENT_USER"));
+            if ("SUPER_ADMIN".equals(role) || "ERM".equals(role) || role == null) {
+                // Legacy tokens (null role) keep the historical ERM grant.
+                authorities.add(new SimpleGrantedAuthority("ROLE_AGREEMENT_ERM"));
+            }
+            if ("MANAGER".equals(role) || "SUPER_ADMIN".equals(role)) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_AGREEMENT_MANAGER"));
+            }
+            if ("ACCOUNTS".equals(role) || "SUPER_ADMIN".equals(role)) {
+                authorities.add(new SimpleGrantedAuthority("ROLE_AGREEMENT_ACCOUNTS"));
+            }
 
             UsernamePasswordAuthenticationToken authToken =
                     new UsernamePasswordAuthenticationToken(email, null, authorities);

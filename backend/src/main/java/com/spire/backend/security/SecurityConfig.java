@@ -56,15 +56,21 @@ public class SecurityConfig {
                         // issued by /login (purpose=agreement_erm),
                         // validated by AgreementErmAuthFilter.
                         .requestMatchers(HttpMethod.POST, "/api/agreement-erm/login").permitAll()
+                        // 3A approver surface (MANAGER / ACCOUNTS queues,
+                        // preview, approve / request-revision). SUPER_ADMIN
+                        // also holds both approver authorities.
+                        .requestMatchers("/api/agreement-approver/**")
+                                .hasAnyRole("AGREEMENT_MANAGER", "AGREEMENT_ACCOUNTS")
                         .requestMatchers("/api/agreement-erm/applications/**")
                                 .hasRole("AGREEMENT_ERM")
-                        // Identity endpoint + super-admin console. Both
-                        // require a valid agreement-console token
-                        // (ROLE_AGREEMENT_ERM, granted to SUPER_ADMIN +
-                        // ERM alike); AgreementAdminController narrows the
-                        // /admin surface to the super-admin and 403s ERMs.
+                        // Identity endpoint: every authenticated console
+                        // user (ERM, SUPER_ADMIN, MANAGER, ACCOUNTS) can
+                        // read /me to render role-aware UI.
                         .requestMatchers("/api/agreement-erm/me")
-                                .hasRole("AGREEMENT_ERM")
+                                .hasRole("AGREEMENT_USER")
+                        // Super-admin console. Requires ROLE_AGREEMENT_ERM
+                        // (SUPER_ADMIN + ERM); AgreementAdminController
+                        // narrows the surface to the super-admin and 403s ERMs.
                         .requestMatchers("/api/agreements/admin/**")
                                 .hasRole("AGREEMENT_ERM")
                         // Consultant-side surface is fully public.

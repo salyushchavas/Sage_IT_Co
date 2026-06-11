@@ -5,8 +5,9 @@ import { useRouter } from "next/navigation";
 import { FileSignature, Loader2 } from "lucide-react";
 
 import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
+import ApprovalStatusBoards from "@/components/agreement-erm/ApprovalStatusBoards";
 import ConsultantsListView from "@/components/agreement-erm/ConsultantsListView";
-import { getAgreementErmToken } from "@/lib/api";
+import { fetchMe, getAgreementErmToken } from "@/lib/api";
 
 export default function AgreementsDashboardPage() {
   const router = useRouter();
@@ -17,7 +18,26 @@ export default function AgreementsDashboardPage() {
       router.replace("/agreements/login");
       return;
     }
-    setChecked(true);
+    // 3B — approvers (Manager / Accounts) belong on the approvals queue,
+    // not the ERM management console.
+    let cancelled = false;
+    fetchMe()
+      .then((me) => {
+        if (cancelled) return;
+        if (me.role === "MANAGER" || me.role === "ACCOUNTS") {
+          router.replace("/agreements/approvals");
+        } else {
+          setChecked(true);
+        }
+      })
+      .catch(() => {
+        // Non-fatal: a dead session is handled by the API layer; show
+        // the console rather than trapping the operator.
+        if (!cancelled) setChecked(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [router]);
 
   if (!checked) {
@@ -34,6 +54,7 @@ export default function AgreementsDashboardPage() {
       subtitle="All applications in flight, completed, or expired."
       Icon={FileSignature}
     >
+      <ApprovalStatusBoards />
       <ConsultantsListView />
     </AgreementErmShell>
   );

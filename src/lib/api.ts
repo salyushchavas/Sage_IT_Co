@@ -3220,10 +3220,33 @@ export type ConsultantApplicationStatus =
   | "REVISION_REQUESTED"
   | "UPDATED"
   | "VERIFIED"
+  // 3B — role-based approval gate between VERIFIED and the ERM countersign.
+  | "AWAITING_APPROVALS"
+  | "APPROVAL_REVISION_REQUESTED"
+  | "READY_TO_SIGN"
   | "SIGNED"
   | "COMPLETED"
   | "CANCELLED"
   | "EXPIRED";
+
+// 3B — per-approver gate record (Manager / Accounts).
+export type ApproverRole = "MANAGER" | "ACCOUNTS";
+export type ApprovalDecision = "PENDING" | "APPROVED" | "REVISION_REQUESTED";
+
+export interface AgreementApproval {
+  id: number;
+  applicationId: number;
+  role: ApproverRole;
+  status: ApprovalDecision;
+  note: string | null;
+  phase: number;
+  round: number;
+  decidedBy: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decidedIp: string | null;
+  createdAt: string;
+}
 
 export interface ConsultantApplication {
   id: number;
@@ -3527,6 +3550,8 @@ export interface ConsultantApplicationDetailEnvelope {
   application: ConsultantApplication;
   events: ConsultantApplicationEvent[];
   revisions: ConsultantApplicationRevision[];
+  // 3B — per-approver gate history (present once Send for Approval fires).
+  approvals?: AgreementApproval[];
 }
 
 export interface ConsultantApplicationsPage {
@@ -3617,7 +3642,7 @@ async function agreementErmFetch<T>(
 // client-side. The admin endpoints are SUPER_ADMIN-only server-side;
 // the console page also guards on the role from /me as a UX layer.
 
-export type AgreementUserRole = "SUPER_ADMIN" | "ERM";
+export type AgreementUserRole = "SUPER_ADMIN" | "ERM" | "MANAGER" | "ACCOUNTS";
 
 export interface AgreementMe {
   userId: string | null;
@@ -3711,6 +3736,8 @@ export async function adminCreateUser(body: {
   fullName: string;
   title: string;
   temporaryPassword: string;
+  // 3A — "ERM" | "MANAGER" | "ACCOUNTS"; defaults to ERM server-side.
+  role?: Exclude<AgreementUserRole, "SUPER_ADMIN">;
 }) {
   return agreementAdminFetch<AgreementUserDto>("/api/agreements/admin/users", {
     method: "POST",
@@ -4357,6 +4384,100 @@ export async function fetchErmPreviewPdfBlob(
     throw new Error("Session expired. Please sign in again.");
   }
   return res;
+}
+
+// ── 3B — role-based approval workflow ──────────────────────────
+
+export interface ApproverQueueItem {
+  application: ConsultantApplication;
+  approvals: AgreementApproval[];
+  myRole: ApproverRole;
+}
+
+export interface ApproverDetailEnvelope {
+  application: ConsultantApplication;
+  approvals: AgreementApproval[];
+  myRole: ApproverRole;
+}
+
+/** ERM routes a consultant-signed agreement to the phase's approvers (also re-send). */
+export async function ermSendForApproval(applicationId: string) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/send-for-approval`,
+    { method: "POST" },
+  );
+}
+
+export interface ApprovalBoardItem {
+  application: ConsultantApplication;
+  approvals: AgreementApproval[];
+}
+
+/** ERM status board: agreements currently in the approval gate (+ approvals). */
+export async function fetchApprovalBoard() {
+  return agreementErmFetch<ApprovalBoardItem[]>(
+    "/api/agreement-erm/approval-board",
+  );
+}
+
+/** Approver's queue — agreements awaiting my gate. */
+export async function approverFetchQueue(role?: ApproverRole) {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ApproverQueueItem[]>(
+    `/api/agreement-approver/queue${qs}`,
+  );
+}
+
+/** Approver's read-only detail (+ approval history) for one agreement. */
+export async function approverFetchDetail(
+  applicationId: string,
+  role?: ApproverRole,
+) {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ApproverDetailEnvelope>(
+    `/api/agreement-approver/applications/${applicationId}${qs}`,
+  );
+}
+
+/** Approver inline preview of the consultant-signed agreement (ERM sig blank). */
+export async function fetchApproverPreviewPdfBlob(
+  applicationId: string,
+  role?: ApproverRole,
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const qs = role ? `?role=${role}` : "";
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-approver/applications/${applicationId}/preview-pdf${qs}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
+}
+
+export async function approverApprove(
+  applicationId: string,
+  body?: { note?: string; role?: ApproverRole },
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-approver/applications/${applicationId}/approve`,
+    { method: "POST", body: JSON.stringify(body ?? {}) },
+  );
+}
+
+export async function approverRequestRevision(
+  applicationId: string,
+  body: { note: string; role?: ApproverRole },
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-approver/applications/${applicationId}/request-revision`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
 }
 
 // ── Portal dashboard + PDF download ────────────────────────────

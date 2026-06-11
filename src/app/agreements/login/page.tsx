@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, Loader2, LogIn } from "lucide-react";
 
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
-import { agreementErmLogin, getAgreementErmToken } from "@/lib/api";
+import { agreementErmLogin, fetchMe, getAgreementErmToken } from "@/lib/api";
 
 export default function AgreementsLoginPage() {
   const router = useRouter();
@@ -25,7 +25,18 @@ export default function AgreementsLoginPage() {
     setSubmitting(true);
     try {
       await agreementErmLogin(email.trim(), password);
-      router.replace("/agreements");
+      // 3B — route approvers to their queue; ERM / super-admin to the
+      // main console.
+      let dest = "/agreements";
+      try {
+        const me = await fetchMe();
+        if (me.role === "MANAGER" || me.role === "ACCOUNTS") {
+          dest = "/agreements/approvals";
+        }
+      } catch {
+        /* fall back to the main console */
+      }
+      router.replace(dest);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign-in failed.");
     } finally {

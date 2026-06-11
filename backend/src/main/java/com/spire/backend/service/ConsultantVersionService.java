@@ -366,7 +366,38 @@ public class ConsultantVersionService {
                     fmtUtc(signed.getCreatedAt()),
                     signed.getIpAddress()));
         }
+        // 3B — role-based approval gate decisions (Manager / Accounts),
+        // in chronological order, with each approver's role + IP + time.
+        List<ConsultantApplicationEvent> chrono = new ArrayList<>(all);
+        java.util.Collections.reverse(chrono); // repo is DESC; want oldest first
+        for (ConsultantApplicationEvent ev : chrono) {
+            String t = ev.getEventType();
+            boolean approved =
+                    ConsultantApplicationEvent.EventType.APPROVAL_APPROVED.name().equals(t);
+            boolean revised =
+                    ConsultantApplicationEvent.EventType.APPROVAL_REVISION_REQUESTED.name().equals(t);
+            if (!approved && !revised) continue;
+            String role = extractMetaValue(ev.getMetadata(), "role");
+            String label = (role == null || role.isBlank() ? "Approver" : capitalizeWord(role))
+                    + (approved ? " approved" : " requested revision");
+            rows.add(new CertificateEvent(
+                    label, fmtUtc(ev.getCreatedAt()), ev.getIpAddress()));
+        }
         return rows;
+    }
+
+    /** Minimal JSON value extraction for a flat string key (audit metadata). */
+    private static String extractMetaValue(String json, String key) {
+        if (json == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("\"" + java.util.regex.Pattern.quote(key) + "\"\\s*:\\s*\"([^\"]*)\"")
+                .matcher(json);
+        return m.find() ? m.group(1) : null;
+    }
+
+    private static String capitalizeWord(String s) {
+        if (s == null || s.isEmpty()) return s;
+        return s.substring(0, 1).toUpperCase() + s.substring(1).toLowerCase();
     }
 
     private static ConsultantApplicationEvent findFirstByType(

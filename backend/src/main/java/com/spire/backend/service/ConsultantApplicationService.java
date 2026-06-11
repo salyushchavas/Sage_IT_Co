@@ -90,6 +90,7 @@ public class ConsultantApplicationService {
     private final AgreementDocumentService agreementDocumentService;
     private final ConsultantVersionService consultantVersionService;
     private final AgreementUserRepository agreementUserRepository;
+    private final com.spire.backend.repository.AgreementApprovalRepository approvalRepository;
     private final ConsultantVerificationRepository verificationRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
@@ -1205,10 +1206,21 @@ public class ConsultantApplicationService {
             String applicationId, String remarks, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
-        if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
+        // 3B — the ERM can bounce to the CONSULTANT from the consultant-
+        // signed state OR from any approval stage (e.g. an approver's note
+        // needs a consultant fix). The consultant resubmit returns the row
+        // to VERIFIED, after which the ERM re-releases + re-sends for
+        // approval (a fresh round).
+        String st = app.getStatus();
+        boolean revisable =
+                ConsultantApplication.Status.VERIFIED.name().equals(st)
+                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
+                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
+                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
+        if (!revisable) {
             throw new IllegalStateException(
-                    "Only VERIFIED applications can be sent back for revision "
-                            + "(status=" + app.getStatus() + ").");
+                    "This application can't be sent back for revision "
+                            + "(status=" + st + ").");
         }
         if (remarks == null || remarks.isBlank()) {
             throw new IllegalArgumentException(
@@ -1242,6 +1254,248 @@ public class ConsultantApplicationService {
         return app;
     }
 
+    // ── 3B — role-based approval workflow ────────────────────────────
+
+    /** Required approver gates for a coaching phase: P1={MANAGER}; P2={MANAGER,ACCOUNTS}. */
+    private static java.util.List<com.spire.backend.entity.AgreementApproval.ApproverRole>
+            requiredApprovers(int phase) {
+        if (phase >= 2) {
+            return java.util.List.of(
+                    com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER,
+                    com.spire.backend.entity.AgreementApproval.ApproverRole.ACCOUNTS);
+        }
+        return java.util.List.of(
+                com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER);
+    }
+
+    /** All approval rows for an application (oldest first) — detail + certificate. */
+    @Transactional(readOnly = true)
+    public java.util.List<com.spire.backend.entity.AgreementApproval> listApprovals(
+            String applicationId) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        return approvalRepository.findByApplicationIdOrderByCreatedAtAsc(app.getId());
+    }
+
+    /**
+     * ERM "Send for Approval" (and re-send after a revision). Routes a
+     * consultant-signed agreement to the phase's required approvers.
+     * First send requires VERIFIED + the consultant version already
+     * released; re-send fires from APPROVAL_REVISION_REQUESTED and RESETS
+     * every required approver to PENDING for a fresh round.
+     */
+    @Transactional
+    public ConsultantApplication sendForApproval(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        String st = app.getStatus();
+        boolean firstSend = ConsultantApplication.Status.VERIFIED.name().equals(st);
+        boolean resend = ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st);
+        if (!firstSend && !resend) {
+            throw new IllegalStateException(
+                    "Send for Approval is only available from VERIFIED (after the "
+                            + "consultant version is released) or APPROVAL_REVISION_REQUESTED "
+                            + "(status=" + st + ").");
+        }
+        if (firstSend && !Boolean.TRUE.equals(app.getConsultantCopyReleased())) {
+            throw new IllegalStateException(
+                    "Release the consultant version (Approve consultant version) "
+                            + "before sending for approval.");
+        }
+        int phase = app.getPhase() == null ? 1 : app.getPhase();
+        Integer prevRound = approvalRepository.maxRound(app.getId());
+        int round = (prevRound == null ? 0 : prevRound) + 1;
+        var approvers = requiredApprovers(phase);
+        for (var role : approvers) {
+            approvalRepository.save(
+                    com.spire.backend.entity.AgreementApproval.builder()
+                            .applicationId(app.getId())
+                            .role(role)
+                            .status(com.spire.backend.entity.AgreementApproval.Decision.PENDING)
+                            .phase(phase)
+                            .round(round)
+                            .build());
+        }
+        app.setStatus(ConsultantApplication.Status.AWAITING_APPROVALS.name());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.SENT_FOR_APPROVAL,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("phase", phase, "round", round,
+                        "approvers", approvers.toString(),
+                        "resend", resend),
+                request);
+        return app;
+    }
+
+    /**
+     * An approver (MANAGER / ACCOUNTS) decides on their gate.
+     * {@code approve=true} → APPROVED (→ READY_TO_SIGN once ALL required
+     * gates for the round are approved). Otherwise a revision request
+     * (note required) → APPROVAL_REVISION_REQUESTED, surfacing the note to
+     * the ERM via {@code currentRevisionRemarks}.
+     */
+    @Transactional
+    public ConsultantApplication approverDecision(
+            String applicationId,
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            boolean approve,
+            String note,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        if (!ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(app.getStatus())) {
+            throw new IllegalStateException(
+                    "This agreement is not awaiting approvals (status="
+                            + app.getStatus() + ").");
+        }
+        Integer round = approvalRepository.maxRound(app.getId());
+        if (round == null) {
+            throw new IllegalStateException("No approval round is open.");
+        }
+        com.spire.backend.entity.AgreementApproval row = approvalRepository
+                .findFirstByApplicationIdAndRoleAndRound(app.getId(), role, round)
+                .orElseThrow(() -> new IllegalStateException(
+                        "You are not a required approver for this agreement."));
+        if (row.getStatus() != com.spire.backend.entity.AgreementApproval.Decision.PENDING) {
+            throw new IllegalStateException("This gate has already been decided.");
+        }
+        if (!approve && (note == null || note.isBlank())) {
+            throw new IllegalArgumentException(
+                    "A note is required when requesting a revision.");
+        }
+
+        String approverId = com.spire.backend.security.AgreementAuthz.userId(request);
+        String approverName = approverId == null ? null
+                : agreementUserRepository.findById(approverId)
+                        .map(AgreementUser::getFullName).orElse(null);
+        String ip = clientIp(request);
+        row.setDecidedBy(approverId);
+        row.setDecidedByName(approverName);
+        row.setDecidedAt(LocalDateTime.now());
+        row.setDecidedIp(ip);
+        row.setNote(note);
+
+        if (approve) {
+            row.setStatus(com.spire.backend.entity.AgreementApproval.Decision.APPROVED);
+            approvalRepository.save(row);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.APPROVAL_APPROVED,
+                    ConsultantApplicationEvent.ActorType.ERM, null,
+                    Map.of("role", role.name(), "round", round,
+                            "approver", approverName == null ? "" : approverName,
+                            "ip", ip == null ? "" : ip),
+                    request);
+            var rows = approvalRepository.findByApplicationIdAndRound(app.getId(), round);
+            boolean allApproved = !rows.isEmpty() && rows.stream().allMatch(
+                    r -> r.getStatus()
+                            == com.spire.backend.entity.AgreementApproval.Decision.APPROVED);
+            if (allApproved) {
+                app.setStatus(ConsultantApplication.Status.READY_TO_SIGN.name());
+                applicationRepository.save(app);
+            }
+        } else {
+            row.setStatus(com.spire.backend.entity.AgreementApproval.Decision.REVISION_REQUESTED);
+            approvalRepository.save(row);
+            app.setStatus(ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name());
+            app.setCurrentRevisionRemarks("[" + role.name() + "] " + note);
+            applicationRepository.save(app);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.APPROVAL_REVISION_REQUESTED,
+                    ConsultantApplicationEvent.ActorType.ERM, null,
+                    Map.of("role", role.name(), "round", round,
+                            "approver", approverName == null ? "" : approverName,
+                            "note", note),
+                    request);
+        }
+        return app;
+    }
+
+    /** The apps currently awaiting THIS approver role's gate (current round). */
+    @Transactional(readOnly = true)
+    public java.util.List<ConsultantApplication> approverQueue(
+            com.spire.backend.entity.AgreementApproval.ApproverRole role) {
+        var pending = approvalRepository.findByStatusAndRole(
+                com.spire.backend.entity.AgreementApproval.Decision.PENDING, role);
+        java.util.List<ConsultantApplication> out = new java.util.ArrayList<>();
+        for (var row : pending) {
+            ConsultantApplication app =
+                    applicationRepository.findById(row.getApplicationId()).orElse(null);
+            if (app == null || Boolean.TRUE.equals(app.getDeleted())) continue;
+            if (!ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(app.getStatus())) {
+                continue;
+            }
+            Integer maxR = approvalRepository.maxRound(app.getId());
+            if (maxR != null && !maxR.equals(row.getRound())) continue;
+            out.add(app);
+        }
+        out.sort(java.util.Comparator.comparing(
+                ConsultantApplication::getUpdatedAt,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
+        return out;
+    }
+
+    /**
+     * Fetch an application for an approver's read-only preview/detail.
+     * The approver may only see agreements where they hold a gate in the
+     * current round; anything else 404s (so a token can't probe IDs).
+     */
+    @Transactional(readOnly = true)
+    public ConsultantApplication getForApprover(
+            String applicationId,
+            com.spire.backend.entity.AgreementApproval.ApproverRole role) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        Integer round = approvalRepository.maxRound(app.getId());
+        boolean isGate = round != null && approvalRepository
+                .findFirstByApplicationIdAndRoleAndRound(app.getId(), role, round).isPresent();
+        if (!isGate) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        return app;
+    }
+
+    /**
+     * 3B — ERM status board: every agreement currently in an approval
+     * state ({@code AWAITING_APPROVALS} / {@code APPROVAL_REVISION_REQUESTED}
+     * / {@code READY_TO_SIGN}), each with its full approval history. The
+     * super-admin sees all; an ERM sees only their own (per-ERM isolation).
+     * The frontend splits these into Phase 1 / Phase 2 boards.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<java.util.Map<String, Object>> approvalBoard(
+            String ownerErmId, com.spire.backend.entity.AgreementUserRole role) {
+        java.util.List<String> states = java.util.List.of(
+                ConsultantApplication.Status.AWAITING_APPROVALS.name(),
+                ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name(),
+                ConsultantApplication.Status.READY_TO_SIGN.name());
+        java.util.List<ConsultantApplication> apps =
+                (role == com.spire.backend.entity.AgreementUserRole.SUPER_ADMIN)
+                        ? applicationRepository
+                                .findByStatusInAndDeletedFalseOrderByUpdatedAtDesc(states)
+                        : applicationRepository
+                                .findByOwnerErmIdAndStatusInAndDeletedFalseOrderByUpdatedAtDesc(
+                                        ownerErmId, states);
+        java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+        for (ConsultantApplication app : apps) {
+            java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
+            row.put("application", app);
+            row.put("approvals",
+                    approvalRepository.findByApplicationIdOrderByCreatedAtAsc(app.getId()));
+            out.add(row);
+        }
+        return out;
+    }
+
     /**
      * ERM countersigns the agreement and locks it as COMPLETED. Spawns
      * the AgreementDocumentService to render the final PDF and stores
@@ -1263,10 +1517,14 @@ public class ConsultantApplicationService {
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
-        if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
+        // 3B — the ERM countersign is now gated behind approvals. The
+        // agreement must be READY_TO_SIGN (every required approver for the
+        // current phase has approved).
+        if (!ConsultantApplication.Status.READY_TO_SIGN.name().equals(app.getStatus())) {
             throw new IllegalStateException(
-                    "Only VERIFIED applications can be approved + signed "
-                            + "(status=" + app.getStatus() + ").");
+                    "Only READY_TO_SIGN applications can be countersigned "
+                            + "(status=" + app.getStatus() + "). All required "
+                            + "approvals must be in first.");
         }
         if (ermName == null || ermName.isBlank()
                 || ermTitle == null || ermTitle.isBlank()) {

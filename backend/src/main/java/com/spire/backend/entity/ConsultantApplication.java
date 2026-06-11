@@ -620,6 +620,16 @@ public class ConsultantApplication {
         REVISION_REQUESTED,
         UPDATED,
         VERIFIED,
+        // 3B — role-based approval gate (inserted between the consultant-
+        // signed VERIFIED state and the ERM countersign):
+        //   VERIFIED --(ERM Send for Approval)--> AWAITING_APPROVALS
+        //   AWAITING_APPROVALS --(all required approvers approve)--> READY_TO_SIGN
+        //   AWAITING_APPROVALS --(any approver requests revision)--> APPROVAL_REVISION_REQUESTED
+        //   APPROVAL_REVISION_REQUESTED --(ERM re-sends)--> AWAITING_APPROVALS
+        //   READY_TO_SIGN --(ERM countersign)--> COMPLETED
+        AWAITING_APPROVALS,
+        APPROVAL_REVISION_REQUESTED,
+        READY_TO_SIGN,
         SIGNED,
         COMPLETED,
         CANCELLED,

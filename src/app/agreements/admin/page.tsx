@@ -406,6 +406,8 @@ function CreateUserModal({
   const [fullName, setFullName] = useState("");
   const [title, setTitle] = useState("");
   const [password, setPassword] = useState("");
+  // 3A — assignable console role (never SUPER_ADMIN).
+  const [role, setRole] = useState<"ERM" | "MANAGER" | "ACCOUNTS">("ERM");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
   const [emailTaken, setEmailTaken] = useState(false);
@@ -427,6 +429,7 @@ function CreateUserModal({
         fullName: fullName.trim(),
         title: title.trim(),
         temporaryPassword: password,
+        role,
       });
       onCreated(email.trim().toLowerCase(), password);
     } catch (e) {
@@ -480,6 +483,20 @@ function CreateUserModal({
             placeholder="Senior ERM"
             className={modalInput}
           />
+        </ModalField>
+        <ModalField label="Role" required>
+          <select
+            value={role}
+            onChange={(e) =>
+              setRole(e.target.value as "ERM" | "MANAGER" | "ACCOUNTS")
+            }
+            disabled={submitting}
+            className={modalInput}
+          >
+            <option value="ERM">ERM — sends agreements + countersigns</option>
+            <option value="MANAGER">Manager — approval gate (Phase 1 + 2)</option>
+            <option value="ACCOUNTS">Accounts — approval gate (Phase 2)</option>
+          </select>
         </ModalField>
         <ModalField label="Temporary password" required>
           <div className="flex items-center gap-2">
@@ -698,17 +715,22 @@ function ModalField({
 }
 
 function RoleBadge({ role }: { role: string }) {
-  const isAdmin = role === "SUPER_ADMIN";
+  // 3A — distinct styling per console role.
+  const meta: Record<string, { cls: string; label: string }> = {
+    SUPER_ADMIN: { cls: "bg-sage-navy/10 text-sage-navy", label: "Super admin" },
+    ERM: { cls: "bg-gray-100 text-gray-600", label: "ERM" },
+    MANAGER: { cls: "bg-violet-50 text-violet-700", label: "Manager" },
+    ACCOUNTS: { cls: "bg-teal-50 text-teal-700", label: "Accounts" },
+  };
+  const m = meta[role] ?? meta.ERM;
   return (
     <span
       className={
         "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold " +
-        (isAdmin
-          ? "bg-sage-navy/10 text-sage-navy"
-          : "bg-gray-100 text-gray-600")
+        m.cls
       }
     >
-      {isAdmin ? "Super admin" : "ERM"}
+      {m.label}
     </span>
   );
 }

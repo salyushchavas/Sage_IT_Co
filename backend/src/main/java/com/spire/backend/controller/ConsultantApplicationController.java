@@ -156,6 +156,21 @@ public class ConsultantApplicationController {
         return ResponseEntity.ok(ApiResponse.success(PageResponse.from(result)));
     }
 
+    /**
+     * 3B — approval status board: agreements awaiting / in-revision / ready
+     * across the approval gate, with their per-approver history. Owner-
+     * scoped (super-admin sees all). The frontend splits Phase 1 / Phase 2.
+     */
+    @GetMapping("/api/agreement-erm/approval-board")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> approvalBoard(
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                consultantService.approvalBoard(
+                        AgreementAuthz.userId(request),
+                        AgreementAuthz.roleEnum(request))));
+    }
+
     @GetMapping("/api/agreement-erm/applications/{appId}")
     @PreAuthorize("hasRole('AGREEMENT_ERM')")
     public ResponseEntity<ApiResponse<Map<String, Object>>> get(
@@ -172,6 +187,8 @@ public class ConsultantApplicationController {
         view.put("application", app);
         view.put("events", events);
         view.put("revisions", revisions);
+        // 3B — per-approver gate history (Manager/Accounts decisions).
+        view.put("approvals", consultantService.listApprovals(appId));
         return ResponseEntity.ok(ApiResponse.success(view));
     }
 
@@ -237,6 +254,23 @@ public class ConsultantApplicationController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Revision requested",
                 consultantService.ermRequestRevision(appId, body.remarks, request)));
+    }
+
+    /**
+     * 3B — ERM "Send for Approval". Routes a consultant-signed,
+     * consultant-version-released agreement to the phase's required
+     * approvers (Phase 1 = Manager; Phase 2 = Manager + Accounts). Also
+     * used to RE-SEND after an approver requested a revision (resets all
+     * required approvers to PENDING for a fresh round).
+     */
+    @PostMapping("/api/agreement-erm/applications/{appId}/send-for-approval")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> sendForApproval(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Sent for approval",
+                consultantService.sendForApproval(appId, request)));
     }
 
     @PostMapping("/api/agreement-erm/applications/{appId}/approve-and-sign")
@@ -1136,7 +1170,15 @@ public class ConsultantApplicationController {
             HttpServletRequest request) {
         ConsultantApplication app = consultantService.getByApplicationId(appId);
         consultantService.assertErmCanAccess(app, request);
-        if (!ConsultantApplication.Status.VERIFIED.name().equals(app.getStatus())) {
+        // 3B — preview is useful across the whole approval window (the
+        // consultant has signed, the ERM hasn't countersigned yet).
+        String st = app.getStatus();
+        boolean previewable =
+                ConsultantApplication.Status.VERIFIED.name().equals(st)
+                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
+                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
+                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
+        if (!previewable) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
         byte[] bytes;
