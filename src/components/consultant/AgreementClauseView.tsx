@@ -76,7 +76,17 @@ export default function AgreementClauseView({
   signature,
 }: Props) {
   return (
-    <div className="space-y-3 [&_p+p]:mt-3">
+    // Build Y — the clause text is read-only + non-copyable (deterrent
+    // only). Inputs are rendered elsewhere (the wizard's action rail), so
+    // this never touches form controls.
+    <div
+      className="space-y-3 [&_p+p]:mt-3 select-none"
+      onCopy={(e) => e.preventDefault()}
+      onCut={(e) => e.preventDefault()}
+      onContextMenu={(e) => e.preventDefault()}
+      onDragStart={(e) => e.preventDefault()}
+      style={{ userSelect: "none", WebkitUserSelect: "none", MozUserSelect: "none" }}
+    >
       {blocks.map((b, i) => (
         <BlockView
           key={i}

@@ -271,6 +271,18 @@ public class ConsultantApplication {
     @Column(name = "ach_routing_number") private String achRoutingNumber;
     @Column(name = "ach_account_number") private String achAccountNumber;
     @Column(name = "ach_notice_email") private String achNoticeEmail;
+    /**
+     * Build Y — the debit schedule is now ERM-filled at create as a
+     * repeatable list of (date, amount) rows, stored JSON-in-TEXT
+     * (mirrors {@link #cheques}). Example:
+     * {@code [{"date":"2026-07-15","amount":"$416.67"}, …]}.
+     * The flattened, comma-joined views are kept on the legacy
+     * {@code achDebitDates} / {@code achDebitAmounts} columns (dates
+     * formatted MM-DD-YYYY) so the existing ${achDebitDates} /
+     * ${achDebitAmounts} placeholders render unchanged; read-only to
+     * the consultant.
+     */
+    @Column(name = "ach_debit_schedule", columnDefinition = "TEXT") private String achDebitSchedule;
     @Column(name = "ach_debit_dates") private String achDebitDates;
     @Column(name = "ach_debit_amounts") private String achDebitAmounts;
 
@@ -334,6 +346,18 @@ public class ConsultantApplication {
     @Column(name = "revision_count")
     @Builder.Default
     private Integer revisionCount = 0;
+
+    /**
+     * Build Y — ERM section-picker revision scope. JSON-in-TEXT array of
+     * {@code [{"key":"appendix4","note":"…"}, …]} written by
+     * {@code ermRequestRevision}. While status = REVISION_REQUESTED and
+     * this is non-empty, the consultant may see + edit ONLY these
+     * sections (+ the final sign step); every other section stays hidden
+     * and immutable for that round (enforced in {@code consultantFill}).
+     * Each consultant re-submit / non-restricted revision overwrites it.
+     */
+    @Column(name = "revision_sections", columnDefinition = "TEXT")
+    private String revisionSections;
 
     // ── Final countersigned PDF (post-ERM signature) ─────────────────
     //

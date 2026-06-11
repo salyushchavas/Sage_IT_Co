@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   RotateCcw,
+  X,
 } from "lucide-react";
 
 import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
@@ -17,7 +18,7 @@ import {
   approverApprove,
   approverFetchQueue,
   approverRequestRevision,
-  fetchApproverPreviewPdfBlob,
+  fetchApproverPreviewImages,
   fetchMe,
   getAgreementErmToken,
   type ApproverQueueItem,
@@ -142,18 +143,15 @@ function ApprovalCard({
   const [showRevise, setShowRevise] = useState(false);
   const [note, setNote] = useState("");
   const [err, setErr] = useState("");
+  // Build Y — in-app non-copyable preview (watermarked PNGs, no PDF tab).
+  const [previewPages, setPreviewPages] = useState<string[] | null>(null);
 
-  const previewPdf = async () => {
+  const previewAgreement = async () => {
     setBusy("preview");
     setErr("");
     try {
-      const res = await fetchApproverPreviewPdfBlob(app.applicationId);
-      if (!res.ok) throw new Error("Couldn't load the preview.");
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      // Revoke a little later so the new tab has time to load it.
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      const data = await fetchApproverPreviewImages(app.applicationId);
+      setPreviewPages(data.pages);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't load the preview.");
     } finally {
@@ -212,7 +210,7 @@ function ApprovalCard({
         </div>
         <button
           type="button"
-          onClick={previewPdf}
+          onClick={previewAgreement}
           disabled={busy !== null}
           className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
         >
@@ -224,6 +222,13 @@ function ApprovalCard({
           Preview agreement
         </button>
       </div>
+
+      {previewPages !== null && (
+        <ApproverPreviewModal
+          pages={previewPages}
+          onClose={() => setPreviewPages(null)}
+        />
+      )}
 
       {/* Other approvers' status (Phase 2 parallel gate visibility). */}
       {otherGates.length > 0 && (
@@ -312,6 +317,76 @@ function ApprovalCard({
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/**
+ * Build Y — non-copyable approver preview. Renders the watermarked PNG
+ * pages in a modal with text-selection, copy/cut, context-menu, and drag
+ * all blocked (deterrent only — won't stop screenshots). No PDF/file
+ * ever reaches the browser, so there is nothing to "save as".
+ */
+function ApproverPreviewModal({
+  pages,
+  onClose,
+}: {
+  pages: string[];
+  onClose: () => void;
+}) {
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-y-auto"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white w-full sm:max-w-3xl rounded-xl shadow-xl my-6"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="flex items-center justify-between px-4 py-3 border-b border-stone-100">
+          <p className="text-sm font-bold text-sage-navy inline-flex items-center gap-1.5">
+            <FileText size={14} /> Agreement preview
+          </p>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close preview"
+            className="text-gray-500 hover:text-sage-navy cursor-pointer"
+          >
+            <X size={16} />
+          </button>
+        </header>
+        <div
+          className="bg-stone-100 p-4 max-h-[78vh] overflow-y-auto space-y-3 select-none"
+          style={{ userSelect: "none", WebkitUserSelect: "none", MozUserSelect: "none" }}
+          onContextMenu={(e) => e.preventDefault()}
+          onCopy={(e) => e.preventDefault()}
+          onCut={(e) => e.preventDefault()}
+          onDragStart={(e) => e.preventDefault()}
+        >
+          {pages.length === 0 ? (
+            <p className="text-center text-xs text-gray-500 py-12">
+              Nothing to preview.
+            </p>
+          ) : (
+            pages.map((b64, i) => (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                key={i}
+                src={`data:image/png;base64,${b64}`}
+                alt={`Agreement page ${i + 1}`}
+                draggable={false}
+                onDragStart={(e) => e.preventDefault()}
+                onContextMenu={(e) => e.preventDefault()}
+                className="block w-full rounded-md border border-stone-200 shadow-sm"
+                style={{ userSelect: "none", WebkitUserSelect: "none" }}
+              />
+            ))
+          )}
+        </div>
+      </div>
     </div>
   );
 }

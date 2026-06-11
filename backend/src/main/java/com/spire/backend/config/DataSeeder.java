@@ -1317,6 +1317,10 @@ public class DataSeeder implements CommandLineRunner {
                 // consultant signature_date. Null until the ERM signs so
                 // no date renders under the unsigned ERM block.
                 {"erm_signature_date TIMESTAMP", "erm_signature_date"},
+                // Build Y — ERM-filled ACH debit schedule (JSON rows).
+                {"ach_debit_schedule TEXT", "ach_debit_schedule"},
+                // Build Y — ERM section-picker revision scope (JSON).
+                {"revision_sections TEXT", "revision_sections"},
         };
         for (String[] col : columns) {
             try {

@@ -51,6 +51,7 @@ import {
   getConsultantApplicationView,
   getConsultantToken,
   parseChequeList,
+  parseRevisionSections,
   recordConsultantConsent,
   requestConsultantDownloadOtp,
   saveConsultantChequeMetadata,
@@ -337,6 +338,28 @@ function filterVisibleSections(
   );
 }
 
+/**
+ * Build Y — STRICT section-restricted revision view. When the ERM sends a
+ * section-picker revision, the consultant sees ONLY the selected
+ * section(s) + the final sign step ("review"); every other section is
+ * absent from the wizard, navigator, progress, and submit jumps (mirrors
+ * the backend write-scope enforcement). Empty selection ⇒ unrestricted.
+ */
+function restrictedVisibleSections(
+  selectedKeys: string[],
+): readonly AgreementSection[] {
+  const set = new Set(selectedKeys);
+  return AGREEMENT_SECTIONS.filter((s) => set.has(s.id) || s.id === "review");
+}
+
+/** The active revision scope (section keys), or [] when unrestricted. */
+function revisionScopeKeys(
+  app: ConsultantApplication | null,
+): string[] {
+  if (!app || app.status !== "REVISION_REQUESTED") return [];
+  return parseRevisionSections(app.revisionSections).map((r) => r.key);
+}
+
 // ── Page ───────────────────────────────────────────────────────
 
 export default function ConsultantWizardPage() {
@@ -458,7 +481,12 @@ export default function ConsultantWizardPage() {
         // appendices are not counted; if every visible non-review
         // section is already complete, the consultant lands on Review.
         const loadedReqs = effectiveRequirements(data);
-        const loadedVisible = filterVisibleSections(loadedReqs);
+        // Build Y — a section-restricted revision shows ONLY the selected
+        // section(s) + sign step; otherwise the normal visible set.
+        const loadedScope = revisionScopeKeys(data);
+        const loadedVisible = loadedScope.length > 0
+            ? restrictedVisibleSections(loadedScope)
+            : filterVisibleSections(loadedReqs);
         const loadedWorkAuth = Boolean(data.workAuthDocPublicId);
         setCurrentStep(firstIncompleteIndex(
             loadedVisible, initial, loadedReqs, entries, loadedWorkAuth));
@@ -489,24 +517,42 @@ export default function ConsultantWizardPage() {
     };
   }, []);
 
+  // Build Y — active revision scope (section ids), empty when unrestricted.
+  const restrictedScopeSet = useMemo(
+    () => new Set(revisionScopeKeys(app)),
+    [app],
+  );
+
   // Auto-save (reuses Phase 5 internals) ───────────────────────
   const computeDelta = useCallback(
     (current: FormState): ConsultantFillPayload => {
       const delta: ConsultantFillPayload = {};
       const snap = lastSavedRef.current;
+      // Build Y — during a section-restricted revision, never emit a
+      // change for a section outside the scope (the backend would reject
+      // it anyway; this keeps out-of-scope values off the wire).
+      const restricted = restrictedScopeSet.size > 0;
       for (const key of ALL_FIELD_KEYS) {
         if (current.fields[key] !== snap.fields[key]) {
+          if (restricted) {
+            const sec = findSectionForFieldKey(key);
+            if (!sec || !restrictedScopeSet.has(sec.id)) continue;
+          }
           (delta as Record<string, string>)[key] = current.fields[key];
         }
       }
       for (const flag of AFFIRMATION_FLAGS) {
         if (current.affirmations[flag] !== snap.affirmations[flag]) {
+          if (restricted) {
+            const sec = findSectionForAffirmation(flag);
+            if (!sec || !restrictedScopeSet.has(sec.id)) continue;
+          }
           (delta as Record<string, boolean>)[flag] = current.affirmations[flag];
         }
       }
       return delta;
     },
-    [],
+    [restrictedScopeSet],
   );
 
   const fireSave = useCallback(
@@ -732,10 +778,23 @@ export default function ConsultantWizardPage() {
 
   // Effective requirements derived from the ERM's per-agreement flags.
   // Memoised so per-section gating is a single derivation each render.
-  const reqs = useMemo<EffectiveRequirements>(
-    () => effectiveRequirements(app),
-    [app],
-  );
+  const reqs = useMemo<EffectiveRequirements>(() => {
+    const base = effectiveRequirements(app);
+    // Build Y — in a restricted revision, the ERM-selected appendices are
+    // forced required (so the wizard gates them as must-complete +
+    // re-affirm), mirroring the backend's revisionForcedSections.
+    const scope = revisionScopeKeys(app);
+    if (scope.length === 0) return base;
+    const o: EffectiveRequirements = { ...base };
+    for (const k of scope) {
+      if (k === "appendix1") o.appendix1 = true;
+      else if (k === "appendix2") o.appendix2 = true;
+      else if (k === "appendix3") o.appendix3 = true;
+      else if (k === "appendix4") o.appendix4 = true;
+      else if (k === "appendix5") o.appendix5 = true;
+    }
+    return o;
+  }, [app]);
 
   // Build X — visible-section source: core sections + ONLY the
   // appendices the ERM marked required. Everything downstream
@@ -743,10 +802,11 @@ export default function ConsultantWizardPage() {
   // submit-error jumps, ReviewStep read-back) is derived from this
   // list so a not-required appendix simply doesn't exist for the
   // consultant.
-  const visibleSections = useMemo(
-    () => filterVisibleSections(reqs),
-    [reqs],
-  );
+  const visibleSections = useMemo(() => {
+    const scope = revisionScopeKeys(app);
+    if (scope.length > 0) return restrictedVisibleSections(scope);
+    return filterVisibleSections(reqs);
+  }, [reqs, app]);
 
   // Build X — if the ERM updates per-agreement requirements mid-flow
   // (or a previously-required section is hidden on next load), clamp
@@ -1185,8 +1245,9 @@ export default function ConsultantWizardPage() {
                     {app.currentRevisionRemarks}
                   </p>
                   <p className="text-xs text-stone-600 mt-2">
-                    Update the highlighted fields, then submit to send it back
-                    for verification.
+                    {revisionScopeKeys(app).length > 0
+                      ? "Only the section(s) Sage IT flagged are shown below. Update them, re-affirm, re-sign, and submit to send it back for verification."
+                      : "Update the highlighted fields, then submit to send it back for verification."}
                   </p>
                 </div>
               </div>
@@ -1738,11 +1799,21 @@ function SectionStep({
     <div className="grid grid-cols-1 lg:grid-cols-[1.62fr_0.92fr] gap-6 lg:gap-10 items-start max-w-[1320px] mx-auto">
       {/* ── Reading column (dominant) ─────────────────────────── */}
       <article
-        className="relative bg-[var(--paper)] rounded-[14px] motion-safe:transition-opacity"
+        className="relative bg-[var(--paper)] rounded-[14px] motion-safe:transition-opacity select-none"
         aria-labelledby="section-title"
+        // Build Y — read-only agreement text is non-copyable (deterrent
+        // only). The inputs/affirmation/signature/nav live in the
+        // separate sticky rail, so this does not affect form controls.
+        onCopy={(e) => e.preventDefault()}
+        onCut={(e) => e.preventDefault()}
+        onContextMenu={(e) => e.preventDefault()}
+        onDragStart={(e) => e.preventDefault()}
         style={{
           border: "1px solid var(--line)",
           boxShadow: "0 18px 36px -28px rgba(15,31,68,0.18)",
+          userSelect: "none",
+          WebkitUserSelect: "none",
+          MozUserSelect: "none",
         }}
       >
         {/* Build S — slim left-edge reading-progress rail. Sits inside

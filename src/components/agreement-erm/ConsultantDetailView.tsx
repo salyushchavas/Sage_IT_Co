@@ -52,7 +52,14 @@ import {
   type Phase2PromotionPayload,
 } from "@/lib/api";
 import { formatUsDate, formatUsDateTime } from "@/lib/dates";
+import { AGREEMENT_SECTIONS } from "@/lib/agreement-sections";
 import AgreementStatusPill from "./AgreementStatusPill";
+
+// Build Y — sections the ERM can pick in the revision picker (the final
+// sign step is always included for the consultant and is not pickable).
+const REVISABLE_SECTIONS = AGREEMENT_SECTIONS.filter((s) => s.id !== "review").map(
+  (s) => ({ id: s.id, title: s.title }),
+);
 import AgreementEventTimeline from "./AgreementEventTimeline";
 
 // Build W — derive the displayed work-authorization (custom text when
@@ -2056,17 +2063,32 @@ function RequestRevisionModal({
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
-  const [remarks, setRemarks] = useState("");
+  // Build Y — SECTION PICKER. The ERM ticks the section(s) to revise;
+  // a per-section note is optional (never required). The consultant is
+  // then restricted to ONLY the ticked section(s) + the sign step.
+  const [picked, setPicked] = useState<Record<string, boolean>>({});
+  const [notes, setNotes] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const canSubmit = remarks.trim().length >= 4 && !busy;
+
+  const selectedIds = REVISABLE_SECTIONS.filter((s) => picked[s.id]).map((s) => s.id);
+  const canSubmit = selectedIds.length > 0 && !busy;
+
+  const toggle = (id: string) =>
+    setPicked((p) => ({ ...p, [id]: !p[id] }));
+  const setNote = (id: string, v: string) =>
+    setNotes((n) => ({ ...n, [id]: v }));
 
   const submit = async () => {
     if (!canSubmit) return;
     setBusy(true);
     setError("");
     try {
-      await ermRequestRevision(appId, remarks.trim());
+      const sections = selectedIds.map((id) => {
+        const note = (notes[id] ?? "").trim();
+        return note ? { key: id, note } : { key: id };
+      });
+      await ermRequestRevision(appId, sections);
       await onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't send revision request.");
@@ -2077,7 +2099,7 @@ function RequestRevisionModal({
   return (
     <ModalShell
       title="Request revision"
-      subtitle="The consultant will receive an email with your remarks."
+      subtitle="Pick the section(s) to send back. The consultant will be restricted to only these."
       onClose={onClose}
       closeable={!busy}
       footer={
@@ -2102,20 +2124,47 @@ function RequestRevisionModal({
         </>
       }
     >
-      <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-        Remarks for consultant <span className="text-red-500">*</span>
-      </label>
-      <textarea
-        value={remarks}
-        onChange={(e) => setRemarks(e.target.value.slice(0, 2000))}
-        rows={5}
-        autoFocus
-        disabled={busy}
-        placeholder="e.g. Please correct the phone number — it appears to be missing a digit."
-        className="w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
-      />
-      <p className="mt-1 text-[11px] text-gray-500">
-        Be specific. The consultant sees your remarks verbatim. {remarks.length}/2000
+      <p className="text-[11px] text-gray-500 mb-2">
+        Tick the missing/wrong section(s). A note is optional — you can send
+        a revision with no typed text at all.
+      </p>
+      <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
+        {REVISABLE_SECTIONS.map((s) => {
+          const on = Boolean(picked[s.id]);
+          return (
+            <div
+              key={s.id}
+              className={
+                "rounded-md border px-3 py-2 " +
+                (on ? "border-sage-navy bg-sage-navy/5" : "border-gray-200 bg-white")
+              }
+            >
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={on}
+                  onChange={() => toggle(s.id)}
+                  disabled={busy}
+                  className="mt-0.5 h-4 w-4 accent-sage-navy"
+                />
+                <span className="text-sm font-medium text-gray-800">{s.title}</span>
+              </label>
+              {on && (
+                <input
+                  type="text"
+                  value={notes[s.id] ?? ""}
+                  onChange={(e) => setNote(s.id, e.target.value.slice(0, 500))}
+                  disabled={busy}
+                  placeholder="Optional note for this section…"
+                  className="mt-2 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+                />
+              )}
+            </div>
+          );
+        })}
+      </div>
+      <p className="mt-2 text-[11px] text-gray-500">
+        {selectedIds.length} section{selectedIds.length === 1 ? "" : "s"} selected.
       </p>
       {error && (
         <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-600">

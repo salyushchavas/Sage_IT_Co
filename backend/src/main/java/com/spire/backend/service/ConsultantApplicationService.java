@@ -142,6 +142,7 @@ public class ConsultantApplicationService {
             Boolean requireAppendix4,
             Boolean requireAppendix5,
             Boolean requireSsn,
+            JsonNode achDebitSchedule,
             JsonNode payload,
             String ownerErmId,
             HttpServletRequest request
@@ -151,6 +152,39 @@ public class ConsultantApplicationService {
         String applicationId = UUID.randomUUID().toString();
         LocalDateTime now = LocalDateTime.now();
         String payloadJson = stringify(payload);
+
+        // Build Y — ERM-filled ACH debit schedule (multi-row). Persist the
+        // JSON rows and flatten to the legacy comma-joined columns (dates
+        // MM-DD-YYYY) so the existing ${achDebitDates}/${achDebitAmounts}
+        // placeholders render unchanged; read-only to the consultant.
+        String achScheduleJson = null;
+        String achDatesJoined = null;
+        String achAmountsJoined = null;
+        if (achDebitSchedule != null && achDebitSchedule.isArray()
+                && achDebitSchedule.size() > 0) {
+            java.util.List<String> dates = new java.util.ArrayList<>();
+            java.util.List<String> amounts = new java.util.ArrayList<>();
+            com.fasterxml.jackson.databind.node.ArrayNode clean = objectMapper.createArrayNode();
+            for (JsonNode row : achDebitSchedule) {
+                String d = blankToNull(row.path("date").asText(""));
+                String a = blankToNull(row.path("amount").asText(""));
+                // Only keep rows with BOTH a date AND an amount so the
+                // flattened columns stay index-aligned (date[i]↔amount[i]),
+                // even when a malformed/direct API request sends partials.
+                if (d == null || a == null) continue;
+                dates.add(formatIsoToUs(d));
+                amounts.add(a);
+                com.fasterxml.jackson.databind.node.ObjectNode o = objectMapper.createObjectNode();
+                o.put("date", d);
+                o.put("amount", a);
+                clean.add(o);
+            }
+            if (!dates.isEmpty()) {
+                achScheduleJson = clean.toString();
+                achDatesJoined = String.join(", ", dates);
+                achAmountsJoined = String.join(", ", amounts);
+            }
+        }
 
         // Build W — structured name. Compose consultant_name from
         // First + Middle? + Last; fall back to the single legacy field.
@@ -194,6 +228,10 @@ public class ConsultantApplicationService {
                 .requireAppendix4(Boolean.TRUE.equals(requireAppendix4))
                 .requireAppendix5(Boolean.TRUE.equals(requireAppendix5))
                 .requireSsn(Boolean.TRUE.equals(requireSsn))
+                // Build Y — ERM-filled ACH debit schedule (+ flattened views).
+                .achDebitSchedule(achScheduleJson)
+                .achDebitDates(achDatesJoined)
+                .achDebitAmounts(achAmountsJoined)
                 // Build G — effective date is the creation date. Was
                 // formerly set at ermApproveAndSign; moving it here so
                 // the consultant sees a stable "Effective: MM-DD-YYYY"
@@ -1055,6 +1093,24 @@ public class ConsultantApplicationService {
                     "Application is in status " + status
                             + " and cannot be edited by the consultant.");
         }
+        // Build Y (B5) — during a section-restricted revision round, ONLY
+        // the ERM-selected section(s) may change. Every other section's
+        // data + confirmations stay immutable for that round.
+        boolean restricted =
+                ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
+                && app.getRevisionSections() != null
+                && !app.getRevisionSections().isBlank();
+        if (restricted) {
+            java.util.Set<String> allowed = parseRevisionSectionKeys(app);
+            for (String touched : patch.touchedFieldNames()) {
+                String section = FIELD_SECTION.get(touched);
+                if (section != null && !allowed.contains(section)) {
+                    throw new IllegalArgumentException(
+                            "This revision is limited to the selected section(s). "
+                                    + "The field '" + touched + "' is outside that scope.");
+                }
+            }
+        }
         boolean changed = patch.applyTo(app);
         if (!changed) {
             return app;
@@ -1121,8 +1177,17 @@ public class ConsultantApplicationService {
         // first-and-last signature model demands BOTH a main-agreement
         // draw and a final review-step draw -- one without the other
         // is rejected.
-        boolean missingSig = signatureBase64 == null || signatureBase64.isBlank()
-                || !signatureBase64.startsWith("data:image/");
+        // Build Y — the primary (main-agreement) signature may be REUSED
+        // on a section-restricted revision where the main-agreement step
+        // isn't in scope (the consultant only re-draws the final
+        // execution signature). It's missing only when neither a fresh
+        // draw nor a persisted primary exists. The final signature is
+        // always re-captured.
+        boolean hasNewPrimary = signatureBase64 != null
+                && signatureBase64.startsWith("data:image/");
+        boolean hasExistingPrimary = app.getSignatureImage() != null
+                && !app.getSignatureImage().isBlank();
+        boolean missingSig = !hasNewPrimary && !hasExistingPrimary;
         boolean missingFinalSig = finalSignatureBase64 == null || finalSignatureBase64.isBlank()
                 || !finalSignatureBase64.startsWith("data:image/");
         java.util.List<String> missingFields = collectMissingConsultantFields(app);
@@ -1132,11 +1197,13 @@ public class ConsultantApplicationService {
                     missingFields, missingAffs, missingSig, missingFinalSig);
         }
 
-        String signatureUrl;
+        String signatureUrl = app.getSignatureImage();
         String finalSignatureUrl;
         try {
-            signatureUrl = uploadSignatureToCloudinary(
-                    signatureBase64, "signatures/consultant-" + applicationId);
+            if (hasNewPrimary) {
+                signatureUrl = uploadSignatureToCloudinary(
+                        signatureBase64, "signatures/consultant-" + applicationId);
+            }
             finalSignatureUrl = uploadSignatureToCloudinary(
                     finalSignatureBase64, "signatures/consultant-final-" + applicationId);
         } catch (Exception e) {
@@ -1166,6 +1233,10 @@ public class ConsultantApplicationService {
         // the right behaviour: the final PDF's signature date should
         // reflect the most recent signing action.
         app.setSignatureDate(now);
+        // Build Y — the revision round is complete; clear the scope so a
+        // fresh VERIFIED row is no longer restricted (the next
+        // ermRequestRevision sets a new scope).
+        app.setRevisionSections(null);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
 
@@ -1203,7 +1274,7 @@ public class ConsultantApplicationService {
      */
     @Transactional
     public ConsultantApplication ermRequestRevision(
-            String applicationId, String remarks, HttpServletRequest request) {
+            String applicationId, JsonNode sections, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
         // 3B — the ERM can bounce to the CONSULTANT from the consultant-
@@ -1222,11 +1293,47 @@ public class ConsultantApplicationService {
                     "This application can't be sent back for revision "
                             + "(status=" + st + ").");
         }
-        if (remarks == null || remarks.isBlank()) {
-            throw new IllegalArgumentException(
-                    "Remarks are required when requesting a revision.");
+
+        // Build Y — SECTION PICKER. The ERM selects the section(s) to
+        // revise (optional per-section note, never required). The
+        // consultant is then restricted to ONLY these sections.
+        java.util.List<String> selectedKeys = new java.util.ArrayList<>();
+        java.util.LinkedHashMap<String, String> notes = new java.util.LinkedHashMap<>();
+        if (sections != null && sections.isArray()) {
+            for (JsonNode row : sections) {
+                String key = blankToNull(row.path("key").asText(""));
+                if (key == null || !REVISABLE_SECTION_IDS.contains(key)) continue;
+                if (!selectedKeys.contains(key)) selectedKeys.add(key);
+                String note = blankToNull(row.path("note").asText(""));
+                if (note != null) notes.put(key, note);
+            }
         }
-        app.setCurrentRevisionRemarks(remarks);
+        if (selectedKeys.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Select at least one section to revise.");
+        }
+
+        // Persist the revision scope (JSON: [{"key":…,"note":…}, …]).
+        com.fasterxml.jackson.databind.node.ArrayNode arr = objectMapper.createArrayNode();
+        for (String k : selectedKeys) {
+            com.fasterxml.jackson.databind.node.ObjectNode o = objectMapper.createObjectNode();
+            o.put("key", k);
+            if (notes.containsKey(k)) o.put("note", notes.get(k));
+            arr.add(o);
+        }
+        app.setRevisionSections(arr.toString());
+
+        // Human-readable summary (drives the consultant email + the
+        // REVISION_REQUESTED banner). Built from the section labels + any
+        // notes, so a zero-text revision still reads clearly.
+        String summary = buildRevisionSummary(selectedKeys, notes);
+        app.setCurrentRevisionRemarks(summary);
+
+        // Re-arm the affirmation for each selected section so the
+        // consultant must re-read + re-affirm it (scroll-gate re-arms in
+        // the wizard automatically per section).
+        for (String k : selectedKeys) clearAffirmationForSection(app, k);
+
         Integer prevCount = app.getRevisionCount();
         app.setRevisionCount((prevCount == null ? 0 : prevCount) + 1);
         app.setStatus(ConsultantApplication.Status.REVISION_REQUESTED.name());
@@ -1236,11 +1343,13 @@ public class ConsultantApplicationService {
                 ConsultantApplicationEvent.EventType.REVISION_REQUESTED,
                 ConsultantApplicationEvent.ActorType.ERM,
                 AGREEMENT_ERM_USER_ID,
-                Map.of("remarks", remarks, "revisionCount", app.getRevisionCount()),
+                Map.of("selectedSections", selectedKeys,
+                        "revisionCount", app.getRevisionCount()),
                 request);
 
         try {
-            emailTemplateService.sendConsultantRevisionRequest(app, remarks);
+            emailTemplateService.sendConsultantRevisionRequest(
+                    app, summary == null ? "" : summary);
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -1252,6 +1361,127 @@ public class ConsultantApplicationService {
         }
 
         return app;
+    }
+
+    // ── Build Y — section-picker revision support ────────────────────
+
+    /** Sections the ERM may select in the revision picker (review/sign excluded). */
+    private static final java.util.List<String> REVISABLE_SECTION_IDS = java.util.List.of(
+            "cover", "main-agreement", "exhibit-a", "exhibit-b",
+            "appendix1", "appendix2", "appendix3", "appendix4", "appendix5");
+
+    private static final java.util.Map<String, String> SECTION_LABELS = java.util.Map.ofEntries(
+            java.util.Map.entry("cover", "Your Information"),
+            java.util.Map.entry("main-agreement", "The Agreement"),
+            java.util.Map.entry("exhibit-a", "Exhibit A"),
+            java.util.Map.entry("exhibit-b", "Exhibit B"),
+            java.util.Map.entry("appendix1", "Appendix 1 — Employment"),
+            java.util.Map.entry("appendix2", "Appendix 2 — ACH Authorization"),
+            java.util.Map.entry("appendix3", "Appendix 3 — Background Check"),
+            java.util.Map.entry("appendix4", "Appendix 4 — Portal Access"),
+            java.util.Map.entry("appendix5", "Appendix 5 — Security Cheque"));
+
+    /** field/affirmation key → owning section id (for B5 write-scope enforcement). */
+    private static final java.util.Map<String, String> FIELD_SECTION = buildFieldSectionMap();
+
+    private static java.util.Map<String, String> buildFieldSectionMap() {
+        java.util.Map<String, String> m = new java.util.HashMap<>();
+        for (String f : new String[]{"firstName", "middleName", "lastName",
+                "consultantName", "primaryPhone", "addressLine1", "addressLine2",
+                "addressCity", "addressState", "addressZip",
+                // ERM-set / read-only cover fields that still exist on the
+                // fill patch — mapped so they can't bypass the B5 scope.
+                "residenceAddress", "workAuthorizationCategory", "effectiveDate"}) {
+            m.put(f, "cover");
+        }
+        m.put("affirmedMainAgreement", "main-agreement");
+        for (String f : new String[]{"technologyTrack", "customScopeNotes",
+                "affirmedExhibitA"}) m.put(f, "exhibit-a");
+        m.put("affirmedExhibitB", "exhibit-b");
+        for (String f : new String[]{"employerPayrollEntity", "implementationPartner",
+                "endClient", "roleTitle", "verifiedStartDate", "payrollCycle",
+                "affirmedAppendix1"}) m.put(f, "appendix1");
+        for (String f : new String[]{"achAccountType", "achBankName",
+                "achAccountHolderName", "achRoutingNumber", "achAccountNumber",
+                "achNoticeEmail", "achDebitDates", "achDebitAmounts",
+                "affirmedAppendix2"}) m.put(f, "appendix2");
+        for (String f : new String[]{"bgFullLegalName", "bgOtherNamesUsed",
+                "bgCurrentAddress", "bgDateOfBirth", "bgFullSsn", "idType",
+                "bgDriverLicense", "affirmedAppendix3"}) m.put(f, "appendix3");
+        for (String f : new String[]{"portalPlatform", "portalUsername",
+                "portalAuthorizedActions", "portalEffectiveDate",
+                "portalRevocationContact", "affirmedAppendix4"}) m.put(f, "appendix4");
+        for (String f : new String[]{"securityCheckCount", "securityCheckBank",
+                "securityCheckHolderName", "securityCheckAmount",
+                "securityCheckNumbers", "securityCheckDates",
+                "affirmedAppendix5"}) m.put(f, "appendix5");
+        return m;
+    }
+
+    private static String buildRevisionSummary(
+            java.util.List<String> keys, java.util.Map<String, String> notes) {
+        StringBuilder sb = new StringBuilder("Please revise: ");
+        for (int i = 0; i < keys.size(); i++) {
+            String k = keys.get(i);
+            if (i > 0) sb.append("; ");
+            sb.append(SECTION_LABELS.getOrDefault(k, k));
+            String note = notes.get(k);
+            if (note != null && !note.isBlank()) sb.append(" (").append(note).append(")");
+        }
+        sb.append('.');
+        return sb.toString();
+    }
+
+    private static void clearAffirmationForSection(ConsultantApplication app, String key) {
+        switch (key) {
+            case "main-agreement" -> app.setAffirmedMainAgreement(false);
+            case "exhibit-a" -> app.setAffirmedExhibitA(false);
+            case "exhibit-b" -> app.setAffirmedExhibitB(false);
+            case "appendix1" -> app.setAffirmedAppendix1(false);
+            case "appendix2" -> app.setAffirmedAppendix2(false);
+            case "appendix3" -> app.setAffirmedAppendix3(false);
+            case "appendix4" -> app.setAffirmedAppendix4(false);
+            case "appendix5" -> app.setAffirmedAppendix5(false);
+            default -> { /* cover / review carry no affirmation */ }
+        }
+    }
+
+    /**
+     * Build Y (B5) — reject a write to {@code sectionId} when a section-
+     * restricted revision round is active and that section isn't in scope.
+     * No-op outside REVISION_REQUESTED or when the scope is empty. Covers
+     * the out-of-band upload endpoints (cheque, work-auth) that don't pass
+     * through {@code consultantFill}.
+     */
+    private void assertSectionWritable(ConsultantApplication app, String sectionId) {
+        if (!ConsultantApplication.Status.REVISION_REQUESTED.name().equals(app.getStatus())) {
+            return;
+        }
+        String json = app.getRevisionSections();
+        if (json == null || json.isBlank()) return;
+        if (!parseRevisionSectionKeys(app).contains(sectionId)) {
+            throw new IllegalArgumentException(
+                    "This revision is limited to the selected section(s); "
+                            + "this change is outside that scope.");
+        }
+    }
+
+    /** The section keys currently in the consultant's revision scope (empty = unrestricted). */
+    private java.util.Set<String> parseRevisionSectionKeys(ConsultantApplication app) {
+        java.util.Set<String> keys = new java.util.LinkedHashSet<>();
+        String json = app.getRevisionSections();
+        if (json != null && !json.isBlank()) {
+            try {
+                JsonNode arr = objectMapper.readTree(json);
+                if (arr.isArray()) {
+                    for (JsonNode n : arr) {
+                        String k = n.path("key").asText("");
+                        if (!k.isBlank()) keys.add(k);
+                    }
+                }
+            } catch (Exception ignored) { /* treat as unrestricted */ }
+        }
+        return keys;
     }
 
     // ── 3B — role-based approval workflow ────────────────────────────
@@ -2321,6 +2551,7 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix5"); // Build Y (B5)
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Cheque file is empty.");
         }
@@ -2379,6 +2610,7 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix1"); // Build Y (B5)
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Work-authorization file is empty.");
         }
@@ -2452,6 +2684,15 @@ public class ConsultantApplicationService {
         if (s == null) return null;
         String t = s.trim();
         return t.isEmpty() ? null : t;
+    }
+
+    /** Build Y — reformat an ISO yyyy-MM-dd date as MM-DD-YYYY (passthrough otherwise). */
+    private static String formatIsoToUs(String iso) {
+        if (iso == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("^(\\d{4})-(\\d{2})-(\\d{2})").matcher(iso.trim());
+        if (m.find()) return m.group(2) + "-" + m.group(3) + "-" + m.group(1);
+        return iso.trim();
     }
 
     /**
@@ -2602,6 +2843,7 @@ public class ConsultantApplicationService {
             ChequeMetadataPatch patch,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix5"); // Build Y (B5)
         if (index < 0 || index > 50) {
             throw new IllegalArgumentException("Cheque index out of range.");
         }
@@ -2636,6 +2878,7 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
+        assertSectionWritable(app, "appendix5"); // Build Y (B5)
         if (index < 0 || index > 50) {
             throw new IllegalArgumentException("Cheque index out of range.");
         }
@@ -2995,10 +3238,26 @@ public class ConsultantApplicationService {
                 || Boolean.TRUE.equals(app.getAffirmedAppendix5());
     }
 
+    /**
+     * Build Y — sections the ERM explicitly selected in a (restricted)
+     * revision round. They become REQUIRED for that round even if they
+     * were optional/untouched, so the consultant must actually complete +
+     * affirm what was asked. Empty outside a restricted revision.
+     */
+    private java.util.Set<String> revisionForcedSections(ConsultantApplication app) {
+        if (ConsultantApplication.Status.REVISION_REQUESTED.name().equals(app.getStatus())
+                && app.getRevisionSections() != null
+                && !app.getRevisionSections().isBlank()) {
+            return parseRevisionSectionKeys(app);
+        }
+        return java.util.Collections.emptySet();
+    }
+
     /** Returns the keys of every effectively-required consultant field that's blank. */
     private java.util.List<String> collectMissingConsultantFields(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
+        java.util.Set<String> forced = revisionForcedSections(app);
         // CORE (always required).
         // Build W — structured name: first + last required, middle optional.
         addIfBlank(missing, "firstName", app.getFirstName());
@@ -3020,7 +3279,7 @@ public class ConsultantApplicationService {
         // Appendix 1 -- employment (per require_appendix1; all-or-nothing
         // if optional but touched). implementationPartner is never required.
         boolean app1Required = Boolean.TRUE.equals(app.getRequireAppendix1());
-        if (app1Required || isAppendix1Touched(app)) {
+        if (app1Required || isAppendix1Touched(app) || forced.contains("appendix1")) {
             addIfBlank(missing, "employerPayrollEntity", app.getEmployerPayrollEntity());
             addIfBlank(missing, "endClient", app.getEndClient());
             addIfBlank(missing, "roleTitle", app.getRoleTitle());
@@ -3036,21 +3295,25 @@ public class ConsultantApplicationService {
 
         // Appendix 2 -- ACH.
         boolean app2Required = Boolean.TRUE.equals(app.getRequireAppendix2());
-        if (app2Required || isAppendix2Touched(app)) {
+        boolean app2Active = app2Required || isAppendix2Touched(app)
+                || forced.contains("appendix2");
+        if (app2Active) {
             addIfBlank(missing, "achAccountType", app.getAchAccountType());
             addIfBlank(missing, "achBankName", app.getAchBankName());
             addIfBlank(missing, "achAccountHolderName", app.getAchAccountHolderName());
             addIfBlank(missing, "achRoutingNumber", app.getAchRoutingNumber());
             addIfBlank(missing, "achAccountNumber", app.getAchAccountNumber());
             addIfBlank(missing, "achNoticeEmail", app.getAchNoticeEmail());
-            addIfBlank(missing, "achDebitDates", app.getAchDebitDates());
-            addIfBlank(missing, "achDebitAmounts", app.getAchDebitAmounts());
+            // Build Y — debit date(s)/amount(s) are now ERM-filled at
+            // create (read-only to the consultant), so they are no longer
+            // part of the consultant's required-field gate.
         }
 
         // Appendix 3 -- background check (SSN gated by require_ssn,
         // idType + ID number always required when the section is active).
         boolean app3Required = Boolean.TRUE.equals(app.getRequireAppendix3());
-        boolean app3Active = app3Required || isAppendix3Touched(app);
+        boolean app3Active = app3Required || isAppendix3Touched(app)
+                || forced.contains("appendix3");
         if (app3Active) {
             addIfBlank(missing, "bgFullLegalName", app.getBgFullLegalName());
             addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
@@ -3068,7 +3331,7 @@ public class ConsultantApplicationService {
 
         // Appendix 4 -- portal access.
         boolean app4Required = Boolean.TRUE.equals(app.getRequireAppendix4());
-        if (app4Required || isAppendix4Touched(app)) {
+        if (app4Required || isAppendix4Touched(app) || forced.contains("appendix4")) {
             addIfBlank(missing, "portalPlatform", app.getPortalPlatform());
             addIfBlank(missing, "portalUsername", app.getPortalUsername());
             addIfBlank(missing, "portalAuthorizedActions", app.getPortalAuthorizedActions());
@@ -3082,7 +3345,7 @@ public class ConsultantApplicationService {
         // honoured via parseCheques (treated as index 0) for pre-Build-U
         // rows that haven't migrated their data.
         boolean app5Required = Boolean.TRUE.equals(app.getRequireAppendix5());
-        if (app5Required || isAppendix5Touched(app)) {
+        if (app5Required || isAppendix5Touched(app) || forced.contains("appendix5")) {
             addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
             addIfBlank(missing, "securityCheckBank", app.getSecurityCheckBank());
             addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
@@ -3109,7 +3372,7 @@ public class ConsultantApplicationService {
         // Build G strict format checks. Only enforced WHEN the field is
         // effectively required (i.e. already in `missing`-checking scope);
         // an unfilled optional field doesn't need a format check.
-        if (app2Required || isAppendix2Touched(app)) {
+        if (app2Active) {
             if (nonBlank(app.getAchRoutingNumber())
                     && !app.getAchRoutingNumber().replaceAll("\\D", "").matches("\\d{9}")) {
                 missing.add("achRoutingNumber");
@@ -3132,31 +3395,40 @@ public class ConsultantApplicationService {
     }
 
     /** Returns the keys of every effectively-required affirmation flag still false / null. */
-    private static java.util.List<String> collectMissingAffirmations(
+    private java.util.List<String> collectMissingAffirmations(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
+        // Build Y — ERM-selected sections in a restricted revision are
+        // forced required (so the consultant must re-affirm them).
+        java.util.Set<String> forced = revisionForcedSections(app);
         // Always-required affirmations (main agreement + exhibits).
         if (!Boolean.TRUE.equals(app.getAffirmedMainAgreement())) missing.add("affirmedMainAgreement");
         if (!Boolean.TRUE.equals(app.getAffirmedExhibitA())) missing.add("affirmedExhibitA");
         if (!Boolean.TRUE.equals(app.getAffirmedExhibitB())) missing.add("affirmedExhibitB");
-        // Per-appendix: required directly, OR optional-but-touched (all-or-nothing).
-        if ((Boolean.TRUE.equals(app.getRequireAppendix1()) || isAppendix1Touched(app))
+        // Per-appendix: required directly, OR optional-but-touched (all-or-nothing),
+        // OR forced into scope by the ERM's revision picker.
+        if ((Boolean.TRUE.equals(app.getRequireAppendix1()) || isAppendix1Touched(app)
+                || forced.contains("appendix1"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix1())) {
             missing.add("affirmedAppendix1");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix2()) || isAppendix2Touched(app))
+        if ((Boolean.TRUE.equals(app.getRequireAppendix2()) || isAppendix2Touched(app)
+                || forced.contains("appendix2"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix2())) {
             missing.add("affirmedAppendix2");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix3()) || isAppendix3Touched(app))
+        if ((Boolean.TRUE.equals(app.getRequireAppendix3()) || isAppendix3Touched(app)
+                || forced.contains("appendix3"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix3())) {
             missing.add("affirmedAppendix3");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix4()) || isAppendix4Touched(app))
+        if ((Boolean.TRUE.equals(app.getRequireAppendix4()) || isAppendix4Touched(app)
+                || forced.contains("appendix4"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix4())) {
             missing.add("affirmedAppendix4");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix5()) || isAppendix5Touched(app))
+        if ((Boolean.TRUE.equals(app.getRequireAppendix5()) || isAppendix5Touched(app)
+                || forced.contains("appendix5"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix5())) {
             missing.add("affirmedAppendix5");
         }

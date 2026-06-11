@@ -3317,8 +3317,10 @@ export interface ConsultantApplication {
   achRoutingNumber: string | null;
   achAccountNumber: string | null;
   achNoticeEmail: string | null;
+  // Build Y — flattened views (comma-joined) of the ERM-filled schedule.
   achDebitDates: string | null;
   achDebitAmounts: string | null;
+  achDebitSchedule: string | null; // JSON array of AchDebitRow
   // Appendix 3 -- background check (sensitive PII)
   bgFullLegalName: string | null;
   bgOtherNamesUsed: string | null;
@@ -3349,6 +3351,9 @@ export interface ConsultantApplication {
   // Revision tracking
   currentRevisionRemarks: string | null;
   revisionCount: number | null;
+  // Build Y — ERM section-picker revision scope (JSON array of {key,note});
+  // non-empty + REVISION_REQUESTED ⇒ the consultant is restricted to these.
+  revisionSections: string | null;
   // Final post-countersignature PDF
   finalPdfUrl: string | null;
   // Phase D — consultant access record (real client IP via X-Forwarded-For).
@@ -3801,6 +3806,12 @@ export const adminArchiveApplication = adminDeleteApplication;
 
 // ── Agreement-ERM operations ────────────────────────────────────
 
+/** Build Y — one ERM-filled ACH debit row (date is ISO yyyy-MM-dd). */
+export interface AchDebitRow {
+  date: string;
+  amount: string;
+}
+
 export async function createConsultantApplication(data: {
   consultantEmail: string;
   consultantName?: string;
@@ -3828,6 +3839,8 @@ export async function createConsultantApplication(data: {
   requireAppendix4?: boolean;
   requireAppendix5?: boolean;
   requireSsn?: boolean;
+  // Build Y — ERM-filled ACH debit schedule (repeatable date/amount rows).
+  achDebitSchedule?: AchDebitRow[];
   // Legacy JSON-textarea payload. New /agreement-erm/new form does
   // not send it; preserved so the detail-view edit panel and any
   // other in-flight caller keeps compiling.
@@ -3902,13 +3915,35 @@ export async function updateConsultantContact(
 // ── Phase 6 two-stage workflow actions (Bearer token via
 //    agreementErmFetch is auto-attached from sessionStorage) ─────
 
+/** Build Y — one ERM-selected revision section (optional per-section note). */
+export interface RevisionSectionSelection {
+  key: string;
+  note?: string;
+}
+
+/** Build Y — parse the persisted revision_sections JSON to selections. */
+export function parseRevisionSections(
+  json: string | null | undefined,
+): RevisionSectionSelection[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((r) => r && typeof r.key === "string" && r.key.length > 0)
+      .map((r) => ({ key: r.key as string, note: r.note as string | undefined }));
+  } catch {
+    return [];
+  }
+}
+
 export async function ermRequestRevision(
   applicationId: string,
-  remarks: string,
+  sections: RevisionSectionSelection[],
 ) {
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/request-revision`,
-    { method: "POST", body: JSON.stringify({ remarks }) },
+    { method: "POST", body: JSON.stringify({ sections }) },
   );
 }
 
@@ -4363,6 +4398,20 @@ export async function fetchConsultantPreviewImages(
 }
 
 /**
+ * Build Y — approver inline preview as watermarked PNGs (non-copyable,
+ * no saveable PDF). Reuses the {@link ConsultantPreviewImages} shape.
+ */
+export async function fetchApproverPreviewImages(
+  applicationId: string,
+  role?: ApproverRole,
+): Promise<ConsultantPreviewImages> {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ConsultantPreviewImages>(
+    `/api/agreement-approver/applications/${applicationId}/preview-images${qs}`,
+  );
+}
+
+/**
  * Build G — ERM inline preview of the consultant-signed agreement
  * before countersigning. Streams the bytes server-side; no Cloudinary
  * round-trip. Same session handling as
@@ -4439,26 +4488,6 @@ export async function approverFetchDetail(
   );
 }
 
-/** Approver inline preview of the consultant-signed agreement (ERM sig blank). */
-export async function fetchApproverPreviewPdfBlob(
-  applicationId: string,
-  role?: ApproverRole,
-): Promise<Response> {
-  const token = getAgreementErmToken();
-  if (!token) {
-    throw new Error("Session expired. Please sign in again.");
-  }
-  const qs = role ? `?role=${role}` : "";
-  const res = await fetch(
-    `${BASE_URL}/api/agreement-approver/applications/${applicationId}/preview-pdf${qs}`,
-    { headers: { Authorization: `Bearer ${token}` } },
-  );
-  if (res.status === 401 || res.status === 403) {
-    clearAgreementErmToken();
-    throw new Error("Session expired. Please sign in again.");
-  }
-  return res;
-}
 
 export async function approverApprove(
   applicationId: string,

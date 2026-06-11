@@ -121,6 +121,42 @@ public class AgreementApproverController {
                 .body(bytes);
     }
 
+    /**
+     * Build Y — non-copyable inline preview for approvers: the agreement
+     * is rendered to PDF then rasterised into PNG page images (see
+     * {@link AgreementDocumentService#renderWatermarkedPageImages}), so no
+     * saveable PDF reaches the client. The approver page renders these in
+     * a select-none, copy/drag/contextmenu-blocked view.
+     */
+    @GetMapping("/api/agreement-approver/applications/{appId}/preview-images")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> previewImages(
+            @PathVariable String appId,
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        ConsultantApplication app = consultantService.getForApprover(appId, gate);
+        String viewerEmail = (String) request.getAttribute(AgreementAuthz.ATTR_EMAIL);
+        List<String> pages;
+        try {
+            byte[] pdfBytes = agreementDocumentService.renderPdfBytes(
+                    app, AgreementDocumentService.ermPreviewOverrides());
+            List<byte[]> images = agreementDocumentService
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail);
+            pages = new ArrayList<>(images.size());
+            for (byte[] png : images) {
+                pages.add(java.util.Base64.getEncoder().encodeToString(png));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Couldn't render the preview."));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pages", pages);
+        payload.put("pageCount", pages.size());
+        payload.put("viewerEmail", viewerEmail);
+        return ResponseEntity.ok(ApiResponse.success("Preview ready", payload));
+    }
+
     @PostMapping("/api/agreement-approver/applications/{appId}/approve")
     public ResponseEntity<ApiResponse<ConsultantApplication>> approve(
             @PathVariable String appId,
