@@ -32,6 +32,10 @@ public interface AgreementApprovalRepository
     /** Build K2 — pending gates routed to a user being re-roled/deleted (to un-route). */
     List<AgreementApproval> findByApproverUserIdAndStatus(String approverUserId, Decision status);
 
+    /** Build L — an approver's own approved decisions for a role (newest first). */
+    List<AgreementApproval> findByStatusAndRoleAndDecidedByOrderByDecidedAtDesc(
+            Decision status, ApproverRole role, String decidedBy);
+
     /** Highest round number recorded for an application (null if none). */
     @Query("select max(a.round) from AgreementApproval a where a.applicationId = :appId")
     Integer maxRound(@Param("appId") Long appId);

@@ -314,15 +314,14 @@ public class AgreementDocumentService {
      * PDF page. Render DPI is intentionally modest (~110) so the
      * bytes stay cheap to stream.
      *
-     * Build T — the diagonal CONFIDENTIAL watermark was removed; the
-     * page images are now clean. The preview is still image-only (no
-     * downloadable PDF) and the scroll-gated attestation still gates
-     * the review submission. {@code viewerEmail} is retained on the
-     * signature for backward compatibility with the controller call
-     * but is no longer baked into the bytes.
+     * Build T removed the diagonal watermark; Build L restores it, but
+     * ONLY for the consultant pre-signature preview ({@code watermark=true}).
+     * The approver preview passes {@code watermark=false} (clean images).
+     * The preview is still image-only (no downloadable PDF) and the
+     * scroll-gated attestation still gates the review submission.
      */
     public List<byte[]> renderWatermarkedPageImages(
-            byte[] pdfBytes, String viewerEmail) throws IOException {
+            byte[] pdfBytes, String viewerEmail, boolean watermark) throws IOException {
         if (pdfBytes == null || pdfBytes.length == 0) {
             throw new IOException("Empty PDF bytes; nothing to rasterize.");
         }
@@ -334,16 +333,63 @@ public class AgreementDocumentService {
             PDFRenderer renderer = new PDFRenderer(doc);
             int pageCount = doc.getNumberOfPages();
             List<byte[]> pages = new ArrayList<>(pageCount);
+            String stamp = watermark ? watermarkText(viewerEmail) : null;
             for (int i = 0; i < pageCount; i++) {
                 BufferedImage page = renderer.renderImageWithDPI(i, 110f);
+                BufferedImage out = watermark ? applyWatermark(page, stamp) : page;
                 ByteArrayOutputStream baos = new ByteArrayOutputStream();
-                ImageIO.write(page, "png", baos);
+                ImageIO.write(out, "png", baos);
                 pages.add(baos.toByteArray());
             }
-            log.info("Rendered {} clean preview page(s) for {}",
-                    pageCount, viewerEmail);
+            log.info("Rendered {} preview page(s) (watermark={}) for {}",
+                    pageCount, watermark, viewerEmail);
             return pages;
         }
+    }
+
+    /** Build L — the per-viewer watermark string: CONFIDENTIAL • email • UTC. */
+    private static String watermarkText(String viewerEmail) {
+        String who = (viewerEmail == null || viewerEmail.isBlank())
+                ? "consultant" : viewerEmail.trim();
+        String ts = java.time.format.DateTimeFormatter
+                .ofPattern("yyyy-MM-dd HH:mm 'UTC'")
+                .format(java.time.LocalDateTime.now(java.time.ZoneOffset.UTC));
+        return "CONFIDENTIAL  •  " + who + "  •  " + ts;
+    }
+
+    /**
+     * Build L — bake a diagonal, tiled, semi-transparent watermark onto a
+     * rendered page image (sage-navy @ 18% alpha, 30° tilt). Deterrent only.
+     */
+    private static BufferedImage applyWatermark(BufferedImage page, String text) {
+        int w = page.getWidth();
+        int h = page.getHeight();
+        BufferedImage out = new BufferedImage(w, h, BufferedImage.TYPE_INT_RGB);
+        Graphics2D g = out.createGraphics();
+        g.setRenderingHint(RenderingHints.KEY_ANTIALIASING,
+                RenderingHints.VALUE_ANTIALIAS_ON);
+        g.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,
+                RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g.drawImage(page, 0, 0, null);
+        g.setComposite(java.awt.AlphaComposite.getInstance(
+                java.awt.AlphaComposite.SRC_OVER, 0.18f));
+        g.setColor(new java.awt.Color(0x1B, 0x2A, 0x5C)); // sage-navy
+        int fontSize = Math.max(18, Math.min(w, h) / 36);
+        g.setFont(new java.awt.Font("SansSerif", java.awt.Font.BOLD, fontSize));
+        java.awt.FontMetrics fm = g.getFontMetrics();
+        int textW = fm.stringWidth(text);
+        int textH = fm.getHeight();
+        g.rotate(Math.toRadians(-30), w / 2.0, h / 2.0);
+        int margin = Math.max(w, h) / 2;
+        int xStep = textW + fontSize * 4;
+        int yStep = textH * 5;
+        for (int y = -margin; y < h + margin; y += yStep) {
+            for (int x = -margin; x < w + margin; x += xStep) {
+                g.drawString(text, x, y);
+            }
+        }
+        g.dispose();
+        return out;
     }
 
     /**

@@ -82,6 +82,21 @@ public class AgreementApproverController {
         return ResponseEntity.ok(ApiResponse.success(out));
     }
 
+    /**
+     * Build L — read-only record of agreements I (this approver) have
+     * approved. Manager renders a flat list; Accounts groups by ermName.
+     * Each row: appId, consultantName, ermId, ermName, phase, decidedAt,
+     * current status.
+     */
+    @GetMapping("/api/agreement-approver/approved")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> approvedRecords(
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        return ResponseEntity.ok(ApiResponse.success(
+                consultantService.approverApprovedRecords(gate, AgreementAuthz.userId(request))));
+    }
+
     /** Read-only detail (+ approval history) for one agreement in my queue. */
     @GetMapping("/api/agreement-approver/applications/{appId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> detail(
@@ -141,8 +156,9 @@ public class AgreementApproverController {
         try {
             byte[] pdfBytes = agreementDocumentService.renderPdfBytes(
                     app, AgreementDocumentService.ermPreviewOverrides());
+            // Build L — approver preview stays clean (consultant-only watermark).
             List<byte[]> images = agreementDocumentService
-                    .renderWatermarkedPageImages(pdfBytes, viewerEmail);
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail, false);
             pages = new ArrayList<>(images.size());
             for (byte[] png : images) {
                 pages.add(java.util.Base64.getEncoder().encodeToString(png));

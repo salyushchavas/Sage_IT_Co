@@ -16,13 +16,11 @@ import {
   ArrowRight,
   CheckCircle2,
   ChevronDown,
-  Download,
   Eye,
   EyeOff,
   FileText,
   Loader2,
   Lock,
-  Mail,
   PauseCircle,
   Plus,
   ShieldCheck,
@@ -46,7 +44,6 @@ import {
   type SectionField,
 } from "@/lib/agreement-sections";
 import {
-  downloadConsultantCopy,
   fetchAgreementContent,
   fetchAgreementTemplatePdfBlob,
   fetchConsultantPreviewImages,
@@ -55,7 +52,6 @@ import {
   parseChequeList,
   parseRevisionSections,
   recordConsultantConsent,
-  requestConsultantDownloadOtp,
   saveConsultantChequeMetadata,
   saveConsultantFill,
   signConsultantApplication,
@@ -1247,32 +1243,17 @@ export default function ConsultantWizardPage() {
     );
   }
 
-  // Build T — VERIFIED rows split on whether the ERM has released a
-  // consultant version. Not released → original "sent for
-  // verification" screen. Released → OTP-gated download screen.
+  // Build L — no consultant download in any state. VERIFIED rows split on
+  // whether the ERM has approved the consultant version: not yet → "sent
+  // for verification"; approved → "verified" (+ revision notice).
   if (app.status === "VERIFIED" || app.status === "SIGNED"
           || app.status === "UPDATED") {
-    if (app.consultantCopyReleased) {
-      return <ConsultantReleasedDownload
-        app={app}
-        onSignOut={() => router.replace("/consultant/dashboard")}
-      />;
-    }
-    return <ConsultantStatusScreen kind="sent" onSignOut={() => {
-      router.replace("/consultant/dashboard");
-    }} />;
+    return <ConsultantStatusScreen
+      kind={app.consultantCopyReleased ? "verified" : "sent"}
+      onSignOut={() => router.replace("/consultant/dashboard")}
+    />;
   }
   if (app.status === "COMPLETED") {
-    // Build T — the consultant-version copy (released earlier) stays
-    // downloadable after COMPLETED. The ERM-signed PDF is never
-    // served to the consultant.
-    if (app.consultantCopyReleased) {
-      return <ConsultantReleasedDownload
-        app={app}
-        accepted
-        onSignOut={() => router.replace("/consultant/dashboard")}
-      />;
-    }
     return <ConsultantStatusScreen kind="accepted" onSignOut={() => {
       router.replace("/consultant/dashboard");
     }} />;
@@ -2911,7 +2892,7 @@ function ConsultantStatusScreen({
   kind,
   onSignOut,
 }: {
-  kind: "sent" | "accepted" | "expired";
+  kind: "sent" | "verified" | "accepted" | "expired";
   onSignOut: () => void;
 }) {
   const copy = kind === "sent"
@@ -2919,6 +2900,15 @@ function ConsultantStatusScreen({
         eyebrow: "Submitted",
         title: "Your agreement has been sent for verification.",
         body: "We'll review it and update you here once it's accepted. There's nothing else you need to do right now.",
+      }
+    : kind === "verified"
+    ? {
+        // Build L — ERM has approved the consultant version. No download;
+        // the consultant is simply told it's verified + will hear about
+        // any revision.
+        eyebrow: "Verified",
+        title: "Your agreement is verified.",
+        body: "Sage IT has verified your agreement. You'll be notified here if there's any revision. There's nothing else you need to do right now.",
       }
     : kind === "accepted"
       ? {
@@ -3109,189 +3099,9 @@ function ConsentGate({
   );
 }
 
-// ── Build T: consultant-version download (post-release) ──────────
-
-/**
- * Build T — shown when the ERM has released the consultant version
- * (consultantCopyReleased=true). Two-step UX: request a fresh OTP,
- * then enter it to receive the PDF. The ERM-signed COMPLETED PDF is
- * NEVER served by this path.
- */
-function ConsultantReleasedDownload({
-  app,
-  accepted,
-  onSignOut,
-}: {
-  app: ConsultantApplication;
-  accepted?: boolean;
-  onSignOut: () => void;
-}) {
-  const [step, setStep] = useState<"idle" | "code">("idle");
-  const [otp, setOtp] = useState("");
-  const [sending, setSending] = useState(false);
-  const [downloading, setDownloading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const [info, setInfo] = useState<string | null>(null);
-
-  const requestOtp = async () => {
-    if (sending) return;
-    setSending(true);
-    setErr(null);
-    try {
-      const r = await requestConsultantDownloadOtp(app.applicationId);
-      setInfo(r.message || "A code is on its way.");
-      setStep("code");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't request a code.");
-    } finally {
-      setSending(false);
-    }
-  };
-
-  const submitOtp = async () => {
-    if (!otp.trim() || downloading) return;
-    setDownloading(true);
-    setErr(null);
-    try {
-      const res = await downloadConsultantCopy(app.applicationId, otp.trim());
-      if (!res.ok) {
-        let msg = `Couldn't download (HTTP ${res.status}).`;
-        try {
-          const j = await res.json();
-          if (j?.message) msg = j.message;
-        } catch {
-          /* keep default */
-        }
-        throw new Error(msg);
-      }
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      const safeName = (app.signedLegalName || app.consultantName || app.applicationId)
-        .replace(/[^A-Za-z0-9_-]+/g, "-");
-      a.href = url;
-      a.download = `SageITCO-Agreement_${safeName}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      setTimeout(() => URL.revokeObjectURL(url), 1500);
-      setInfo("Download started. Save the file somewhere safe.");
-      setOtp("");
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't download your copy.");
-    } finally {
-      setDownloading(false);
-    }
-  };
-
-  return (
-    <main className="min-h-screen bg-stone-50">
-      <meta name="robots" content="noindex,nofollow" />
-      <header className="bg-sage-navy text-white">
-        <div className="max-w-3xl mx-auto px-6 py-10 flex items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-bold uppercase tracking-widest text-sage-copper">
-              {accepted ? "Accepted" : "Approved"}
-            </p>
-            <h1 className="font-serif text-3xl mt-2">Your agreement copy is ready</h1>
-          </div>
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md border border-white/30 hover:bg-white/10 transition-colors"
-          >
-            Back to dashboard
-          </button>
-        </div>
-      </header>
-      <section className="max-w-3xl mx-auto px-6 py-12">
-        <div className="bg-white rounded-2xl border border-stone-200 shadow-sm p-8">
-          <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
-            Verify your email
-          </p>
-          <h2 className="font-serif text-2xl text-sage-navy mt-2 leading-snug">
-            For your security, we'll send a fresh 6-digit code to{" "}
-            <span className="font-semibold">{app.consultantEmail}</span> before
-            the download starts.
-          </h2>
-          <p className="text-[13.5px] text-stone-600 mt-4 leading-relaxed max-w-[64ch]">
-            The PDF you'll download contains your signed agreement and an
-            appended Certificate of Completion that documents the audit
-            trail of your signing session.
-          </p>
-
-          {step === "idle" && (
-            <button
-              type="button"
-              onClick={() => void requestOtp()}
-              disabled={sending}
-              className="mt-6 inline-flex items-center gap-1.5 px-5 py-2.5 rounded-md text-sm font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep motion-safe:transition-colors cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
-            >
-              {sending ? <Loader2 size={13} className="animate-spin" /> : <Mail size={13} />}
-              Email me a code
-            </button>
-          )}
-
-          {step === "code" && (
-            <div className="mt-6 space-y-3 max-w-sm">
-              <label className="block text-[12px] font-medium text-stone-700">
-                6-digit code
-              </label>
-              <input
-                type="text"
-                inputMode="numeric"
-                maxLength={6}
-                value={otp}
-                onChange={(e) => setOtp(e.target.value.replace(/\D/g, ""))}
-                placeholder="123456"
-                className="w-full px-3 py-2.5 text-[15px] font-mono tracking-[6px] rounded-md border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors"
-              />
-              <div className="flex items-center gap-3">
-                <button
-                  type="button"
-                  onClick={() => void submitOtp()}
-                  disabled={otp.length < 6 || downloading}
-                  className={
-                    "inline-flex items-center gap-1.5 px-5 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
-                    + (otp.length >= 6 && !downloading
-                      ? "bg-sage-navy text-white hover:bg-sage-navy-deep"
-                      : "bg-stone-100 text-stone-400 cursor-not-allowed")
-                  }
-                >
-                  {downloading ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />}
-                  Download my copy
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void requestOtp()}
-                  disabled={sending}
-                  className="text-[12px] font-medium text-stone-500 hover:text-sage-navy underline underline-offset-[3px] disabled:opacity-60"
-                >
-                  Resend code
-                </button>
-              </div>
-            </div>
-          )}
-
-          {info && !err && (
-            <p className="mt-5 text-[12.5px] text-sage-navy inline-flex items-center gap-1.5">
-              <CheckCircle2 size={12} /> {info}
-            </p>
-          )}
-          {err && (
-            <p className="mt-5 text-[12.5px] text-red-700 inline-flex items-center gap-1.5">
-              <AlertCircle size={12} /> {err}
-            </p>
-          )}
-          <p className="text-[11px] text-stone-500 mt-8 inline-flex items-center gap-1">
-            <Lock size={12} /> The Sage IT countersigned version is retained
-            internally and is not available for download from this portal.
-          </p>
-        </div>
-      </section>
-    </main>
-  );
-}
+// Build L — the consultant-version download was retired entirely; no PDF
+// is served to the consultant in any state. The old OTP-download component
+// was removed; VERIFIED/COMPLETED now render a status-only screen.
 
 // ── Build N: submit-error panel grouped by section ────────────
 

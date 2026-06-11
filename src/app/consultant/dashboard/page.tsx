@@ -7,7 +7,6 @@ import {
   Ban,
   CheckCircle2,
   Clock,
-  Download,
   FileText,
   Hourglass,
   Loader2,
@@ -83,15 +82,8 @@ export default function ConsultantPortalDashboardPage() {
   };
 
   const handleAction = (item: ConsultantAgreementSummary) => {
-    // Build K — only SIGN / REVIEW_AND_SIGN are clickable.
-    // Build T — DOWNLOAD is clickable too: it routes into the per-app
-    // status screen, which renders the OTP-gated download for
-    // VERIFIED/COMPLETED + released rows.
-    if (
-      item.action !== "SIGN"
-      && item.action !== "REVIEW_AND_SIGN"
-      && item.action !== "DOWNLOAD"
-    ) {
+    // Build L — only SIGN / REVIEW_AND_SIGN are clickable (no download).
+    if (item.action !== "SIGN" && item.action !== "REVIEW_AND_SIGN") {
       return;
     }
     router.push(`/consultant/${encodeURIComponent(item.appId)}/fill`);
@@ -182,11 +174,10 @@ function AgreementRow({
   item: ConsultantAgreementSummary;
   onAction: () => void;
 }) {
-  const tone = actionTone(item.action, item.status);
+  const tone = actionTone(item.action, item.status, item.consultantCopyReleased);
   const clickable =
     item.action === "SIGN"
-    || item.action === "REVIEW_AND_SIGN"
-    || item.action === "DOWNLOAD";
+    || item.action === "REVIEW_AND_SIGN";
   return (
     <li className="bg-white rounded-2xl border border-stone-200 p-5 flex flex-col sm:flex-row sm:items-center gap-4 shadow-sm">
       <div className="flex-1 min-w-0">
@@ -242,7 +233,11 @@ function AgreementRow({
   );
 }
 
-function actionTone(action: ConsultantPortalAction, status: string) {
+function actionTone(
+  action: ConsultantPortalAction,
+  status: string,
+  released?: boolean,
+) {
   switch (action) {
     case "SIGN":
       return {
@@ -259,20 +254,6 @@ function actionTone(action: ConsultantPortalAction, status: string) {
         cta: "Review & re-sign",
         button:
           "bg-sage-copper text-white hover:bg-sage-copper-deep cursor-pointer",
-        passiveCopy: "",
-      };
-    case "DOWNLOAD":
-      // Build T — Sage IT has released the consultant version. The row
-      // is clickable and routes to the per-app screen, which fires the
-      // OTP-gated download flow.
-      return {
-        badge:
-          status === "COMPLETED"
-            ? "bg-emerald-100 text-emerald-800"
-            : "bg-sage-navy/10 text-sage-navy",
-        icon: <Download size={11} />,
-        cta: "Download my copy",
-        button: "bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer",
         passiveCopy: "",
       };
     case "NONE":
@@ -297,11 +278,22 @@ function actionTone(action: ConsultantPortalAction, status: string) {
             "The 15-day window to complete this agreement has passed. Contact Sage IT and ask them to resend the invitation.",
         };
       }
-      return _SENT_FOR_VERIFICATION_TONE;
+      // Build L — VERIFIED + ERM-verified (released) vs still awaiting it.
+      // No download in either case.
+      return released ? _VERIFIED_TONE : _SENT_FOR_VERIFICATION_TONE;
     default:
       return _SENT_FOR_VERIFICATION_TONE;
   }
 }
+
+const _VERIFIED_TONE = {
+  badge: "bg-emerald-100 text-emerald-800",
+  icon: <CheckCircle2 size={11} />,
+  cta: "",
+  button: "",
+  passiveCopy:
+    "Sage IT has verified your agreement. You'll be notified here if there's any revision.",
+};
 
 const _SENT_FOR_VERIFICATION_TONE = {
   badge: "bg-sage-navy/10 text-sage-navy",

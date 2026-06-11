@@ -16,13 +16,16 @@ import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
 import AgreementStatusPill from "@/components/agreement-erm/AgreementStatusPill";
 import {
   approverApprove,
+  approverFetchApproved,
   approverFetchQueue,
   approverRequestRevision,
   fetchApproverPreviewImages,
   fetchMe,
   getAgreementErmToken,
+  type ApproverApprovedItem,
   type ApproverQueueItem,
   type ApproverRole,
+  type ConsultantApplicationStatus,
 } from "@/lib/api";
 import { formatUsDate } from "@/lib/dates";
 
@@ -40,6 +43,11 @@ export default function ApprovalsPage() {
   const [items, setItems] = useState<ApproverQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  // Build L — Pending queue vs the read-only "Approved" record.
+  const [tab, setTab] = useState<"pending" | "approved">("pending");
+  const [approved, setApproved] = useState<ApproverApprovedItem[]>([]);
+  const [approvedLoading, setApprovedLoading] = useState(false);
+  const [approvedLoaded, setApprovedLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -51,6 +59,19 @@ export default function ApprovalsPage() {
       setError(e instanceof Error ? e.message : "Couldn't load your queue.");
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  const loadApproved = useCallback(async () => {
+    setApprovedLoading(true);
+    setError("");
+    try {
+      setApproved(await approverFetchApproved());
+      setApprovedLoaded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load your approved record.");
+    } finally {
+      setApprovedLoading(false);
     }
   }, []);
 
@@ -78,6 +99,13 @@ export default function ApprovalsPage() {
     };
   }, [router, load]);
 
+  // Build L — lazily load the approved record the first time that tab opens.
+  useEffect(() => {
+    if (checked && tab === "approved" && !approvedLoaded) {
+      void loadApproved();
+    }
+  }, [checked, tab, approvedLoaded, loadApproved]);
+
   if (!checked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -99,33 +127,175 @@ export default function ApprovalsPage() {
         </div>
       )}
 
-      {loading ? (
-        <div className="py-16 flex items-center justify-center text-gray-400">
-          <Loader2 size={22} className="animate-spin" />
-        </div>
-      ) : items.length === 0 ? (
-        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
-          <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
-          <p className="mt-3 text-sm font-semibold text-gray-700">
-            Nothing awaiting your approval
-          </p>
-          <p className="mt-1 text-xs text-gray-500">
-            New agreements appear here when an ERM sends them for approval.
-          </p>
-        </div>
+      {/* Build L — Pending queue / Approved record tabs. */}
+      <div className="mb-5 inline-flex rounded-lg border border-stone-200 bg-white p-0.5">
+        <button
+          type="button"
+          onClick={() => setTab("pending")}
+          className={
+            "px-3.5 py-1.5 rounded-md text-xs font-semibold cursor-pointer " +
+            (tab === "pending" ? "bg-sage-navy text-white" : "text-gray-600 hover:bg-gray-50")
+          }
+        >
+          Pending approval
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("approved")}
+          className={
+            "px-3.5 py-1.5 rounded-md text-xs font-semibold cursor-pointer " +
+            (tab === "approved" ? "bg-sage-navy text-white" : "text-gray-600 hover:bg-gray-50")
+          }
+        >
+          Approved agreements
+        </button>
+      </div>
+
+      {tab === "pending" ? (
+        loading ? (
+          <div className="py-16 flex items-center justify-center text-gray-400">
+            <Loader2 size={22} className="animate-spin" />
+          </div>
+        ) : items.length === 0 ? (
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
+            <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
+            <p className="mt-3 text-sm font-semibold text-gray-700">
+              Nothing awaiting your approval
+            </p>
+            <p className="mt-1 text-xs text-gray-500">
+              New agreements appear here when an ERM sends them for approval.
+            </p>
+          </div>
+        ) : (
+          <div className="space-y-4 max-w-3xl">
+            {items.map((item) => (
+              <ApprovalCard
+                key={item.application.applicationId}
+                item={item}
+                role={role!}
+                onDone={load}
+              />
+            ))}
+          </div>
+        )
       ) : (
-        <div className="space-y-4 max-w-3xl">
-          {items.map((item) => (
-            <ApprovalCard
-              key={item.application.applicationId}
-              item={item}
-              role={role!}
-              onDone={load}
-            />
-          ))}
-        </div>
+        <ApprovedRecord
+          loading={approvedLoading}
+          items={approved}
+          // PART D — the Accounts approver spans all ERMs, so split the
+          // record by originating ERM; the Manager sees a flat list.
+          groupByErm={role === "ACCOUNTS"}
+        />
       )}
     </AgreementErmShell>
+  );
+}
+
+// Build L — read-only record of agreements this approver has approved.
+function ApprovedRecord({
+  loading,
+  items,
+  groupByErm,
+}: {
+  loading: boolean;
+  items: ApproverApprovedItem[];
+  groupByErm: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="py-16 flex items-center justify-center text-gray-400">
+        <Loader2 size={22} className="animate-spin" />
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-10 text-center">
+        <ClipboardCheck size={28} className="mx-auto text-stone-400" />
+        <p className="mt-3 text-sm font-semibold text-gray-700">
+          No approved agreements yet
+        </p>
+        <p className="mt-1 text-xs text-gray-500">
+          Agreements you approve will be recorded here.
+        </p>
+      </div>
+    );
+  }
+
+  if (!groupByErm) {
+    return <ApprovedTable rows={items} showErm />;
+  }
+
+  // PART D — group by originating ERM (preserve first-seen order).
+  const groups = new Map<string, ApproverApprovedItem[]>();
+  for (const it of items) {
+    const key = it.ermName || "(unassigned ERM)";
+    const arr = groups.get(key);
+    if (arr) arr.push(it);
+    else groups.set(key, [it]);
+  }
+  return (
+    <div className="space-y-6 max-w-4xl">
+      {Array.from(groups.entries()).map(([erm, rows]) => (
+        <div key={erm}>
+          <h3 className="text-xs font-bold uppercase tracking-wider text-sage-navy mb-2 inline-flex items-center gap-1.5">
+            <FileText size={12} /> {erm}
+            <span className="text-gray-400 font-medium normal-case tracking-normal">
+              · {rows.length} agreement{rows.length === 1 ? "" : "s"}
+            </span>
+          </h3>
+          <ApprovedTable rows={rows} showErm={false} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ApprovedTable({
+  rows,
+  showErm,
+}: {
+  rows: ApproverApprovedItem[];
+  showErm: boolean;
+}) {
+  return (
+    <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500 border-b border-stone-100">
+            <th className="px-4 py-2.5 font-semibold">Consultant</th>
+            {showErm && <th className="px-4 py-2.5 font-semibold">ERM</th>}
+            <th className="px-4 py-2.5 font-semibold">Phase</th>
+            <th className="px-4 py-2.5 font-semibold">Approved</th>
+            <th className="px-4 py-2.5 font-semibold">Current status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.appId} className="border-b border-stone-50 last:border-0">
+              <td className="px-4 py-2.5">
+                <span className="font-medium text-gray-900">
+                  {r.consultantName || "(consultant)"}
+                </span>
+                {r.consultantEmail && (
+                  <span className="block text-[11px] text-gray-500">{r.consultantEmail}</span>
+                )}
+              </td>
+              {showErm && (
+                <td className="px-4 py-2.5 text-gray-700">{r.ermName}</td>
+              )}
+              <td className="px-4 py-2.5 text-gray-700">Phase {r.phase ?? 1}</td>
+              <td className="px-4 py-2.5 text-gray-600">
+                {r.decidedAt ? formatUsDate(r.decidedAt) : "—"}
+              </td>
+              <td className="px-4 py-2.5">
+                <AgreementStatusPill status={r.status as ConsultantApplicationStatus} />
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 

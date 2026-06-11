@@ -1177,58 +1177,30 @@ public class ConsultantApplicationController {
     }
 
     /**
-     * Build T — request a fresh OTP to download the released
-     * consultant-version PDF. Generic response regardless of release
-     * state so a token holder can't probe.
+     * Build L — the consultant download was retired. No PDF is ever served
+     * to the consultant in any state. These endpoints remain only to give
+     * cached/bookmarked clients a clean 410 Gone (token still required so we
+     * don't leak existence to anonymous callers). The internal consultant-
+     * version PDF + Certificate + hash are still generated for audit, but
+     * are never downloadable.
      */
     @PostMapping("/api/consultant/applications/{appId}/request-download-otp")
-    public ResponseEntity<ApiResponse<Map<String, String>>> consultantRequestDownloadOtp(
+    public ResponseEntity<ApiResponse<Void>> consultantRequestDownloadOtp(
             @PathVariable String appId,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowOtpRequest("download|" + appId + "|" + clientIp(request))) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
-        }
-        String message = consultantService.requestDownloadOtp(appId, request);
-        return ResponseEntity.ok(ApiResponse.success(Map.of("message", message)));
+        return ResponseEntity.status(HttpStatus.GONE).body(ApiResponse.error(
+                "Agreement downloads have been retired. Check your dashboard for the current status."));
     }
 
-    /**
-     * Build T — exchange a fresh OTP for the consultant-version PDF
-     * bytes. ONLY serves the released consultant-version (the ERM-
-     * signed COMPLETED PDF is NEVER served by this path).
-     */
     @PostMapping("/api/consultant/applications/{appId}/download")
-    public ResponseEntity<?> consultantDownload(
+    public ResponseEntity<ApiResponse<Void>> consultantDownload(
             @PathVariable String appId,
             @RequestBody(required = false) DownloadBody body,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowOtpVerify("download|" + appId + "|" + clientIp(request))) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
-        }
-        byte[] bytes;
-        try {
-            bytes = consultantService.downloadConsultantCopy(
-                    appId, body == null ? null : body.otp, request);
-        } catch (IllegalArgumentException e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error(e.getMessage()));
-        } catch (IllegalStateException e) {
-            return ResponseEntity.status(HttpStatus.CONFLICT)
-                    .body(ApiResponse.error(e.getMessage()));
-        }
-        ConsultantApplication app = consultantService.getByApplicationId(appId);
-        String filename = AgreementDocumentService.buildPdfFilename(app);
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
-                .contentLength(bytes.length)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-                .body(bytes);
+        return ResponseEntity.status(HttpStatus.GONE).body(ApiResponse.error(
+                "Agreement downloads have been retired. Check your dashboard for the current status."));
     }
 
     // ── Consultant-side: two-stage workflow (Phase 3) ───────────────
@@ -1365,8 +1337,9 @@ public class ConsultantApplicationController {
         try {
             byte[] pdfBytes = agreementDocumentService.renderPdfBytes(
                     app, AgreementDocumentService.consultantPreviewOverrides(primarySig));
+            // Build L — the consultant pre-signature preview is watermarked.
             java.util.List<byte[]> images = agreementDocumentService
-                    .renderWatermarkedPageImages(pdfBytes, viewerEmail);
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail, true);
             pages = new java.util.ArrayList<>(images.size());
             for (byte[] png : images) {
                 pages.add(java.util.Base64.getEncoder().encodeToString(png));
@@ -1572,11 +1545,15 @@ public class ConsultantApplicationController {
         public String updatedAt;
         /** Build M — current phase of the two-phase agreement (1 or 2). */
         public Integer phase;
-        /** Build T — ERM has released a consultant-version copy. */
+        /**
+         * Build L — true once the ERM has "approved the consultant version"
+         * (= verified). No longer enables a download; it flips the consultant
+         * message from "Sent for verification" to "Verified".
+         */
         public boolean consultantCopyReleased;
-        /** Build T — downloadAvailable = released AND the public_id is on the row. */
+        /** Build L — downloads are retired; always false (kept for compat). */
         public boolean downloadAvailable;
-        /** Build T — release timestamp, surfaced for "released N days ago" hints. */
+        /** Release/verification timestamp. */
         public String consultantCopyReleasedAt;
 
         public static ConsultantAgreementSummary from(ConsultantApplication app) {
@@ -1587,24 +1564,17 @@ public class ConsultantApplicationController {
             r.technologyTrack = app.getTechnologyTrack();
             r.status = app.getStatus();
             r.phase = app.getPhase();
-            // Build T — surface release state so the dashboard can route
-            // VERIFIED + released rows to the OTP-gated download instead
-            // of the passive "Sent for verification" pill.
+            // Build L — "released" now means the ERM verified the consultant
+            // version. No PDF is ever served to the consultant, so there is
+            // no download action; the flag only changes the status message.
             r.consultantCopyReleased = Boolean.TRUE.equals(app.getConsultantCopyReleased());
-            r.downloadAvailable = r.consultantCopyReleased
-                    && app.getConsultantPdfPublicId() != null
-                    && !app.getConsultantPdfPublicId().isBlank();
+            r.downloadAvailable = false;
             r.consultantCopyReleasedAt = app.getConsultantCopyReleasedAt() == null
                     ? null
                     : app.getConsultantCopyReleasedAt().toString();
 
             String s = app.getStatus();
-            // Build K — post-submit states are status-only. Build T —
-            // VERIFIED + released and COMPLETED + released switch to the
-            // DOWNLOAD action so the dashboard row routes to the OTP-
-            // gated download screen. The ERM-signed PDF is never served
-            // to the consultant; the download path serves only the
-            // consultant-version copy.
+            // Build L — every post-submit state is status-only (no download).
             if (ConsultantApplication.Status.SUBMITTED.name().equals(s)) {
                 r.statusLabel = "Awaiting your signature";
                 r.action = "SIGN";
@@ -1614,21 +1584,14 @@ public class ConsultantApplicationController {
             } else if (ConsultantApplication.Status.UPDATED.name().equals(s)
                     || ConsultantApplication.Status.VERIFIED.name().equals(s)
                     || ConsultantApplication.Status.SIGNED.name().equals(s)) {
-                if (r.downloadAvailable) {
-                    r.statusLabel = "Approved — download your copy";
-                    r.action = "DOWNLOAD";
-                } else {
-                    r.statusLabel = "Sent for verification";
-                    r.action = "NONE";
-                }
+                // Verified once the ERM approved the consultant version,
+                // otherwise still awaiting that review.
+                r.statusLabel = r.consultantCopyReleased
+                        ? "Verified" : "Sent for verification";
+                r.action = "NONE";
             } else if (ConsultantApplication.Status.COMPLETED.name().equals(s)) {
-                if (r.downloadAvailable) {
-                    r.statusLabel = "Accepted — download your copy";
-                    r.action = "DOWNLOAD";
-                } else {
-                    r.statusLabel = "Accepted";
-                    r.action = "NONE";
-                }
+                r.statusLabel = "Accepted";
+                r.action = "NONE";
             } else if (ConsultantApplication.Status.EXPIRED.name().equals(s)) {
                 // Build L — invite went stale (15-day window).
                 r.statusLabel = "Invitation expired";

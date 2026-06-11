@@ -4583,6 +4583,18 @@ export interface ApproverDetailEnvelope {
   myRole: ApproverRole;
 }
 
+/** Build L — one row in an approver's read-only "Approved Agreements" record. */
+export interface ApproverApprovedItem {
+  appId: string;
+  consultantName: string | null;
+  consultantEmail: string | null;
+  ermId: string | null;
+  ermName: string;
+  phase: number | null;
+  decidedAt: string | null;
+  status: string;
+}
+
 /** Build K — one approver option for the send-for-approval picker. */
 export interface ApproverOption {
   id: string;
@@ -4638,6 +4650,14 @@ export async function approverFetchQueue(role?: ApproverRole) {
   );
 }
 
+/** Build L — read-only record of agreements I've approved. */
+export async function approverFetchApproved(role?: ApproverRole) {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ApproverApprovedItem[]>(
+    `/api/agreement-approver/approved${qs}`,
+  );
+}
+
 /** Approver's read-only detail (+ approval history) for one agreement. */
 export async function approverFetchDetail(
   applicationId: string,
@@ -4670,17 +4690,15 @@ export async function approverRequestRevision(
   );
 }
 
-// ── Portal dashboard + PDF download ────────────────────────────
+// ── Portal dashboard (status-only; no download) ───────────────
 
 // Build K — post-submit experience is status-only. SIGN +
 // REVIEW_AND_SIGN open the wizard; NONE means "show the status pill,
-// no button". Build T — DOWNLOAD is back: VERIFIED/COMPLETED rows
-// where the ERM has released a consultant-version copy route the
-// consultant into the OTP-gated download.
+// no button". Build L — the consultant download was retired; there is
+// no DOWNLOAD action.
 export type ConsultantPortalAction =
   | "SIGN"
   | "REVIEW_AND_SIGN"
-  | "DOWNLOAD"
   | "NONE";
 
 export interface ConsultantAgreementSummary {
@@ -4917,55 +4935,10 @@ export async function recordConsultantConsent(applicationId: string) {
   );
 }
 
-/**
- * Build T — POST /api/consultant/applications/{appId}/request-download-otp.
- * Issues a fresh OTP for the consultant-version PDF download. Generic
- * response regardless of release state so a token holder can't probe
- * for "is this released yet".
- */
-export async function requestConsultantDownloadOtp(applicationId: string) {
-  return consultantFetch<{ message: string }>(
-    applicationId, "/request-download-otp",
-    { method: "POST" },
-  );
-}
-
-/**
- * Build T — POST /api/consultant/applications/{appId}/download.
- * Exchanges a fresh OTP for the consultant-version PDF blob (a Blob
- * the caller turns into a saveable file). The returned Response is
- * the raw fetch response; OK on success, 400 on OTP failure, 409
- * if the row hasn't been released yet.
- */
-export async function downloadConsultantCopy(
-  applicationId: string,
-  otp: string,
-): Promise<Response> {
-  const token = getConsultantToken();
-  const res = await fetch(
-    `${BASE_URL}/api/consultant/applications/${applicationId}/download`,
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({ otp }),
-    },
-  );
-  if (res.status === 401) {
-    clearConsultantToken();
-    if (typeof window !== "undefined") {
-      // Build V — bounce to the per-agreement login (which resolves the
-      // email server-side from the appId), not the bare landing.
-      window.location.assign(
-        `/consultant/${encodeURIComponent(applicationId)}/login`,
-      );
-    }
-    throw new Error("Verification required.");
-  }
-  return res;
-}
+// Build L — the consultant download (request-download-otp + /download) was
+// retired; no PDF is served to the consultant. The client helpers were
+// removed. The internal consultant-version PDF + Certificate are still
+// produced for audit via approve-consultant-version (below).
 
 /**
  * Build T — ERM action POST /api/agreement-erm/applications/{appId}/approve-consultant-version.

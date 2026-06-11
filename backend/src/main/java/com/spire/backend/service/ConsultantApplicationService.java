@@ -1813,6 +1813,51 @@ public class ConsultantApplicationService {
     }
 
     /**
+     * Build L — read-only record of agreements THIS approver has approved
+     * (one row per agreement, the latest APPROVED decision), with the
+     * originating ERM resolved. The Accounts dashboard groups these by ERM;
+     * the Manager dashboard shows a flat list. Deleted agreements are
+     * dropped; the "status" reflects the agreement's CURRENT state.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<java.util.Map<String, Object>> approverApprovedRecords(
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
+        if (approverUserId == null || approverUserId.isBlank()) {
+            return java.util.List.of();
+        }
+        var approved = approvalRepository
+                .findByStatusAndRoleAndDecidedByOrderByDecidedAtDesc(
+                        com.spire.backend.entity.AgreementApproval.Decision.APPROVED,
+                        role, approverUserId);
+        java.util.Set<Long> seen = new java.util.HashSet<>();
+        java.util.Map<String, String> ermNameCache = new java.util.HashMap<>();
+        java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+        for (var row : approved) {
+            if (!seen.add(row.getApplicationId())) continue; // latest only (ordered desc)
+            ConsultantApplication app =
+                    applicationRepository.findById(row.getApplicationId()).orElse(null);
+            if (app == null || Boolean.TRUE.equals(app.getDeleted())) continue;
+            String ermId = app.getOwnerErmId();
+            String ermName = ermId == null ? null : ermNameCache.computeIfAbsent(ermId,
+                    id -> agreementUserRepository.findById(id)
+                            .map(AgreementUser::getFullName).orElse(null));
+            java.util.Map<String, Object> rec = new java.util.LinkedHashMap<>();
+            rec.put("appId", app.getApplicationId());
+            rec.put("consultantName", app.getConsultantName());
+            rec.put("consultantEmail", app.getConsultantEmail());
+            rec.put("ermId", ermId);
+            rec.put("ermName", ermName == null || ermName.isBlank()
+                    ? "(unassigned ERM)" : ermName);
+            rec.put("phase", row.getPhase());
+            rec.put("decidedAt", row.getDecidedAt() == null ? null : row.getDecidedAt().toString());
+            rec.put("status", app.getStatus());
+            out.add(rec);
+        }
+        return out;
+    }
+
+    /**
      * 3B — ERM status board: every agreement currently in an approval
      * state ({@code AWAITING_APPROVALS} / {@code APPROVAL_REVISION_REQUESTED}
      * / {@code READY_TO_SIGN}), each with its full approval history. The
