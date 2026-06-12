@@ -2210,7 +2210,8 @@ public class ConsultantApplicationService {
 
         String s3Key;
         try {
-            // Store the consultant-version PDF in S3 (the only generated-PDF path).
+            // Phase 1 (S3) — store the consultant-version PDF in S3. Cloudinary
+            // uploadPdfBytes is kept intact for old records / Phase 2 migration.
             s3Key = agreementDocumentService.storeConsultantVersionPdf(app, release.bytes());
         } catch (Exception e) {
             log.error("S3 upload of consultant-version failed for {}: {}",
