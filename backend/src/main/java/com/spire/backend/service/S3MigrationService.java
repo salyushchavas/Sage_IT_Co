@@ -16,7 +16,6 @@ import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
-import java.net.URLConnection;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -113,7 +112,6 @@ public class S3MigrationService {
         // Cloudinary read) so the report stays scannable while the operator
         // still gets the actionable AWS/Cloudinary error in the logs.
         boolean firstS3ErrLogged = false;
-        boolean firstSourceErrLogged = false;
         log.info("{} bucket={} candidates={}", LOG, bucket, total);
 
         for (Candidate c : candidates) {
@@ -139,14 +137,10 @@ public class S3MigrationService {
             } catch (Exception e) {
                 brokenSource++;
                 failures.add("id=" + c.id() + " type=" + c.type() + " reason=BROKEN_SOURCE");
-                if (!firstSourceErrLogged) {
-                    firstSourceErrLogged = true;
-                    log.error("{} BROKEN_SOURCE id={} type={} sourceId={} — full Cloudinary-fetch "
-                            + "cause (first occurrence):", LOG, c.id(), c.type(), c.cloudinaryPublicId(), e);
-                } else {
-                    log.warn("{} BROKEN_SOURCE id={} type={} sourceId={} ({})",
-                            LOG, c.id(), c.type(), c.cloudinaryPublicId(), e.toString());
-                }
+                // e.getMessage() is sanitized (HTTP status only — see
+                // downloadCloudinary); never log the throwable, which carries the URL.
+                log.warn("{} BROKEN_SOURCE id={} type={} sourceId={} ({})",
+                        LOG, c.id(), c.type(), c.cloudinaryPublicId(), e.getMessage());
                 continue;
             }
             String srcHash = ConsultantVersionService.sha256Hex(bytes);   // (b) hash source bytes
@@ -260,15 +254,29 @@ public class S3MigrationService {
                 + c.type() + "-" + ts.format(KEY_TS) + ".pdf";
     }
 
-    /** Authenticated Cloudinary fetch — reuses the app's exact signed-URL mechanism. */
+    /**
+     * Authenticated Cloudinary fetch — reuses the app's exact signed-URL
+     * mechanism. On failure it surfaces the HTTP status + public_id but NEVER
+     * the signed URL (which carries a long-lived read signature): honors the
+     * "never log full signed URLs" constraint while keeping the status that
+     * distinguishes gone (404) from mis-addressed (401).
+     */
     private byte[] downloadCloudinary(String publicId) throws Exception {
         String url = agreementDocumentService.signedPdfUrl(publicId, Duration.ofMinutes(5));
-        if (url == null) throw new java.io.IOException("null signed URL for " + publicId);
-        URLConnection conn = new URL(url).openConnection();
+        if (url == null) throw new java.io.IOException("null signed URL for publicId=" + publicId);
+        HttpURLConnection conn = (HttpURLConnection) new URL(url).openConnection();
         conn.setConnectTimeout(30_000);
         conn.setReadTimeout(30_000);
         try (InputStream in = conn.getInputStream()) {
             return in.readAllBytes();
+        } catch (java.io.IOException e) {
+            int code = -1;
+            try { code = conn.getResponseCode(); } catch (Exception ignore) { /* no status */ }
+            // Wrap with a sanitized message (status only). The original cause
+            // carries the URL, so callers must log getMessage(), not the throwable.
+            throw new java.io.IOException("Cloudinary GET failed: HTTP " + code, e);
+        } finally {
+            conn.disconnect();
         }
     }
 
