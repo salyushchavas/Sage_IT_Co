@@ -126,10 +126,9 @@ public class AgreementDocumentService {
     public record PdfUploadResult(String secureUrl, String publicId, byte[] bytes) {}
 
     public PdfUploadResult generateAgreementPdf(ConsultantApplication app) throws Exception {
-        // Build I — final/stored PDF includes the consultant's uploaded
-        // attachments (work-auth doc + offer letter) appended after the
-        // agreement body. (Lightweight in-place previews skip this.)
-        byte[] bytes = appendAttachments(renderPdfBytes(app, null), app);
+        // Build N — renderPdfBytes now centralizes appendAttachments, so the
+        // stored/COMPLETED PDF already includes the uploaded documents.
+        byte[] bytes = renderPdfBytes(app, null);
         PdfUploadResult uploaded = uploadBytesToCloudinary(bytes, app.getApplicationId());
         return new PdfUploadResult(uploaded.secureUrl(), uploaded.publicId(), bytes);
     }
@@ -301,7 +300,12 @@ public class AgreementDocumentService {
         try {
             filledDocx = fillTemplate(ctx);
             pdf = convertToPdf(filledDocx);
-            return Files.readAllBytes(pdf);
+            // Build N — the append is now centralized here, so EVERY
+            // full-agreement render (consultant preview, ERM preview, ERM
+            // download, consultant-version) carries the uploaded documents
+            // as appended pages. Callers that add a Certificate of Completion
+            // still append it AFTER this, keeping the certificate last.
+            return appendAttachments(Files.readAllBytes(pdf), app);
         } finally {
             safeDelete(filledDocx);
             safeDelete(pdf);

@@ -39,6 +39,7 @@ import {
   type AgreementMe,
   type AgreementUserDto,
 } from "@/lib/api";
+import { formatUsDateTime } from "@/lib/dates";
 
 type AdminTab = "users" | "agreements";
 
@@ -1166,12 +1167,8 @@ function StatusBadge({ active }: { active: boolean }) {
 }
 
 function formatDate(iso: string | null | undefined) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
+  // Build N — US MM-DD-YYYY HH:mm (was en-IN DD-MM).
+  return iso ? formatUsDateTime(iso) : "—";
 }
 
 /**

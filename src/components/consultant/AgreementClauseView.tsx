@@ -62,6 +62,13 @@ function prettify(name: string): string {
     .trim();
 }
 
+// Build N — reformat an ISO yyyy-MM-dd value to MM-DD-YYYY; pass anything
+// that isn't exactly ISO-date-shaped through unchanged (only dates affected).
+function usDateIfIso(v: string): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v.trim());
+  return m ? `${m[2]}-${m[3]}-${m[1]}` : v;
+}
+
 interface Props {
   blocks: AgreementBlock[];
   values: Record<string, string>;
@@ -244,7 +251,9 @@ function SegmentView({
   if (key in FIELD_LABELS) {
     const v = (fields[key] ?? "").trim();
     if (v) {
-      return <Filled value={v} />;
+      // Build N — date fields are stored ISO; show them MM-DD-YYYY live so
+      // the clause text matches the input + the stamped PDF.
+      return <Filled value={usDateIfIso(v)} />;
     }
     return <Blank label={FIELD_LABELS[key]} />;
   }

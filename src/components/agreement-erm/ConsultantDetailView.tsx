@@ -717,13 +717,7 @@ function AccessRecord({ app }: { app: ConsultantApplication }) {
     return null;
   }
   const fmt = (iso: string | null | undefined) =>
-    iso
-      ? new Date(iso).toLocaleString("en-IN", {
-          timeZone: "Asia/Kolkata",
-          dateStyle: "medium",
-          timeStyle: "short",
-        })
-      : "—";
+    iso ? formatUsDateTime(iso) : "—";
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
       <p className="text-[11px] font-bold uppercase tracking-wider text-sage-navy inline-flex items-center gap-1.5">
@@ -1918,13 +1912,7 @@ function ConsultantDownloadStat({ app }: { app: ConsultantApplication }) {
   const count = app.consultantDownloadCount ?? 0;
   if (!app.consultantCopyReleased && count === 0) return null;
   const fmt = (iso: string | null | undefined) =>
-    iso
-      ? new Date(iso).toLocaleString("en-IN", {
-          timeZone: "Asia/Kolkata",
-          dateStyle: "medium",
-          timeStyle: "short",
-        })
-      : null;
+    iso ? formatUsDateTime(iso) : null;
   const last = fmt(app.consultantLastDownloadedAt);
   return (
     <div className="rounded-xl border border-gray-100 bg-white px-4 py-3 inline-flex items-start gap-2.5">

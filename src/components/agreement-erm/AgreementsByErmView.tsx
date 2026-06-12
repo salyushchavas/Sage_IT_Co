@@ -18,6 +18,7 @@ import {
   type AgreementSummaryDto,
 } from "@/lib/api";
 import AgreementStatusPill from "./AgreementStatusPill";
+import { formatUsDate } from "@/lib/dates";
 
 interface ErmGroup {
   key: string;
@@ -249,9 +250,6 @@ export default function AgreementsByErmView() {
 }
 
 function formatDate(iso: string | null | undefined) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    dateStyle: "medium",
-  });
+  // Build N — US MM-DD-YYYY (was en-IN DD-MM).
+  return iso ? formatUsDate(iso) : "—";
 }

@@ -226,6 +226,36 @@ function digitsOnly(raw: string, maxLen: number): string {
   return raw.replace(/\D/g, "").slice(0, maxLen);
 }
 
+// ── Build N — MM-DD-YYYY date mask (stores ISO yyyy-MM-dd) ──────
+// Date fields store ISO internally; the input shows/edits MM-DD-YYYY so
+// the display is US-format regardless of browser locale (replaces native
+// <input type="date">). Conversions are positional re-formats — never a
+// day/month swap.
+function isoToUsInput(iso: string | null | undefined): string {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(iso ?? "").trim());
+  return m ? `${m[2]}-${m[3]}-${m[1]}` : "";
+}
+function maskMmDdYyyy(raw: string): string {
+  const d = raw.replace(/\D/g, "").slice(0, 8);
+  return [d.slice(0, 2), d.slice(2, 4), d.slice(4, 8)]
+    .filter((p) => p.length > 0)
+    .join("-");
+}
+/** MM-DD-YYYY -> ISO yyyy-MM-dd, or "" when incomplete/invalid (incl. bad calendar day). */
+function usInputToIso(masked: string): string {
+  const m = /^(\d{2})-(\d{2})-(\d{4})$/.exec(masked.trim());
+  if (!m) return "";
+  const mm = Number(m[1]);
+  const dd = Number(m[2]);
+  const yyyy = Number(m[3]);
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || yyyy < 1900 || yyyy > 2200) return "";
+  const dt = new Date(yyyy, mm - 1, dd);
+  if (dt.getFullYear() !== yyyy || dt.getMonth() !== mm - 1 || dt.getDate() !== dd) {
+    return ""; // rejects e.g. 02-30-2026
+  }
+  return `${m[3]}-${m[1]}-${m[2]}`;
+}
+
 /**
  * True iff any non-readOnly, non-implementationPartner field in this
  * appendix has a value OR the affirmation flag is set. CORE sections
@@ -2436,6 +2466,53 @@ function SectionStep({
   );
 }
 
+// Build N — MM-DD-YYYY masked date input. The form value is ISO
+// (yyyy-MM-dd); the field renders + accepts MM-DD-YYYY and converts at the
+// edges. Emits "" until a complete, valid calendar date is typed.
+function DateMaskInput({
+  value,
+  onChange,
+  onBlur,
+  readOnly,
+  className,
+}: {
+  value: string;
+  onChange: (iso: string) => void;
+  onBlur: () => void;
+  readOnly?: boolean;
+  className?: string;
+}) {
+  const [text, setText] = useState(() => isoToUsInput(value));
+  // The ISO we last emitted, so an external value change (e.g. a reset)
+  // re-syncs the display but our own keystroke echo does not loop.
+  const emittedRef = useRef(value);
+  useEffect(() => {
+    if (value !== emittedRef.current) {
+      emittedRef.current = value;
+      setText(isoToUsInput(value));
+    }
+  }, [value]);
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      value={text}
+      placeholder="MM-DD-YYYY"
+      maxLength={10}
+      readOnly={readOnly}
+      onChange={(e) => {
+        const masked = maskMmDdYyyy(e.target.value);
+        setText(masked);
+        const iso = usInputToIso(masked);
+        emittedRef.current = iso;
+        onChange(iso);
+      }}
+      onBlur={onBlur}
+      className={className}
+    />
+  );
+}
+
 // ── Field input ──────────────────────────────────────────────
 
 function FieldInput({
@@ -2574,11 +2651,12 @@ function FieldInput({
       </select>
     );
   } else if (field.type === "date") {
+    // Build N — MM-DD-YYYY masked input (stores ISO), not a native picker,
+    // so the input always shows US format regardless of browser locale.
     control = (
-      <input
-        type="date"
+      <DateMaskInput
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={onChange}
         onBlur={onBlur}
         readOnly={ro}
         className={baseInputClasses}

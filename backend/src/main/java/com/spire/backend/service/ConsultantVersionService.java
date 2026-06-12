@@ -93,17 +93,15 @@ public class ConsultantVersionService {
         // 1. Consultant-version body: same render path as ERM preview
         //    (ERM signature blanked). Consultant signatures are present
         //    because they were uploaded to Cloudinary at submit.
+        // Build N — renderPdfBytes already appends the uploaded documents
+        // (centralized), so the body arrives with attachments; the
+        // certificate is appended AFTER, keeping it the final page, and the
+        // hash (step 3) covers body + attachments + certificate.
         byte[] body = agreementDocumentService.renderPdfBytes(
                 app, AgreementDocumentService.ermPreviewOverrides());
 
-        // Build I — append the consultant's uploaded documents (work-auth
-        // doc, offer letter) AFTER the body and BEFORE the certificate, so
-        // the Certificate of Completion stays the final page and the hash
-        // (step 3) covers the attachments.
-        byte[] withAttachments = agreementDocumentService.appendAttachments(body, app);
-
-        // 2. Append the certificate page.
-        byte[] combined = appendCertificatePage(withAttachments, app);
+        // 2. Append the certificate page (stays last).
+        byte[] combined = appendCertificatePage(body, app);
 
         // 3. Hash the bytes the consultant will receive.
         String sha256 = sha256Hex(combined);

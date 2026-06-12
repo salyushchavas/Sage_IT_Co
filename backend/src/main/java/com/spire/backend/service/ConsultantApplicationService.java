@@ -2783,11 +2783,37 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Build W — Appendix 1 work-authorization document upload. Mirrors
-     * {@link #uploadCheque}: validates type/size, stores the bytes in
-     * Cloudinary at {@code agreements/{appId}-workauth}
-     * (type=authenticated), and persists the public_id + content type +
-     * timestamp on the row. Subsequent uploads overwrite.
+     * Build N — authenticated-raw Cloudinary assets that are re-uploaded on a
+     * STABLE public_id get re-versioned, which breaks the version-less signed
+     * delivery URL (401). Mirroring the working final-PDF pattern, every
+     * (re-)upload uses a UNIQUE timestamped public_id so the asset has a
+     * single version and the signed URL always resolves. Callers store the
+     * returned id and best-effort {@link #destroyCloudinaryDoc} the prior one.
+     */
+    private static String uniqueDocPublicId(String base) {
+        return base + "-" + System.currentTimeMillis();
+    }
+
+    /** Build N — best-effort delete of a superseded authenticated Cloudinary doc. */
+    private void destroyCloudinaryDoc(String publicId, String contentType) {
+        if (publicId == null || publicId.isBlank()) return;
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        try {
+            cloudinary.uploader().destroy(publicId,
+                    com.cloudinary.utils.ObjectUtils.asMap(
+                            "resource_type", isPdf ? "raw" : "image",
+                            "type", "authenticated",
+                            "invalidate", true));
+        } catch (Exception ignored) {
+            // Orphan cleanup is best-effort; never block an upload on it.
+        }
+    }
+
+    /**
+     * Build W — Appendix 1 work-authorization document upload. Validates
+     * type/size, stores the bytes in Cloudinary (type=authenticated) under a
+     * Build-N unique public_id, persists the public_id + content type +
+     * timestamp, and cleans up the prior asset.
      */
     @Transactional
     public ConsultantApplication uploadWorkAuthDoc(
@@ -2812,7 +2838,9 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "Work-authorization document must be an image (JPG/PNG/HEIC) or PDF.");
         }
-        String publicId = "agreements/" + applicationId + "-workauth";
+        String oldPublicId = app.getWorkAuthDocPublicId();
+        String oldContentType = app.getWorkAuthDocContentType();
+        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-workauth");
         try {
             cloudinary.uploader().upload(bytes,
                     com.cloudinary.utils.ObjectUtils.asMap(
@@ -2828,6 +2856,7 @@ public class ConsultantApplicationService {
         app.setWorkAuthDocContentType(normalisedType);
         app.setWorkAuthDocUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
+        destroyCloudinaryDoc(oldPublicId, oldContentType);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.WORK_AUTH_UPLOADED,
@@ -2891,7 +2920,9 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "Offer letter must be an image (JPG/PNG/HEIC) or PDF.");
         }
-        String publicId = "agreements/" + applicationId + "-offerletter";
+        String oldPublicId = app.getOfferLetterPublicId();
+        String oldContentType = app.getOfferLetterContentType();
+        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-offerletter");
         try {
             cloudinary.uploader().upload(bytes,
                     com.cloudinary.utils.ObjectUtils.asMap(
@@ -2907,6 +2938,7 @@ public class ConsultantApplicationService {
         app.setOfferLetterContentType(normalisedType);
         app.setOfferLetterUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
+        destroyCloudinaryDoc(oldPublicId, oldContentType);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.OFFER_LETTER_UPLOADED,
@@ -2995,12 +3027,15 @@ public class ConsultantApplicationService {
             String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertSectionWritable(app, "appendix3"); // Build Y (B5)
-        String publicId = "agreements/" + applicationId + "-dldoc";
+        String oldPublicId = app.getDlDocPublicId();
+        String oldContentType = app.getDlDocContentType();
+        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-dldoc");
         String normalisedType = storeBgDoc(bytes, contentType, publicId, "Driver's License / State ID document");
         app.setDlDocPublicId(publicId);
         app.setDlDocContentType(normalisedType);
         app.setDlDocUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
+        destroyCloudinaryDoc(oldPublicId, oldContentType);
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.DL_DOC_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
@@ -3021,12 +3056,15 @@ public class ConsultantApplicationService {
             String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertSectionWritable(app, "appendix3"); // Build Y (B5)
-        String publicId = "agreements/" + applicationId + "-ssndoc";
+        String oldPublicId = app.getSsnDocPublicId();
+        String oldContentType = app.getSsnDocContentType();
+        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-ssndoc");
         String normalisedType = storeBgDoc(bytes, contentType, publicId, "SSN document");
         app.setSsnDocPublicId(publicId);
         app.setSsnDocContentType(normalisedType);
         app.setSsnDocUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
+        destroyCloudinaryDoc(oldPublicId, oldContentType);
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.SSN_DOC_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
@@ -3252,7 +3290,8 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "Cheque must be an image (JPG/PNG/HEIC) or PDF.");
         }
-        String publicId = "agreements/" + applicationId + "-cheque-" + index;
+        // Build N — unique public_id (no re-versioning -> signed URL resolves).
+        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-cheque-" + index);
         try {
             cloudinary.uploader().upload(bytes,
                     com.cloudinary.utils.ObjectUtils.asMap(
@@ -3267,6 +3306,8 @@ public class ConsultantApplicationService {
 
         List<ChequeEntry> entries = new ArrayList<>(parseCheques(app));
         ChequeEntry existing = findEntry(entries, index);
+        String oldChequePublicId = existing == null ? null : existing.publicId();
+        String oldChequeContentType = existing == null ? null : existing.contentType();
         ChequeEntry replacement = new ChequeEntry(
                 index,
                 existing == null ? "" : existing.number(),
@@ -3285,6 +3326,7 @@ public class ConsultantApplicationService {
             app.setChequeUploadedAt(LocalDateTime.now());
         }
         applicationRepository.save(app);
+        destroyCloudinaryDoc(oldChequePublicId, oldChequeContentType);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CHEQUE_UPLOADED,

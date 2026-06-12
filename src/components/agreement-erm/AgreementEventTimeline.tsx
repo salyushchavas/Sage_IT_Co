@@ -1,6 +1,7 @@
 "use client";
 
 import { Clock } from "lucide-react";
+import { formatUsDateTime } from "@/lib/dates";
 import type { ConsultantApplicationEvent } from "@/lib/api";
 
 const EVENT_LABELS: Record<string, string> = {
@@ -81,11 +82,7 @@ export default function AgreementEventTimeline({
             </div>
             <p className="text-[11px] text-gray-500 inline-flex items-center gap-1 mt-0.5">
               <Clock size={10} />
-              {new Date(e.createdAt).toLocaleString("en-IN", {
-                timeZone: "Asia/Kolkata",
-                dateStyle: "medium",
-                timeStyle: "short",
-              })}
+              {formatUsDateTime(e.createdAt)}
             </p>
             {extra && Object.keys(extra).length > 0 && (
               <pre className="mt-1 text-[11px] text-gray-600 bg-gray-50 border border-gray-100 rounded-md px-2 py-1 whitespace-pre-wrap">

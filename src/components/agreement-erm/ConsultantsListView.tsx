@@ -12,6 +12,7 @@ import {
   type ConsultantApplicationsPage,
 } from "@/lib/api";
 import AgreementStatusPill from "./AgreementStatusPill";
+import { formatUsDate } from "@/lib/dates";
 
 const FILTERS: ReadonlyArray<{ id: "ALL" | ConsultantApplicationStatus; label: string }> = [
   { id: "ALL",                label: "All" },
@@ -285,9 +286,6 @@ export default function ConsultantsListView() {
 }
 
 function formatDate(iso: string | null | undefined) {
-  if (!iso) return "—";
-  return new Date(iso).toLocaleString("en-IN", {
-    timeZone: "Asia/Kolkata",
-    dateStyle: "medium",
-  });
+  // Build N — US MM-DD-YYYY (was en-IN DD-MM).
+  return iso ? formatUsDate(iso) : "—";
 }
