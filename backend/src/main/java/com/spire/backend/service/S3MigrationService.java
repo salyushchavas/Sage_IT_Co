@@ -109,6 +109,12 @@ public class S3MigrationService {
         List<String> failures = new ArrayList<>();
         List<Long> migratedFinal = new ArrayList<>();
         List<Long> migratedConsultant = new ArrayList<>();
+        // Log the full root-cause exception ONCE per failure class (S3 write,
+        // Cloudinary read) so the report stays scannable while the operator
+        // still gets the actionable AWS/Cloudinary error in the logs.
+        boolean firstS3ErrLogged = false;
+        boolean firstSourceErrLogged = false;
+        log.info("{} bucket={} candidates={}", LOG, bucket, total);
 
         for (Candidate c : candidates) {
             if ("final".equals(c.type())) finalCount++; else consultantCount++;
@@ -133,8 +139,14 @@ public class S3MigrationService {
             } catch (Exception e) {
                 brokenSource++;
                 failures.add("id=" + c.id() + " type=" + c.type() + " reason=BROKEN_SOURCE");
-                log.warn("{} BROKEN_SOURCE id={} type={} sourceId={} ({})",
-                        LOG, c.id(), c.type(), c.cloudinaryPublicId(), e.getClass().getSimpleName());
+                if (!firstSourceErrLogged) {
+                    firstSourceErrLogged = true;
+                    log.error("{} BROKEN_SOURCE id={} type={} sourceId={} — full Cloudinary-fetch "
+                            + "cause (first occurrence):", LOG, c.id(), c.type(), c.cloudinaryPublicId(), e);
+                } else {
+                    log.warn("{} BROKEN_SOURCE id={} type={} sourceId={} ({})",
+                            LOG, c.id(), c.type(), c.cloudinaryPublicId(), e.toString());
+                }
                 continue;
             }
             String srcHash = ConsultantVersionService.sha256Hex(bytes);   // (b) hash source bytes
@@ -145,8 +157,14 @@ public class S3MigrationService {
             } catch (Exception e) {
                 skipped++;
                 failures.add("id=" + c.id() + " type=" + c.type() + " reason=S3_UPLOAD_FAILED");
-                log.warn("{} S3_UPLOAD_FAILED id={} type={} ({})",
-                        LOG, c.id(), c.type(), e.getClass().getSimpleName());
+                if (!firstS3ErrLogged) {
+                    firstS3ErrLogged = true;
+                    log.error("{} S3_UPLOAD_FAILED id={} type={} bucket={} key={} — full S3 cause "
+                            + "(first occurrence):", LOG, c.id(), c.type(), bucket, key, e);
+                } else {
+                    log.warn("{} S3_UPLOAD_FAILED id={} type={} ({})",
+                            LOG, c.id(), c.type(), e.toString());
+                }
                 continue;
             }
 
@@ -157,7 +175,7 @@ public class S3MigrationService {
                 skipped++;
                 failures.add("id=" + c.id() + " type=" + c.type() + " reason=S3_READBACK_FAILED");
                 log.warn("{} S3_READBACK_FAILED id={} type={} ({})",
-                        LOG, c.id(), c.type(), e.getClass().getSimpleName());
+                        LOG, c.id(), c.type(), e.toString());
                 continue;
             }
             if (!srcHash.equalsIgnoreCase(ConsultantVersionService.sha256Hex(back))) {
@@ -183,7 +201,7 @@ public class S3MigrationService {
                 skipped++;
                 failures.add("id=" + c.id() + " type=" + c.type() + " reason=DB_UPDATE_FAILED");
                 log.warn("{} DB_UPDATE_FAILED id={} type={} ({})",
-                        LOG, c.id(), c.type(), e.getClass().getSimpleName());
+                        LOG, c.id(), c.type(), e.toString());
                 continue;
             }
             migrated++;
