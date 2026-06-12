@@ -123,6 +123,16 @@
             <groupId>software.amazon.awssdk</groupId>
             <artifactId>s3</artifactId>
         </dependency>
+        <!-- Use the JDK URLConnection HTTP client for the S3Client instead
+             of the SDK default (Apache HttpClient 5). Spring Boot 3.2.5 pins
+             httpclient5 to 5.2.x, which lacks TlsSocketStrategy (added in
+             5.4) that the AWS apache-client needs — that mismatch made the
+             S3Client bean fail to instantiate. URLConnection has no such
+             dependency, so it sidesteps the conflict entirely. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>url-connection-client</artifactId>
+        </dependency>
 
         <!-- Apache POI: low-level DOCX read/write. docx-stamper
              depends on this transitively but pinning here keeps the
