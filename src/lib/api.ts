@@ -4187,6 +4187,37 @@ export async function fetchAgreementChequeBlob(
   return res;
 }
 
+/**
+ * Build R — bearer-authenticated fetch of ANY ERM agreement document
+ * (work-auth, offer-letter, DL, SSN, indexed cheque). The {@code erm*ViewUrl}
+ * helpers return a token-less backend URL, so opening them in a new tab — or
+ * a plain {@code credentials:"include"} fetch — does NOT attach the
+ * sessionStorage bearer, and the JWT/role gate returns 403. Callers fetch the
+ * bytes HERE (Authorization header) then open a blob URL. The endpoint stays
+ * JWT/role-gated and dual-reads S3 (s3_key) → Cloudinary, streaming the real
+ * content-type. {@code docPath} is e.g. "/workauth", "/offer-letter",
+ * "/dl-doc", "/ssn-doc", "/cheques/{index}".
+ */
+export async function fetchAgreementDocBlob(
+  applicationId: string,
+  docPath: string,
+  disposition: "inline" | "attachment" = "inline",
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-erm/applications/${applicationId}${docPath}?disposition=${disposition}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
+}
+
 // ── Consultant portal (email-scoped session) ───────────────────
 //
 // Token lives in sessionStorage under one global key so it survives
@@ -4445,11 +4476,6 @@ export async function uploadConsultantWorkAuthDoc(
   await consultantMultipartFetch(applicationId, "/workauth", form);
 }
 
-/** Build W — ERM-side work-authorization document viewer URL. */
-export function ermWorkAuthViewUrl(applicationId: string): string {
-  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/workauth?disposition=inline`;
-}
-
 /** Build I — upload the Phase 2 Employment offer letter. */
 export async function uploadConsultantOfferLetter(
   applicationId: string,
@@ -4458,11 +4484,6 @@ export async function uploadConsultantOfferLetter(
   const form = new FormData();
   form.append("file", file);
   await consultantMultipartFetch(applicationId, "/offer-letter", form);
-}
-
-/** Build I — ERM-side offer-letter viewer URL. */
-export function ermOfferLetterViewUrl(applicationId: string): string {
-  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/offer-letter?disposition=inline`;
 }
 
 /** Build J — upload the Background Check Driver's-License / State-ID document. */
@@ -4483,14 +4504,6 @@ export async function uploadConsultantSsnDoc(
   const form = new FormData();
   form.append("file", file);
   await consultantMultipartFetch(applicationId, "/ssn-doc", form);
-}
-
-/** Build J — ERM-side viewer URLs for the Background Check documents. */
-export function ermDlDocViewUrl(applicationId: string): string {
-  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/dl-doc?disposition=inline`;
-}
-export function ermSsnDocViewUrl(applicationId: string): string {
-  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/ssn-doc?disposition=inline`;
 }
 
 /** Build J — one repeatable Portal Access entry (platform + username). */
@@ -4530,15 +4543,6 @@ export async function saveConsultantChequeMetadata(
     `/cheques/${index}`,
     { method: "PUT", body: JSON.stringify(body) },
   );
-}
-
-/**
- * Build U — ERM-side cheque viewer URL helper. The bytes are streamed
- * server-side; this returns the inline URL with the ERM session token
- * implicitly attached by the browser's fetch on click.
- */
-export function ermChequeViewUrl(applicationId: string, index: number): string {
-  return `${BASE_URL}/api/agreement-erm/applications/${applicationId}/cheques/${index}?disposition=inline`;
 }
 
 /**

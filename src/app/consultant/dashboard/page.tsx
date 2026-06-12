@@ -15,6 +15,8 @@ import {
   RefreshCw,
 } from "lucide-react";
 
+import { formatUsDate } from "@/lib/dates";
+
 import {
   clearConsultantToken,
   fetchConsultantAgreements,
@@ -213,7 +215,7 @@ function AgreementRow({
         {item.createdAt && (
           <p className="mt-1 text-[11px] text-gray-500 inline-flex items-center gap-1">
             <Clock size={10} />
-            Issued {new Date(item.createdAt).toLocaleDateString()}
+            Issued {formatUsDate(item.createdAt)}
           </p>
         )}
       </div>

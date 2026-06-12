@@ -33,16 +33,12 @@ import {
   ermAdvanceToPhase2,
   ermApproveAndSign,
   ermApproveConsultantVersion,
-  ermChequeViewUrl,
-  ermWorkAuthViewUrl,
-  ermOfferLetterViewUrl,
-  ermDlDocViewUrl,
-  ermSsnDocViewUrl,
   ermRequestRevision,
   ermSendForApproval,
   ermFetchEligibleApprovers,
   type EligibleApprovers,
   ermSendPdfToEmail,
+  fetchAgreementDocBlob,
   fetchAgreementPdfBlob,
   fetchErmPreviewPdfBlob,
   fetchMe,
@@ -328,8 +324,8 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const handleApproveConsultantVersion = async () => {
     if (!confirm(
       "Release a consultant-version PDF (with Certificate of Completion) "
-      + "for the consultant to download? This does not countersign the "
-      + "agreement.",
+      + "for audit/records? The consultant will see their agreement as "
+      + "Verified; this does not countersign the agreement.",
     )) {
       return;
     }
@@ -337,7 +333,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
     setError("");
     try {
       await ermApproveConsultantVersion(app.applicationId);
-      setFeedback("Consultant version released. They can now download it after a fresh OTP.");
+      setFeedback("Consultant version released. The consultant now sees their agreement as Verified and will be notified of any revision.");
       await onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't release consultant version");
@@ -1328,6 +1324,54 @@ function ReadOnlyRow({
   );
 }
 
+// ── Build R — authenticated document open (fixes the 403) ─────────
+//
+// The erm*ViewUrl endpoints are JWT/role-gated and the ERM bearer lives in
+// sessionStorage, so a bare new-tab link (or credentials:"include") never
+// carries it. Fetch the bytes WITH the bearer, then open a blob URL. Works
+// for S3 + legacy Cloudinary records (the backend dual-reads + streams).
+function DocViewButton({
+  applicationId,
+  docPath,
+  label = "View document",
+}: {
+  applicationId: string;
+  docPath: string;
+  label?: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const open = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await fetchAgreementDocBlob(applicationId, docPath, "inline");
+      if (!res.ok) throw new Error(`Couldn't open the document (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't open the document.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <div className="flex flex-col items-end gap-1">
+      <button
+        type="button"
+        onClick={open}
+        disabled={busy}
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+      >
+        <FileText size={12} /> {busy ? "Opening…" : label}
+      </button>
+      {err && <span className="text-[11px] text-sage-copper-deep">{err}</span>}
+    </div>
+  );
+}
+
 // ── Build W — Appendix 1 work-authorization document (read-only) ──
 
 function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
@@ -1348,14 +1392,7 @@ function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
             ? ` ${formatUsDate(app.workAuthDocUploadedAt)}`
             : ""}
         </p>
-        <a
-          href={ermWorkAuthViewUrl(app.applicationId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer"
-        >
-          <FileText size={12} /> View document
-        </a>
+        <DocViewButton applicationId={app.applicationId} docPath="/workauth" />
       </div>
     </section>
   );
@@ -1378,14 +1415,7 @@ function OfferLetterCard({ app }: { app: ConsultantApplication }) {
             ? ` ${formatUsDate(app.offerLetterUploadedAt)}`
             : ""}
         </p>
-        <a
-          href={ermOfferLetterViewUrl(app.applicationId)}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer"
-        >
-          <FileText size={12} /> View document
-        </a>
+        <DocViewButton applicationId={app.applicationId} docPath="/offer-letter" />
       </div>
     </section>
   );
@@ -1397,12 +1427,14 @@ function UploadedDocCard({
   title,
   uploaded,
   uploadedAt,
-  href,
+  applicationId,
+  docPath,
 }: {
   title: string;
   uploaded: boolean;
   uploadedAt: string | null;
-  href: string;
+  applicationId: string;
+  docPath: string;
 }) {
   if (!uploaded) return null;
   return (
@@ -1415,14 +1447,7 @@ function UploadedDocCard({
           <CheckCircle2 size={13} className="text-emerald-600" />
           Uploaded{uploadedAt ? ` ${formatUsDate(uploadedAt)}` : ""}
         </p>
-        <a
-          href={href}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer"
-        >
-          <FileText size={12} /> View document
-        </a>
+        <DocViewButton applicationId={applicationId} docPath={docPath} />
       </div>
     </section>
   );
@@ -1442,13 +1467,15 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
         title="Driver's License / State ID document"
         uploaded={Boolean(app.dlDocPublicId || app.dlDocS3Key)}
         uploadedAt={app.dlDocUploadedAt}
-        href={ermDlDocViewUrl(app.applicationId)}
+        applicationId={app.applicationId}
+        docPath="/dl-doc"
       />
       <UploadedDocCard
         title="SSN document"
         uploaded={Boolean(app.ssnDocPublicId || app.ssnDocS3Key)}
         uploadedAt={app.ssnDocUploadedAt}
-        href={ermSsnDocViewUrl(app.applicationId)}
+        applicationId={app.applicationId}
+        docPath="/ssn-doc"
       />
       <SecurityChequeCard app={app} />
     </div>
@@ -1567,12 +1594,12 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
     try {
       // Index-aware ERM endpoint — works for the new per-cheque storage
       // and falls back to the legacy single-cheque path at index 0 via
-      // the backend's parseCheques.
-      const res = await fetch(
-        ermChequeViewUrl(app.applicationId, entry.index)
-          .replace("disposition=inline",
-            `disposition=${mode === "download" ? "attachment" : "inline"}`),
-        { credentials: "include" },
+      // the backend's parseCheques. Build R — bearer-authenticated (the
+      // sessionStorage token isn't a cookie, so credentials:"include" 403'd).
+      const res = await fetchAgreementDocBlob(
+        app.applicationId,
+        `/cheques/${entry.index}`,
+        mode === "download" ? "attachment" : "inline",
       );
       if (!res.ok) {
         throw new Error(`Couldn't fetch the cheque (${res.status})`);
@@ -1672,7 +1699,7 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
               </div>
               {entry.uploadedAt && (entry.publicId || entry.s3Key) && (
                 <p className="text-[10px] text-gray-500">
-                  Uploaded {new Date(entry.uploadedAt).toLocaleString()}
+                  Uploaded {formatUsDateTime(entry.uploadedAt)}
                 </p>
               )}
             </div>

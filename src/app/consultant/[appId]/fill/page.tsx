@@ -471,9 +471,18 @@ function filterVisibleSections(
  */
 function restrictedVisibleSections(
   selectedKeys: string[],
+  includePrimarySign = false,
 ): readonly AgreementSection[] {
   const set = new Set(selectedKeys);
-  return AGREEMENT_SECTIONS.filter((s) => set.has(s.id) || s.id === "review");
+  return AGREEMENT_SECTIONS.filter(
+    (s) =>
+      set.has(s.id)
+      || s.id === "review"
+      // Build R — Phase 2 re-signs BOTH signature steps: the PRIMARY
+      // (main-agreement) is always signable too, not just the final
+      // execution signature on "review".
+      || (includePrimarySign && s.id === "main-agreement"),
+  );
 }
 
 /** The active revision scope (section keys), or [] when unrestricted. */
@@ -626,6 +635,16 @@ export default function ConsultantWizardPage() {
           return;
         }
         const initial = buildInitialState(data);
+        // Build R — a Phase-2 fill makes the main-agreement step signable so
+        // the consultant RE-DRAWS the primary. Legacy/migrated records keep a
+        // non-null signatureImage that would pre-fill form.signature and let
+        // them click through without re-drawing (the backend would then reuse
+        // the stale Phase-1 primary). Clear the in-wizard primary for Phase-2
+        // fills so a fresh draw is required; the persisted Phase-1 signature
+        // stays as the audit/backstop record.
+        if (isPhase2Restricted(data)) {
+          initial.signature = null;
+        }
         setForm(initial);
         lastSavedRef.current = { ...initial };
         const entries = parseChequeList(data.cheques);
@@ -651,7 +670,7 @@ export default function ConsultantWizardPage() {
         const loadedVisible = loadedScope.length > 0
             ? restrictedVisibleSections(loadedScope)
             : isPhase2Restricted(data)
-              ? restrictedVisibleSections(phase2ScopeKeys(data))
+              ? restrictedVisibleSections(phase2ScopeKeys(data), true)
               : filterVisibleSections(loadedReqs);
         const loadedWorkAuth = Boolean(data.workAuthDocPublicId || data.workAuthDocS3Key);
         const loadedOffer = Boolean(data.offerLetterPublicId || data.offerLetterS3Key);
@@ -1039,13 +1058,15 @@ export default function ConsultantWizardPage() {
     const scope = revisionScopeKeys(app);
     if (scope.length > 0) return restrictedVisibleSections(scope);
     // Build P — a Phase-2 fill restricts to the ERM-reopened sections
-    // (+ the final sign step). Completed Phase 1 sections — including
-    // every upload (cheques, work-auth, DL/SSN) — are hidden + immutable;
-    // the consultant re-signs only the final execution signature (the
-    // primary signature is reused). An empty reopened scope still
-    // restricts (review-only), so nothing completed can be re-edited.
+    // (+ the two signature steps). Completed Phase 1 NON-signature content —
+    // including every upload (cheques, work-auth, DL/SSN) — stays hidden +
+    // immutable. Build R — the consultant re-signs BOTH the primary
+    // (main-agreement) and the final execution signature for the Phase 2
+    // execution; the offer-letter and similar sections reuse the freshly
+    // re-drawn primary at render time. An empty reopened scope still
+    // restricts to just the two signature steps.
     if (isPhase2Restricted(app)) {
-      return restrictedVisibleSections(phase2ScopeKeys(app));
+      return restrictedVisibleSections(phase2ScopeKeys(app), true);
     }
     return filterVisibleSections(reqs);
   }, [reqs, app]);
