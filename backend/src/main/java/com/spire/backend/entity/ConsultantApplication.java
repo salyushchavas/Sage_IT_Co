@@ -71,6 +71,24 @@ public class ConsultantApplication {
     private String ownerName;
 
     /**
+     * Build O — ERM "All" list approval summary, resolved by the list
+     * service onto these transient fields (one batched query per page,
+     * never persisted). {@code managerStatus} / {@code accountsStatus}
+     * carry the latest gate decision per role ({@code PENDING} /
+     * {@code APPROVED} / {@code REVISION_REQUESTED}), or null when no gate
+     * exists yet (Phase 1 has no Accounts gate → the UI shows "N/A").
+     * {@code sentForApprovalAt} is the ISO timestamp the agreement was
+     * first routed to approvers (the {@code SENT_FOR_APPROVAL} event), or
+     * null if it has never been sent. Null on detail responses.
+     */
+    @Transient
+    private String managerStatus;
+    @Transient
+    private String accountsStatus;
+    @Transient
+    private String sentForApprovalAt;
+
+    /**
      * Phase C — soft delete (archive). Only the super-admin archives,
      * and only CANCELLED applications. The row stays in the DB
      * (recoverable, audit history + Cloudinary PDF preserved); it's
@@ -253,6 +271,11 @@ public class ConsultantApplication {
 
     @Column(name = "technology_track") private String technologyTrack;
     @Column(name = "custom_scope_notes", columnDefinition = "TEXT") private String customScopeNotes;
+
+    // Build O — optional ERM-authored email message/pre-text used as the
+    // intro of the consultant's invitation email. Blank/null → the Sage IT
+    // Co default copy. Set at create time only; not surfaced to the consultant.
+    @Column(name = "email_pretext", columnDefinition = "TEXT") private String emailPretext;
 
     // ── Appendix 1: Phase 2 employment ───────────────────────────────
 

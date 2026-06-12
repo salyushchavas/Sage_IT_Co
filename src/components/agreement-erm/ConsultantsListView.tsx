@@ -107,7 +107,9 @@ export default function ConsultantsListView() {
     );
   }, [pageData, search, isSuperAdmin, ownerFilter]);
 
-  const colCount = isSuperAdmin ? 6 : 5;
+  // Build O — base 6 cols (Consultant, App ID, Status, Manager, Accounts,
+  // Sent on) + Created + Expires = 8; super-admin adds the Owner column.
+  const colCount = isSuperAdmin ? 9 : 8;
 
   return (
     <div className="space-y-4">
@@ -192,6 +194,9 @@ export default function ConsultantsListView() {
               {isSuperAdmin && <th className="text-left px-4 py-2">Owner</th>}
               <th className="text-left px-4 py-2">Application ID</th>
               <th className="text-left px-4 py-2">Status</th>
+              <th className="text-left px-4 py-2">Manager</th>
+              <th className="text-left px-4 py-2">Accounts</th>
+              <th className="text-left px-4 py-2">Sent on</th>
               <th className="text-left px-4 py-2">Created</th>
               <th className="text-left px-4 py-2">Expires</th>
             </tr>
@@ -241,6 +246,20 @@ export default function ConsultantsListView() {
                   <td className="px-4 py-2">
                     <AgreementStatusPill status={r.status} />
                   </td>
+                  <td className="px-4 py-2">
+                    <ApprovalBadge status={r.managerStatus} />
+                  </td>
+                  <td className="px-4 py-2">
+                    {/* Phase 1 has no Accounts gate → N/A. */}
+                    {(r.phase ?? 1) >= 2 ? (
+                      <ApprovalBadge status={r.accountsStatus} />
+                    ) : (
+                      <span className="text-[11px] text-gray-400">N/A</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-500">
+                    {formatDate(r.sentForApprovalAt)}
+                  </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {formatDate(r.createdAt)}
                   </td>
@@ -288,4 +307,26 @@ export default function ConsultantsListView() {
 function formatDate(iso: string | null | undefined) {
   // Build N — US MM-DD-YYYY (was en-IN DD-MM).
   return iso ? formatUsDate(iso) : "—";
+}
+
+// Build O — compact Manager/Accounts gate-status badge for the "All" list.
+// null status (never sent for that role) renders a neutral dash.
+function ApprovalBadge({ status }: { status: string | null | undefined }) {
+  if (!status) return <span className="text-[11px] text-gray-400">—</span>;
+  const map: Record<string, { label: string; cls: string }> = {
+    APPROVED: { label: "Approved", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    PENDING: { label: "Pending", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+    REVISION_REQUESTED: { label: "Revision", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  };
+  const m = map[status] ?? { label: status, cls: "bg-gray-50 text-gray-600 border-gray-200" };
+  return (
+    <span
+      className={
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold " +
+        m.cls
+      }
+    >
+      {m.label}
+    </span>
+  );
 }

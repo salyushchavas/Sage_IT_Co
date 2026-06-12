@@ -3441,6 +3441,15 @@ export interface ConsultantApplication {
   // Build U — consultant download accounting surfaced to the ERM.
   consultantDownloadCount?: number | null;
   consultantLastDownloadedAt?: string | null;
+  // Build O — ERM "All" list approval summary (transient; populated on
+  // list rows only, null on detail). managerStatus/accountsStatus carry
+  // the latest gate decision per role (PENDING | APPROVED |
+  // REVISION_REQUESTED) or null when no gate exists (Phase 1 → no Accounts
+  // gate → "N/A"). sentForApprovalAt is the ISO timestamp the agreement
+  // was first sent for approval, or null if never sent.
+  managerStatus?: string | null;
+  accountsStatus?: string | null;
+  sentForApprovalAt?: string | null;
 }
 
 /**
@@ -3909,6 +3918,10 @@ export async function createConsultantApplication(data: {
   // optional; read-only to the consultant.
   technologyTrack?: string;
   customScopeNotes?: string;
+  // Build O — optional ERM-authored invitation email pre-text. Blank →
+  // the Sage IT Co default copy. Becomes the intro of the consultant's
+  // "complete your details" email.
+  emailPretext?: string;
   // Legacy JSON-textarea payload. New /agreement-erm/new form does
   // not send it; preserved so the detail-view edit panel and any
   // other in-flight caller keeps compiling.
@@ -4542,6 +4555,22 @@ export async function fetchApproverPreviewImages(
   const qs = role ? `?role=${role}` : "";
   return agreementErmFetch<ConsultantPreviewImages>(
     `/api/agreement-approver/applications/${applicationId}/preview-images${qs}`,
+  );
+}
+
+/**
+ * Build O — approver preview of the FINAL, ERM-signed agreement from the
+ * "Approved Documents" record. Same non-copyable PNG shape as
+ * {@link fetchApproverPreviewImages}, but the backend renders with the ERM
+ * countersignature present. Only valid once the agreement is COMPLETED.
+ */
+export async function fetchApproverSignedPreviewImages(
+  applicationId: string,
+  role?: ApproverRole,
+): Promise<ConsultantPreviewImages> {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ConsultantPreviewImages>(
+    `/api/agreement-approver/applications/${applicationId}/signed-preview-images${qs}`,
   );
 }
 

@@ -1341,6 +1341,8 @@ public class DataSeeder implements CommandLineRunner {
                 {"ssn_doc_content_type VARCHAR(64)", "ssn_doc_content_type"},
                 // Build J — repeatable Portal Access platform+username entries.
                 {"portal_entries TEXT", "portal_entries"},
+                // Build O — optional ERM-authored invitation email pre-text.
+                {"email_pretext TEXT", "email_pretext"},
         };
         for (String[] col : columns) {
             try {

@@ -20,6 +20,7 @@ import {
   approverFetchQueue,
   approverRequestRevision,
   fetchApproverPreviewImages,
+  fetchApproverSignedPreviewImages,
   fetchMe,
   getAgreementErmToken,
   type ApproverApprovedItem,
@@ -258,8 +259,33 @@ function ApprovedTable({
   rows: ApproverApprovedItem[];
   showErm: boolean;
 }) {
+  // Build O — non-copyable preview of the FINAL ERM-signed agreement,
+  // available once the agreement is COMPLETED. Shared modal with the
+  // pending queue; one preview open at a time across the table.
+  const [previewPages, setPreviewPages] = useState<string[] | null>(null);
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const [previewErr, setPreviewErr] = useState("");
+
+  const openPreview = async (appId: string) => {
+    setBusyId(appId);
+    setPreviewErr("");
+    try {
+      const data = await fetchApproverSignedPreviewImages(appId);
+      setPreviewPages(data.pages);
+    } catch (e) {
+      setPreviewErr(e instanceof Error ? e.message : "Couldn't load the signed agreement.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-x-auto">
+      {previewErr && (
+        <p className="px-4 pt-3 text-xs text-red-600 inline-flex items-center gap-1">
+          <AlertCircle size={12} /> {previewErr}
+        </p>
+      )}
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[11px] uppercase tracking-wider text-gray-500 border-b border-stone-100">
@@ -268,33 +294,68 @@ function ApprovedTable({
             <th className="px-4 py-2.5 font-semibold">Phase</th>
             <th className="px-4 py-2.5 font-semibold">Approved</th>
             <th className="px-4 py-2.5 font-semibold">Current status</th>
+            <th className="px-4 py-2.5 font-semibold">Document</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((r) => (
-            <tr key={r.appId} className="border-b border-stone-50 last:border-0">
-              <td className="px-4 py-2.5">
-                <span className="font-medium text-gray-900">
-                  {r.consultantName || "(consultant)"}
-                </span>
-                {r.consultantEmail && (
-                  <span className="block text-[11px] text-gray-500">{r.consultantEmail}</span>
+          {rows.map((r) => {
+            const completed = r.status === "COMPLETED";
+            return (
+              <tr key={r.appId} className="border-b border-stone-50 last:border-0">
+                <td className="px-4 py-2.5">
+                  <span className="font-medium text-gray-900">
+                    {r.consultantName || "(consultant)"}
+                  </span>
+                  {r.consultantEmail && (
+                    <span className="block text-[11px] text-gray-500">{r.consultantEmail}</span>
+                  )}
+                </td>
+                {showErm && (
+                  <td className="px-4 py-2.5 text-gray-700">{r.ermName}</td>
                 )}
-              </td>
-              {showErm && (
-                <td className="px-4 py-2.5 text-gray-700">{r.ermName}</td>
-              )}
-              <td className="px-4 py-2.5 text-gray-700">Phase {r.phase ?? 1}</td>
-              <td className="px-4 py-2.5 text-gray-600">
-                {r.decidedAt ? formatUsDate(r.decidedAt) : "—"}
-              </td>
-              <td className="px-4 py-2.5">
-                <AgreementStatusPill status={r.status as ConsultantApplicationStatus} />
-              </td>
-            </tr>
-          ))}
+                <td className="px-4 py-2.5 text-gray-700">Phase {r.phase ?? 1}</td>
+                <td className="px-4 py-2.5 text-gray-600">
+                  {r.decidedAt ? formatUsDate(r.decidedAt) : "—"}
+                </td>
+                <td className="px-4 py-2.5">
+                  <AgreementStatusPill status={r.status as ConsultantApplicationStatus} />
+                </td>
+                <td className="px-4 py-2.5">
+                  {completed ? (
+                    <button
+                      type="button"
+                      onClick={() => openPreview(r.appId)}
+                      disabled={busyId !== null}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                    >
+                      {busyId === r.appId ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <FileText size={12} />
+                      )}
+                      Preview
+                    </button>
+                  ) : (
+                    <span
+                      className="text-[11px] text-gray-400 italic"
+                      title="Available once the ERM has signed the agreement."
+                    >
+                      Awaiting ERM signature
+                    </span>
+                  )}
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
+
+      {previewPages !== null && (
+        <ApproverPreviewModal
+          pages={previewPages}
+          onClose={() => setPreviewPages(null)}
+        />
+      )}
     </div>
   );
 }

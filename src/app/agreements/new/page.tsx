@@ -54,7 +54,18 @@ interface FormState {
   // required to send; Custom Scope is optional. Read-only to the consultant.
   technologyTrack: string;
   customScopeNotes: string;
+  // Build O — optional ERM-authored invitation email message. Prefilled
+  // with the Sage IT Co default; becomes the intro of the consultant's
+  // invitation email. Blank → backend falls back to the default.
+  emailPretext: string;
 }
+
+// Build O — default invitation email pre-text. Matches the backend
+// fallback copy, so leaving it untouched (or clearing it) yields the
+// same message.
+const DEFAULT_EMAIL_PRETEXT =
+  "Sage IT Co has prepared your engagement agreement and needs you to " +
+  "complete a few details so the document can be finalized.";
 
 // Build W — the eight ERM-selectable work-authorization options, shared
 // with the consultant read-only view via agreement-sections.
@@ -81,6 +92,7 @@ const EMPTY: FormState = {
   achDebitAmounts: "",
   technologyTrack: "",
   customScopeNotes: "",
+  emailPretext: DEFAULT_EMAIL_PRETEXT,
 };
 
 /**
@@ -139,6 +151,8 @@ export default function NewConsultantApplicationPage() {
     // Build I — Service Track (ERM-set). Track required, Scope optional.
     technologyTrack: form.technologyTrack.trim(),
     customScopeNotes: form.customScopeNotes.trim(),
+    // Build O — optional invitation email pre-text (blank → backend default).
+    emailPretext: form.emailPretext.trim(),
   };
 
   // Middle name + custom scope are optional; everything else is required.
@@ -350,6 +364,25 @@ export default function NewConsultantApplicationPage() {
                 rows={3}
                 placeholder="Optional — any custom scope specific to this engagement."
                 className={inputClass + " min-h-[72px]"}
+              />
+            </Field>
+          </section>
+
+          <section className="space-y-3">
+            <SectionHeader title="Invitation email message (optional)" />
+            <p className="text-[11px] text-gray-500">
+              This becomes the intro of the invitation email the consultant
+              receives. Edit it for this consultant, or leave the Sage IT Co
+              default. Clearing it falls back to the default.
+            </p>
+            <Field label="Email message / pre-text">
+              <textarea
+                value={form.emailPretext}
+                onChange={setText("emailPretext")}
+                disabled={isSubmitting}
+                rows={4}
+                placeholder={DEFAULT_EMAIL_PRETEXT}
+                className={inputClass + " min-h-[96px]"}
               />
             </Field>
           </section>

@@ -147,6 +147,7 @@ public class ConsultantApplicationService {
             String achDebitAmounts,
             String technologyTrack,
             String customScopeNotes,
+            String emailPretext,
             JsonNode payload,
             String ownerErmId,
             HttpServletRequest request
@@ -213,6 +214,9 @@ public class ConsultantApplicationService {
                 // the consultant; rendered into the agreement.
                 .technologyTrack(blankToNull(technologyTrack))
                 .customScopeNotes(blankToNull(customScopeNotes))
+                // Build O — optional ERM-authored invitation email pre-text
+                // (blank → the default copy at send time).
+                .emailPretext(blankToNull(emailPretext))
                 // Build G — effective date is the creation date. Was
                 // formerly set at ermApproveAndSign; moving it here so
                 // the consultant sees a stable "Effective: MM-DD-YYYY"
@@ -538,7 +542,72 @@ public class ConsultantApplicationService {
                     : applicationRepository.findByOwnerErmIdAndStatusAndDeletedFalse(owner, status, pageable);
         }
         populateOwnerNames(page.getContent());
+        populateApprovalSummary(page.getContent());
         return page;
+    }
+
+    /**
+     * Build O — batch-resolves the Manager/Accounts gate status and the
+     * "sent for approval" timestamp onto the transient summary fields for
+     * the ERM "All" list. Two queries for the whole page (gate rows +
+     * SENT_FOR_APPROVAL events) rather than per-row lookups.
+     *
+     * managerStatus/accountsStatus carry the LATEST gate decision per role
+     * (highest round wins); null when no gate exists for that role (e.g.
+     * Phase 1 never has an Accounts gate → the UI renders "N/A").
+     * sentForApprovalAt is the EARLIEST SENT_FOR_APPROVAL event (when it
+     * was first routed to approvers), ISO-formatted; null if never sent.
+     */
+    private void populateApprovalSummary(List<ConsultantApplication> apps) {
+        if (apps == null || apps.isEmpty()) return;
+        List<Long> ids = apps.stream()
+                .map(ConsultantApplication::getId)
+                .filter(java.util.Objects::nonNull)
+                .toList();
+        if (ids.isEmpty()) return;
+
+        // Latest gate row per (applicationId, role): highest round wins.
+        java.util.Map<Long, java.util.Map<
+                com.spire.backend.entity.AgreementApproval.ApproverRole,
+                com.spire.backend.entity.AgreementApproval>> byApp = new java.util.HashMap<>();
+        for (var a : approvalRepository.findByApplicationIdIn(ids)) {
+            byApp.computeIfAbsent(a.getApplicationId(), k -> new java.util.EnumMap<>(
+                            com.spire.backend.entity.AgreementApproval.ApproverRole.class))
+                    .merge(a.getRole(), a, (cur, cand) -> {
+                        int curRound = cur.getRound() == null ? -1 : cur.getRound();
+                        int candRound = cand.getRound() == null ? -1 : cand.getRound();
+                        return candRound >= curRound ? cand : cur;
+                    });
+        }
+
+        // Earliest SENT_FOR_APPROVAL event per application.
+        java.util.Map<Long, LocalDateTime> sentAt = new java.util.HashMap<>();
+        for (var e : eventRepository.findByApplicationIdInAndEventType(ids,
+                ConsultantApplicationEvent.EventType.SENT_FOR_APPROVAL.name())) {
+            if (e.getCreatedAt() == null) continue;
+            sentAt.merge(e.getApplicationId(), e.getCreatedAt(),
+                    (cur, cand) -> cand.isBefore(cur) ? cand : cur);
+        }
+
+        for (ConsultantApplication app : apps) {
+            var roleMap = byApp.get(app.getId());
+            if (roleMap != null) {
+                var mgr = roleMap.get(
+                        com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER);
+                if (mgr != null && mgr.getStatus() != null) {
+                    app.setManagerStatus(mgr.getStatus().name());
+                }
+                var acc = roleMap.get(
+                        com.spire.backend.entity.AgreementApproval.ApproverRole.ACCOUNTS);
+                if (acc != null && acc.getStatus() != null) {
+                    app.setAccountsStatus(acc.getStatus().name());
+                }
+            }
+            LocalDateTime sent = sentAt.get(app.getId());
+            if (sent != null) {
+                app.setSentForApprovalAt(sent.toString());
+            }
+        }
     }
 
     /**

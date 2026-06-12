@@ -799,12 +799,13 @@ public class EmailTemplateService {
      * signing and again on request (the /done page exposes a button).
      */
     public void sendConsultantApplicationCopy(ConsultantApplication application) {
-        String pdf = application.getSignedPdfUrl();
+        // Build O — no download link. The signed PDF is held in Sage IT's
+        // records and is not sent over email (mirrors the completed-agreement
+        // policy); the consultant is simply confirmed.
         String body = p("Hi " + escape(firstName(application)) + ",")
-                + p("Thanks for signing your engagement agreement with " + brandName() + ".")
-                + (pdf == null || pdf.isBlank()
-                        ? p("Your copy will be available shortly.")
-                        : button("Download your copy", pdf) + ctaFallback(pdf))
+                + p("Thanks for signing your engagement agreement with " + brandName() + ". "
+                        + "Your signed agreement is securely held in " + brandName()
+                        + "'s records — there's nothing further you need to do.")
                 + receipt(
                         "Application ID: " + application.getApplicationId(),
                         "Signed: " + (application.getSignedAt() == null
@@ -831,10 +832,16 @@ public class EmailTemplateService {
      */
     public void sendConsultantInitialFill(ConsultantApplication application) {
         String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
-        String body = p("Hi " + escape(firstName(application)) + ",")
-                + p(brandName() + " has prepared your engagement agreement and "
+        // Build O — ERM-authored pre-text becomes the intro; blank → the
+        // default copy. Escaped (HTML-safe) with newlines kept as breaks.
+        String pretext = application.getEmailPretext();
+        String introHtml = (pretext != null && !pretext.isBlank())
+                ? p(escape(pretext).replace("\n", "<br/>"))
+                : p(brandName() + " has prepared your engagement agreement and "
                         + "needs you to complete a few details so the document "
-                        + "can be finalized.")
+                        + "can be finalized.");
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + introHtml
                 + button("Complete Your Details", url)
                 + ctaFallback(url)
                 + receipt(
@@ -902,28 +909,21 @@ public class EmailTemplateService {
     }
 
     /**
-     * Build T — sent the moment the ERM releases the consultant version
-     * of the agreement. Points the consultant back to the portal where
-     * they can request a fresh OTP and download their copy.
+     * Build O — sent the moment the ERM verifies/releases the consultant
+     * version of the agreement. Pure notification: NO download link, no
+     * OTP, no portal button (consultant downloads were retired). Just
+     * confirms the agreement is verified and that we'll reach out if a
+     * revision is needed.
      */
     public void sendConsultantVersionReleased(ConsultantApplication application) {
-        String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
-                + p(brandName() + " has approved and released your copy of "
-                        + "the consultant agreement. You can now download a "
-                        + "PDF of the agreement and its Certificate of "
-                        + "Completion from your portal.")
-                + button("Open your portal", url)
-                + ctaFallback(url)
-                + receipt(
-                        "Application ID: " + application.getApplicationId(),
-                        "Verification: email OTP at download time")
-                + muted("For your security, we'll ask you to verify a fresh "
-                        + "6-digit code before the download starts.");
+                + p("Your " + brandName() + " consultant agreement is verified — "
+                        + "you'll be notified if any revision is needed.")
+                + receipt("Application ID: " + application.getApplicationId());
         emailService.sendEmail(
                 application.getConsultantEmail(),
-                "Your " + brandName() + " consultant agreement is ready to download",
-                wrap("Your agreement copy is ready", body));
+                "Your " + brandName() + " consultant agreement is verified",
+                wrap("Your agreement is verified", body));
     }
 
     /**

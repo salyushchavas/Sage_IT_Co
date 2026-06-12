@@ -174,6 +174,53 @@ public class AgreementApproverController {
         return ResponseEntity.ok(ApiResponse.success("Preview ready", payload));
     }
 
+    /**
+     * Build O — non-copyable inline preview of the FINAL, ERM-signed
+     * agreement for an approver's "Approved Documents" record. Unlike
+     * {@link #previewImages} (which blanks the ERM signature for the
+     * pre-sign review), this renders with {@code null} overrides so every
+     * signature — including the ERM countersignature and the appended
+     * uploads — is present. Only available once the agreement is COMPLETED
+     * (i.e. the ERM has signed); otherwise 409. Access is still gated by
+     * {@link ConsultantApplicationService#getForApprover} — the final-round
+     * gate row persists at COMPLETED, so the approver retains view rights.
+     */
+    @GetMapping("/api/agreement-approver/applications/{appId}/signed-preview-images")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> signedPreviewImages(
+            @PathVariable String appId,
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        ConsultantApplication app = consultantService.getForApprover(appId, gate, AgreementAuthz.userId(request));
+        if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(ApiResponse.error("The signed agreement is available once the ERM has signed it."));
+        }
+        String viewerEmail = (String) request.getAttribute(AgreementAuthz.ATTR_EMAIL);
+        List<String> pages;
+        try {
+            // null overrides → ALL signatures render (consultant + ERM
+            // countersignature); appended uploads are already centralized
+            // inside renderPdfBytes.
+            byte[] pdfBytes = agreementDocumentService.renderPdfBytes(app, null);
+            // Approver view stays clean (no consultant watermark).
+            List<byte[]> images = agreementDocumentService
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail, false);
+            pages = new ArrayList<>(images.size());
+            for (byte[] png : images) {
+                pages.add(java.util.Base64.getEncoder().encodeToString(png));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Couldn't render the signed agreement."));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pages", pages);
+        payload.put("pageCount", pages.size());
+        payload.put("viewerEmail", viewerEmail);
+        return ResponseEntity.ok(ApiResponse.success("Signed agreement ready", payload));
+    }
+
     @PostMapping("/api/agreement-approver/applications/{appId}/approve")
     public ResponseEntity<ApiResponse<ConsultantApplication>> approve(
             @PathVariable String appId,

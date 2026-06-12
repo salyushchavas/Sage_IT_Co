@@ -133,6 +133,7 @@ public class ConsultantApplicationController {
                 body.achDebitAmounts,
                 body.technologyTrack,
                 body.customScopeNotes,
+                body.emailPretext,
                 body.payload,
                 // Authenticated agreement user, stamped as the owner.
                 AgreementAuthz.userId(request),
@@ -1456,6 +1457,10 @@ public class ConsultantApplicationController {
         // consultant; rendered via ${technologyTrack}/${customScopeNotes}.
         public String technologyTrack;
         public String customScopeNotes;
+        // Build O — optional ERM-authored invitation email pre-text. Blank
+        // → the Sage IT Co default. Becomes the intro of the consultant's
+        // "complete your details" email.
+        public String emailPretext;
         // Legacy free-form payload, preserved for backward compat
         // with the existing /agreement-erm/new form. New flow ignores it.
         public JsonNode payload;

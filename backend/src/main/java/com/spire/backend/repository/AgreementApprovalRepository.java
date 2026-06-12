@@ -36,6 +36,9 @@ public interface AgreementApprovalRepository
     List<AgreementApproval> findByStatusAndRoleAndDecidedByOrderByDecidedAtDesc(
             Decision status, ApproverRole role, String decidedBy);
 
+    /** Build O — every gate row across a page of applications (batched for the ERM "All" list). */
+    List<AgreementApproval> findByApplicationIdIn(java.util.Collection<Long> applicationIds);
+
     /** Highest round number recorded for an application (null if none). */
     @Query("select max(a.round) from AgreementApproval a where a.applicationId = :appId")
     Integer maxRound(@Param("appId") Long appId);
