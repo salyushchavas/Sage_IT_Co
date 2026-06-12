@@ -1,7 +1,6 @@
 package com.spire.backend.service;
 
 import com.cloudinary.Cloudinary;
-import com.cloudinary.utils.ObjectUtils;
 import com.spire.backend.entity.ConsultantApplication;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -131,10 +130,8 @@ public class AgreementDocumentService {
         // Build N — renderPdfBytes now centralizes appendAttachments, so the
         // stored/COMPLETED PDF already includes the uploaded documents.
         byte[] bytes = renderPdfBytes(app, null);
-        // Phase 1 (S3) — store the final PDF in S3 and persist its key via
-        // PdfUploadResult.publicId(). Cloudinary fields are left null for new
-        // records (the download path dual-reads on s3_key). Cloudinary upload
-        // code (uploadBytesToCloudinary) is kept intact for old records.
+        // Store the final PDF in S3 and persist its key via
+        // PdfUploadResult.publicId() (S3 is now the only generated-PDF path).
         String key = documentStorage.store(
                 bytes, buildAgreementPdfKey(app, "final"), "application/pdf");
         return new PdfUploadResult(null, key, bytes);
@@ -158,31 +155,18 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Phase 1 — resolve a short-lived source URL to GET the final agreement
-     * PDF bytes, dual-reading by storage backend:
-     *   S3 (new records, {@code s3Key} set) → presigned GET URL;
-     *   else Cloudinary ({@code finalPdfPublicId}/derived) → signed URL;
-     *   else the legacy intermediate {@code signedPdfUrl}.
-     * Returns null when no document is available. For S3 records this NEVER
-     * falls back to Cloudinary — a presign failure surfaces as the same kind
-     * of error the Cloudinary path would.
+     * Phase 3 — short-lived presigned S3 GET URL for the final agreement PDF.
+     * Every final PDF lives in S3 ({@code s3_key}) after the Phase 2
+     * migration; the Cloudinary dual-read fallback has been removed. Returns
+     * null when {@code s3_key} is unset (impossible post-migration) — callers
+     * surface that as the standard not-available (404) response, never an NPE.
+     * The {@code final_pdf_*} columns are retained as a permanent audit map of
+     * the original Cloudinary asset ids.
      */
     public String finalPdfSourceUrl(ConsultantApplication app, Duration ttl) {
         String s3Key = app.getS3Key();
         if (s3Key != null && !s3Key.isBlank()) {
             return documentStorage.presignedGetUrl(s3Key, ttl, null, true);
-        }
-        boolean hasFinal = app.getFinalPdfPublicId() != null
-                || (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank());
-        if (hasFinal) {
-            String publicId = app.getFinalPdfPublicId();
-            if (publicId == null || publicId.isBlank()) {
-                publicId = derivePublicId(app.getApplicationId());
-            }
-            return signedPdfUrl(publicId, ttl);
-        }
-        if (app.getSignedPdfUrl() != null && !app.getSignedPdfUrl().isBlank()) {
-            return app.getSignedPdfUrl();
         }
         return null;
     }
@@ -197,18 +181,14 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Phase 1 — short-lived source URL for the consultant-version PDF:
-     * S3 ({@code consultantPdfS3Key}) → presigned; else Cloudinary
-     * ({@code consultantPdfPublicId}) → signed. Null when neither is set.
+     * Phase 3 — short-lived presigned S3 GET URL for the consultant-version
+     * PDF ({@code consultant_pdf_s3_key}); the Cloudinary fallback has been
+     * removed. Null when unset (post-migration impossible).
      */
     public String consultantPdfSourceUrl(ConsultantApplication app, Duration ttl) {
         String s3Key = app.getConsultantPdfS3Key();
         if (s3Key != null && !s3Key.isBlank()) {
             return documentStorage.presignedGetUrl(s3Key, ttl, null, true);
-        }
-        String publicId = app.getConsultantPdfPublicId();
-        if (publicId != null && !publicId.isBlank()) {
-            return signedPdfUrl(publicId, ttl);
         }
         return null;
     }
@@ -502,16 +482,6 @@ public class AgreementDocumentService {
     }
 
     /**
-     * Stable, derivable public_id for an application's final PDF.
-     * Always {@code agreements/<applicationId>}, matching the upload
-     * call. Used to re-sign download URLs for rows persisted before
-     * {@code final_pdf_public_id} was a column.
-     */
-    public static String derivePublicId(String applicationId) {
-        return "agreements/" + applicationId;
-    }
-
-    /**
      * In-memory cache of the consultant-independent BLANK preview PDF
      * (the master template rendered with empty values + underscore
      * placeholders + no signatures). Built lazily on first request and
@@ -557,58 +527,6 @@ public class AgreementDocumentService {
                 safeDelete(pdf);
             }
         }
-    }
-
-    /**
-     * Builds a Cloudinary signed URL for the given final-PDF public_id.
-     *
-     * The {@code Url.signed(true) + type("authenticated")} chain blocks
-     * bare URL guessing -- requests without a valid {@code ?s=...}
-     * signature get 401 from Cloudinary's edge.
-     *
-     * Note on the {@code ttl} parameter: the cloudinary-http44 v1.38.0
-     * {@code Url} class does not expose an {@code expiresAt} method;
-     * true time-limited URLs need an account-side Auth Token key
-     * (enterprise Cloudinary feature). Until that's configured, the
-     * signature is valid as long as the API secret is. The TTL is
-     * accepted here so call sites can express intent ("5-minute
-     * download link") and a future Auth Token upgrade is a single-
-     * method-body change with no signature churn.
-     */
-    public String signedPdfUrl(String publicId, Duration ttl) {
-        return signedPdfUrl(publicId, ttl, null);
-    }
-
-    /**
-     * Overload that bakes a human-readable download filename into the
-     * URL via Cloudinary's {@code fl_attachment:<filename>} flag.
-     * Causes the edge to respond with {@code Content-Disposition:
-     * attachment; filename="<filename>"} so the browser save dialog
-     * suggests the readable name instead of the public_id's UUID tail.
-     *
-     * Pass {@code null} (or use the two-arg overload) when fetching
-     * for server-side use (email attachment bytes) where the
-     * Content-Disposition header is set on the email by the
-     * MimeMessageHelper anyway.
-     */
-    public String signedPdfUrl(String publicId, Duration ttl, String downloadFilename) {
-        if (publicId == null || publicId.isBlank()) return null;
-        log.debug("Signing final PDF URL for {} with intended ttl {} download={}",
-                publicId, ttl, downloadFilename);
-        com.cloudinary.Url url = cloudinary.url()
-                .resourceType("raw")
-                .type("authenticated")
-                .signed(true)
-                .secure(true);
-        if (downloadFilename != null && !downloadFilename.isBlank()) {
-            // fl_attachment is signature-stable per filename: Cloudinary
-            // computes the signature over the transformation string, so
-            // the URL is valid for exactly this filename.
-            url = url.transformation(
-                    new com.cloudinary.Transformation<>()
-                            .flags("attachment:" + downloadFilename));
-        }
-        return url.generate(publicId);
     }
 
     // ── Filename helpers ────────────────────────────────────────────
@@ -1911,53 +1829,6 @@ public class AgreementDocumentService {
             throw new IOException("Expected PDF output missing: " + pdf);
         }
         return pdf;
-    }
-
-    // ── Cloudinary upload ───────────────────────────────────────────
-
-    /**
-     * Build T — upload an arbitrary PDF byte array under a custom
-     * public_id (the consultant-version PDF uses
-     * {@code agreements/{appId}-consultant} so it doesn't collide with
-     * the ERM-signed final PDF at {@code agreements/{appId}}).
-     */
-    public PdfUploadResult uploadPdfBytes(byte[] bytes, String publicId) throws IOException {
-        Map<?, ?> result = cloudinary.uploader().upload(bytes,
-                ObjectUtils.asMap(
-                        "public_id", publicId,
-                        "resource_type", "raw",
-                        "type", "authenticated",
-                        "overwrite", true));
-        Object url = result.get("secure_url");
-        if (url == null) {
-            throw new IOException("Cloudinary upload returned no secure_url");
-        }
-        return new PdfUploadResult(url.toString(), publicId, bytes);
-    }
-
-    private PdfUploadResult uploadBytesToCloudinary(byte[] bytes, String appId) throws IOException {
-        // type=authenticated: bare /raw/upload/agreements/{id} URLs
-        // return 401. Re-fetching requires a signature minted with the
-        // API secret (see signedPdfUrl()). The secure_url returned at
-        // upload time IS pre-signed -- safe to persist on the entity as
-        // the canonical URL for the operator's existing browser tab
-        // (no second sign() round trip), but anyone who only knows the
-        // public_id can't construct it.
-        String publicId = "agreements/" + appId;
-        Map<?, ?> result = cloudinary.uploader().upload(bytes,
-                ObjectUtils.asMap(
-                        "public_id", publicId,
-                        "resource_type", "raw",
-                        "type", "authenticated",
-                        "overwrite", true));
-        Object url = result.get("secure_url");
-        if (url == null) {
-            throw new IOException("Cloudinary upload returned no secure_url");
-        }
-        // Bytes are filled in by the outer generateAgreementPdf() that
-        // already holds them -- the upload helper itself never re-reads
-        // them, so this slot stays null and is replaced upstream.
-        return new PdfUploadResult(url.toString(), publicId, null);
     }
 
     private static void safeDelete(Path p) {
