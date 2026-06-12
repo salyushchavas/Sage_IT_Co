@@ -70,8 +70,14 @@ jobs:
         run: |
           # No `set -x`: the connection string must never be echoed.
           set -euo pipefail
+          # The runner ships a REAL pg_dump 16 at /usr/bin/pg_dump, which sits
+          # ahead of the v18 path on PATH and aborts against the 18.4 server.
+          # Prepend the v18 bin dir so `pg_dump` resolves to the version-18
+          # binary at /usr/lib/postgresql/18/bin/pg_dump.
+          export PATH="/usr/lib/postgresql/18/bin:$PATH"
           DUMP_FILE="sageit-db-$(date -u +%Y%m%d-%H%M%S).dump"
           echo "DUMP_FILE=$DUMP_FILE" >> "$GITHUB_ENV"
+          pg_dump --version   # proof in the log: must read pg_dump (PostgreSQL) 18.x
           pg_dump "$DATABASE_URL" -Fc --no-owner --no-acl -f "$DUMP_FILE"
           echo "Dump written: $DUMP_FILE"
 
