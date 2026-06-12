@@ -1325,10 +1325,11 @@ export default function ConsultantWizardPage() {
       router.replace("/consultant/dashboard");
     }} />;
   }
-  // Build L — invite went stale (15-day window). The consultant sees a
-  // clear "expired" state; the wizard never mounts. They can re-engage
-  // only after an ERM resends the invite, which restarts the clock.
-  if (app.status === "EXPIRED") {
+  // Build Q — access link lapsed (7-day window) OR a legacy EXPIRED row.
+  // The consultant sees a clear "expired" state; the wizard never mounts.
+  // They re-engage only after the ERM resends, which restarts the clock.
+  // The agreement itself is never expired/hidden — only the link lapses.
+  if (app.status === "EXPIRED" || app.linkExpired) {
     return <ConsultantStatusScreen kind="expired" onSignOut={() => {
       router.replace("/consultant/dashboard");
     }} />;

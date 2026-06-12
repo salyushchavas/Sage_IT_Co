@@ -923,6 +923,16 @@ public class ConsultantApplicationController {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
+        // Build Q — link-only expiry: if the consultant access link has
+        // lapsed (7 days), refuse to send a code and signal the expired
+        // state. The agreement is untouched and stays in every dashboard;
+        // the ERM resends to issue a fresh 7-day link.
+        if (consultantService.isConsultantLinkExpired(appId)) {
+            return ResponseEntity.ok(ApiResponse.success(Map.of(
+                    "linkExpired", "true",
+                    "message", "This invitation link has expired. Please ask your "
+                            + "Sage IT contact to resend it.")));
+        }
         String message = consultantService.requestPortalOtpForApp(appId, request);
         return ResponseEntity.ok(ApiResponse.success(Map.of("message", message)));
     }
@@ -1560,6 +1570,13 @@ public class ConsultantApplicationController {
         public boolean downloadAvailable;
         /** Release/verification timestamp. */
         public String consultantCopyReleasedAt;
+        /**
+         * Build Q — DERIVED: the consultant access link has lapsed (7-day
+         * TTL) on an awaiting agreement. The agreement is NOT expired — it
+         * stays here; the consultant just needs the ERM to resend a fresh
+         * link. Drives the passive "invitation link expired" dashboard row.
+         */
+        public boolean linkExpired;
 
         public static ConsultantAgreementSummary from(ConsultantApplication app) {
             ConsultantAgreementSummary r = new ConsultantAgreementSummary();
@@ -1578,7 +1595,16 @@ public class ConsultantApplicationController {
                     ? null
                     : app.getConsultantCopyReleasedAt().toString();
 
+            r.linkExpired = Boolean.TRUE.equals(app.getLinkExpired());
+
             String s = app.getStatus();
+            // Build Q — a lapsed access link on an awaiting agreement is a
+            // passive, non-actionable row (the consultant can't sign until
+            // the ERM resends); the agreement itself is untouched.
+            if (r.linkExpired) {
+                r.statusLabel = "Invitation link expired";
+                r.action = "NONE";
+            } else
             // Build L — every post-submit state is status-only (no download).
             if (ConsultantApplication.Status.SUBMITTED.name().equals(s)) {
                 r.statusLabel = "Awaiting your signature";

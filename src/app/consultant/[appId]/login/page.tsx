@@ -38,6 +38,10 @@ export default function ConsultantAppLoginPage() {
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
   const [cooldown, setCooldown] = useState(0);
+  // Build Q — the consultant access link has lapsed (7-day TTL). No code is
+  // sent; the consultant is told to ask Sage IT to resend. The agreement is
+  // untouched and still visible to the ERM.
+  const [linkExpired, setLinkExpired] = useState(false);
 
   // Already-verified consultants bounce straight to the fill flow.
   useEffect(() => {
@@ -79,6 +83,10 @@ export default function ConsultantAppLoginPage() {
     setInfo("");
     try {
       const res = await requestConsultantPortalOtp(appId);
+      if (res.linkExpired === "true") {
+        setLinkExpired(true);
+        return;
+      }
       setInfo(res.message);
       setStep("otp");
       setCooldown(RESEND_SECONDS);
@@ -95,6 +103,10 @@ export default function ConsultantAppLoginPage() {
     setError("");
     try {
       const res = await requestConsultantPortalOtp(appId);
+      if (res.linkExpired === "true") {
+        setLinkExpired(true);
+        return;
+      }
       setInfo(res.message);
       setCooldown(RESEND_SECONDS);
       setOtp("");
@@ -138,7 +150,23 @@ export default function ConsultantAppLoginPage() {
           </span>
         </div>
 
-        {step === "intro" ? (
+        {linkExpired ? (
+          <div className="space-y-4">
+            <h1 className="text-2xl font-serif text-sage-navy">
+              This link has expired
+            </h1>
+            <div className="rounded-md border border-stone-200 bg-stone-50 px-4 py-3 inline-flex items-start gap-2 text-sm text-gray-700">
+              <AlertCircle size={16} className="text-sage-copper-deep shrink-0 mt-0.5" />
+              <span>
+                Your invitation link is more than 7 days old. For your
+                security it can no longer be used. Please contact your Sage IT
+                contact and ask them to resend the invitation — your agreement
+                and anything you&apos;ve already filled in are safe, and a fresh
+                link will reopen access.
+              </span>
+            </div>
+          </div>
+        ) : step === "intro" ? (
           <form
             onSubmit={(e) => {
               e.preventDefault();

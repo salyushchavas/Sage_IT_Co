@@ -89,6 +89,18 @@ public class ConsultantApplication {
     private String sentForApprovalAt;
 
     /**
+     * Build Q — DERIVED consultant-link expiry. True when an awaiting
+     * (SUBMITTED) agreement's access link is older than the 7-day TTL
+     * (from {@code inviteSentAt}). Computed by the service on consultant +
+     * ERM list reads; never persisted and never a substitute for status —
+     * the agreement keeps its lifecycle state and stays visible. Drives
+     * the "Link expired — resend" indicator (ERM) and the "link expired —
+     * contact Sage IT" screen (consultant).
+     */
+    @Transient
+    private Boolean linkExpired;
+
+    /**
      * Phase C — soft delete (archive). Only the super-admin archives,
      * and only CANCELLED applications. The row stays in the DB
      * (recoverable, audit history + Cloudinary PDF preserved); it's

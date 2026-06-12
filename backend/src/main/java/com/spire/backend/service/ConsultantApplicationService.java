@@ -68,12 +68,17 @@ public class ConsultantApplicationService {
 
     private static final int APPLICATION_TTL_DAYS = 7;
     /**
-     * Build L — invite stays valid for 15 days from {@code inviteSentAt}.
-     * Past that, a SUBMITTED row is flipped to EXPIRED both lazily on
-     * consultant access (so the dashboard reflects the state without
-     * waiting for the cron) and by the daily sweep.
+     * Build Q — the consultant ACCESS LINK is valid for 7 days from the
+     * last invite send ({@code inviteSentAt}; falls back to createdAt).
+     * Past that the link is treated as expired: the consultant is BLOCKED
+     * from accessing the agreement (shown a "link expired — ask Sage IT to
+     * resend" message), but the AGREEMENT itself is NEVER mutated — it
+     * keeps its lifecycle status and stays visible in every dashboard. The
+     * ERM resends to issue a fresh 7-day window. Replaces the Build L rule
+     * that flipped SUBMITTED rows to the terminal EXPIRED status after 15
+     * days; link expiry is now a DERIVED, non-mutating indicator.
      */
-    private static final int INVITE_VALIDITY_DAYS = 15;
+    private static final int CONSULTANT_LINK_TTL_DAYS = 7;
 
     /**
      * Sentinel ermUserId for applications created via the hardcoded
@@ -373,6 +378,14 @@ public class ConsultantApplicationService {
                 || app.getConsultantEmail().isBlank()) {
             throw new IllegalArgumentException("Invalid or expired code.");
         }
+        // Build Q — block verify through an expired access link (no status
+        // mutation; the request endpoint already refuses these, this covers
+        // the rare request→verify boundary).
+        if (isConsultantLinkExpired(app)) {
+            throw new IllegalStateException(
+                    "This invitation link has expired. Please ask your Sage IT "
+                            + "contact to resend it.");
+        }
         String normalised = app.getConsultantEmail().trim().toLowerCase();
         ConsultantVerification cv = verificationRepository
                 .findFirstByEmailAndConsumedAtIsNullOrderByCreatedAtDesc(normalised)
@@ -470,7 +483,7 @@ public class ConsultantApplicationService {
     public List<ConsultantApplication> listForConsultant(String email) {
         String normalised = email == null ? "" : email.trim().toLowerCase();
         if (normalised.isEmpty()) return List.of();
-        return applicationRepository
+        List<ConsultantApplication> out = applicationRepository
                 .findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(
                         normalised)
                 .stream()
@@ -480,6 +493,10 @@ public class ConsultantApplicationService {
                         dashboardRank(a.getStatus()),
                         dashboardRank(b.getStatus())))
                 .toList();
+        // Build Q — derived link-expiry so the dashboard renders the
+        // "link expired — contact Sage IT to resend" state (no status flip).
+        out.forEach(app -> app.setLinkExpired(isConsultantLinkExpired(app)));
+        return out;
     }
 
     private static int dashboardRank(String status) {
@@ -543,6 +560,9 @@ public class ConsultantApplicationService {
         }
         populateOwnerNames(page.getContent());
         populateApprovalSummary(page.getContent());
+        // Build Q — derived "link expired — resend" indicator for the ERM
+        // dashboard; never hides or mutates the agreement.
+        page.getContent().forEach(app -> app.setLinkExpired(isConsultantLinkExpired(app)));
         return page;
     }
 
@@ -888,18 +908,15 @@ public class ConsultantApplicationService {
     public ConsultantApplication getForConsultant(String applicationId,
                                                   HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        // Build L — lazy 15-day invite expiry. If a SUBMITTED row's
-        // invite is older than 15 days, flip it to EXPIRED on the
-        // spot so the dashboard / wizard render the expired state
-        // even if the daily cron hasn't fired yet.
-        app = applyInviteExpiryIfStale(app, request);
-        // CANCELLED stays a hard block; EXPIRED is now readable so
-        // the consultant can see the "invitation expired" status
-        // screen rather than a generic error.
+        // CANCELLED stays a hard block.
         if (ConsultantApplication.Status.CANCELLED.name().equals(app.getStatus())) {
             throw new IllegalStateException(
                     "This application is no longer accepting consultant actions.");
         }
+        // Build Q — link expiry is a DERIVED, non-mutating signal: the
+        // agreement keeps its status, but the consultant view renders the
+        // "link expired — ask Sage IT to resend" screen when it's set.
+        app.setLinkExpired(isConsultantLinkExpired(app));
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.ACCESSED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
@@ -909,33 +926,32 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Build L — flips a SUBMITTED row past its 15-day invite window
-     * to EXPIRED in place. Returns the (possibly mutated) entity.
-     * No-op for any other state, and for SUBMITTED rows whose invite
-     * is still inside the window.
+     * Build Q — DERIVED consultant-link expiry. True when an awaiting
+     * (SUBMITTED) agreement's access link is older than the 7-day TTL
+     * (measured from inviteSentAt, falling back to createdAt). NEVER
+     * mutates the agreement — callers use it to block consultant access
+     * and to render the "link expired — resend" indicator. Returns false
+     * for every other status (so COMPLETED and all post-submission states
+     * are never link-expired) and when the timestamp is missing.
      */
-    private ConsultantApplication applyInviteExpiryIfStale(
-            ConsultantApplication app, HttpServletRequest request) {
+    private boolean isConsultantLinkExpired(ConsultantApplication app) {
+        if (app == null) return false;
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(app.getStatus())) {
-            return app;
+            return false;
         }
         LocalDateTime sentAt = app.getInviteSentAt();
         if (sentAt == null) sentAt = app.getCreatedAt();
-        if (sentAt == null) return app;
-        if (sentAt.plusDays(INVITE_VALIDITY_DAYS).isAfter(LocalDateTime.now())) {
-            return app;
-        }
-        String previousStatus = app.getStatus();
-        app.setStatus(ConsultantApplication.Status.EXPIRED.name());
-        applicationRepository.save(app);
-        appendEvent(app.getId(),
-                ConsultantApplicationEvent.EventType.EXPIRED,
-                ConsultantApplicationEvent.ActorType.SYSTEM, null,
-                Map.of("reason", "invite-15-day-expiry",
-                        "previousStatus", previousStatus,
-                        "inviteSentAt", sentAt.toString()),
-                request);
-        return app;
+        if (sentAt == null) return false;
+        return sentAt.plusDays(CONSULTANT_LINK_TTL_DAYS).isBefore(LocalDateTime.now());
+    }
+
+    /** Build Q — public overload: resolve the row, then derive link expiry (false if missing/deleted). */
+    @Transactional(readOnly = true)
+    public boolean isConsultantLinkExpired(String applicationId) {
+        ConsultantApplication app = applicationRepository
+                .findByApplicationId(applicationId).orElse(null);
+        if (app == null || Boolean.TRUE.equals(app.getDeleted())) return false;
+        return isConsultantLinkExpired(app);
     }
 
     @Transactional
@@ -948,6 +964,12 @@ public class ConsultantApplicationService {
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
             throw new IllegalStateException(
                     "Application is in status " + status + " and cannot be verified.");
+        }
+        // Build Q — block this consultant transition through an expired link.
+        if (isConsultantLinkExpired(app)) {
+            throw new IllegalStateException(
+                    "This invitation link has expired. Please ask your Sage IT "
+                            + "contact to resend it.");
         }
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
@@ -1132,16 +1154,20 @@ public class ConsultantApplicationService {
             ConsultantFillPatch patch,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        // Build L — lazy 15-day expiry guard. A SUBMITTED row whose
-        // invite is past 15 days flips to EXPIRED and the fill is
-        // rejected with the consultant-visible "expired" state below.
-        app = applyInviteExpiryIfStale(app, request);
         String status = app.getStatus();
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
             throw new IllegalStateException(
                     "Application is in status " + status
                             + " and cannot be edited by the consultant.");
+        }
+        // Build Q — the agreement is never mutated by expiry, but an
+        // expired access link blocks the write (the consultant must get a
+        // fresh link from the ERM). No status change.
+        if (isConsultantLinkExpired(app)) {
+            throw new IllegalStateException(
+                    "This invitation link has expired. Please ask your Sage IT "
+                            + "contact to resend it.");
         }
         // Build Y (B5) / Build P — during a section-restricted round, ONLY
         // the in-scope section(s) may change. Covers a Build Y revision
@@ -1236,15 +1262,19 @@ public class ConsultantApplicationService {
             String signedLegalName,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        // Build L — lazy 15-day expiry guard. Stops a stale invite
-        // from sliding through submit between the daily cron sweeps.
-        app = applyInviteExpiryIfStale(app, request);
         String fromStatus = app.getStatus();
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(fromStatus)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(fromStatus)) {
             throw new IllegalStateException(
                     "Application is in status " + fromStatus
                             + " and cannot be submitted by the consultant.");
+        }
+        // Build Q — block a submit through an expired access link (no
+        // status mutation; the ERM resends to reopen the 7-day window).
+        if (isConsultantLinkExpired(app)) {
+            throw new IllegalStateException(
+                    "This invitation link has expired. Please ask your Sage IT "
+                            + "contact to resend it.");
         }
         if (signedLegalName == null
                 || signedLegalName.trim().split("\\s+").length < 2) {
@@ -1552,6 +1582,15 @@ public class ConsultantApplicationService {
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(st)) {
             throw new IllegalStateException(
                     "This agreement is no longer open for consultant edits.");
+        }
+        // Build Q — an expired access link blocks EVERY consultant write,
+        // including the out-of-band uploads (cheque/work-auth/DL/SSN/offer-
+        // letter) that don't pass through consultantFill/consultantSubmit.
+        // No status mutation; the ERM resends to reopen the 7-day window.
+        if (isConsultantLinkExpired(app)) {
+            throw new IllegalStateException(
+                    "This invitation link has expired. Please ask your Sage IT "
+                            + "contact to resend it.");
         }
         java.util.Optional<java.util.Set<String>> scope = consultantWriteScope(app);
         if (scope.isEmpty()) return;
@@ -3565,43 +3604,17 @@ public class ConsultantApplicationService {
     // ── Cron sweep ──────────────────────────────────────────────────
 
     /**
-     * Flip every in-flight application whose {@code expiresAt} is in
-     * the past to EXPIRED, append an audit event, and return how many
-     * we touched. Called from {@link ConsultantExpiryJob} once daily.
-     *
-     * Idempotent — terminal statuses are filtered out by
-     * {@link ConsultantApplicationRepository#findByStatusInAndExpiresAtBefore}
-     * so re-running the sweep is safe.
+     * Build Q — NO-OP. Agreements no longer expire: the 7-day TTL applies
+     * only to the consultant ACCESS LINK, surfaced as a derived,
+     * non-mutating indicator ({@link #isConsultantLinkExpired}). This
+     * method is retained (returns 0) so the daily {@link ConsultantExpiryJob}
+     * — itself now unscheduled — and any operations caller keep compiling,
+     * but it never changes an agreement's status. Executed (COMPLETED)
+     * agreements and all other states are permanent records.
      */
-    @Transactional
+    @Transactional(readOnly = true)
     public int expireStaleApplications() {
-        LocalDateTime now = LocalDateTime.now();
-        // Build L — sweep only SUBMITTED rows whose invite is past 15
-        // days. REVISION_REQUESTED, VERIFIED, UPDATED, COMPLETED are
-        // exempt: the consultant has already engaged or the ERM is
-        // mid-review, so they shouldn't time out under the consultant
-        // -invite rule.
-        LocalDateTime cutoff = now.minusDays(INVITE_VALIDITY_DAYS);
-        List<String> inFlight = List.of(
-                ConsultantApplication.Status.SUBMITTED.name());
-        List<ConsultantApplication> stale =
-                applicationRepository.findByStatusInAndInviteSentAtBefore(inFlight, cutoff);
-        if (stale.isEmpty()) return 0;
-
-        for (ConsultantApplication app : stale) {
-            String previousStatus = app.getStatus();
-            app.setStatus(ConsultantApplication.Status.EXPIRED.name());
-            applicationRepository.save(app);
-            appendEvent(app.getId(),
-                    ConsultantApplicationEvent.EventType.EXPIRED,
-                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
-                    Map.of("expiredAt", now.toString(),
-                            "previousStatus", previousStatus,
-                            "reason", "invite-15-day-expiry",
-                            "inviteSentAt", String.valueOf(app.getInviteSentAt())),
-                    null);
-        }
-        return stale.size();
+        return 0;
     }
 
     // ── Internal helpers ────────────────────────────────────────────

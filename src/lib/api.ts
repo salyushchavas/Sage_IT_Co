@@ -3455,6 +3455,15 @@ export interface ConsultantApplication {
   managerStatus?: string | null;
   accountsStatus?: string | null;
   sentForApprovalAt?: string | null;
+  // Build L — timestamp of the last consultant-invite send (create or
+  // resend); drives the derived 7-day link-expiry window.
+  inviteSentAt?: string | null;
+  // Build Q — DERIVED: the consultant access link has lapsed (7 days from
+  // inviteSentAt) for an awaiting (SUBMITTED) agreement. The agreement is
+  // NOT expired/hidden — it stays in every dashboard; this only drives the
+  // "Link expired — resend" indicator (ERM) and the "contact Sage IT to
+  // resend" screen (consultant). Populated on list/consultant reads only.
+  linkExpired?: boolean | null;
 }
 
 /**
@@ -4250,7 +4259,9 @@ export async function requestConsultantPortalOtp(applicationId: string) {
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
-  const body = await readApiResponse<{ message: string }>(res);
+  // Build Q — a lapsed access link returns { linkExpired: "true", message }
+  // (no code sent); the login page renders the "link expired" state.
+  const body = await readApiResponse<{ message: string; linkExpired?: string }>(res);
   if (!res.ok || !body?.success) {
     throw new Error(body?.message || `Request failed (${res.status})`);
   }
@@ -4753,6 +4764,10 @@ export interface ConsultantAgreementSummary {
   consultantCopyReleased?: boolean;
   downloadAvailable?: boolean;
   consultantCopyReleasedAt?: string | null;
+  // Build Q — the consultant access link has lapsed (7-day TTL) on an
+  // awaiting agreement. The agreement is NOT expired/hidden; the row is
+  // passive until the ERM resends a fresh link.
+  linkExpired?: boolean;
 }
 
 /**

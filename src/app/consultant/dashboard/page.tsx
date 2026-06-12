@@ -174,7 +174,12 @@ function AgreementRow({
   item: ConsultantAgreementSummary;
   onAction: () => void;
 }) {
-  const tone = actionTone(item.action, item.status, item.consultantCopyReleased);
+  const tone = actionTone(
+    item.action,
+    item.status,
+    item.consultantCopyReleased,
+    item.linkExpired,
+  );
   const clickable =
     item.action === "SIGN"
     || item.action === "REVIEW_AND_SIGN";
@@ -237,7 +242,21 @@ function actionTone(
   action: ConsultantPortalAction,
   status: string,
   released?: boolean,
+  linkExpired?: boolean,
 ) {
+  // Build Q — a lapsed access link makes the row passive: the consultant
+  // can't act until the ERM resends a fresh link. The agreement is NOT
+  // expired/hidden — it stays here with a calm "contact Sage IT" prompt.
+  if (linkExpired) {
+    return {
+      badge: "bg-stone-200 text-gray-700",
+      icon: <Ban size={11} />,
+      cta: "",
+      button: "",
+      passiveCopy:
+        "Your invitation link has expired (7-day window). Contact Sage IT and ask them to resend it — your agreement and saved details are safe.",
+    };
+  }
   switch (action) {
     case "SIGN":
       return {

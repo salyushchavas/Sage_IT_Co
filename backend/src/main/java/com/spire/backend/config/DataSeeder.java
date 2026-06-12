@@ -1346,6 +1346,65 @@ public class DataSeeder implements CommandLineRunner {
                 // Build P — Phase 2 reopened-section scope (JSON array).
                 {"phase2_reopened_sections TEXT", "phase2_reopened_sections"},
         };
+        // Build Q — agreements no longer expire (the 7-day TTL applies to
+        // the consultant LINK only, as a derived indicator). Restore every
+        // previously-EXPIRED, non-deleted agreement to its TRUE prior
+        // status so it returns to the dashboards in the right lifecycle
+        // state. EXPIRED was historically produced from several statuses
+        // (the first cron flipped DRAFT/SUBMITTED/REVISION_REQUESTED/
+        // UPDATED/VERIFIED), so a blanket →SUBMITTED would corrupt e.g. a
+        // VERIFIED (already-signed, awaiting-countersignature) row by
+        // re-opening it for consultant editing. Each EXPIRED transition
+        // recorded metadata.previousStatus on an EXPIRED audit event, so we
+        // recover that per row; fall back to SUBMITTED only when no prior
+        // status is recoverable (visible + resendable). COMPLETED was never
+        // EXPIRED, so executed agreements are untouched. Idempotent: re-runs
+        // find no EXPIRED rows.
+        try {
+            java.util.Set<String> validStatuses = new java.util.HashSet<>();
+            for (com.spire.backend.entity.ConsultantApplication.Status v
+                    : com.spire.backend.entity.ConsultantApplication.Status.values()) {
+                validStatuses.add(v.name());
+            }
+            java.util.regex.Pattern prevPat = java.util.regex.Pattern.compile(
+                    "\"previousStatus\"\\s*:\\s*\"([A-Z_]+)\"");
+            java.util.List<Long> expiredIds = jdbcTemplate.queryForList(
+                    "SELECT id FROM consultant_applications "
+                            + "WHERE status = 'EXPIRED' AND deleted = FALSE",
+                    Long.class);
+            int restored = 0;
+            for (Long id : expiredIds) {
+                String target = "SUBMITTED"; // fallback when unrecoverable
+                try {
+                    java.util.List<String> metas = jdbcTemplate.queryForList(
+                            "SELECT metadata FROM consultant_application_events "
+                                    + "WHERE application_id = ? AND event_type = 'EXPIRED' "
+                                    + "ORDER BY created_at DESC",
+                            String.class, id);
+                    for (String meta : metas) {
+                        if (meta == null) continue;
+                        java.util.regex.Matcher m = prevPat.matcher(meta);
+                        if (m.find()) {
+                            String prev = m.group(1);
+                            if (validStatuses.contains(prev) && !"EXPIRED".equals(prev)) {
+                                target = prev;
+                            }
+                            break;
+                        }
+                    }
+                } catch (Exception ignore) { /* fall back to SUBMITTED */ }
+                jdbcTemplate.update(
+                        "UPDATE consultant_applications SET status = ? WHERE id = ?",
+                        target, id);
+                restored++;
+            }
+            if (restored > 0) {
+                log.info("Build Q — restored {} previously-EXPIRED agreement(s) to "
+                        + "their true prior status (link-only expiry)", restored);
+            }
+        } catch (Exception e) {
+            log.warn("Build Q EXPIRED restore skipped: {}", e.getMessage());
+        }
         for (String[] col : columns) {
             try {
                 jdbcTemplate.execute(

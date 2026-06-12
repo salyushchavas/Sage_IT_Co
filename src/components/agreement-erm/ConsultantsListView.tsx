@@ -2,11 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertCircle, Loader2, Plus, Search } from "lucide-react";
+import { AlertCircle, Loader2, Plus, RefreshCw, Search } from "lucide-react";
 
 import {
   fetchMe,
   listConsultantApplications,
+  resendConsultantInvite,
   type ConsultantApplication,
   type ConsultantApplicationStatus,
   type ConsultantApplicationsPage,
@@ -41,6 +42,9 @@ export default function ConsultantsListView() {
   // theirs, so the column would be redundant).
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [ownerFilter, setOwnerFilter] = useState("ALL");
+  // Build Q — bumped after a "Resend link" so the list reloads and the
+  // refreshed inviteSentAt clears the "Link expired" indicator.
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -82,7 +86,7 @@ export default function ConsultantsListView() {
     return () => {
       cancelled = true;
     };
-  }, [filter, page]);
+  }, [filter, page, reloadKey]);
 
   // Distinct owner names in the current page, for the super-admin's
   // "View" dropdown (client-side filter at this data volume).
@@ -245,6 +249,16 @@ export default function ConsultantsListView() {
                   </td>
                   <td className="px-4 py-2">
                     <AgreementStatusPill status={r.status} />
+                    {/* Build Q — derived "Link expired — resend"; the
+                        agreement is never hidden/expired by this. */}
+                    {r.linkExpired && (
+                      <div className="mt-1">
+                        <ResendLinkButton
+                          appId={r.applicationId}
+                          onResent={() => setReloadKey((k) => k + 1)}
+                        />
+                      </div>
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     <ApprovalBadge status={r.managerStatus} />
@@ -307,6 +321,62 @@ export default function ConsultantsListView() {
 function formatDate(iso: string | null | undefined) {
   // Build N — US MM-DD-YYYY (was en-IN DD-MM).
   return iso ? formatUsDate(iso) : "—";
+}
+
+// Build Q — inline "Link expired · Resend" affordance for the ERM list.
+// Issues a fresh 7-day consultant link (resets inviteSentAt, re-emails,
+// supersedes old OTPs) WITHOUT changing the agreement's state.
+function ResendLinkButton({
+  appId,
+  onResent,
+}: {
+  appId: string;
+  onResent: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+  const [err, setErr] = useState("");
+
+  const resend = async () => {
+    setBusy(true);
+    setErr("");
+    try {
+      await resendConsultantInvite(appId);
+      setDone(true);
+      // Let the parent reload so the refreshed inviteSentAt clears the badge.
+      setTimeout(onResent, 900);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't resend.");
+      setBusy(false);
+    }
+  };
+
+  if (done) {
+    return (
+      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
+        Fresh link sent
+      </span>
+    );
+  }
+  return (
+    <span className="inline-flex flex-col gap-0.5">
+      <button
+        type="button"
+        onClick={resend}
+        disabled={busy}
+        title="Issue a fresh 7-day consultant link (the agreement is unchanged)"
+        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 cursor-pointer"
+      >
+        {busy ? (
+          <Loader2 size={10} className="animate-spin" />
+        ) : (
+          <RefreshCw size={10} />
+        )}
+        Link expired · Resend
+      </button>
+      {err && <span className="text-[10px] text-red-600">{err}</span>}
+    </span>
+  );
 }
 
 // Build O — compact Manager/Accounts gate-status badge for the "All" list.
