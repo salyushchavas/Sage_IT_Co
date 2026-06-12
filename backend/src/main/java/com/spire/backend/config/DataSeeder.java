@@ -1343,6 +1343,8 @@ public class DataSeeder implements CommandLineRunner {
                 {"portal_entries TEXT", "portal_entries"},
                 // Build O — optional ERM-authored invitation email pre-text.
                 {"email_pretext TEXT", "email_pretext"},
+                // Build P — Phase 2 reopened-section scope (JSON array).
+                {"phase2_reopened_sections TEXT", "phase2_reopened_sections"},
         };
         for (String[] col : columns) {
             try {

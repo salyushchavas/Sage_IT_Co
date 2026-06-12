@@ -408,6 +408,20 @@ public class ConsultantApplication {
     @Column(name = "revision_sections", columnDefinition = "TEXT")
     private String revisionSections;
 
+    /**
+     * Build P — Phase 2 reopened-section scope. JSON-in-TEXT array of
+     * {@code [{"key":"appendix2"}, …]} written by {@code advanceToPhase2}
+     * = the ERM-promoted (previously-optional) appendices. While phase ≥ 2
+     * and status = SUBMITTED and this is non-null, the consultant may see
+     * + edit ONLY these sections (+ the final sign step); every completed
+     * Phase-1 section — including its uploads (cheques, work-auth, DL/SSN)
+     * — stays hidden + immutable. Distinct from {@code revisionSections}:
+     * a Build Y revision round can still scope a Phase-2 agreement on top
+     * of this (and takes precedence while status = REVISION_REQUESTED).
+     */
+    @Column(name = "phase2_reopened_sections", columnDefinition = "TEXT")
+    private String phase2ReopenedSections;
+
     // ── Final countersigned PDF (post-ERM signature) ─────────────────
     //
     // Distinct from signedPdfUrl (which is the consultant-signed

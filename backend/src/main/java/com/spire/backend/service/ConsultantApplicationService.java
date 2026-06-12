@@ -1143,21 +1143,20 @@ public class ConsultantApplicationService {
                     "Application is in status " + status
                             + " and cannot be edited by the consultant.");
         }
-        // Build Y (B5) — during a section-restricted revision round, ONLY
-        // the ERM-selected section(s) may change. Every other section's
-        // data + confirmations stay immutable for that round.
-        boolean restricted =
-                ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
-                && app.getRevisionSections() != null
-                && !app.getRevisionSections().isBlank();
-        if (restricted) {
-            java.util.Set<String> allowed = parseRevisionSectionKeys(app);
+        // Build Y (B5) / Build P — during a section-restricted round, ONLY
+        // the in-scope section(s) may change. Covers a Build Y revision
+        // round (REVISION_REQUESTED) AND a Phase-2 fill (phase ≥ 2): in
+        // Phase 2 only the ERM-reopened sections are writable, so every
+        // completed Phase-1 field/affirmation stays immutable.
+        java.util.Optional<java.util.Set<String>> writeScope = consultantWriteScope(app);
+        if (writeScope.isPresent()) {
+            java.util.Set<String> allowed = writeScope.get();
             for (String touched : patch.touchedFieldNames()) {
                 String section = FIELD_SECTION.get(touched);
                 if (section != null && !allowed.contains(section)) {
                     throw new IllegalArgumentException(
-                            "This revision is limited to the selected section(s). "
-                                    + "The field '" + touched + "' is outside that scope.");
+                            "This change is outside the section(s) currently open for "
+                                    + "editing. The field '" + touched + "' is locked.");
                 }
             }
         }
@@ -1532,29 +1531,49 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Build Y (B5) — reject a write to {@code sectionId} when a section-
-     * restricted revision round is active and that section isn't in scope.
-     * No-op outside REVISION_REQUESTED or when the scope is empty. Covers
-     * the out-of-band upload endpoints (cheque, work-auth) that don't pass
-     * through {@code consultantFill}.
+     * Build Y (B5) / Build P — reject a write to {@code sectionId} when a
+     * section-restricted round is active and that section isn't in scope.
+     * Covers BOTH a Build Y revision round (REVISION_REQUESTED) and a
+     * Phase-2 fill (phase ≥ 2, status SUBMITTED) — in Phase 2 only the
+     * ERM-reopened sections are writable, so a completed Phase-1 upload
+     * (cheques, work-auth, DL/SSN) is rejected here even though the
+     * out-of-band upload endpoints don't pass through {@code consultantFill}.
+     * No-op when unrestricted.
      */
     private void assertSectionWritable(ConsultantApplication app, String sectionId) {
-        if (!ConsultantApplication.Status.REVISION_REQUESTED.name().equals(app.getStatus())) {
-            return;
+        // Build P — the out-of-band upload endpoints (cheque, work-auth,
+        // DL/SSN, offer-letter) carry no status guard of their own, so gate
+        // them here: a consultant may only write while actively filling
+        // (SUBMITTED) or revising (REVISION_REQUESTED). Reject in any other
+        // status so a still-valid consultant token can't overwrite a locked
+        // Phase-1 upload after submit (VERIFIED) or once finalized.
+        String st = app.getStatus();
+        if (!ConsultantApplication.Status.SUBMITTED.name().equals(st)
+                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(st)) {
+            throw new IllegalStateException(
+                    "This agreement is no longer open for consultant edits.");
         }
-        String json = app.getRevisionSections();
-        if (json == null || json.isBlank()) return;
-        if (!parseRevisionSectionKeys(app).contains(sectionId)) {
+        java.util.Optional<java.util.Set<String>> scope = consultantWriteScope(app);
+        if (scope.isEmpty()) return;
+        if (!scope.get().contains(sectionId)) {
             throw new IllegalArgumentException(
-                    "This revision is limited to the selected section(s); "
-                            + "this change is outside that scope.");
+                    "This change is outside the section(s) currently open for editing.");
         }
     }
 
     /** The section keys currently in the consultant's revision scope (empty = unrestricted). */
     private java.util.Set<String> parseRevisionSectionKeys(ConsultantApplication app) {
+        return parseSectionScopeKeys(app.getRevisionSections());
+    }
+
+    /** Build P — the Phase 2 reopened-section keys (same JSON shape as the revision scope). */
+    private java.util.Set<String> parsePhase2ReopenedKeys(ConsultantApplication app) {
+        return parseSectionScopeKeys(app.getPhase2ReopenedSections());
+    }
+
+    /** Parse a {@code [{"key":"…"}, …]} section-scope JSON into its keys (empty on null/blank/garbage). */
+    private java.util.Set<String> parseSectionScopeKeys(String json) {
         java.util.Set<String> keys = new java.util.LinkedHashSet<>();
-        String json = app.getRevisionSections();
         if (json != null && !json.isBlank()) {
             try {
                 JsonNode arr = objectMapper.readTree(json);
@@ -1567,6 +1586,42 @@ public class ConsultantApplicationService {
             } catch (Exception ignored) { /* treat as unrestricted */ }
         }
         return keys;
+    }
+
+    /** Build P — serialize section keys into the {@code [{"key":"…"}, …]} scope JSON (appendix keys only). */
+    private String buildSectionScopeJson(java.util.List<String> keys) {
+        com.fasterxml.jackson.databind.node.ArrayNode arr = objectMapper.createArrayNode();
+        if (keys != null) {
+            for (String k : keys) {
+                if (k != null && k.startsWith("appendix")) {
+                    arr.add(objectMapper.createObjectNode().put("key", k));
+                }
+            }
+        }
+        return arr.toString();
+    }
+
+    /**
+     * Build P — the section keys the consultant may currently WRITE, or an
+     * empty {@link java.util.Optional} when unrestricted. A Build Y revision
+     * round (status = REVISION_REQUESTED) takes precedence; otherwise a
+     * Phase-2 fill (phase ≥ 2, status = SUBMITTED, scope persisted)
+     * restricts writes to the ERM-reopened sections. Present-but-empty ⇒
+     * nothing is writable (everything was completed in Phase 1).
+     */
+    private java.util.Optional<java.util.Set<String>> consultantWriteScope(ConsultantApplication app) {
+        if (ConsultantApplication.Status.REVISION_REQUESTED.name().equals(app.getStatus())
+                && app.getRevisionSections() != null && !app.getRevisionSections().isBlank()) {
+            return java.util.Optional.of(parseRevisionSectionKeys(app));
+        }
+        Integer phase = app.getPhase();
+        if (phase != null && phase >= 2
+                && ConsultantApplication.Status.SUBMITTED.name().equals(app.getStatus())
+                && app.getPhase2ReopenedSections() != null
+                && !app.getPhase2ReopenedSections().isBlank()) {
+            return java.util.Optional.of(parsePhase2ReopenedKeys(app));
+        }
+        return java.util.Optional.empty();
     }
 
     // ── 3B — role-based approval workflow ────────────────────────────
@@ -2465,27 +2520,31 @@ public class ConsultantApplicationService {
         if (p5) { app.setRequireAppendix5(true); promoted.add("appendix5"); }
         if (pSsn) { app.setRequireSsn(true); promoted.add("ssn"); }
 
-        // Clear consultant signatures + every audit timestamp + every
-        // section affirmation so the consultant has to re-sign and
-        // re-affirm the now-final document. Field data stays put.
-        app.setSignatureImage(null);
-        app.setSignedAt(null);
-        app.setSignedIp(null);
-        app.setSignedUserAgent(null);
-        app.setSigningAt(null);
-        app.setSigningIp(null);
+        // Build P — Phase 2 lock. Completed Phase 1 content stays
+        // IMMUTABLE: preserve the PRIMARY signature + legal name and every
+        // already-given affirmation (main agreement, exhibits, and any
+        // appendix NOT being reopened). The consultant re-signs only the
+        // FINAL execution block and re-affirms only the reopened sections.
+        // (Mirrors the Build Y restricted-revision signing model, which
+        // reuses the persisted primary signature and re-captures the final
+        // — see consultantSubmit's hasExistingPrimary handling.)
         app.setFinalSignatureImage(null);
         app.setFinalSignedAt(null);
         app.setFinalSigningIp(null);
-        app.setSignedLegalName(null);
-        app.setAffirmedMainAgreement(false);
-        app.setAffirmedExhibitA(false);
-        app.setAffirmedExhibitB(false);
-        app.setAffirmedAppendix1(false);
-        app.setAffirmedAppendix2(false);
-        app.setAffirmedAppendix3(false);
-        app.setAffirmedAppendix4(false);
-        app.setAffirmedAppendix5(false);
+        // Clear affirmations ONLY for the reopened (newly-required)
+        // appendices, so the consultant re-affirms exactly those; locked
+        // Phase-1 sections keep their original affirmation.
+        if (p1) app.setAffirmedAppendix1(false);
+        if (p2) app.setAffirmedAppendix2(false);
+        if (p3) app.setAffirmedAppendix3(false);
+        if (p4) app.setAffirmedAppendix4(false);
+        if (p5) app.setAffirmedAppendix5(false);
+
+        // Build P — persist the reopened-section scope (the promoted
+        // appendices). The consultant wizard + the backend write-gate
+        // restrict Phase 2 to exactly these sections + the final sign
+        // step; everything else completed in Phase 1 is read-only/hidden.
+        app.setPhase2ReopenedSections(buildSectionScopeJson(promoted));
 
         // Clear the Phase-1 ERM countersignature record + the final
         // PDF pointers. ermApproveAndSign regenerates both at Phase 2

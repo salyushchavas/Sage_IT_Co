@@ -3377,6 +3377,11 @@ export interface ConsultantApplication {
   // Build Y — ERM section-picker revision scope (JSON array of {key,note});
   // non-empty + REVISION_REQUESTED ⇒ the consultant is restricted to these.
   revisionSections: string | null;
+  // Build P — Phase 2 reopened-section scope (JSON array of {key}); when
+  // phase ≥ 2 and status = SUBMITTED, the consultant fills + signs ONLY
+  // these reopened sections, and every completed Phase-1 section (incl.
+  // its uploads) is hidden + immutable.
+  phase2ReopenedSections?: string | null;
   // Final post-countersignature PDF
   finalPdfUrl: string | null;
   // Phase D — consultant access record (real client IP via X-Forwarded-For).

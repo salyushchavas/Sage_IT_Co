@@ -483,6 +483,27 @@ function revisionScopeKeys(
   return parseRevisionSections(app.revisionSections).map((r) => r.key);
 }
 
+/**
+ * Build P — true when this is a Phase-2 fill restricted to the ERM-reopened
+ * sections. Triggered by a persisted scope (set at advance-to-Phase-2), so
+ * even an empty scope still restricts the wizard to the final sign step —
+ * completed Phase 1 content (incl. uploads) is never re-opened.
+ */
+function isPhase2Restricted(app: ConsultantApplication | null): boolean {
+  return (
+    !!app
+    && (app.phase ?? 1) >= 2
+    && app.status === "SUBMITTED"
+    && app.phase2ReopenedSections != null
+  );
+}
+
+/** Build P — the reopened Phase-2 section keys (same JSON shape as the revision scope). */
+function phase2ScopeKeys(app: ConsultantApplication | null): string[] {
+  if (!isPhase2Restricted(app)) return [];
+  return parseRevisionSections(app!.phase2ReopenedSections).map((r) => r.key);
+}
+
 // ── Page ───────────────────────────────────────────────────────
 
 export default function ConsultantWizardPage() {
@@ -618,12 +639,18 @@ export default function ConsultantWizardPage() {
         // appendices are not counted; if every visible non-review
         // section is already complete, the consultant lands on Review.
         const loadedReqs = effectiveRequirements(data);
-        // Build Y — a section-restricted revision shows ONLY the selected
-        // section(s) + sign step; otherwise the normal visible set.
+        // Build Y / Build P — the seed list MUST match the render-time
+        // visibleSections precedence (revision scope → Phase-2 reopened
+        // scope → normal visible set); otherwise firstIncompleteIndex
+        // seeds an index into a longer list than what renders, leaving
+        // currentStep out of range and crashing on first paint (the clamp
+        // effect only runs post-commit).
         const loadedScope = revisionScopeKeys(data);
         const loadedVisible = loadedScope.length > 0
             ? restrictedVisibleSections(loadedScope)
-            : filterVisibleSections(loadedReqs);
+            : isPhase2Restricted(data)
+              ? restrictedVisibleSections(phase2ScopeKeys(data))
+              : filterVisibleSections(loadedReqs);
         const loadedWorkAuth = Boolean(data.workAuthDocPublicId);
         const loadedOffer = Boolean(data.offerLetterPublicId);
         const loadedDl = Boolean(data.dlDocPublicId);
@@ -1002,8 +1029,18 @@ export default function ConsultantWizardPage() {
   // list so a not-required appendix simply doesn't exist for the
   // consultant.
   const visibleSections = useMemo(() => {
+    // Build Y — a section-restricted revision round takes precedence.
     const scope = revisionScopeKeys(app);
     if (scope.length > 0) return restrictedVisibleSections(scope);
+    // Build P — a Phase-2 fill restricts to the ERM-reopened sections
+    // (+ the final sign step). Completed Phase 1 sections — including
+    // every upload (cheques, work-auth, DL/SSN) — are hidden + immutable;
+    // the consultant re-signs only the final execution signature (the
+    // primary signature is reused). An empty reopened scope still
+    // restricts (review-only), so nothing completed can be re-edited.
+    if (isPhase2Restricted(app)) {
+      return restrictedVisibleSections(phase2ScopeKeys(app));
+    }
     return filterVisibleSections(reqs);
   }, [reqs, app]);
 
@@ -1425,9 +1462,9 @@ export default function ConsultantWizardPage() {
                   </p>
                   <p className="text-sm text-stone-700 mt-1 leading-relaxed">
                     Sage IT advanced your agreement to Phase 2 on the same
-                    document. Everything you filled in Phase 1 is preserved.
-                    Complete the sections now marked Required for Phase 2,
-                    re-sign, and submit.
+                    document. Everything you completed in Phase 1 — including
+                    your uploads — stays locked and unchanged. Just complete
+                    the reopened section(s) below, re-sign, and submit.
                   </p>
                 </div>
               </div>
