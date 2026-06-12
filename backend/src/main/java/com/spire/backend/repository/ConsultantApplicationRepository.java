@@ -77,4 +77,17 @@ public interface ConsultantApplicationRepository
     List<ConsultantApplication>
             findByOwnerErmIdAndStatusInAndDeletedFalseOrderByUpdatedAtDesc(
                     String ownerErmId, List<String> statuses);
+
+    // Phase 2 (Cloudinary→S3 migration) — candidates: records whose FINAL
+    // PDF still lives on Cloudinary (public_id set) but isn't yet in S3
+    // (s3_key null). Deleted rows are intentionally included: the Cloudinary
+    // object exists regardless of soft-delete, so its s3_key should migrate
+    // too. Idempotent: once s3_key is set the row drops out of this set.
+    List<ConsultantApplication> findByS3KeyIsNullAndFinalPdfPublicIdIsNotNull();
+
+    // Phase 2 — candidates: records whose CONSULTANT-VERSION PDF (consultant
+    // copy + Certificate of Completion) still lives on Cloudinary but isn't
+    // yet in S3.
+    List<ConsultantApplication>
+            findByConsultantPdfS3KeyIsNullAndConsultantPdfPublicIdIsNotNull();
 }
