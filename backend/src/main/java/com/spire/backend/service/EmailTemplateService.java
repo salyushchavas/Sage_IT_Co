@@ -193,6 +193,39 @@ public class EmailTemplateService {
                 wrap("Profile complete!", body));
     }
 
+    // ── Build T — approval-request notification (Manager / Accounts) ──
+    /**
+     * Build T — notify a ROUTED approver (the specific Manager / Accounts the
+     * ERM selected via Build K) that an agreement is awaiting their approval
+     * after the ERM sends it for approval. Branded body with consultant, ERM,
+     * and phase; a login-required CTA to the approver dashboard (no public deep
+     * link). Best-effort: the caller swallows failures so the send-for-approval
+     * action never blocks. Only the routed approver(s) are ever emailed.
+     */
+    public void sendApprovalRequestNotification(
+            String toEmail, String approverName, String consultantName,
+            String ermName, int phase) {
+        if (toEmail == null || toEmail.isBlank()) return;
+        String greetName = (approverName == null || approverName.isBlank())
+                ? "there" : approverName;
+        String body = p("Hi " + escape(greetName) + ",")
+                + p("An agreement is awaiting your approval on " + brandName() + ".")
+                + receipt(
+                        // escape(safe(..)) — null-guard then HTML-escape, since
+                        // the consultant name is user-controlled (injection).
+                        "Consultant: " + escape(safe(consultantName)),
+                        "ERM: " + escape(safe(ermName)),
+                        "Phase: " + phase)
+                + p("Please review the agreement and record your decision "
+                        + "(Approve or Request revision) from your approvals "
+                        + "dashboard. You'll need to sign in.")
+                + button("Review in your dashboard", appUrl + "/agreements/approvals")
+                + muted("— " + brandName() + "");
+        emailService.sendEmail(toEmail,
+                "Action needed — an agreement is awaiting your approval",
+                wrap("Agreement awaiting your approval", body));
+    }
+
     // ── 12. Weekly report reminder (Phase 5A — Mondays) ─────────────
     /**
      * Monday nudge for participants in WEEKLY_REPORTING_ACTIVE who

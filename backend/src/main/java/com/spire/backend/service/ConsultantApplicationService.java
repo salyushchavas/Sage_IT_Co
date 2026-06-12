@@ -1778,6 +1778,30 @@ public class ConsultantApplicationService {
         app.setStatus(ConsultantApplication.Status.AWAITING_APPROVALS.name());
         applicationRepository.save(app);
 
+        // Build T — email each ROUTED approver (Phase 1: the selected Manager;
+        // Phase 2: the selected Manager + Accounts) that an agreement awaits
+        // their approval. A re-send after a revision reuses this method, so it
+        // re-notifies the relevant approver(s) for free. Best-effort per
+        // recipient: a send failure is logged and never blocks the action, and
+        // only the routed approver(s) — never the whole role pool — are emailed.
+        String ermDisplayName = (ownerErmId == null) ? "your Sage IT contact"
+                : agreementUserRepository.findById(ownerErmId)
+                        .map(AgreementUser::getFullName)
+                        .filter(n -> n != null && !n.isBlank())
+                        .orElse("your Sage IT contact");
+        for (var entry : chosen.entrySet()) {
+            AgreementUser approver = entry.getValue();
+            try {
+                emailTemplateService.sendApprovalRequestNotification(
+                        approver.getEmail(), approver.getFullName(),
+                        app.getConsultantName(), ermDisplayName, phase);
+            } catch (Exception e) {
+                log.warn("Build T — approval-request email to the {} failed "
+                        + "(send-for-approval unaffected): {}",
+                        entry.getKey(), e.getMessage());
+            }
+        }
+
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.SENT_FOR_APPROVAL,
                 ConsultantApplicationEvent.ActorType.ERM,
