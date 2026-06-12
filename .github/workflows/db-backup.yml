@@ -56,12 +56,19 @@ jobs:
           # Add the official PGDG apt repo FIRST, then install the client major
           # EXPLICITLY. The bare `postgresql-client` metapackage resolves to
           # Ubuntu's default (16), which aborts against the 18.4 Railway server
-          # ("server version mismatch"); pinning postgresql-client-18 guarantees
-          # the client major >= the server. pg_wrapper then dispatches the
-          # PATH `pg_dump`/`pg_restore` to the newest installed major (18).
+          # ("server version mismatch"); pinning postgresql-client-18 installs
+          # the v18 client to /usr/lib/postgresql/18/bin.
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
           sudo apt-get install -y --no-install-recommends postgresql-client-18
-          pg_dump --version   # expect: pg_dump (PostgreSQL) 18.x
+          # Make v18 the default for ALL subsequent steps. Writing to GITHUB_PATH
+          # prepends this dir to PATH for every later step (each step is a fresh
+          # shell, so a per-step `export PATH` would NOT carry over), shadowing the
+          # runner's pre-installed v16 at /usr/bin. One line covers both pg_dump
+          # (dump step) and pg_restore (integrity gate).
+          echo "/usr/lib/postgresql/18/bin" >> "$GITHUB_PATH"
+          # Prove the install landed — absolute path, because GITHUB_PATH only
+          # takes effect in SUBSEQUENT steps, not this one.
+          /usr/lib/postgresql/18/bin/pg_dump --version   # pg_dump (PostgreSQL) 18.x
 
       - name: Dump database (custom format)
         env:
@@ -70,11 +77,8 @@ jobs:
         run: |
           # No `set -x`: the connection string must never be echoed.
           set -euo pipefail
-          # The runner ships a REAL pg_dump 16 at /usr/bin/pg_dump, which sits
-          # ahead of the v18 path on PATH and aborts against the 18.4 server.
-          # Prepend the v18 bin dir so `pg_dump` resolves to the version-18
-          # binary at /usr/lib/postgresql/18/bin/pg_dump.
-          export PATH="/usr/lib/postgresql/18/bin:$PATH"
+          # pg_dump resolves to v18 via the GITHUB_PATH entry from the install
+          # step (a fresh shell per step, but GITHUB_PATH is job-wide).
           DUMP_FILE="sageit-db-$(date -u +%Y%m%d-%H%M%S).dump"
           echo "DUMP_FILE=$DUMP_FILE" >> "$GITHUB_ENV"
           pg_dump --version   # proof in the log: must read pg_dump (PostgreSQL) 18.x
@@ -84,6 +88,7 @@ jobs:
       - name: Integrity gate (full restore read + size floor)
         run: |
           set -euo pipefail
+          pg_restore --version   # proof in the log: must read pg_restore (PostgreSQL) 18.x
           # 1) FULL-ARCHIVE integrity. `pg_restore -f /dev/null` converts the
           #    ENTIRE dump to SQL on a throwaway sink WITHOUT a database — it
           #    decompresses and walks every data block. Unlike `--list` (which
