@@ -1,0 +1,111 @@
+name: db-backup
+
+# Nightly logical backup of the Railway Postgres database to S3.
+#
+# Schedule: 20:30 UTC (~02:00 IST) daily; also runnable on demand via the
+# "Run workflow" button (workflow_dispatch).
+#
+# Flow: dump (pg_dump custom format) → integrity gate (full pg_restore read +
+# size floor) → upload to s3://<bucket>/backups/db/. The job fails loudly on
+# any error, so a failed/missing run IS the alert.
+#
+# Retention is NOT handled here — an S3 lifecycle rule on the backups/db/
+# prefix (configured operator-side in the console) expires old dumps.
+#
+# Required repository secrets (Settings → Secrets and variables → Actions):
+#   DATABASE_URL           Railway Postgres PUBLIC connection string
+#                          (Railway → Postgres service → Variables/Connect →
+#                          the PUBLIC URL, host ending in .proxy.rlwy.net or
+#                          similar — NOT the *.railway.internal one, which is
+#                          unreachable from GitHub's runners).
+#   AWS_ACCESS_KEY_ID      IAM key already permitted PutObject on the bucket.
+#   AWS_SECRET_ACCESS_KEY  Matching secret.
+#   AWS_REGION             e.g. ap-southeast-2 (the bucket's region).
+#   S3_BUCKET              Target bucket name (no s3:// prefix, no path).
+#
+# Secrets: no step echoes them and there is no `set -x`, and GitHub masks the
+# exact registered secret values in logs. Masking is substring-exact — the full
+# DATABASE_URL is redacted, but on a libpq *connection error* pg_dump may print
+# the decomposed host/port/dbname (never the password — infra metadata only).
+# PGSSLMODE=require additionally blocks any plaintext fallback of dump traffic.
+
+on:
+  schedule:
+    - cron: "30 20 * * *"   # 20:30 UTC daily ≈ 02:00 IST
+  workflow_dispatch: {}
+
+permissions:
+  contents: read            # least privilege — the job needs no repo write
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false # never abort an in-flight backup with a newer one
+
+jobs:
+  backup:
+    name: Dump, verify, upload
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Install latest postgresql-client (PGDG)
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            postgresql-common curl ca-certificates
+          # Official PGDG apt repo → newest pg_dump/pg_restore, so the client
+          # is always >= the Railway server version. (A newer client dumps an
+          # older server fine; an older client would abort on a newer server.)
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y --no-install-recommends postgresql-client
+          pg_dump --version
+
+      - name: Dump database (custom format)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          PGSSLMODE: require    # enforce TLS — never silently downgrade to plaintext
+        run: |
+          # No `set -x`: the connection string must never be echoed.
+          set -euo pipefail
+          DUMP_FILE="sageit-db-$(date -u +%Y%m%d-%H%M%S).dump"
+          echo "DUMP_FILE=$DUMP_FILE" >> "$GITHUB_ENV"
+          pg_dump "$DATABASE_URL" -Fc --no-owner --no-acl -f "$DUMP_FILE"
+          echo "Dump written: $DUMP_FILE"
+
+      - name: Integrity gate (full restore read + size floor)
+        run: |
+          set -euo pipefail
+          # 1) FULL-ARCHIVE integrity. `pg_restore -f /dev/null` converts the
+          #    ENTIRE dump to SQL on a throwaway sink WITHOUT a database — it
+          #    decompresses and walks every data block. Unlike `--list` (which
+          #    reads only the header+TOC at the start of the file), this catches
+          #    a dump truncated mid-stream (dropped Railway proxy connection,
+          #    runner OOM, disk-full): it fails HERE, before upload, instead of
+          #    storing a header-valid but data-short file as a "good" backup.
+          pg_restore -f /dev/null "$DUMP_FILE"
+          echo "Full restore read OK — archive is restorable end-to-end"
+          # 2) Informational TOC entry count (also flags a schema-less dump).
+          TOC_ENTRIES="$(pg_restore --list "$DUMP_FILE" | wc -l)"
+          echo "Archive TOC: $TOC_ENTRIES entries"
+          # 3) Near-empty smoke test ONLY — a connection-refused/empty dump is
+          #    tiny. Real truncation is caught by the full read above, not here.
+          SIZE="$(stat -c%s "$DUMP_FILE")"
+          echo "Dump size: $SIZE bytes"
+          if [ "$SIZE" -lt 10240 ]; then
+            echo "::error::Dump is only $SIZE bytes (< 10 KB) — failing the backup"
+            exit 1
+          fi
+
+      - name: Upload to S3
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ secrets.AWS_REGION }}
+          S3_BUCKET: ${{ secrets.S3_BUCKET }}
+        run: |
+          set -euo pipefail
+          # Bucket already has default SSE + versioning; the object is encrypted
+          # server-side automatically. Trailing slash → keeps the file's name.
+          aws s3 cp "$DUMP_FILE" "s3://$S3_BUCKET/backups/db/" \
+            --region "$AWS_DEFAULT_REGION" --only-show-errors
+          echo "Uploaded $DUMP_FILE to s3://<bucket>/backups/db/"
