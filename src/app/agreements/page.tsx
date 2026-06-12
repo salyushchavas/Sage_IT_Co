@@ -51,7 +51,7 @@ export default function AgreementsDashboardPage() {
   return (
     <AgreementErmShell
       title="Consultant agreements"
-      subtitle="All applications in flight, completed, or expired."
+      subtitle="Every agreement — in flight or completed. Agreements are permanent records and never expire."
       Icon={FileSignature}
     >
       <ApprovalStatusBoards />

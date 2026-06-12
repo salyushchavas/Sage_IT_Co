@@ -25,7 +25,8 @@ const FILTERS: ReadonlyArray<{ id: "ALL" | ConsultantApplicationStatus; label: s
   { id: "SIGNED",             label: "Signed" },
   { id: "COMPLETED",          label: "Completed" },
   { id: "CANCELLED",          label: "Cancelled" },
-  { id: "EXPIRED",            label: "Expired" },
+  // Build Q — no "Expired" filter: agreements never expire (only the
+  // consultant link does, surfaced as a per-row "Link expired · Resend").
 ];
 
 const PAGE_SIZE = 20;
@@ -111,9 +112,11 @@ export default function ConsultantsListView() {
     );
   }, [pageData, search, isSuperAdmin, ownerFilter]);
 
-  // Build O — base 6 cols (Consultant, App ID, Status, Manager, Accounts,
-  // Sent on) + Created + Expires = 8; super-admin adds the Owner column.
-  const colCount = isSuperAdmin ? 9 : 8;
+  // Build O/Q — base 7 cols (Consultant, App ID, Status, Manager, Accounts,
+  // Sent on, Created); super-admin adds the Owner column. Build Q removed
+  // the "Expires" column — agreements never expire (only the consultant
+  // link does, shown as the "Link expired · Resend" badge in Status).
+  const colCount = isSuperAdmin ? 8 : 7;
 
   return (
     <div className="space-y-4">
@@ -202,7 +205,6 @@ export default function ConsultantsListView() {
               <th className="text-left px-4 py-2">Accounts</th>
               <th className="text-left px-4 py-2">Sent on</th>
               <th className="text-left px-4 py-2">Created</th>
-              <th className="text-left px-4 py-2">Expires</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -276,9 +278,6 @@ export default function ConsultantsListView() {
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {formatDate(r.createdAt)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-gray-500">
-                    {formatDate(r.expiresAt)}
                   </td>
                 </tr>
               ))

@@ -770,9 +770,6 @@ function HeaderRow({ app }: { app: ConsultantApplication }) {
         <span className="inline-flex items-center gap-1">
           <Clock size={11} /> Created {fmtDateTime(app.createdAt)}
         </span>
-        <span className="inline-flex items-center gap-1">
-          <Clock size={11} /> Expires {fmtDateTime(app.expiresAt)}
-        </span>
       </div>
     </div>
   );
