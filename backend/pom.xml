@@ -19,7 +19,22 @@
 
     <properties>
         <java.version>17</java.version>
+        <aws.sdk.version>2.46.9</aws.sdk.version>
     </properties>
+
+    <!-- AWS SDK v2 BOM keeps the s3 artifact (+ its transitive AWS
+         modules) on a single, consistent version. -->
+    <dependencyManagement>
+        <dependencies>
+            <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>bom</artifactId>
+                <version>${aws.sdk.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
+        </dependencies>
+    </dependencyManagement>
 
     <dependencies>
         <!-- Spring Boot Starters -->
@@ -99,6 +114,14 @@
             <groupId>com.cloudinary</groupId>
             <artifactId>cloudinary-http44</artifactId>
             <version>1.38.0</version>
+        </dependency>
+
+        <!-- AWS S3 (Phase 1 document storage). Version managed by the
+             AWS SDK v2 BOM above. The s3 module includes the
+             S3Presigner used for short-lived download URLs. -->
+        <dependency>
+            <groupId>software.amazon.awssdk</groupId>
+            <artifactId>s3</artifactId>
         </dependency>
 
         <!-- Apache POI: low-level DOCX read/write. docx-stamper

@@ -2132,14 +2132,14 @@ public class ConsultantApplicationService {
         try {
             AgreementDocumentService.PdfUploadResult pdf =
                     agreementDocumentService.generateAgreementPdf(app);
-            app.setFinalPdfUrl(pdf.secureUrl());
-            app.setFinalPdfPublicId(pdf.publicId());
+            // Phase 1 (S3) — persist the S3 key; the Cloudinary fields stay
+            // null for new records (download/email paths dual-read on s3_key).
+            app.setS3Key(pdf.publicId());
             applicationRepository.save(app);
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.PDF_GENERATED,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
-                    Map.of("url", pdf.secureUrl(),
-                            "publicId", pdf.publicId(),
+                    Map.of("s3Key", pdf.publicId() == null ? "" : pdf.publicId(),
                             "kind", "final"),
                     null);
             try {
@@ -2208,18 +2208,22 @@ public class ConsultantApplicationService {
                     "Couldn't render consultant-version PDF: " + e.getMessage(), e);
         }
 
-        String publicId = "agreements/" + applicationId + "-consultant";
+        String s3Key;
         try {
-            agreementDocumentService.uploadPdfBytes(release.bytes(), publicId);
+            // Phase 1 (S3) — store the consultant-version PDF in S3. Cloudinary
+            // uploadPdfBytes is kept intact for old records / Phase 2 migration.
+            s3Key = agreementDocumentService.storeConsultantVersionPdf(app, release.bytes());
         } catch (Exception e) {
-            log.error("Cloudinary upload of consultant-version failed for {}: {}",
+            log.error("S3 upload of consultant-version failed for {}: {}",
                     applicationId, e.getMessage(), e);
             throw new IllegalStateException(
                     "Couldn't store consultant-version PDF: " + e.getMessage(), e);
         }
 
         LocalDateTime now = LocalDateTime.now();
-        app.setConsultantPdfPublicId(publicId);
+        // Phase 1 (S3) — persist the S3 key; consultantPdfPublicId (Cloudinary)
+        // stays null for new records.
+        app.setConsultantPdfS3Key(s3Key);
         app.setDocumentHash(release.sha256Hex());
         app.setConsultantCopyReleased(true);
         app.setConsultantCopyReleasedAt(now);
@@ -2234,7 +2238,7 @@ public class ConsultantApplicationService {
                 ConsultantApplicationEvent.ActorType.ERM,
                 AGREEMENT_ERM_USER_ID,
                 Map.of(
-                        "publicId", publicId,
+                        "s3Key", s3Key,
                         "documentHash", release.sha256Hex(),
                         "bytes", String.valueOf(release.bytes().length)),
                 request);
@@ -2390,9 +2394,13 @@ public class ConsultantApplicationService {
     public byte[] downloadConsultantCopy(
             String applicationId, String otp, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        if (!Boolean.TRUE.equals(app.getConsultantCopyReleased())
-                || app.getConsultantPdfPublicId() == null
-                || app.getConsultantPdfPublicId().isBlank()) {
+        // Phase 1 (S3) — released copy lives in S3 (consultantPdfS3Key) for new
+        // records, or Cloudinary (consultantPdfPublicId) for old ones.
+        boolean copyStored = (app.getConsultantPdfS3Key() != null
+                        && !app.getConsultantPdfS3Key().isBlank())
+                || (app.getConsultantPdfPublicId() != null
+                        && !app.getConsultantPdfPublicId().isBlank());
+        if (!Boolean.TRUE.equals(app.getConsultantCopyReleased()) || !copyStored) {
             throw new IllegalStateException(
                     "Your copy is not available yet.");
         }
@@ -2423,10 +2431,10 @@ public class ConsultantApplicationService {
         cv.setConsumedAt(LocalDateTime.now());
         verificationRepository.save(cv);
 
-        // Fetch the bytes through a short-lived signed URL.
-        String url = agreementDocumentService.signedPdfUrl(
-                app.getConsultantPdfPublicId(),
-                java.time.Duration.ofMinutes(5));
+        // Fetch the bytes through a short-lived URL — S3 presigned (new
+        // records) or Cloudinary signed (old records).
+        String url = agreementDocumentService.consultantPdfSourceUrl(
+                app, java.time.Duration.ofMinutes(5));
         byte[] bytes;
         try {
             java.net.URLConnection conn = new java.net.URL(url).openConnection();
@@ -2643,8 +2651,13 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "A valid recipient email is required.");
         }
+        // Phase 1 (S3) — the final PDF is "available" when stored in S3
+        // (s3Key) OR Cloudinary (finalPdfPublicId/finalPdfUrl).
+        boolean finalPdfStored = (app.getS3Key() != null && !app.getS3Key().isBlank())
+                || app.getFinalPdfPublicId() != null
+                || (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank());
         if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())
-                || app.getFinalPdfUrl() == null) {
+                || !finalPdfStored) {
             throw new IllegalStateException(
                     "The final agreement PDF is not yet available.");
         }

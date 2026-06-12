@@ -99,6 +99,8 @@ public class AgreementDocumentService {
     private static final long LIBREOFFICE_TIMEOUT_SECONDS = 60L;
 
     private final Cloudinary cloudinary;
+    /** Phase 1 (S3) — storage backend for NEWLY generated agreement PDFs. */
+    private final DocumentStorage documentStorage;
     /** Phase B — resolve the owning ERM's email for the ${ermEmail}
      *  placeholder, replacing the global env value. */
     private final com.spire.backend.repository.AgreementUserRepository agreementUserRepository;
@@ -129,8 +131,86 @@ public class AgreementDocumentService {
         // Build N — renderPdfBytes now centralizes appendAttachments, so the
         // stored/COMPLETED PDF already includes the uploaded documents.
         byte[] bytes = renderPdfBytes(app, null);
-        PdfUploadResult uploaded = uploadBytesToCloudinary(bytes, app.getApplicationId());
-        return new PdfUploadResult(uploaded.secureUrl(), uploaded.publicId(), bytes);
+        // Phase 1 (S3) — store the final PDF in S3 and persist its key via
+        // PdfUploadResult.publicId(). Cloudinary fields are left null for new
+        // records (the download path dual-reads on s3_key). Cloudinary upload
+        // code (uploadBytesToCloudinary) is kept intact for old records.
+        String key = documentStorage.store(
+                bytes, buildAgreementPdfKey(app, "final"), "application/pdf");
+        return new PdfUploadResult(null, key, bytes);
+    }
+
+    /**
+     * Phase 1 (S3) — object key for a generated agreement PDF:
+     * {@code agreements/{ermId}/phase-{1|2}/{documentType}-{yyyyMMdd-HHmmss}.pdf}.
+     * The timestamp makes every generation a fresh key (bucket versioning also
+     * retains prior bytes). Falls back to {@code system} when the owning ERM
+     * isn't set (legacy rows).
+     */
+    private String buildAgreementPdfKey(ConsultantApplication app, String documentType) {
+        String ermId = (app.getOwnerErmId() == null || app.getOwnerErmId().isBlank())
+                ? "system" : app.getOwnerErmId();
+        int phase = app.getPhase() == null ? 1 : app.getPhase();
+        String ts = LocalDateTime.now()
+                .format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"));
+        return "agreements/" + ermId + "/phase-" + phase + "/"
+                + documentType + "-" + ts + ".pdf";
+    }
+
+    /**
+     * Phase 1 — resolve a short-lived source URL to GET the final agreement
+     * PDF bytes, dual-reading by storage backend:
+     *   S3 (new records, {@code s3Key} set) → presigned GET URL;
+     *   else Cloudinary ({@code finalPdfPublicId}/derived) → signed URL;
+     *   else the legacy intermediate {@code signedPdfUrl}.
+     * Returns null when no document is available. For S3 records this NEVER
+     * falls back to Cloudinary — a presign failure surfaces as the same kind
+     * of error the Cloudinary path would.
+     */
+    public String finalPdfSourceUrl(ConsultantApplication app, Duration ttl) {
+        String s3Key = app.getS3Key();
+        if (s3Key != null && !s3Key.isBlank()) {
+            return documentStorage.presignedGetUrl(s3Key, ttl, null, true);
+        }
+        boolean hasFinal = app.getFinalPdfPublicId() != null
+                || (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank());
+        if (hasFinal) {
+            String publicId = app.getFinalPdfPublicId();
+            if (publicId == null || publicId.isBlank()) {
+                publicId = derivePublicId(app.getApplicationId());
+            }
+            return signedPdfUrl(publicId, ttl);
+        }
+        if (app.getSignedPdfUrl() != null && !app.getSignedPdfUrl().isBlank()) {
+            return app.getSignedPdfUrl();
+        }
+        return null;
+    }
+
+    /**
+     * Phase 1 (S3) — store the already-rendered consultant-version PDF
+     * (consultant copy + Certificate of Completion) in S3 and return its key.
+     */
+    public String storeConsultantVersionPdf(ConsultantApplication app, byte[] bytes) {
+        return documentStorage.store(
+                bytes, buildAgreementPdfKey(app, "consultant"), "application/pdf");
+    }
+
+    /**
+     * Phase 1 — short-lived source URL for the consultant-version PDF:
+     * S3 ({@code consultantPdfS3Key}) → presigned; else Cloudinary
+     * ({@code consultantPdfPublicId}) → signed. Null when neither is set.
+     */
+    public String consultantPdfSourceUrl(ConsultantApplication app, Duration ttl) {
+        String s3Key = app.getConsultantPdfS3Key();
+        if (s3Key != null && !s3Key.isBlank()) {
+            return documentStorage.presignedGetUrl(s3Key, ttl, null, true);
+        }
+        String publicId = app.getConsultantPdfPublicId();
+        if (publicId != null && !publicId.isBlank()) {
+            return signedPdfUrl(publicId, ttl);
+        }
+        return null;
     }
 
     /**

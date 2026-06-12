@@ -1345,6 +1345,11 @@ public class DataSeeder implements CommandLineRunner {
                 {"email_pretext TEXT", "email_pretext"},
                 // Build P — Phase 2 reopened-section scope (JSON array).
                 {"phase2_reopened_sections TEXT", "phase2_reopened_sections"},
+                // Phase 1 (S3) — storage keys for the S3-backed final +
+                // consultant-version PDFs (Cloudinary columns stay null for
+                // new records; downloads dual-read on these).
+                {"s3_key VARCHAR(512)", "s3_key"},
+                {"consultant_pdf_s3_key VARCHAR(512)", "consultant_pdf_s3_key"},
         };
         // Build Q — agreements no longer expire (the 7-day TTL applies to
         // the consultant LINK only, as a derived indicator). Restore every
@@ -1415,6 +1420,17 @@ public class DataSeeder implements CommandLineRunner {
                         + "(likely already present or unsupported dialect): {}",
                         col[1], e.getMessage());
             }
+        }
+
+        // Phase 1 (S3) — storage key for the S3-backed course-completion
+        // certificate PDF (older rows stay on disk; null = on-disk file).
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE certificates ADD COLUMN IF NOT EXISTS s3_key VARCHAR(512)");
+            log.info("Ensured certificates.s3_key exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add certificates.s3_key "
+                    + "(likely already present or unsupported dialect): {}", e.getMessage());
         }
 
         // Backfill: Hibernate's ddl-auto=update may have already added

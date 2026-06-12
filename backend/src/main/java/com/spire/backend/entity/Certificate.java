@@ -43,6 +43,16 @@ public class Certificate {
     private String certificateUrl;
 
     /**
+     * Phase 1 (S3) — storage key for the S3-backed certificate PDF
+     * (e.g. {@code certificates/{userId}/certificate-20260612-101500.pdf}).
+     * Non-null for certificates issued after the S3 cutover; older rows keep
+     * it null and are served from the on-disk file. The download endpoints
+     * branch on this (present → presigned S3 GET, streamed server-side).
+     */
+    @Column(name = "s3_key", length = 512)
+    private String s3Key;
+
+    /**
      * Final score % (0–100). Average of the student's best quiz
      * percentages on this course. Null when the course had no quizzes,
      * which shows as "Completed" rather than a numeric score.

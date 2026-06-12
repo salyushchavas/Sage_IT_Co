@@ -1162,13 +1162,11 @@ public class EmailTemplateService {
      * signature is per-upload and 401s on later GET.
      */
     private String resolveFinalPdfFetchUrl(ConsultantApplication application) {
-        String publicId = application.getFinalPdfPublicId();
-        if (publicId == null || publicId.isBlank()) {
-            publicId = AgreementDocumentService.derivePublicId(
-                    application.getApplicationId());
-        }
-        return agreementDocumentService.signedPdfUrl(
-                publicId, java.time.Duration.ofMinutes(5));
+        // Phase 1 — dual-read: S3 (new records, s3_key) → presigned GET URL;
+        // else the Cloudinary signed URL (old records). Bytes are then GET'd
+        // server-side for the email attachment, same as before.
+        return agreementDocumentService.finalPdfSourceUrl(
+                application, java.time.Duration.ofMinutes(5));
     }
 
     /**

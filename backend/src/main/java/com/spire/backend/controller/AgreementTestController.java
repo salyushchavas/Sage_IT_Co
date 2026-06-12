@@ -54,11 +54,12 @@ public class AgreementTestController {
                 .findByApplicationId(appId)
                 .orElseThrow(() -> new IllegalArgumentException(
                         "Application not found: " + appId));
-        // generateAgreementPdf returns a PdfUploadResult(secureUrl, publicId)
-        // since the signed-URL Cloudinary work; this temp endpoint only
-        // needs the URL for a quick eyeball check.
-        String url = documentService.generateAgreementPdf(app).secureUrl();
-        log.info("Test-generated agreement PDF for {}: {}", appId, url);
-        return ResponseEntity.ok(Map.of("pdfUrl", url, "applicationId", appId));
+        // Phase 1 (S3) — generateAgreementPdf now stores in S3 and returns
+        // the S3 key in publicId() (secureUrl() is null). This temp endpoint
+        // just echoes the stored key for a quick eyeball check.
+        String key = documentService.generateAgreementPdf(app).publicId();
+        log.info("Test-generated agreement PDF for {}: s3Key={}", appId, key);
+        return ResponseEntity.ok(Map.of(
+                "s3Key", key == null ? "" : key, "applicationId", appId));
     }
 }

@@ -455,6 +455,25 @@ public class ConsultantApplication {
     @Column(name = "final_pdf_public_id")
     private String finalPdfPublicId;
 
+    /**
+     * Phase 1 (S3) — storage key for the S3-backed FINAL ERM-signed PDF
+     * (e.g. {@code agreements/{ermId}/phase-1/final-20260612-101500.pdf}).
+     * Non-null on records generated after the S3 cutover; for those the
+     * Cloudinary fields above stay null. Downloads branch on this: present
+     * → presigned S3 GET; else the Cloudinary path (dual-read).
+     */
+    @Column(name = "s3_key", length = 512)
+    private String s3Key;
+
+    /**
+     * Phase 1 (S3) — storage key for the S3-backed consultant-version PDF
+     * (consultant copy + Certificate of Completion). Parallel to
+     * {@code consultantPdfPublicId} (Cloudinary), which stays null for new
+     * records.
+     */
+    @Column(name = "consultant_pdf_s3_key", length = 512)
+    private String consultantPdfS3Key;
+
     // ── Section-by-section affirmation flags (guided signing) ────────
     //
     // The consultant ticks an "I understand" checkbox at the end of

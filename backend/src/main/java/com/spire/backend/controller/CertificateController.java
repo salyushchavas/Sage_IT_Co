@@ -3,10 +3,13 @@ package com.spire.backend.controller;
 import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.Certificate;
 import com.spire.backend.service.CertificateService;
+import com.spire.backend.service.DocumentStorage;
 import lombok.RequiredArgsConstructor;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
 import org.springframework.http.HttpHeaders;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -24,6 +27,8 @@ import java.util.Map;
 public class CertificateController {
 
     private final CertificateService certificateService;
+    /** Phase 1 (S3) — used to presign S3-backed certificate downloads. */
+    private final DocumentStorage documentStorage;
 
     // ─── Generate certificate ───────────────────────────────────────
 
@@ -109,16 +114,25 @@ public class CertificateController {
     @GetMapping("/download/{courseId}/{fileName}")
     public ResponseEntity<Resource> downloadCertificate(
             @PathVariable String courseId, @PathVariable String fileName) {
+        // Old certificates: served from the on-disk file (unchanged).
         File file = new File("certificates/" + courseId + "/" + fileName);
-        if (!file.exists()) {
+        if (file.exists()) {
+            Resource resource = new FileSystemResource(file);
+            return ResponseEntity.ok()
+                    .contentType(MediaType.APPLICATION_PDF)
+                    .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
+                    .body(resource);
+        }
+        // Phase 1 (S3) — no disk file: resolve the cert from its stored URL
+        // and stream from S3 when it has an s3_key. The endpoint stays no-auth
+        // and proxies bytes server-side (the presigned URL is never exposed),
+        // so the frontend's <a href> link contract is unchanged.
+        String certUrl = "/api/certificates/download/" + courseId + "/" + fileName;
+        Certificate cert = certificateService.findByCertificateUrl(certUrl).orElse(null);
+        if (cert == null || cert.getS3Key() == null || cert.getS3Key().isBlank()) {
             return ResponseEntity.notFound().build();
         }
-
-        Resource resource = new FileSystemResource(file);
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + fileName + "\"")
-                .body(resource);
+        return streamFromS3(cert.getS3Key(), fileName);
     }
 
     // ─── By-cert-number lookups ─────────────────────────────────────
@@ -162,6 +176,11 @@ public class CertificateController {
                         || auth.getAuthorities().stream()
                                 .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority())))
                 .map(c -> {
+                    // Phase 1 (S3) — new certs stream from S3 (presigned,
+                    // proxied server-side). Old certs fall through to disk.
+                    if (c.getS3Key() != null && !c.getS3Key().isBlank()) {
+                        return streamFromS3(c.getS3Key(), certificateNumber + ".pdf");
+                    }
                     String url = c.getCertificateUrl();
                     // certificateUrl is stored as "/api/certificates/download/{courseId}/{fileName}".
                     // Strip the prefix to recover the on-disk file.
@@ -188,6 +207,32 @@ public class CertificateController {
      * frontend doesn't have to switch on the source. Includes only
      * fields the owner is allowed to see (no email / user id).
      */
+    /**
+     * Phase 1 (S3) — presign a short-lived GET URL for {@code s3Key}, fetch
+     * the bytes server-side, and return them as a PDF attachment. Keeps both
+     * download endpoints' binary response contract identical; the presigned
+     * URL is never exposed to the client.
+     */
+    private ResponseEntity<Resource> streamFromS3(String s3Key, String filename) {
+        String url = documentStorage.presignedGetUrl(
+                s3Key, java.time.Duration.ofMinutes(15), filename, false);
+        byte[] bytes;
+        try {
+            java.net.URLConnection conn = new java.net.URL(url).openConnection();
+            conn.setConnectTimeout(30_000);
+            conn.setReadTimeout(30_000);
+            try (java.io.InputStream in = conn.getInputStream()) {
+                bytes = in.readAllBytes();
+            }
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"")
+                .body((Resource) new ByteArrayResource(bytes));
+    }
+
     private static Map<String, Object> toFullDto(Certificate cert) {
         Map<String, Object> m = new HashMap<>();
         m.put("id", cert.getId());

@@ -389,24 +389,13 @@ public class ConsultantApplicationController {
         // even though the bytes are backend-streamed.
         consultantService.assertErmCanAccess(app, request);
 
-        // Final PDF first; only fall back to the legacy intermediate
-        // signedPdfUrl when no final PDF exists at all (pre-Phase-3
-        // single-stage rows). Always re-sign on the fly: stored
-        // {@code finalPdfUrl} carries a per-upload signature that
-        // 401s on later GET in prod.
-        boolean hasFinal = app.getFinalPdfPublicId() != null
-                || (app.getFinalPdfUrl() != null && !app.getFinalPdfUrl().isBlank());
-        String sourceUrl;
-        if (hasFinal) {
-            String publicId = app.getFinalPdfPublicId();
-            if (publicId == null || publicId.isBlank()) {
-                publicId = AgreementDocumentService.derivePublicId(appId);
-            }
-            sourceUrl = agreementDocumentService.signedPdfUrl(
-                    publicId, java.time.Duration.ofMinutes(5));
-        } else if (app.getSignedPdfUrl() != null && !app.getSignedPdfUrl().isBlank()) {
-            sourceUrl = app.getSignedPdfUrl();
-        } else {
+        // Phase 1 — resolve the source URL by storage backend (dual-read):
+        // S3 (new records) → short-lived presigned GET; else Cloudinary
+        // (re-signed on the fly) → else the legacy intermediate signedPdfUrl.
+        // Auth/ownership was already enforced above, BEFORE any presigning.
+        String sourceUrl = agreementDocumentService.finalPdfSourceUrl(
+                app, java.time.Duration.ofMinutes(15));
+        if (sourceUrl == null) {
             return ResponseEntity.notFound().build();
         }
 

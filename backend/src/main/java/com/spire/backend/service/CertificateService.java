@@ -14,10 +14,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.awt.Color;
-import java.io.File;
-import java.io.FileOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -71,6 +71,8 @@ public class CertificateService {
     private final AssignmentRepository assignmentRepository;
     private final RecordService recordService;
     private final EmailTemplateService emailTemplateService;
+    /** Phase 1 (S3) — storage backend for NEWLY generated certificate PDFs. */
+    private final DocumentStorage documentStorage;
 
     /**
      * Strict generation — throws when prerequisites aren't met. Used
@@ -155,17 +157,26 @@ public class CertificateService {
                 .build();
         certificate = certificateRepository.save(certificate);
 
-        // 7. Generate PDF
-        String dirPath = String.format("certificates/%d", courseId);
+        // 7. Generate PDF bytes (Phase 1 S3 — no longer written to disk).
         String fileName = String.format("%d-%d.pdf", userId, System.currentTimeMillis());
-        String filePath = dirPath + "/" + fileName;
-
-        new File(dirPath).mkdirs();
-        generatePdf(filePath, user.getFullName(), course.getTitle(),
+        byte[] pdfBytes = generatePdf(user.getFullName(), course.getTitle(),
                 certificate.getCertificateId(), finalScore,
                 course.getInstructor() != null ? course.getInstructor().getFullName() : brandConfig.getName());
 
-        // 8. Patch URL on the saved row
+        // Phase 1 (S3) — store the certificate in S3 (keyed by user). A
+        // failure throws (no silent disk fallback), surfacing to the caller
+        // the same way a disk-write failure did.
+        String s3Key = documentStorage.store(
+                pdfBytes,
+                String.format("certificates/%d/certificate-%s.pdf", userId,
+                        LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))),
+                "application/pdf");
+        certificate.setS3Key(s3Key);
+
+        // 8. Patch URL on the saved row. The path SHAPE is unchanged so the
+        //    existing no-auth /download/{courseId}/{fileName} link the
+        //    frontend renders keeps working; that endpoint now resolves the
+        //    row and streams from S3 when s3_key is set.
         certificate.setCertificateUrl("/api/certificates/download/" + courseId + "/" + fileName);
         Certificate saved = certificateRepository.save(certificate);
 
@@ -215,6 +226,12 @@ public class CertificateService {
 
     public java.util.Optional<Certificate> findByCertificateId(String certificateId) {
         return certificateRepository.findByCertificateId(certificateId);
+    }
+
+    /** Phase 1 (S3) — resolve a cert from its stored certificate_url (used by
+     *  the no-auth legacy download endpoint to recover the S3 key). */
+    public java.util.Optional<Certificate> findByCertificateUrl(String certificateUrl) {
+        return certificateRepository.findByCertificateUrl(certificateUrl);
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -278,13 +295,14 @@ public class CertificateService {
      * design is layout-independent — the borders sit at fixed page
      * coordinates regardless of paragraph flow above.
      */
-    private void generatePdf(
-            String filePath, String studentName, String courseTitle,
+    private byte[] generatePdf(
+            String studentName, String courseTitle,
             String certNumber, Double finalScore, String instructorName
     ) {
         try {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
             Document doc = new Document(PageSize.A4.rotate(), 0, 0, 0, 0);
-            PdfWriter writer = PdfWriter.getInstance(doc, new FileOutputStream(filePath));
+            PdfWriter writer = PdfWriter.getInstance(doc, baos);
             doc.open();
 
             PdfContentByte cb = writer.getDirectContent();
@@ -418,7 +436,7 @@ public class CertificateService {
             cb.endText();
 
             doc.close();
-            log.info("PDF generated: {}", filePath);
+            return baos.toByteArray();
         } catch (Exception e) {
             log.error("Failed to generate PDF: {}", e.getMessage(), e);
             throw new RuntimeException("Failed to generate certificate PDF");
