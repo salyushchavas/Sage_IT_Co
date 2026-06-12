@@ -47,18 +47,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Install latest postgresql-client (PGDG)
+      - name: Install postgresql-client-18 (PGDG)
         run: |
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             postgresql-common curl ca-certificates
-          # Official PGDG apt repo → newest pg_dump/pg_restore, so the client
-          # is always >= the Railway server version. (A newer client dumps an
-          # older server fine; an older client would abort on a newer server.)
+          # Add the official PGDG apt repo FIRST, then install the client major
+          # EXPLICITLY. The bare `postgresql-client` metapackage resolves to
+          # Ubuntu's default (16), which aborts against the 18.4 Railway server
+          # ("server version mismatch"); pinning postgresql-client-18 guarantees
+          # the client major >= the server. pg_wrapper then dispatches the
+          # PATH `pg_dump`/`pg_restore` to the newest installed major (18).
           sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
-          sudo apt-get install -y --no-install-recommends postgresql-client
-          pg_dump --version
+          sudo apt-get install -y --no-install-recommends postgresql-client-18
+          pg_dump --version   # expect: pg_dump (PostgreSQL) 18.x
 
       - name: Dump database (custom format)
         env:
