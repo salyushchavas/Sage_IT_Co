@@ -1350,6 +1350,9 @@ public class DataSeeder implements CommandLineRunner {
                 // new records; downloads dual-read on these).
                 {"s3_key VARCHAR(512)", "s3_key"},
                 {"consultant_pdf_s3_key VARCHAR(512)", "consultant_pdf_s3_key"},
+                // Build S — durable Phase-1 ERM-signed PDF key (snapshot at the
+                // Phase-1 countersign; survives the Phase-2 overwrite of s3_key).
+                {"phase1_final_pdf_s3_key VARCHAR(512)", "phase1_final_pdf_s3_key"},
                 // Phase 5 (S3) — storage keys for the S3-backed consultant
                 // UPLOADS (cheque/work-auth/offer-letter/DL/SSN) + SIGNATURES
                 // (consultant primary + final, ERM). Additive; the parallel

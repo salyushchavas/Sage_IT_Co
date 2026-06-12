@@ -474,6 +474,20 @@ public class ConsultantApplication {
     @Column(name = "consultant_pdf_s3_key", length = 512)
     private String consultantPdfS3Key;
 
+    /**
+     * Build S — durable snapshot of the PHASE-1 ERM-signed agreement PDF,
+     * captured at the Phase-1 countersign (ermApproveAndSign while phase==1).
+     * The single {@code s3Key} above is OVERWRITTEN by the Phase-2 countersign,
+     * and {@code advanceToPhase2} wipes the live ERM/final-signature columns —
+     * so without this key the Phase-1 signed agreement becomes un-previewable
+     * once Phase 2 begins. The Manager previews the Phase-1 signed agreement by
+     * rasterizing the PDF stored under THIS key (not a live re-render). Null
+     * for agreements that never reached a Phase-1 countersign, and for those
+     * countersigned before Build S shipped (no historical backfill).
+     */
+    @Column(name = "phase1_final_pdf_s3_key", length = 512)
+    private String phase1FinalPdfS3Key;
+
     // ── Phase 5 (S3) — consultant-UPLOAD + SIGNATURE storage keys ─────
     //
     // Parallel S3 keys for the two remaining agreements artifact classes

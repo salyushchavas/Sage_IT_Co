@@ -21,6 +21,7 @@ import {
   approverRequestRevision,
   fetchApproverPreviewImages,
   fetchApproverSignedPreviewImages,
+  fetchApproverPhase1SignedPreviewImages,
   fetchMe,
   getAgreementErmToken,
   type ApproverApprovedItem,
@@ -279,6 +280,22 @@ function ApprovedTable({
     }
   };
 
+  // Build S — preview the durable Phase-1 signed agreement (Manager only),
+  // independent of the current phase/COMPLETED state. Shares the one modal.
+  const openPhase1Preview = async (appId: string) => {
+    setBusyId(appId + ":p1");
+    setPreviewErr("");
+    try {
+      const data = await fetchApproverPhase1SignedPreviewImages(appId);
+      setPreviewPages(data.pages);
+    } catch (e) {
+      setPreviewErr(
+        e instanceof Error ? e.message : "Couldn't load the Phase 1 signed agreement.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-x-auto">
       {previewErr && (
@@ -321,28 +338,48 @@ function ApprovedTable({
                   <AgreementStatusPill status={r.status as ConsultantApplicationStatus} />
                 </td>
                 <td className="px-4 py-2.5">
-                  {completed ? (
-                    <button
-                      type="button"
-                      onClick={() => openPreview(r.appId)}
-                      disabled={busyId !== null}
-                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
-                    >
-                      {busyId === r.appId ? (
-                        <Loader2 size={12} className="animate-spin" />
-                      ) : (
-                        <FileText size={12} />
-                      )}
-                      Preview
-                    </button>
-                  ) : (
-                    <span
-                      className="text-[11px] text-gray-400 italic"
-                      title="Available once the ERM has signed the agreement."
-                    >
-                      Awaiting ERM signature
-                    </span>
-                  )}
+                  <div className="flex flex-col items-start gap-1.5">
+                    {/* Build S — durable Phase-1 signed agreement (Manager
+                        only; shown once in/past Phase 2, where the live final
+                        preview no longer reflects the Phase-1 signed copy). */}
+                    {r.hasPhase1Signed && (r.phase ?? 1) >= 2 && (
+                      <button
+                        type="button"
+                        onClick={() => openPhase1Preview(r.appId)}
+                        disabled={busyId !== null}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                      >
+                        {busyId === r.appId + ":p1" ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <FileText size={12} />
+                        )}
+                        Phase 1 signed
+                      </button>
+                    )}
+                    {completed ? (
+                      <button
+                        type="button"
+                        onClick={() => openPreview(r.appId)}
+                        disabled={busyId !== null}
+                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                      >
+                        {busyId === r.appId ? (
+                          <Loader2 size={12} className="animate-spin" />
+                        ) : (
+                          <FileText size={12} />
+                        )}
+                        {(r.phase ?? 1) >= 2 ? "Phase 2 signed" : "Preview"}
+                      </button>
+                    ) : (
+                      <span
+                        className="text-[11px] text-gray-400 italic"
+                        title="Available once the ERM has signed the agreement."
+                      >
+                        Awaiting ERM signature
+                      </span>
+                    )}
+                  </div>
                 </td>
               </tr>
             );

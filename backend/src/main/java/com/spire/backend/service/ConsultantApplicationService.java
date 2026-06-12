@@ -1982,6 +1982,36 @@ public class ConsultantApplicationService {
     }
 
     /**
+     * Build S — gate for the durable Phase-1 signed-agreement preview. Unlike
+     * {@link #getForApprover} (which gates on the CURRENT round's routed
+     * approver), this admits any MANAGER who APPROVED this agreement (any
+     * round) — so the original Phase-1 Manager keeps Phase-1 view rights even
+     * when a different Manager is routed for Phase 2. Matches exactly when the
+     * "Phase 1 signed" button is shown (the app is in their Approved Documents).
+     * 404 (no ID probing) when the caller never approved it as Manager.
+     */
+    @Transactional(readOnly = true)
+    public ConsultantApplication getForManagerPhase1Preview(
+            String applicationId, String managerUserId) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        boolean approvedAsManager = managerUserId != null && !managerUserId.isBlank()
+                && approvalRepository.existsByApplicationIdAndRoleAndStatusAndDecidedBy(
+                        app.getId(),
+                        com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER,
+                        com.spire.backend.entity.AgreementApproval.Decision.APPROVED,
+                        managerUserId);
+        if (!approvedAsManager) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        return app;
+    }
+
+    /**
      * Build L — read-only record of agreements THIS approver has approved
      * (one row per agreement, the latest APPROVED decision), with the
      * originating ERM resolved. The Accounts dashboard groups these by ERM;
@@ -2021,6 +2051,12 @@ public class ConsultantApplicationService {
             rec.put("phase", row.getPhase());
             rec.put("decidedAt", row.getDecidedAt() == null ? null : row.getDecidedAt().toString());
             rec.put("status", app.getStatus());
+            // Build S — does a durable Phase-1 signed agreement exist to preview?
+            // MANAGER only (Accounts approves Phase 2 only and never sees it).
+            rec.put("hasPhase1Signed",
+                    role == com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER
+                    && app.getPhase1FinalPdfS3Key() != null
+                    && !app.getPhase1FinalPdfS3Key().isBlank());
             out.add(rec);
         }
         return out;
@@ -2141,6 +2177,16 @@ public class ConsultantApplicationService {
             // Phase 1 (S3) — persist the S3 key; the Cloudinary fields stay
             // null for new records (download/email paths dual-read on s3_key).
             app.setS3Key(pdf.publicId());
+            // Build S — at the PHASE-1 countersign, ALSO snapshot this final PDF
+            // under a durable key the Phase-2 countersign won't overwrite (it
+            // rewrites only s3Key) and advanceToPhase2 won't clear, so the
+            // Manager can still preview the Phase-1 signed agreement after the
+            // advance to Phase 2. buildAgreementPdfKey already embeds the phase,
+            // so this is the distinct .../phase-1/final-{ts}.pdf object.
+            Integer ermSignPhase = app.getPhase();
+            if (ermSignPhase == null || ermSignPhase == 1) {
+                app.setPhase1FinalPdfS3Key(pdf.publicId());
+            }
             applicationRepository.save(app);
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.PDF_GENERATED,

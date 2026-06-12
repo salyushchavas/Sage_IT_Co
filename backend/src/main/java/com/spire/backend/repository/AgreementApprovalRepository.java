@@ -36,6 +36,16 @@ public interface AgreementApprovalRepository
     List<AgreementApproval> findByStatusAndRoleAndDecidedByOrderByDecidedAtDesc(
             Decision status, ApproverRole role, String decidedBy);
 
+    /**
+     * Build S — did this user APPROVE this application in a given role (any
+     * round)? Gates the Phase-1 signed-preview so the Manager who approved
+     * Phase 1 keeps access even if a different Manager is routed for Phase 2
+     * (broader than the current-round gate, and consistent with when the
+     * "Phase 1 signed" button is shown).
+     */
+    boolean existsByApplicationIdAndRoleAndStatusAndDecidedBy(
+            Long applicationId, ApproverRole role, Decision status, String decidedBy);
+
     /** Build O — every gate row across a page of applications (batched for the ERM "All" list). */
     List<AgreementApproval> findByApplicationIdIn(java.util.Collection<Long> applicationIds);
 

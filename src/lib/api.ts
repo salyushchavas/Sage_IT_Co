@@ -4604,6 +4604,23 @@ export async function fetchApproverSignedPreviewImages(
 }
 
 /**
+ * Build S — Manager preview of the durable PHASE-1 ERM-signed agreement
+ * (the snapshot captured at the Phase-1 countersign). Same non-copyable PNG
+ * shape; the backend rasterizes the STORED Phase-1 PDF (not a live render) and
+ * gates on the snapshot existing + MANAGER role, so it stays previewable
+ * independently of Phase 2 (and of the COMPLETED state).
+ */
+export async function fetchApproverPhase1SignedPreviewImages(
+  applicationId: string,
+  role?: ApproverRole,
+): Promise<ConsultantPreviewImages> {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ConsultantPreviewImages>(
+    `/api/agreement-approver/applications/${applicationId}/phase1-signed-preview-images${qs}`,
+  );
+}
+
+/**
  * Build G — ERM inline preview of the consultant-signed agreement
  * before countersigning. Streams the bytes server-side; no Cloudinary
  * round-trip. Same session handling as
@@ -4651,6 +4668,10 @@ export interface ApproverApprovedItem {
   phase: number | null;
   decidedAt: string | null;
   status: string;
+  // Build S — a durable Phase-1 ERM-signed agreement exists to preview
+  // (MANAGER only; always false for Accounts). Drives the "Phase 1 signed"
+  // preview button independently of the final/COMPLETED state.
+  hasPhase1Signed?: boolean;
 }
 
 /** Build K — one approver option for the send-for-approval picker. */

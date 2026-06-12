@@ -221,6 +221,58 @@ public class AgreementApproverController {
         return ResponseEntity.ok(ApiResponse.success("Signed agreement ready", payload));
     }
 
+    /**
+     * Build S — the durable PHASE-1 ERM-signed agreement preview. Unlike
+     * {@link #signedPreviewImages} (a LIVE render of current entity state — which
+     * after the advance to Phase 2 would show the Phase-2 doc with blank Phase-1
+     * signatures), this rasterizes the Phase-1 snapshot captured at the Phase-1
+     * countersign ({@code phase1FinalPdfS3Key}). Gated on the snapshot EXISTING,
+     * not on status, so the Manager previews it independently of Phase 2. MANAGER
+     * only — Accounts approves Phase 2 only and never sees the Phase-1 copy.
+     */
+    @GetMapping("/api/agreement-approver/applications/{appId}/phase1-signed-preview-images")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> phase1SignedPreviewImages(
+            @PathVariable String appId,
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        if (gate != ApproverRole.MANAGER) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ApiResponse.error(
+                            "The Phase 1 signed agreement is available to the Manager only."));
+        }
+        // Build S — admit any Manager who APPROVED this agreement (not just the
+        // current-round routed approver), so a Phase-1 Manager keeps access
+        // even if Phase 2 is routed to a different Manager.
+        ConsultantApplication app = consultantService.getForManagerPhase1Preview(
+                appId, AgreementAuthz.userId(request));
+        String key = app.getPhase1FinalPdfS3Key();
+        if (key == null || key.isBlank()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(ApiResponse.error("No Phase 1 signed agreement on file for this agreement."));
+        }
+        String viewerEmail = (String) request.getAttribute(AgreementAuthz.ATTR_EMAIL);
+        List<String> pages;
+        try {
+            // Rasterize the STORED Phase-1 snapshot (not a live re-render).
+            byte[] pdfBytes = agreementDocumentService.readStoredPdfBytes(key);
+            List<byte[]> images = agreementDocumentService
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail, false);
+            pages = new ArrayList<>(images.size());
+            for (byte[] png : images) {
+                pages.add(java.util.Base64.getEncoder().encodeToString(png));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Couldn't render the Phase 1 signed agreement."));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pages", pages);
+        payload.put("pageCount", pages.size());
+        payload.put("viewerEmail", viewerEmail);
+        return ResponseEntity.ok(ApiResponse.success("Phase 1 signed agreement ready", payload));
+    }
+
     @PostMapping("/api/agreement-approver/applications/{appId}/approve")
     public ResponseEntity<ApiResponse<ConsultantApplication>> approve(
             @PathVariable String appId,

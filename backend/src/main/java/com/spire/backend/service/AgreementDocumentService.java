@@ -141,6 +141,16 @@ public class AgreementDocumentService {
     }
 
     /**
+     * Build S — read a stored agreement PDF's bytes by its S3 key (the durable
+     * Phase-1 signed snapshot). The approver Phase-1 preview rasterizes THIS
+     * snapshot rather than live-rendering current entity state (which would
+     * reflect the Phase-2 doc / blank signatures after the advance).
+     */
+    public byte[] readStoredPdfBytes(String s3Key) {
+        return documentStorage.get(s3Key);
+    }
+
+    /**
      * Phase 1 (S3) — object key for a generated agreement PDF:
      * {@code agreements/{ermId}/phase-{1|2}/{documentType}-{yyyyMMdd-HHmmss}.pdf}.
      * The timestamp makes every generation a fresh key (bucket versioning also
