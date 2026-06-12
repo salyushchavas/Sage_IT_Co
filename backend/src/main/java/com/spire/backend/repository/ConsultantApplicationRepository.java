@@ -90,4 +90,37 @@ public interface ConsultantApplicationRepository
     // yet in S3.
     List<ConsultantApplication>
             findByConsultantPdfS3KeyIsNullAndConsultantPdfPublicIdIsNotNull();
+
+    // Phase 5 — consultant-UPLOAD migration candidates: the Cloudinary id is
+    // present but the new S3 key isn't yet. One finder per document column;
+    // idempotent (a row drops out once its *_s3_key is set). Plain
+    // String/IsNull predicates — no enum binding, so the Hibernate
+    // String-enum-column caveat does not apply here.
+    List<ConsultantApplication>
+            findByChequeS3KeyIsNullAndChequePublicIdIsNotNull();
+    List<ConsultantApplication>
+            findByWorkAuthDocS3KeyIsNullAndWorkAuthDocPublicIdIsNotNull();
+    List<ConsultantApplication>
+            findByOfferLetterS3KeyIsNullAndOfferLetterPublicIdIsNotNull();
+    List<ConsultantApplication>
+            findByDlDocS3KeyIsNullAndDlDocPublicIdIsNotNull();
+    List<ConsultantApplication>
+            findBySsnDocS3KeyIsNullAndSsnDocPublicIdIsNotNull();
+
+    // Phase 5 — SIGNATURE migration candidates: the legacy Cloudinary URL is
+    // present but the new S3 key isn't yet. NB the migration additionally
+    // skips non-http (data:) values, since the legacy simple-submit flow
+    // stores a data-URL in signature_image (not a Cloudinary object).
+    List<ConsultantApplication>
+            findBySignatureS3KeyIsNullAndSignatureImageIsNotNull();
+    List<ConsultantApplication>
+            findByFinalSignatureS3KeyIsNullAndFinalSignatureImageIsNotNull();
+    List<ConsultantApplication>
+            findByErmSignatureS3KeyIsNullAndErmSignatureUrlIsNotNull();
+
+    // Phase 5 — MULTI-CHEQUE (Build U) candidates: rows carrying a cheques
+    // JSON array. The cheque public_id lives inside the JSON, so a derived
+    // query can't target un-migrated entries — the migration parses each row
+    // and migrates only entries with a publicId and no s3Key.
+    List<ConsultantApplication> findByChequesIsNotNull();
 }

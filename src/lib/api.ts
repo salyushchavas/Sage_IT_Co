@@ -3310,18 +3310,24 @@ export interface ConsultantApplication {
   verifiedStartDate: string | null;
   payrollCycle: string | null;
   // Build W/I — work-authorization document (now in Personal Information).
+  // Phase 5 (S3): *S3Key is the new pointer; the Cloudinary *PublicId is null
+  // for new uploads. Treat (publicId || s3Key) as "uploaded".
   workAuthDocPublicId: string | null;
+  workAuthDocS3Key?: string | null;
   workAuthDocContentType: string | null;
   workAuthDocUploadedAt: string | null;
   // Build I — Phase 2 Employment offer-letter upload.
   offerLetterPublicId: string | null;
+  offerLetterS3Key?: string | null;
   offerLetterContentType: string | null;
   offerLetterUploadedAt: string | null;
   // Build J — Background Check uploads (DL/State-ID required; SSN optional).
   dlDocPublicId: string | null;
+  dlDocS3Key?: string | null;
   dlDocContentType: string | null;
   dlDocUploadedAt: string | null;
   ssnDocPublicId: string | null;
+  ssnDocS3Key?: string | null;
   ssnDocContentType: string | null;
   ssnDocUploadedAt: string | null;
   // Appendix 2 -- ACH (optional)
@@ -3425,6 +3431,7 @@ export interface ConsultantApplication {
   // Build G — Appendix 5 security cheque upload. The public_id is
   // persisted; the wizard treats a non-null value as "uploaded".
   chequePublicId?: string | null;
+  chequeS3Key?: string | null;   // Phase 5 (S3) — new pointer; publicId null for new uploads
   chequeUploadedAt?: string | null;
   chequeContentType?: string | null;
   // Build T — ERM "Approve consultant version" release state. When
@@ -3476,6 +3483,7 @@ export interface ChequeEntry {
   number: string;
   date: string;
   publicId: string;
+  s3Key: string;   // Phase 5 (S3) — new pointer; publicId is "" for new uploads
   contentType: string;
   uploadedAt: string;
 }
@@ -3497,6 +3505,7 @@ export function parseChequeList(raw: string | null | undefined): ChequeEntry[] {
           number: String(o.number ?? ""),
           date: String(o.date ?? ""),
           publicId: String(o.publicId ?? ""),
+          s3Key: String(o.s3Key ?? ""),
           contentType: String(o.contentType ?? ""),
           uploadedAt: String(o.uploadedAt ?? ""),
         } satisfies ChequeEntry;

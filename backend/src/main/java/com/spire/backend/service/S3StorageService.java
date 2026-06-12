@@ -53,6 +53,16 @@ public class S3StorageService implements DocumentStorage {
     }
 
     @Override
+    public byte[] get(String key) {
+        return s3Provider.getObject().getObjectAsBytes(
+                GetObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(key)
+                        .build())
+                .asByteArray();
+    }
+
+    @Override
     public String presignedGetUrl(String key, Duration ttl, String filename, boolean inline) {
         String disposition = inline
                 ? "inline"

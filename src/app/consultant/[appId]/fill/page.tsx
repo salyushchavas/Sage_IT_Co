@@ -379,7 +379,8 @@ function isSectionComplete(
       const entry = chequeEntries.find((e) => e.index === i);
       if (!entry) return false;
       if (!entry.number || !entry.number.trim()) return false;
-      if (!entry.publicId || !entry.publicId.trim()) return false;
+      // Phase 5 — uploaded when EITHER the Cloudinary id or the S3 key is set.
+      if (!(entry.publicId?.trim() || entry.s3Key?.trim())) return false;
     }
   }
   // Signature gating: main-agreement -> primary; review -> final.
@@ -630,10 +631,11 @@ export default function ConsultantWizardPage() {
         const entries = parseChequeList(data.cheques);
         setChequeEntries(entries);
         // Build W/I/J — uploads already on file?
-        setWorkAuthUploaded(Boolean(data.workAuthDocPublicId));
-        setOfferLetterUploaded(Boolean(data.offerLetterPublicId));
-        setDlDocUploaded(Boolean(data.dlDocPublicId));
-        setSsnDocUploaded(Boolean(data.ssnDocPublicId));
+        // Phase 5 — uploaded when EITHER the Cloudinary id or the S3 key is set.
+        setWorkAuthUploaded(Boolean(data.workAuthDocPublicId || data.workAuthDocS3Key));
+        setOfferLetterUploaded(Boolean(data.offerLetterPublicId || data.offerLetterS3Key));
+        setDlDocUploaded(Boolean(data.dlDocPublicId || data.dlDocS3Key));
+        setSsnDocUploaded(Boolean(data.ssnDocPublicId || data.ssnDocS3Key));
         // Build X — resume at the first incomplete section across the
         // VISIBLE set (core + ERM-required appendices). Hidden
         // appendices are not counted; if every visible non-review
@@ -651,9 +653,9 @@ export default function ConsultantWizardPage() {
             : isPhase2Restricted(data)
               ? restrictedVisibleSections(phase2ScopeKeys(data))
               : filterVisibleSections(loadedReqs);
-        const loadedWorkAuth = Boolean(data.workAuthDocPublicId);
-        const loadedOffer = Boolean(data.offerLetterPublicId);
-        const loadedDl = Boolean(data.dlDocPublicId);
+        const loadedWorkAuth = Boolean(data.workAuthDocPublicId || data.workAuthDocS3Key);
+        const loadedOffer = Boolean(data.offerLetterPublicId || data.offerLetterS3Key);
+        const loadedDl = Boolean(data.dlDocPublicId || data.dlDocS3Key);
         setCurrentStep(firstIncompleteIndex(
             loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer, loadedDl));
       })
@@ -868,7 +870,10 @@ export default function ConsultantWizardPage() {
             index,
             number: existing?.number ?? "",
             date: existing?.date ?? "",
+            // In-session "uploaded" marker; the real S3 key arrives on next load.
+            // The (publicId || s3Key) checks treat either as uploaded.
             publicId: `agreements/${appId}-cheque-${index}`,
+            s3Key: existing?.s3Key ?? "",
             contentType: file.type,
             uploadedAt: new Date().toISOString(),
           });
@@ -902,6 +907,7 @@ export default function ConsultantWizardPage() {
           number: patch.number ?? existing?.number ?? "",
           date: patch.date ?? existing?.date ?? "",
           publicId: existing?.publicId ?? "",
+          s3Key: existing?.s3Key ?? "",
           contentType: existing?.contentType ?? "",
           uploadedAt: existing?.uploadedAt ?? "",
         });
@@ -1197,7 +1203,8 @@ export default function ConsultantWizardPage() {
         if (required <= 0) return true;
         for (let i = 0; i < required; i++) {
           const entry = chequeEntries.find((e) => e.index === i);
-          if (!entry || !entry.number?.trim() || !entry.publicId?.trim()) {
+          if (!entry || !entry.number?.trim()
+              || !(entry.publicId?.trim() || entry.s3Key?.trim())) {
             return true;
           }
         }
@@ -3873,7 +3880,7 @@ function ChequeListBlock({
       </header>
       {indices.map((i) => {
         const entry = entries.find((e) => e.index === i);
-        const uploaded = Boolean(entry?.publicId);
+        const uploaded = Boolean(entry?.publicId || entry?.s3Key);
         const uploading = uploadingIndex === i;
         const inputId = `cheque-${i}-file`;
         return (
@@ -4259,7 +4266,7 @@ function ReviewStep({
             {section.id === "appendix5" && (() => {
               const required = parseChequeCount(form.fields["securityCheckCount"]);
               const uploadedCount = chequeEntries.filter(
-                (e) => e.publicId && e.number && e.index < required,
+                (e) => (e.publicId || e.s3Key) && e.number && e.index < required,
               ).length;
               const allReady = required > 0 && uploadedCount === required;
               return (

@@ -474,6 +474,41 @@ public class ConsultantApplication {
     @Column(name = "consultant_pdf_s3_key", length = 512)
     private String consultantPdfS3Key;
 
+    // ── Phase 5 (S3) — consultant-UPLOAD + SIGNATURE storage keys ─────
+    //
+    // Parallel S3 keys for the two remaining agreements artifact classes
+    // that Phases 1–2 left on Cloudinary: consultant document uploads
+    // (cheque / work-auth / offer-letter / DL / SSN) and signature images
+    // (consultant primary + final, ERM countersign). For NEW records the
+    // matching Cloudinary id/url column above stays null; reads branch on
+    // the s3_key (present → S3 bytes; else the untouched Cloudinary path).
+    // Added additively by DataSeeder; nothing here is hardcoded to a doc
+    // type's Cloudinary column being dropped — both coexist (dual-read).
+
+    @Column(name = "cheque_s3_key", length = 512)
+    private String chequeS3Key;
+
+    @Column(name = "work_auth_doc_s3_key", length = 512)
+    private String workAuthDocS3Key;
+
+    @Column(name = "offer_letter_s3_key", length = 512)
+    private String offerLetterS3Key;
+
+    @Column(name = "dl_doc_s3_key", length = 512)
+    private String dlDocS3Key;
+
+    @Column(name = "ssn_doc_s3_key", length = 512)
+    private String ssnDocS3Key;
+
+    @Column(name = "signature_s3_key", length = 512)
+    private String signatureS3Key;
+
+    @Column(name = "final_signature_s3_key", length = 512)
+    private String finalSignatureS3Key;
+
+    @Column(name = "erm_signature_s3_key", length = 512)
+    private String ermSignatureS3Key;
+
     // ── Section-by-section affirmation flags (guided signing) ────────
     //
     // The consultant ticks an "I understand" checkbox at the end of

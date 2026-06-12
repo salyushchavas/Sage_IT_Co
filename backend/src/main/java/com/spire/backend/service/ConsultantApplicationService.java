@@ -101,6 +101,8 @@ public class ConsultantApplicationService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final com.cloudinary.Cloudinary cloudinary;
+    /** Phase 5 (S3) — agreements consultant-upload + signature storage (S3StorageService). */
+    private final DocumentStorage documentStorage;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final SecureRandom secureRandom = new SecureRandom();
@@ -1297,8 +1299,10 @@ public class ConsultantApplicationService {
         // always re-captured.
         boolean hasNewPrimary = signatureBase64 != null
                 && signatureBase64.startsWith("data:image/");
-        boolean hasExistingPrimary = app.getSignatureImage() != null
-                && !app.getSignatureImage().isBlank();
+        boolean hasExistingPrimary = (app.getSignatureImage() != null
+                && !app.getSignatureImage().isBlank())
+                || (app.getSignatureS3Key() != null
+                && !app.getSignatureS3Key().isBlank());
         boolean missingSig = !hasNewPrimary && !hasExistingPrimary;
         boolean missingFinalSig = finalSignatureBase64 == null || finalSignatureBase64.isBlank()
                 || !finalSignatureBase64.startsWith("data:image/");
@@ -1309,15 +1313,19 @@ public class ConsultantApplicationService {
                     missingFields, missingAffs, missingSig, missingFinalSig);
         }
 
-        String signatureUrl = app.getSignatureImage();
-        String finalSignatureUrl;
+        // Phase 5 — signatures store to S3 (signature_s3_key); the Cloudinary
+        // *_image columns stay null for new records. When there's no new
+        // primary draw (a section-restricted revision reusing the existing
+        // primary), the existing pointer — S3 key or legacy Cloudinary URL —
+        // is left untouched.
         try {
             if (hasNewPrimary) {
-                signatureUrl = uploadSignatureToCloudinary(
-                        signatureBase64, "signatures/consultant-" + applicationId);
+                app.setSignatureS3Key(storeSignatureToS3(signatureBase64, "consultant", app));
+                app.setSignatureImage(null);
             }
-            finalSignatureUrl = uploadSignatureToCloudinary(
-                    finalSignatureBase64, "signatures/consultant-final-" + applicationId);
+            app.setFinalSignatureS3Key(
+                    storeSignatureToS3(finalSignatureBase64, "consultant-final", app));
+            app.setFinalSignatureImage(null);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store signature: " + e.getMessage(), e);
@@ -1326,15 +1334,13 @@ public class ConsultantApplicationService {
         LocalDateTime now = LocalDateTime.now();
         String ip = clientIp(request);
         app.setSignedLegalName(signedLegalName.trim());
-        app.setSignatureImage(signatureUrl);
         app.setSignedAt(now);
         app.setSignedIp(ip);
         app.setSignedUserAgent(request == null ? null : request.getHeader("User-Agent"));
         // Phase D — dedicated consultant signing record, surfaced to the ERM.
         app.setSigningIp(ip);
         app.setSigningAt(now);
-        // F-4 — final (review-step) signature record.
-        app.setFinalSignatureImage(finalSignatureUrl);
+        // F-4 — final (review-step) signature record (stored on S3 above).
         app.setFinalSignedAt(now);
         app.setFinalSigningIp(ip);
         // Build Q — persist the signing date here so the
@@ -2093,10 +2099,9 @@ public class ConsultantApplicationService {
                     "An ERM signature image is required (data:image/...).");
         }
 
-        String ermSigUrl;
+        String ermSigS3Key;
         try {
-            ermSigUrl = uploadSignatureToCloudinary(
-                    ermSignatureBase64, "signatures/erm-" + applicationId);
+            ermSigS3Key = storeSignatureToS3(ermSignatureBase64, "erm", app);
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store ERM signature: " + e.getMessage(), e);
@@ -2111,7 +2116,8 @@ public class ConsultantApplicationService {
         }
         app.setErmName(ermName);
         app.setErmTitle(ermTitle);
-        app.setErmSignatureUrl(ermSigUrl);
+        app.setErmSignatureS3Key(ermSigS3Key);
+        app.setErmSignatureUrl(null);   // Phase 5 — new ERM signature on S3
         // Build W — stamp the ERM's OWN countersign date (no longer
         // overwrites the consultant's signatureDate). The ERM "Date:"
         // line stays blank until exactly this moment.
@@ -2576,6 +2582,7 @@ public class ConsultantApplicationService {
         // reuses the persisted primary signature and re-captures the final
         // — see consultantSubmit's hasExistingPrimary handling.)
         app.setFinalSignatureImage(null);
+        app.setFinalSignatureS3Key(null);   // Phase 5 — clear the S3 pointer too
         app.setFinalSignedAt(null);
         app.setFinalSigningIp(null);
         // Clear affirmations ONLY for the reopened (newly-required)
@@ -2599,6 +2606,7 @@ public class ConsultantApplicationService {
         app.setErmName(null);
         app.setErmTitle(null);
         app.setErmSignatureUrl(null);
+        app.setErmSignatureS3Key(null);   // Phase 5 — clear the S3 pointer too
         app.setSignatureDate(null);
         app.setFinalPdfUrl(null);
         app.setFinalPdfPublicId(null);
@@ -2932,46 +2940,33 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "Cheque must be an image (JPG/PNG/HEIC) or PDF.");
         }
-        String publicId = "cheques/" + applicationId;
+        // Phase 5 — store to S3; leave the Cloudinary cheque id null for new
+        // records (reads dual-branch on cheque_s3_key). isImage/isPdf above
+        // are retained for validation only.
+        String oldPublicId = app.getChequePublicId();
+        String oldContentType = app.getChequeContentType();
+        String s3Key = agreementUploadKey(app, "cheque", normalisedType);
         try {
-            cloudinary.uploader().upload(bytes,
-                    com.cloudinary.utils.ObjectUtils.asMap(
-                            "public_id", publicId,
-                            // 'auto' picks image vs raw based on content;
-                            // both flavours can be re-fetched via signedUrl
-                            // by passing the right resourceType.
-                            "resource_type", isPdf ? "raw" : "image",
-                            "type", "authenticated",
-                            "overwrite", true));
-        } catch (java.io.IOException e) {
+            documentStorage.store(bytes, s3Key, normalisedType);
+        } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store cheque: " + e.getMessage(), e);
         }
-        app.setChequePublicId(publicId);
+        app.setChequeS3Key(s3Key);
+        app.setChequePublicId(null);
         app.setChequeContentType(normalisedType);
         app.setChequeUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
+        destroyCloudinaryDoc(oldPublicId, oldContentType);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CHEQUE_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("publicId", publicId,
+                Map.of("s3Key", s3Key,
                         "contentType", normalisedType,
                         "bytes", bytes.length),
                 request);
         return app;
-    }
-
-    /**
-     * Build N — authenticated-raw Cloudinary assets that are re-uploaded on a
-     * STABLE public_id get re-versioned, which breaks the version-less signed
-     * delivery URL (401). Mirroring the working final-PDF pattern, every
-     * (re-)upload uses a UNIQUE timestamped public_id so the asset has a
-     * single version and the signed URL always resolves. Callers store the
-     * returned id and best-effort {@link #destroyCloudinaryDoc} the prior one.
-     */
-    private static String uniqueDocPublicId(String base) {
-        return base + "-" + System.currentTimeMillis();
     }
 
     /** Build N — best-effort delete of a superseded authenticated Cloudinary doc. */
@@ -2987,6 +2982,112 @@ public class ConsultantApplicationService {
         } catch (Exception ignored) {
             // Orphan cleanup is best-effort; never block an upload on it.
         }
+    }
+
+    // ── Phase 5 (S3) — agreements upload + signature storage helpers ──
+    //
+    // New consultant uploads and signatures go to S3 via documentStorage;
+    // reads dual-branch on the new *_s3_key column (present → S3 bytes; else
+    // the untouched authenticated-Cloudinary path). Scoped to these
+    // agreements-only methods — the shared Cloudinary bean is untouched for
+    // vault/media/video/thumbnail callers.
+
+    private static final java.time.format.DateTimeFormatter S3_KEY_TS =
+            java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+
+    /** File extension for an S3 key, derived from the upload's content type. */
+    private static String extFor(String contentType) {
+        if (contentType == null) return "bin";
+        String t = contentType.toLowerCase();
+        if (t.equals("application/pdf")) return "pdf";
+        if (t.equals("image/jpeg") || t.equals("image/jpg")) return "jpg";
+        if (t.equals("image/png")) return "png";
+        if (t.equals("image/heic") || t.equals("image/heif")) return "heic";
+        if (t.startsWith("image/")) {
+            String sub = t.substring("image/".length()).replaceAll("[^a-z0-9]", "");
+            return sub.isEmpty() ? "img" : sub;
+        }
+        return "bin";
+    }
+
+    /** ERM-id path segment for S3 keys (falls back to "system" for un-owned rows). */
+    private static String ermSegment(ConsultantApplication app) {
+        String erm = app.getOwnerErmId();
+        return (erm == null || erm.isBlank()) ? "system" : erm;
+    }
+
+    /**
+     * Per-APPLICATION key segment. One ERM owns many applications, so the key
+     * MUST include the application id — otherwise two consultants under the
+     * same ERM uploading the same doc-type in the same second would collide
+     * and overwrite each other's object.
+     */
+    private static String appSegment(ConsultantApplication app) {
+        if (app.getId() != null) return String.valueOf(app.getId());
+        String aid = app.getApplicationId();
+        return (aid == null || aid.isBlank()) ? "app" : aid;
+    }
+
+    /** Short random suffix so re-uploads within the same second never collide. */
+    private static String rand() {
+        return Long.toHexString(
+                java.util.concurrent.ThreadLocalRandom.current().nextLong() & 0xffffffffL);
+    }
+
+    /** S3 key for a consultant upload: agreements/{ermId}/uploads/{appId}-{docType}-{ts}-{rand}.{ext}. */
+    private String agreementUploadKey(ConsultantApplication app, String docType, String contentType) {
+        return "agreements/" + ermSegment(app) + "/uploads/" + appSegment(app) + "-" + docType + "-"
+                + LocalDateTime.now().format(S3_KEY_TS) + "-" + rand() + "." + extFor(contentType);
+    }
+
+    /** S3 key for a signature image (always normalised PNG): agreements/{ermId}/signatures/{appId}-{role}-{ts}-{rand}.png. */
+    private String agreementSignatureKey(ConsultantApplication app, String role) {
+        return "agreements/" + ermSegment(app) + "/signatures/" + appSegment(app) + "-" + role + "-"
+                + LocalDateTime.now().format(S3_KEY_TS) + "-" + rand() + ".png";
+    }
+
+    /**
+     * Authenticated Cloudinary fetch of an agreements upload by public_id —
+     * the legacy read path, reused by the dual-read fallback and the upload
+     * migration. Re-signs on every call (the per-upload URL 401s later).
+     */
+    byte[] cloudinaryAuthBytes(String publicId, String contentType) throws java.io.IOException {
+        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
+        String url = cloudinary.url()
+                .resourceType(isPdf ? "raw" : "image")
+                .type("authenticated")
+                .signed(true)
+                .secure(true)
+                .generate(publicId);
+        java.net.URLConnection conn = new java.net.URL(url).openConnection();
+        conn.setConnectTimeout(30_000);
+        conn.setReadTimeout(30_000);
+        try (java.io.InputStream in = conn.getInputStream()) {
+            return in.readAllBytes();
+        }
+    }
+
+    /**
+     * Dual-read for a consultant upload: S3 when {@code s3Key} is set (Phase 5
+     * records), else the untouched authenticated-Cloudinary path. Returns null
+     * when neither pointer is present (no upload on file).
+     */
+    private ChequeBytes readAgreementDoc(String s3Key, String cloudinaryPublicId, String contentType)
+            throws java.io.IOException {
+        if (s3Key != null && !s3Key.isBlank()) {
+            try {
+                return new ChequeBytes(documentStorage.get(s3Key), contentType);
+            } catch (software.amazon.awssdk.services.s3.model.NoSuchKeyException e) {
+                return null; // missing object → 404 via the controller's null guard
+            } catch (software.amazon.awssdk.core.exception.SdkException e) {
+                // The S3 SDK throws UNCHECKED exceptions; without this the
+                // controller's IOException catch is bypassed → HTTP 500. Map to
+                // IOException to preserve the existing 502 (BAD_GATEWAY) path.
+                throw new java.io.IOException("S3 read failed", e);
+            }
+        }
+        if (cloudinaryPublicId == null || cloudinaryPublicId.isBlank()) return null;
+        return new ChequeBytes(cloudinaryAuthBytes(cloudinaryPublicId, contentType), contentType);
     }
 
     /**
@@ -3020,19 +3121,15 @@ public class ConsultantApplicationService {
         }
         String oldPublicId = app.getWorkAuthDocPublicId();
         String oldContentType = app.getWorkAuthDocContentType();
-        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-workauth");
+        String s3Key = agreementUploadKey(app, "workauth", normalisedType);
         try {
-            cloudinary.uploader().upload(bytes,
-                    com.cloudinary.utils.ObjectUtils.asMap(
-                            "public_id", publicId,
-                            "resource_type", isPdf ? "raw" : "image",
-                            "type", "authenticated",
-                            "overwrite", true));
-        } catch (java.io.IOException e) {
+            documentStorage.store(bytes, s3Key, normalisedType);
+        } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store work-authorization document: " + e.getMessage(), e);
         }
-        app.setWorkAuthDocPublicId(publicId);
+        app.setWorkAuthDocS3Key(s3Key);
+        app.setWorkAuthDocPublicId(null);
         app.setWorkAuthDocContentType(normalisedType);
         app.setWorkAuthDocUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
@@ -3041,7 +3138,7 @@ public class ConsultantApplicationService {
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.WORK_AUTH_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("publicId", publicId,
+                Map.of("s3Key", s3Key,
                         "contentType", normalisedType,
                         "bytes", bytes.length),
                 request);
@@ -3055,22 +3152,8 @@ public class ConsultantApplicationService {
      */
     public ChequeBytes fetchWorkAuthDocBytes(String applicationId) throws java.io.IOException {
         ConsultantApplication app = getByApplicationId(applicationId);
-        String publicId = app.getWorkAuthDocPublicId();
-        if (publicId == null || publicId.isBlank()) return null;
-        boolean isPdf = "application/pdf".equalsIgnoreCase(app.getWorkAuthDocContentType());
-        String url = cloudinary.url()
-                .resourceType(isPdf ? "raw" : "image")
-                .type("authenticated")
-                .signed(true)
-                .secure(true)
-                .generate(publicId);
-        java.net.URLConnection conn = new java.net.URL(url).openConnection();
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(30_000);
-        try (java.io.InputStream in = conn.getInputStream()) {
-            byte[] bytes = in.readAllBytes();
-            return new ChequeBytes(bytes, app.getWorkAuthDocContentType());
-        }
+        return readAgreementDoc(app.getWorkAuthDocS3Key(), app.getWorkAuthDocPublicId(),
+                app.getWorkAuthDocContentType());
     }
 
     /**
@@ -3102,19 +3185,15 @@ public class ConsultantApplicationService {
         }
         String oldPublicId = app.getOfferLetterPublicId();
         String oldContentType = app.getOfferLetterContentType();
-        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-offerletter");
+        String s3Key = agreementUploadKey(app, "offerletter", normalisedType);
         try {
-            cloudinary.uploader().upload(bytes,
-                    com.cloudinary.utils.ObjectUtils.asMap(
-                            "public_id", publicId,
-                            "resource_type", isPdf ? "raw" : "image",
-                            "type", "authenticated",
-                            "overwrite", true));
-        } catch (java.io.IOException e) {
+            documentStorage.store(bytes, s3Key, normalisedType);
+        } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store offer letter: " + e.getMessage(), e);
         }
-        app.setOfferLetterPublicId(publicId);
+        app.setOfferLetterS3Key(s3Key);
+        app.setOfferLetterPublicId(null);
         app.setOfferLetterContentType(normalisedType);
         app.setOfferLetterUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
@@ -3123,7 +3202,7 @@ public class ConsultantApplicationService {
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.OFFER_LETTER_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("publicId", publicId,
+                Map.of("s3Key", s3Key,
                         "contentType", normalisedType,
                         "bytes", bytes.length),
                 request);
@@ -3133,22 +3212,8 @@ public class ConsultantApplicationService {
     /** Build I — streams the uploaded offer-letter bytes (re-signed URL). */
     public ChequeBytes fetchOfferLetterBytes(String applicationId) throws java.io.IOException {
         ConsultantApplication app = getByApplicationId(applicationId);
-        String publicId = app.getOfferLetterPublicId();
-        if (publicId == null || publicId.isBlank()) return null;
-        boolean isPdf = "application/pdf".equalsIgnoreCase(app.getOfferLetterContentType());
-        String url = cloudinary.url()
-                .resourceType(isPdf ? "raw" : "image")
-                .type("authenticated")
-                .signed(true)
-                .secure(true)
-                .generate(publicId);
-        java.net.URLConnection conn = new java.net.URL(url).openConnection();
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(30_000);
-        try (java.io.InputStream in = conn.getInputStream()) {
-            byte[] bytes = in.readAllBytes();
-            return new ChequeBytes(bytes, app.getOfferLetterContentType());
-        }
+        return readAgreementDoc(app.getOfferLetterS3Key(), app.getOfferLetterPublicId(),
+                app.getOfferLetterContentType());
     }
 
     /**
@@ -3156,7 +3221,8 @@ public class ConsultantApplicationService {
      * upload. Mirrors {@link #uploadOfferLetter}; the caller persists the
      * returned public_id/content-type on the right columns.
      */
-    private String storeBgDoc(byte[] bytes, String contentType, String publicId, String label) {
+    /** Build J — validate a Background Check upload; returns the normalised content type. */
+    private String validateBgDoc(byte[] bytes, String contentType, String label) {
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException(label + " file is empty.");
         }
@@ -3170,35 +3236,13 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     label + " must be an image (JPG/PNG/HEIC) or PDF.");
         }
-        try {
-            cloudinary.uploader().upload(bytes,
-                    com.cloudinary.utils.ObjectUtils.asMap(
-                            "public_id", publicId,
-                            "resource_type", isPdf ? "raw" : "image",
-                            "type", "authenticated",
-                            "overwrite", true));
-        } catch (java.io.IOException e) {
-            throw new IllegalStateException(
-                    "Couldn't store " + label.toLowerCase() + ": " + e.getMessage(), e);
-        }
         return normalisedType;
     }
 
-    private ChequeBytes fetchBgDoc(String publicId, String contentType) throws java.io.IOException {
-        if (publicId == null || publicId.isBlank()) return null;
-        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
-        String url = cloudinary.url()
-                .resourceType(isPdf ? "raw" : "image")
-                .type("authenticated")
-                .signed(true)
-                .secure(true)
-                .generate(publicId);
-        java.net.URLConnection conn = new java.net.URL(url).openConnection();
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(30_000);
-        try (java.io.InputStream in = conn.getInputStream()) {
-            return new ChequeBytes(in.readAllBytes(), contentType);
-        }
+    /** Build J — dual-read a Background Check upload (S3 key → S3; else Cloudinary). */
+    private ChequeBytes fetchBgDoc(String s3Key, String publicId, String contentType)
+            throws java.io.IOException {
+        return readAgreementDoc(s3Key, publicId, contentType);
     }
 
     /** Build J — Driver's-License / State-ID document upload (Appendix 3). */
@@ -3209,9 +3253,11 @@ public class ConsultantApplicationService {
         assertSectionWritable(app, "appendix3"); // Build Y (B5)
         String oldPublicId = app.getDlDocPublicId();
         String oldContentType = app.getDlDocContentType();
-        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-dldoc");
-        String normalisedType = storeBgDoc(bytes, contentType, publicId, "Driver's License / State ID document");
-        app.setDlDocPublicId(publicId);
+        String normalisedType = validateBgDoc(bytes, contentType, "Driver's License / State ID document");
+        String s3Key = agreementUploadKey(app, "dldoc", normalisedType);
+        documentStorage.store(bytes, s3Key, normalisedType);
+        app.setDlDocS3Key(s3Key);
+        app.setDlDocPublicId(null);
         app.setDlDocContentType(normalisedType);
         app.setDlDocUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
@@ -3219,15 +3265,15 @@ public class ConsultantApplicationService {
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.DL_DOC_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("publicId", publicId, "contentType", normalisedType, "bytes", bytes.length),
+                Map.of("s3Key", s3Key, "contentType", normalisedType, "bytes", bytes.length),
                 request);
         return app;
     }
 
-    /** Build J — streams the uploaded DL/State-ID document (re-signed URL). */
+    /** Build J — streams the uploaded DL/State-ID document (S3 → S3; else Cloudinary). */
     public ChequeBytes fetchDlDocBytes(String applicationId) throws java.io.IOException {
         ConsultantApplication app = getByApplicationId(applicationId);
-        return fetchBgDoc(app.getDlDocPublicId(), app.getDlDocContentType());
+        return fetchBgDoc(app.getDlDocS3Key(), app.getDlDocPublicId(), app.getDlDocContentType());
     }
 
     /** Build J — SSN document upload (Appendix 3). ALWAYS optional. */
@@ -3238,9 +3284,11 @@ public class ConsultantApplicationService {
         assertSectionWritable(app, "appendix3"); // Build Y (B5)
         String oldPublicId = app.getSsnDocPublicId();
         String oldContentType = app.getSsnDocContentType();
-        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-ssndoc");
-        String normalisedType = storeBgDoc(bytes, contentType, publicId, "SSN document");
-        app.setSsnDocPublicId(publicId);
+        String normalisedType = validateBgDoc(bytes, contentType, "SSN document");
+        String s3Key = agreementUploadKey(app, "ssndoc", normalisedType);
+        documentStorage.store(bytes, s3Key, normalisedType);
+        app.setSsnDocS3Key(s3Key);
+        app.setSsnDocPublicId(null);
         app.setSsnDocContentType(normalisedType);
         app.setSsnDocUploadedAt(LocalDateTime.now());
         applicationRepository.save(app);
@@ -3248,15 +3296,15 @@ public class ConsultantApplicationService {
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.SSN_DOC_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("publicId", publicId, "contentType", normalisedType, "bytes", bytes.length),
+                Map.of("s3Key", s3Key, "contentType", normalisedType, "bytes", bytes.length),
                 request);
         return app;
     }
 
-    /** Build J — streams the uploaded SSN document (re-signed URL). */
+    /** Build J — streams the uploaded SSN document (S3 → S3; else Cloudinary). */
     public ChequeBytes fetchSsnDocBytes(String applicationId) throws java.io.IOException {
         ConsultantApplication app = getByApplicationId(applicationId);
-        return fetchBgDoc(app.getSsnDocPublicId(), app.getSsnDocContentType());
+        return fetchBgDoc(app.getSsnDocS3Key(), app.getSsnDocPublicId(), app.getSsnDocContentType());
     }
 
     // ── Build W — small name helpers ──────────────────────────────────
@@ -3327,22 +3375,8 @@ public class ConsultantApplicationService {
      */
     public ChequeBytes fetchChequeBytes(String applicationId) throws java.io.IOException {
         ConsultantApplication app = getByApplicationId(applicationId);
-        String publicId = app.getChequePublicId();
-        if (publicId == null || publicId.isBlank()) return null;
-        boolean isPdf = "application/pdf".equalsIgnoreCase(app.getChequeContentType());
-        String url = cloudinary.url()
-                .resourceType(isPdf ? "raw" : "image")
-                .type("authenticated")
-                .signed(true)
-                .secure(true)
-                .generate(publicId);
-        java.net.URLConnection conn = new java.net.URL(url).openConnection();
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(30_000);
-        try (java.io.InputStream in = conn.getInputStream()) {
-            byte[] bytes = in.readAllBytes();
-            return new ChequeBytes(bytes, app.getChequeContentType());
-        }
+        return readAgreementDoc(app.getChequeS3Key(), app.getChequePublicId(),
+                app.getChequeContentType());
     }
 
     /** Carries the cheque bytes + their original content-type for the controller's stream. */
@@ -3350,12 +3384,18 @@ public class ConsultantApplicationService {
 
     // ── Build U: multi-cheque support ────────────────────────────────
 
-    /** One entry in the {@code cheques} JSON list. */
+    /**
+     * One entry in the {@code cheques} JSON list. Phase 5 adds {@code s3Key}:
+     * new cheque uploads store the S3 key here (Cloudinary {@code publicId}
+     * left blank); reads dual-branch on it, so pre-Phase-5 entries that only
+     * carry a {@code publicId} keep rendering from Cloudinary.
+     */
     public record ChequeEntry(
             int index,
             String number,
             String date,
             String publicId,
+            String s3Key,
             String contentType,
             String uploadedAt) {}
 
@@ -3378,6 +3418,7 @@ public class ConsultantApplicationService {
                                 n.path("number").asText(""),
                                 n.path("date").asText(""),
                                 n.path("publicId").asText(""),
+                                n.path("s3Key").asText(""),
                                 n.path("contentType").asText(""),
                                 n.path("uploadedAt").asText("")));
                     }
@@ -3389,10 +3430,17 @@ public class ConsultantApplicationService {
                         app.getApplicationId(), e.getMessage());
             }
         }
-        String legacy = app.getChequePublicId();
-        if (legacy != null && !legacy.isBlank()) {
+        // Legacy single-cheque fallback (index 0). Phase 5: the single cheque
+        // may now be on S3 (chequeS3Key) with the Cloudinary id null, so the
+        // fallback triggers on EITHER pointer.
+        String legacyPublicId = app.getChequePublicId();
+        String legacyS3Key = app.getChequeS3Key();
+        if ((legacyS3Key != null && !legacyS3Key.isBlank())
+                || (legacyPublicId != null && !legacyPublicId.isBlank())) {
             return List.of(new ChequeEntry(
-                    0, "", "", legacy,
+                    0, "", "",
+                    legacyPublicId == null ? "" : legacyPublicId,
+                    legacyS3Key == null ? "" : legacyS3Key,
                     app.getChequeContentType() == null ? "" : app.getChequeContentType(),
                     app.getChequeUploadedAt() == null ? "" : app.getChequeUploadedAt().toString()));
         }
@@ -3430,6 +3478,7 @@ public class ConsultantApplicationService {
                 number,
                 date,
                 existing == null ? "" : existing.publicId(),
+                existing == null ? "" : existing.s3Key(),
                 existing == null ? "" : existing.contentType(),
                 existing == null ? "" : existing.uploadedAt());
         upsertEntry(entries, replacement);
@@ -3470,16 +3519,12 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(
                     "Cheque must be an image (JPG/PNG/HEIC) or PDF.");
         }
-        // Build N — unique public_id (no re-versioning -> signed URL resolves).
-        String publicId = uniqueDocPublicId("agreements/" + applicationId + "-cheque-" + index);
+        // Phase 5 — store to S3 (unique timestamped key); Cloudinary id stays
+        // blank for new entries. isImage/isPdf above are validation-only now.
+        String s3Key = agreementUploadKey(app, "cheque-" + index, normalisedType);
         try {
-            cloudinary.uploader().upload(bytes,
-                    com.cloudinary.utils.ObjectUtils.asMap(
-                            "public_id", publicId,
-                            "resource_type", isPdf ? "raw" : "image",
-                            "type", "authenticated",
-                            "overwrite", true));
-        } catch (java.io.IOException e) {
+            documentStorage.store(bytes, s3Key, normalisedType);
+        } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't store cheque: " + e.getMessage(), e);
         }
@@ -3492,16 +3537,18 @@ public class ConsultantApplicationService {
                 index,
                 existing == null ? "" : existing.number(),
                 existing == null ? "" : existing.date(),
-                publicId,
+                "",                       // Phase 5 — Cloudinary id null for new entries
+                s3Key,
                 normalisedType,
                 LocalDateTime.now().toString());
         upsertEntry(entries, replacement);
         app.setCheques(serialiseCheques(entries));
         // Keep the legacy single-cheque fields current too so the ERM's
         // existing "cheque uploaded" pill in the wizard's review step
-        // and the older fetchChequeBytes path keep working.
+        // and the older fetchChequeBytes path keep working — now on S3.
         if (index == 0) {
-            app.setChequePublicId(publicId);
+            app.setChequeS3Key(s3Key);
+            app.setChequePublicId(null);
             app.setChequeContentType(normalisedType);
             app.setChequeUploadedAt(LocalDateTime.now());
         }
@@ -3511,7 +3558,7 @@ public class ConsultantApplicationService {
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CHEQUE_UPLOADED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
-                Map.of("publicId", publicId,
+                Map.of("s3Key", s3Key,
                         "index", index,
                         "contentType", normalisedType,
                         "bytes", bytes.length),
@@ -3529,23 +3576,8 @@ public class ConsultantApplicationService {
         ConsultantApplication app = getByApplicationId(applicationId);
         List<ChequeEntry> entries = parseCheques(app);
         ChequeEntry entry = findEntry(new ArrayList<>(entries), index);
-        if (entry == null || entry.publicId() == null || entry.publicId().isBlank()) {
-            return null;
-        }
-        boolean isPdf = "application/pdf".equalsIgnoreCase(entry.contentType());
-        String url = cloudinary.url()
-                .resourceType(isPdf ? "raw" : "image")
-                .type("authenticated")
-                .signed(true)
-                .secure(true)
-                .generate(entry.publicId());
-        java.net.URLConnection conn = new java.net.URL(url).openConnection();
-        conn.setConnectTimeout(30_000);
-        conn.setReadTimeout(30_000);
-        try (java.io.InputStream in = conn.getInputStream()) {
-            byte[] bytes = in.readAllBytes();
-            return new ChequeBytes(bytes, entry.contentType());
-        }
+        if (entry == null) return null;
+        return readAgreementDoc(entry.s3Key(), entry.publicId(), entry.contentType());
     }
 
     private static ChequeEntry findEntry(List<ChequeEntry> entries, int index) {
@@ -3587,31 +3619,35 @@ public class ConsultantApplicationService {
     }
 
     /**
-     * Decodes a data:image/...;base64,... data URL and pushes the
-     * bytes to Cloudinary under the given public_id. Returns the
-     * Cloudinary {@code secure_url}.
+     * Phase 5 — decodes a {@code data:image/...;base64,...} signature and
+     * stores the bytes in S3 under
+     * {@code agreements/{ermId}/signatures/{role}-{ts}.png}. Returns the S3
+     * key (persisted on the relevant {@code *_s3_key} column; the Cloudinary
+     * {@code *_image}/{@code *_url} column stays null for new records). The
+     * stored bytes are the raw signature image; the PDF render
+     * ({@link AgreementDocumentService#buildImage}) re-normalises to PNG on
+     * read, so the object content-type is informational only.
      */
-    private String uploadSignatureToCloudinary(String dataUrl, String publicId)
+    private String storeSignatureToS3(String dataUrl, String role, ConsultantApplication app)
             throws java.io.IOException {
+        if (dataUrl == null) {
+            throw new java.io.IOException("Missing signature data URL.");
+        }
         int comma = dataUrl.indexOf(',');
         if (comma < 0) {
             throw new java.io.IOException("Malformed data URL (no comma).");
         }
         byte[] bytes = java.util.Base64.getDecoder()
                 .decode(dataUrl.substring(comma + 1));
-        @SuppressWarnings("unchecked")
-        Map<String, Object> result = (Map<String, Object>)
-                cloudinary.uploader().upload(bytes,
-                        com.cloudinary.utils.ObjectUtils.asMap(
-                                "public_id", publicId,
-                                "resource_type", "image",
-                                "overwrite", true));
-        Object url = result.get("secure_url");
-        if (url == null) {
-            throw new java.io.IOException(
-                    "Cloudinary returned no secure_url for " + publicId);
+        String mime = "image/png";
+        if (dataUrl.startsWith("data:")) {
+            int semi = dataUrl.indexOf(';');
+            int end = (semi >= 0 && semi < comma) ? semi : comma;
+            if (end > 5) mime = dataUrl.substring(5, end);
         }
-        return url.toString();
+        String key = agreementSignatureKey(app, role);
+        documentStorage.store(bytes, key, mime);
+        return key;
     }
 
     // ── Cron sweep ──────────────────────────────────────────────────
@@ -3895,8 +3931,9 @@ public class ConsultantApplicationService {
         }
         // Build I — work-authorization document now lives in Personal
         // Information and is required for EVERY work-auth type (CORE).
-        if (app.getWorkAuthDocPublicId() == null
-                || app.getWorkAuthDocPublicId().isBlank()) {
+        // Phase 5 — dual-read: present when EITHER the S3 key or the legacy
+        // Cloudinary id is set (new uploads store the key + null the id).
+        if (!nonBlank(app.getWorkAuthDocS3Key()) && !nonBlank(app.getWorkAuthDocPublicId())) {
             missing.add("workAuthDoc");
         }
         // Build I — Service Track is ERM-set at create (read-only to the
@@ -3913,8 +3950,7 @@ public class ConsultantApplicationService {
             addIfBlank(missing, "payrollCycle", app.getPayrollCycle());
             // Build I — Offer Letter upload is required whenever Appendix 1
             // (Phase 2 Employment) applies.
-            if (app.getOfferLetterPublicId() == null
-                    || app.getOfferLetterPublicId().isBlank()) {
+            if (!nonBlank(app.getOfferLetterS3Key()) && !nonBlank(app.getOfferLetterPublicId())) {
                 missing.add("offerLetter");
             }
         }
@@ -3961,7 +3997,7 @@ public class ConsultantApplicationService {
             }
             addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
             // Build J — DL / State-ID document required when Appendix 3 applies.
-            if (app.getDlDocPublicId() == null || app.getDlDocPublicId().isBlank()) {
+            if (!nonBlank(app.getDlDocS3Key()) && !nonBlank(app.getDlDocPublicId())) {
                 missing.add("dlDoc");
             }
             // Build J — SSN document is ALWAYS optional; never validated here.
@@ -4003,9 +4039,12 @@ public class ConsultantApplicationService {
                 List<ChequeEntry> entries = parseCheques(app);
                 for (int i = 0; i < requiredCount; i++) {
                     ChequeEntry e = findEntry(new java.util.ArrayList<>(entries), i);
+                    // Phase 5 — uploaded when EITHER pointer is present.
+                    boolean noUpload = e == null
+                            || (!nonBlank(e.s3Key()) && !nonBlank(e.publicId()));
                     if (e == null
                             || e.number() == null || e.number().isBlank()
-                            || e.publicId() == null || e.publicId().isBlank()) {
+                            || noUpload) {
                         missing.add("cheques");
                         break;
                     }

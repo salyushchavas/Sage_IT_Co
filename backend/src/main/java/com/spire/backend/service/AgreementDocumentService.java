@@ -225,27 +225,29 @@ public class AgreementDocumentService {
      * the returned bytes so the hash covers the attachments.
      */
     public byte[] appendAttachments(byte[] body, ConsultantApplication app) {
-        boolean hasWorkAuth = nonBlank(app.getWorkAuthDocPublicId());
-        boolean hasOffer = nonBlank(app.getOfferLetterPublicId());
-        boolean hasDl = nonBlank(app.getDlDocPublicId());
-        boolean hasSsn = nonBlank(app.getSsnDocPublicId());
+        // Phase 5 — an attachment is present when EITHER its S3 key or its
+        // legacy Cloudinary id is set (dual-read).
+        boolean hasWorkAuth = nonBlank(app.getWorkAuthDocS3Key()) || nonBlank(app.getWorkAuthDocPublicId());
+        boolean hasOffer = nonBlank(app.getOfferLetterS3Key()) || nonBlank(app.getOfferLetterPublicId());
+        boolean hasDl = nonBlank(app.getDlDocS3Key()) || nonBlank(app.getDlDocPublicId());
+        boolean hasSsn = nonBlank(app.getSsnDocS3Key()) || nonBlank(app.getSsnDocPublicId());
         if (!hasWorkAuth && !hasOffer && !hasDl && !hasSsn) return body;
         try (PDDocument doc = Loader.loadPDF(body)) {
             if (hasWorkAuth) {
                 appendOneAttachment(doc, "Attachment — Work Authorization Document",
-                        app.getWorkAuthDocPublicId(), app.getWorkAuthDocContentType());
+                        app.getWorkAuthDocS3Key(), app.getWorkAuthDocPublicId(), app.getWorkAuthDocContentType());
             }
             if (hasOffer) {
                 appendOneAttachment(doc, "Attachment — Offer Letter",
-                        app.getOfferLetterPublicId(), app.getOfferLetterContentType());
+                        app.getOfferLetterS3Key(), app.getOfferLetterPublicId(), app.getOfferLetterContentType());
             }
             if (hasDl) {
                 appendOneAttachment(doc, "Attachment — Driver's License / State ID",
-                        app.getDlDocPublicId(), app.getDlDocContentType());
+                        app.getDlDocS3Key(), app.getDlDocPublicId(), app.getDlDocContentType());
             }
             if (hasSsn) {
                 appendOneAttachment(doc, "Attachment — SSN Document",
-                        app.getSsnDocPublicId(), app.getSsnDocContentType());
+                        app.getSsnDocS3Key(), app.getSsnDocPublicId(), app.getSsnDocContentType());
             }
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
@@ -263,9 +265,9 @@ public class AgreementDocumentService {
 
     /** Append one upload: prepare its content first, then a divider + the content. */
     private void appendOneAttachment(
-            PDDocument doc, String label, String publicId, String contentType) {
+            PDDocument doc, String label, String s3Key, String publicId, String contentType) {
         try {
-            byte[] bytes = fetchAttachmentBytes(publicId, contentType);
+            byte[] bytes = fetchAttachmentBytes(s3Key, publicId, contentType);
             if (bytes == null || bytes.length == 0) return;
             boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
             if (isPdf) {
@@ -331,8 +333,16 @@ public class AgreementDocumentService {
         }
     }
 
-    /** Fetch an authenticated Cloudinary upload's bytes by public_id. */
-    private byte[] fetchAttachmentBytes(String publicId, String contentType) throws IOException {
+    /**
+     * Fetch an uploaded attachment's bytes. Phase 5 dual-read: the S3 object
+     * when {@code s3Key} is set, else the legacy authenticated-Cloudinary
+     * upload by public_id.
+     */
+    private byte[] fetchAttachmentBytes(String s3Key, String publicId, String contentType)
+            throws IOException {
+        if (s3Key != null && !s3Key.isBlank()) {
+            return documentStorage.get(s3Key);
+        }
         boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
         String url = cloudinary.url()
                 .resourceType(isPdf ? "raw" : "image")
@@ -833,9 +843,11 @@ public class AgreementDocumentService {
         // F-4 first-and-last model: signatureImage is drawn on the
         // main-agreement step; finalSignatureImage is drawn on the
         // review step and stamps the closing/execution block.
-        c.put("signatureImage", buildImage(app.getSignatureImage()));
-        c.put("finalSignatureImage", buildImage(app.getFinalSignatureImage()));
-        c.put("ermSignatureImage", buildImage(app.getErmSignatureUrl()));
+        // Phase 5 — dual-read signatures: S3 bytes when the *_s3_key is set,
+        // else the legacy Cloudinary URL. Blank box on failure (render-safe).
+        c.put("signatureImage", signatureImage(app.getSignatureS3Key(), app.getSignatureImage()));
+        c.put("finalSignatureImage", signatureImage(app.getFinalSignatureS3Key(), app.getFinalSignatureImage()));
+        c.put("ermSignatureImage", signatureImage(app.getErmSignatureS3Key(), app.getErmSignatureUrl()));
 
         return c;
     }
@@ -1222,6 +1234,36 @@ public class AgreementDocumentService {
         } catch (Exception e) {
             log.warn("Failed loading signature image from {}: {}",
                     url, e.getMessage());
+            return "";
+        }
+    }
+
+    /**
+     * Phase 5 — dual-read a signature image: the S3 object when {@code s3Key}
+     * is set, else the legacy Cloudinary URL ({@link #buildImage}). Returns ""
+     * (blank box) on any failure so a render never breaks on a signature
+     * hiccup — but, unlike the silent S3 path the survey flagged, it logs.
+     */
+    private Object signatureImage(String s3Key, String cloudinaryUrl) {
+        if (s3Key != null && !s3Key.isBlank()) {
+            try {
+                return buildImageBytes(documentStorage.get(s3Key));
+            } catch (Exception e) {
+                log.warn("Phase 5 — failed loading signature from S3 key {}: {}",
+                        s3Key, e.getMessage());
+                return "";
+            }
+        }
+        return buildImage(cloudinaryUrl);
+    }
+
+    /** Build G — normalise raw signature bytes into a sized PDF image (S3 read path). */
+    private Object buildImageBytes(byte[] bytes) {
+        if (bytes == null || bytes.length == 0) return "";
+        try {
+            return new Image(normalizeSignaturePng(bytes));
+        } catch (Exception e) {
+            log.warn("Failed normalising signature image bytes: {}", e.getMessage());
             return "";
         }
     }

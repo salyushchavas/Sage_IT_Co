@@ -1331,7 +1331,7 @@ function ReadOnlyRow({
 // ── Build W — Appendix 1 work-authorization document (read-only) ──
 
 function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
-  const has = Boolean(app.workAuthDocPublicId);
+  const has = Boolean(app.workAuthDocPublicId || app.workAuthDocS3Key);
   if (!has) return null;
   return (
     <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
@@ -1364,7 +1364,7 @@ function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
 // ── Build I — Phase 2 Employment offer letter (read-only) ─────────
 
 function OfferLetterCard({ app }: { app: ConsultantApplication }) {
-  if (!app.offerLetterPublicId) return null;
+  if (!app.offerLetterPublicId && !app.offerLetterS3Key) return null;
   return (
     <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
       <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
@@ -1440,13 +1440,13 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
       <OfferLetterCard app={app} />
       <UploadedDocCard
         title="Driver's License / State ID document"
-        uploaded={Boolean(app.dlDocPublicId)}
+        uploaded={Boolean(app.dlDocPublicId || app.dlDocS3Key)}
         uploadedAt={app.dlDocUploadedAt}
         href={ermDlDocViewUrl(app.applicationId)}
       />
       <UploadedDocCard
         title="SSN document"
-        uploaded={Boolean(app.ssnDocPublicId)}
+        uploaded={Boolean(app.ssnDocPublicId || app.ssnDocS3Key)}
         uploadedAt={app.ssnDocUploadedAt}
         href={ermSsnDocViewUrl(app.applicationId)}
       />
@@ -1544,20 +1544,21 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
   const entries = useMemo<ChequeEntry[]>(() => {
     const parsed = parseChequeList(app.cheques ?? null);
     if (parsed.length > 0) return parsed;
-    if (app.chequePublicId) {
+    if (app.chequePublicId || app.chequeS3Key) {
       return [{
         index: 0,
         number: "",
         date: "",
-        publicId: app.chequePublicId,
+        publicId: app.chequePublicId ?? "",
+        s3Key: app.chequeS3Key ?? "",
         contentType: app.chequeContentType ?? "",
         uploadedAt: app.chequeUploadedAt ?? "",
       }];
     }
     return [];
-  }, [app.cheques, app.chequePublicId, app.chequeContentType, app.chequeUploadedAt]);
+  }, [app.cheques, app.chequePublicId, app.chequeS3Key, app.chequeContentType, app.chequeUploadedAt]);
 
-  const uploadedCount = entries.filter((e) => e.publicId).length;
+  const uploadedCount = entries.filter((e) => e.publicId || e.s3Key).length;
 
   const handleAction = async (entry: ChequeEntry, mode: "view" | "download") => {
     const key = `${entry.index}-${mode}`;
@@ -1643,7 +1644,7 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
                   )}
                 </p>
                 <div className="flex items-center gap-2">
-                  {entry.publicId ? (
+                  {(entry.publicId || entry.s3Key) ? (
                     <>
                       <button
                         type="button"
@@ -1669,7 +1670,7 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
                   )}
                 </div>
               </div>
-              {entry.uploadedAt && entry.publicId && (
+              {entry.uploadedAt && (entry.publicId || entry.s3Key) && (
                 <p className="text-[10px] text-gray-500">
                   Uploaded {new Date(entry.uploadedAt).toLocaleString()}
                 </p>

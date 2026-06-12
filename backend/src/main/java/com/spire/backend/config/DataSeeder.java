@@ -1350,6 +1350,19 @@ public class DataSeeder implements CommandLineRunner {
                 // new records; downloads dual-read on these).
                 {"s3_key VARCHAR(512)", "s3_key"},
                 {"consultant_pdf_s3_key VARCHAR(512)", "consultant_pdf_s3_key"},
+                // Phase 5 (S3) — storage keys for the S3-backed consultant
+                // UPLOADS (cheque/work-auth/offer-letter/DL/SSN) + SIGNATURES
+                // (consultant primary + final, ERM). Additive; the parallel
+                // Cloudinary *_public_id / *_image / *_url columns are retained
+                // (dual-read), null for new records.
+                {"cheque_s3_key VARCHAR(512)", "cheque_s3_key"},
+                {"work_auth_doc_s3_key VARCHAR(512)", "work_auth_doc_s3_key"},
+                {"offer_letter_s3_key VARCHAR(512)", "offer_letter_s3_key"},
+                {"dl_doc_s3_key VARCHAR(512)", "dl_doc_s3_key"},
+                {"ssn_doc_s3_key VARCHAR(512)", "ssn_doc_s3_key"},
+                {"signature_s3_key VARCHAR(512)", "signature_s3_key"},
+                {"final_signature_s3_key VARCHAR(512)", "final_signature_s3_key"},
+                {"erm_signature_s3_key VARCHAR(512)", "erm_signature_s3_key"},
         };
         // Build Q — agreements no longer expire (the 7-day TTL applies to
         // the consultant LINK only, as a derived indicator). Restore every
