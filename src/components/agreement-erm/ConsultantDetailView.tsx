@@ -2208,7 +2208,7 @@ function AdvanceToPhase2Modal({
     { key: "appendix2", label: "Appendix 2 — ACH Payment Authorization", alreadyRequired: Boolean(app.requireAppendix2) },
     { key: "appendix3", label: "Appendix 3 — Background Check", alreadyRequired: Boolean(app.requireAppendix3) },
     { key: "appendix4", label: "Appendix 4 — Portal & Account Access", alreadyRequired: Boolean(app.requireAppendix4) },
-    { key: "appendix5", label: "Appendix 5 — Security Check", alreadyRequired: Boolean(app.requireAppendix5) },
+    { key: "appendix5", label: "Appendix 5 — Security Cheque", alreadyRequired: Boolean(app.requireAppendix5) },
     { key: "ssn", label: "Require SSN (within Appendix 3)", alreadyRequired: Boolean(app.requireSsn) },
   ];
 

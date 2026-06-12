@@ -508,7 +508,7 @@ export default function NewConsultantApplicationPage() {
                 disabled={isSubmitting}
               />
               <RequirementCheckbox
-                label="Appendix 5 — Security check acknowledgment"
+                label="Appendix 5 — Security cheque acknowledgment"
                 checked={form.requireAppendix5}
                 onToggle={toggleFlag("requireAppendix5")}
                 disabled={isSubmitting}
