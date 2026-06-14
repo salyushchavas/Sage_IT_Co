@@ -4044,10 +4044,11 @@ export function parseRevisionSections(
 export async function ermRequestRevision(
   applicationId: string,
   sections: RevisionSectionSelection[],
+  ach?: { achDebitDates?: string; achDebitAmounts?: string },
 ) {
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/request-revision`,
-    { method: "POST", body: JSON.stringify({ sections }) },
+    { method: "POST", body: JSON.stringify({ sections, ...(ach ?? {}) }) },
   );
 }
 

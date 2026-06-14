@@ -1392,7 +1392,9 @@ public class ConsultantApplicationService {
      */
     @Transactional
     public ConsultantApplication ermRequestRevision(
-            String applicationId, JsonNode sections, HttpServletRequest request) {
+            String applicationId, JsonNode sections,
+            String achDebitDates, String achDebitAmounts,
+            HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
         // 3B — the ERM can bounce to the CONSULTANT from the consultant-
@@ -1426,6 +1428,26 @@ public class ConsultantApplicationService {
                 if (note != null) notes.put(key, note);
             }
         }
+
+        // Build U — apply an ERM ACH debit-schedule correction sent with the
+        // revision. Only a CHANGED value is persisted; when it changes, scope
+        // appendix2 in so the consultant re-reviews + re-affirms the corrected
+        // schedule (this also makes an "ACH-only" revision valid below).
+        boolean achChanged = false;
+        if (achDebitDates != null && !java.util.Objects.equals(
+                blankToNull(achDebitDates), blankToNull(app.getAchDebitDates()))) {
+            app.setAchDebitDates(blankToNull(achDebitDates));
+            achChanged = true;
+        }
+        if (achDebitAmounts != null && !java.util.Objects.equals(
+                blankToNull(achDebitAmounts), blankToNull(app.getAchDebitAmounts()))) {
+            app.setAchDebitAmounts(blankToNull(achDebitAmounts));
+            achChanged = true;
+        }
+        if (achChanged && !selectedKeys.contains("appendix2")) {
+            selectedKeys.add("appendix2");
+        }
+
         if (selectedKeys.isEmpty()) {
             throw new IllegalArgumentException(
                     "Select at least one section to revise.");
@@ -2795,6 +2817,10 @@ public class ConsultantApplicationService {
         public String achRoutingNumber;
         public String achAccountNumber;
         public String achNoticeEmail;
+        // Build U — ERM-only (consultant-read-only). Still deserialized for
+        // shape stability, but NEVER applied or counted as touched from a
+        // consultant patch (see applyTo + touchedFieldNames), so a crafted
+        // /fill cannot overwrite the ERM-set ACH debit schedule.
         public String achDebitDates;
         public String achDebitAmounts;
         public String bgFullLegalName;
@@ -2869,8 +2895,9 @@ public class ConsultantApplicationService {
             if (achRoutingNumber != null)         { app.setAchRoutingNumber(achRoutingNumber); changed = true; }
             if (achAccountNumber != null)         { app.setAchAccountNumber(achAccountNumber); changed = true; }
             if (achNoticeEmail != null)           { app.setAchNoticeEmail(achNoticeEmail); changed = true; }
-            if (achDebitDates != null)            { app.setAchDebitDates(achDebitDates); changed = true; }
-            if (achDebitAmounts != null)          { app.setAchDebitAmounts(achDebitAmounts); changed = true; }
+            // Build U — achDebitDates/achDebitAmounts are ERM-only; deliberately
+            // NOT applied from a consultant patch (read-only enforced server-side;
+            // the ERM corrects them via the revision-request action instead).
             if (bgFullLegalName != null)          { app.setBgFullLegalName(bgFullLegalName); changed = true; }
             if (bgOtherNamesUsed != null)         { app.setBgOtherNamesUsed(bgOtherNamesUsed); changed = true; }
             if (bgCurrentAddress != null)         { app.setBgCurrentAddress(bgCurrentAddress); changed = true; }
@@ -2937,8 +2964,7 @@ public class ConsultantApplicationService {
             if (achRoutingNumber != null) names.add("achRoutingNumber");
             if (achAccountNumber != null) names.add("achAccountNumber");
             if (achNoticeEmail != null) names.add("achNoticeEmail");
-            if (achDebitDates != null) names.add("achDebitDates");
-            if (achDebitAmounts != null) names.add("achDebitAmounts");
+            // Build U — ACH debit fields are ERM-only; not consultant-touchable.
             if (bgFullLegalName != null) names.add("bgFullLegalName");
             if (bgOtherNamesUsed != null) names.add("bgOtherNamesUsed");
             if (bgCurrentAddress != null) names.add("bgCurrentAddress");

@@ -259,7 +259,11 @@ public class ConsultantApplicationController {
         return ResponseEntity.ok(ApiResponse.success(
                 "Revision requested",
                 consultantService.ermRequestRevision(
-                        appId, body == null ? null : body.sections, request)));
+                        appId,
+                        body == null ? null : body.sections,
+                        body == null ? null : body.achDebitDates,
+                        body == null ? null : body.achDebitAmounts,
+                        request)));
     }
 
     /**
@@ -1470,6 +1474,12 @@ public class ConsultantApplicationController {
         // {key (section id), note (optional)} rows. No free-text is
         // required; a revision can be sent with notes empty.
         public JsonNode sections;
+        // Build U — optional ACH debit-schedule correction sent WITH the
+        // revision (free-text, pre-filled from current values). Null = leave
+        // unchanged; a CHANGED value is persisted and auto-scopes appendix2 so
+        // the consultant re-reviews the corrected schedule before re-signing.
+        public String achDebitDates;
+        public String achDebitAmounts;
     }
 
     public static class ApproveAndSignBody {
