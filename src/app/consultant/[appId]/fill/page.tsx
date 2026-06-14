@@ -1111,7 +1111,14 @@ export default function ConsultantWizardPage() {
           affirmations: nextAff,
         };
       }
-      if (!form.signature) {
+      // Build V — the PRIMARY signature is only re-required when the
+      // main-agreement step is part of THIS round's visible sections (a first
+      // fill, or the Phase-2 re-sign). In a section-restricted revision the
+      // main step is hidden and NOT re-required: the persisted primary is
+      // reused server-side and the consultant's explicit revision execution
+      // signature (the review step, below) covers the revised content.
+      const mainStepInScope = visibleSections.some((s) => s.id === "main-agreement");
+      if (mainStepInScope && !form.signature) {
         throw new Error("Your primary signature is required before you can submit.");
       }
       if (!form.finalSignature) {
@@ -1120,7 +1127,7 @@ export default function ConsultantWizardPage() {
       const updated = await signConsultantApplication(
         appId,
         form.signedLegalName.trim(),
-        form.signature,
+        form.signature ?? "",
         form.finalSignature,
       );
       // Build K — stay on this route and re-render as the inline
@@ -1168,7 +1175,7 @@ export default function ConsultantWizardPage() {
       setSubmitError(msg);
       setSubmitting(false);
     }
-  }, [appId, computeDelta, form, reqs, chequeEntries, router]);
+  }, [appId, computeDelta, form, reqs, chequeEntries, router, visibleSections]);
 
   // Step accessors ──────────────────────────────────────────────
   // Build X — wizard step indexing flows through visibleSections only.
@@ -1562,6 +1569,7 @@ export default function ConsultantWizardPage() {
             onAffirm={setAffirmation}
             onSignature={setSignature}
             onLegalName={setLegalName}
+            revision={!visibleSections.some((s) => s.id === "main-agreement")}
             consultantEmail={app.consultantEmail}
             effectiveDateText={formatUsDate(app.effectiveDate)}
             onOpenTemplate={() => setTemplateOpen(true)}
@@ -1995,6 +2003,7 @@ function SectionStep({
   missingAffirmation,
   missingSignature,
   missingCheques,
+  revision,
 }: {
   section: AgreementSection;
   content: AgreementContent | null;
@@ -2052,6 +2061,10 @@ function SectionStep({
   missingAffirmation: boolean;
   missingSignature: boolean;
   missingCheques: boolean;
+  /** Build V — main-agreement step hidden this round (section-restricted
+   *  revision); the per-section signature preview is covered by the
+   *  review-step execution signature, not the (absent) main-step primary. */
+  revision: boolean;
   submitting: boolean;
   isFirstStep: boolean;
   onReadProgress: (pct: number) => void;
@@ -2489,7 +2502,7 @@ function SectionStep({
           )}
 
           {section.requiresAffirmation && !section.requiresSignature && (
-            <SignaturePreviewBlock signature={form.signature} />
+            <SignaturePreviewBlock signature={form.signature} revision={revision} />
           )}
 
           {section.requiresAffirmation && section.affirmationFlag && (
@@ -2994,14 +3007,21 @@ function SignatureBlock({
   );
 }
 
-function SignaturePreviewBlock({ signature }: { signature: string | null }) {
+function SignaturePreviewBlock({
+  signature,
+  revision = false,
+}: {
+  signature: string | null;
+  revision?: boolean;
+}) {
   if (!signature) {
     return (
       <div className="rounded-xl bg-[#FBF1E8] border border-sage-copper/30 px-4 py-3 text-[12.5px] text-sage-copper-deep inline-flex items-start gap-2">
         <AlertCircle size={14} className="mt-0.5 shrink-0" />
         <span>
-          Add your signature on the main agreement step first. We will
-          apply it here automatically.
+          {revision
+            ? "Your revision signature on the review step will apply to this section."
+            : "Add your signature on the main agreement step first. We will apply it here automatically."}
         </span>
       </div>
     );

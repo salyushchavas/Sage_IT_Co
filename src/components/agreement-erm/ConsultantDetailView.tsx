@@ -37,6 +37,9 @@ import {
   ermSendForApproval,
   ermFetchEligibleApprovers,
   type EligibleApprovers,
+  ermFetchAgreementVersions,
+  fetchAgreementVersionPdfBlob,
+  type AgreementVersion,
   ermSendPdfToEmail,
   fetchAgreementDocBlob,
   fetchAgreementPdfBlob,
@@ -350,6 +353,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const handleSendForApproval = async (routing: {
     managerUserId?: string;
     accountsUserId?: string;
+    versionNumber?: number;
   }) => {
     setBusy("sendApproval");
     setError("");
@@ -420,6 +424,8 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
       <ConsultantSections app={app} />
 
       <SignaturesPreview app={app} />
+
+      <VersionHistory app={app} />
 
       <AccessRecord app={app} />
 
@@ -1455,6 +1461,116 @@ function UploadedDocCard({
   );
 }
 
+// ── Build V — approved consultant-version history (immutable snapshots) ──
+//
+// Each row is a numbered snapshot (V1, V2, …) created when the ERM approved a
+// consultant version. View-only: the PDF streams through an authenticated
+// bearer fetch into a session-local blob URL (never presigned to the client),
+// mirroring DocViewButton. The version currently routed for approval is
+// flagged. Renders nothing until at least one version exists.
+function VersionHistory({ app }: { app: ConsultantApplication }) {
+  const [versions, setVersions] = useState<AgreementVersion[] | null>(null);
+  const [err, setErr] = useState("");
+  const [openingVersion, setOpeningVersion] = useState<number | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    ermFetchAgreementVersions(app.applicationId)
+      .then((rows) => {
+        if (alive) setVersions(rows);
+      })
+      .catch((e) => {
+        if (alive) {
+          setErr(e instanceof Error ? e.message : "Couldn't load versions.");
+        }
+      });
+    return () => {
+      alive = false;
+    };
+  }, [app.applicationId]);
+
+  const openVersion = async (versionNumber: number) => {
+    setOpeningVersion(versionNumber);
+    setErr("");
+    try {
+      const res = await fetchAgreementVersionPdfBlob(
+        app.applicationId,
+        versionNumber,
+      );
+      if (!res.ok) {
+        throw new Error(`Couldn't open version V${versionNumber} (${res.status})`);
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      window.open(url, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't open the version.");
+    } finally {
+      setOpeningVersion(null);
+    }
+  };
+
+  if (!versions || versions.length === 0) return null;
+
+  return (
+    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+      <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
+        <h3 className="font-serif text-lg text-gray-900">
+          Approved consultant versions
+        </h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Immutable snapshots created each time you approved a consultant
+          version. View-only.
+        </p>
+      </header>
+      <ul className="divide-y divide-stone-100">
+        {versions.map((v) => {
+          const isRouted = app.approvalVersionNumber === v.versionNumber;
+          return (
+            <li
+              key={v.versionNumber}
+              className="px-5 sm:px-6 py-3 flex items-center justify-between gap-3 flex-wrap"
+            >
+              <div className="min-w-0">
+                <p className="text-sm font-semibold text-sage-navy inline-flex items-center gap-2 flex-wrap">
+                  Version V{v.versionNumber}
+                  {typeof v.phase === "number" && (
+                    <span className="text-[11px] font-medium text-gray-500">
+                      Phase {v.phase}
+                    </span>
+                  )}
+                  {isRouted && (
+                    <span className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700 bg-emerald-50 border border-emerald-200 rounded px-1.5 py-0.5">
+                      Sent for approval
+                    </span>
+                  )}
+                </p>
+                <p className="text-[11px] text-gray-500 mt-0.5">
+                  Approved{" "}
+                  {v.approvedAt ? formatUsDateTime(v.approvedAt) : "—"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => openVersion(v.versionNumber)}
+                disabled={openingVersion === v.versionNumber}
+                className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+              >
+                <FileText size={12} />{" "}
+                {openingVersion === v.versionNumber ? "Opening…" : "View version"}
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {err && (
+        <p className="px-5 sm:px-6 pb-3 text-[11px] text-sage-copper-deep">{err}</p>
+      )}
+    </section>
+  );
+}
+
 // ── Consultant-filled sections (read-only) ────────────────────
 
 function ConsultantSections({ app }: { app: ConsultantApplication }) {
@@ -2050,7 +2166,11 @@ function SendForApprovalModal({
   app: ConsultantApplication;
   busy: boolean;
   onClose: () => void;
-  onSend: (routing: { managerUserId?: string; accountsUserId?: string }) => Promise<void>;
+  onSend: (routing: {
+    managerUserId?: string;
+    accountsUserId?: string;
+    versionNumber?: number;
+  }) => Promise<void>;
 }) {
   const [eligible, setEligible] = useState<EligibleApprovers | null>(null);
   const [loading, setLoading] = useState(true);
@@ -2058,6 +2178,12 @@ function SendForApprovalModal({
   const [managerId, setManagerId] = useState("");
   const [accountsId, setAccountsId] = useState("");
   const [sendError, setSendError] = useState("");
+  // Build V — the approved consultant versions to choose from. The selected
+  // version is the frozen snapshot the approver(s) review. Defaults to the
+  // latest; null/empty means no version exists (approver sees the current
+  // consultant-signed state — the legacy live-render fallback).
+  const [versions, setVersions] = useState<AgreementVersion[]>([]);
+  const [selectedVersion, setSelectedVersion] = useState<number | "">("");
 
   useEffect(() => {
     let cancelled = false;
@@ -2072,6 +2198,24 @@ function SendForApprovalModal({
         setLoadError(err instanceof Error ? err.message : "Couldn't load approvers."),
       )
       .finally(() => !cancelled && setLoading(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [app.applicationId]);
+
+  useEffect(() => {
+    let cancelled = false;
+    ermFetchAgreementVersions(app.applicationId)
+      .then((rows) => {
+        if (cancelled) return;
+        setVersions(rows);
+        if (rows.length > 0) {
+          setSelectedVersion(rows[rows.length - 1].versionNumber); // latest
+        }
+      })
+      .catch(() => {
+        /* non-fatal — fall back to no explicit version (live render) */
+      });
     return () => {
       cancelled = true;
     };
@@ -2158,6 +2302,51 @@ function SendForApprovalModal({
                 Route this agreement to {phase2 ? "a Manager and an Accounts approver" : "a Manager"}.
                 {phase2 ? " Both must approve." : ""}
               </p>
+              {versions.length > 1 ? (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy mb-1">
+                    Version to review
+                  </p>
+                  <select
+                    value={selectedVersion === "" ? "" : String(selectedVersion)}
+                    onChange={(e) =>
+                      setSelectedVersion(
+                        e.target.value === "" ? "" : Number(e.target.value),
+                      )
+                    }
+                    className="w-full px-3 py-2.5 text-[14px] rounded-md border border-stone-300 bg-white focus:outline-none focus:ring-2 focus:ring-sage-copper/40"
+                  >
+                    {versions.map((v) => (
+                      <option key={v.versionNumber} value={v.versionNumber}>
+                        Version V{v.versionNumber}
+                        {typeof v.phase === "number" ? ` · Phase ${v.phase}` : ""}
+                        {v.approvedAt ? ` · ${formatUsDate(v.approvedAt)}` : ""}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    The approver(s) review this frozen version. Defaults to the
+                    latest.
+                  </p>
+                </div>
+              ) : versions.length === 1 ? (
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy mb-1">
+                    Version to review
+                  </p>
+                  <div className="rounded-md border border-stone-200 bg-stone-50 px-3 py-2.5">
+                    <p className="text-[13px] font-medium text-gray-900">
+                      Version V{versions[0].versionNumber}
+                    </p>
+                    <p className="text-[11px] text-gray-500">
+                      Approved{" "}
+                      {versions[0].approvedAt
+                        ? formatUsDate(versions[0].approvedAt)
+                        : "—"}
+                    </p>
+                  </div>
+                </div>
+              ) : null}
               {renderPicker("Manager", eligible?.managers ?? [], managerId, setManagerId, "manager")}
               {phase2 &&
                 renderPicker("Accounts", eligible?.accounts ?? [], accountsId, setAccountsId, "accounts")}
@@ -2185,6 +2374,8 @@ function SendForApprovalModal({
               void onSend({
                 managerUserId: managerId,
                 accountsUserId: phase2 ? accountsId : undefined,
+                versionNumber:
+                  selectedVersion === "" ? undefined : selectedVersion,
               }).catch((e) =>
                 setSendError(
                   e instanceof Error ? e.message : "Couldn't send for approval.",

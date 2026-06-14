@@ -19,7 +19,7 @@ import {
   approverFetchApproved,
   approverFetchQueue,
   approverRequestRevision,
-  fetchApproverPreviewImages,
+  fetchApproverVersionPreviewImages,
   fetchApproverSignedPreviewImages,
   fetchApproverPhase1SignedPreviewImages,
   fetchMe,
@@ -413,13 +413,19 @@ function ApprovalCard({
   const [err, setErr] = useState("");
   // Build Y — in-app non-copyable preview (watermarked PNGs, no PDF tab).
   const [previewPages, setPreviewPages] = useState<string[] | null>(null);
+  // Build V — the frozen consultant version this round is reviewing (null when
+  // the round predates versioning and falls back to a live render).
+  const [previewVersion, setPreviewVersion] = useState<number | null>(null);
 
   const previewAgreement = async () => {
     setBusy("preview");
     setErr("");
     try {
-      const data = await fetchApproverPreviewImages(app.applicationId);
+      // Build V — review the FROZEN version the ERM routed for this round
+      // (the backend falls back to a live render for legacy rounds).
+      const data = await fetchApproverVersionPreviewImages(app.applicationId);
       setPreviewPages(data.pages);
+      setPreviewVersion(data.versionNumber ?? null);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't load the preview.");
     } finally {
@@ -494,7 +500,15 @@ function ApprovalCard({
       {previewPages !== null && (
         <ApproverPreviewModal
           pages={previewPages}
-          onClose={() => setPreviewPages(null)}
+          title={
+            previewVersion != null
+              ? `Agreement preview — Version V${previewVersion}`
+              : undefined
+          }
+          onClose={() => {
+            setPreviewPages(null);
+            setPreviewVersion(null);
+          }}
         />
       )}
 
@@ -598,9 +612,11 @@ function ApprovalCard({
 function ApproverPreviewModal({
   pages,
   onClose,
+  title,
 }: {
   pages: string[];
   onClose: () => void;
+  title?: string;
 }) {
   return (
     <div
@@ -615,7 +631,7 @@ function ApproverPreviewModal({
       >
         <header className="flex items-center justify-between px-4 py-3 border-b border-stone-100">
           <p className="text-sm font-bold text-sage-navy inline-flex items-center gap-1.5">
-            <FileText size={14} /> Agreement preview
+            <FileText size={14} /> {title ?? "Agreement preview"}
           </p>
           <button
             type="button"

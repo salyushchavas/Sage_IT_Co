@@ -273,6 +273,49 @@ public class AgreementApproverController {
         return ResponseEntity.ok(ApiResponse.success("Phase 1 signed agreement ready", payload));
     }
 
+    /**
+     * Build V — the approver reviews the FROZEN consultant VERSION the ERM
+     * routed for this approval round ({@code app.approvalVersionNumber}), not a
+     * live re-render. The version's immutable S3 snapshot is rasterized to
+     * watermark-free PNGs (no downloadable PDF — the review surface stays
+     * image-only). When no version was routed (legacy rounds before Build V),
+     * it falls back to the live pre-sign render so older agreements still work.
+     */
+    @GetMapping("/api/agreement-approver/applications/{appId}/version-preview-images")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> versionPreviewImages(
+            @PathVariable String appId,
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        ConsultantApplication app = consultantService.getForApprover(appId, gate, AgreementAuthz.userId(request));
+        String viewerEmail = (String) request.getAttribute(AgreementAuthz.ATTR_EMAIL);
+        List<String> pages;
+        Integer versionNumber = app.getApprovalVersionNumber();
+        try {
+            byte[] pdfBytes = consultantService.versionSnapshotBytes(app);
+            if (pdfBytes == null) {
+                // Legacy round — no version routed; fall back to the live pre-sign render.
+                pdfBytes = agreementDocumentService.renderPdfBytes(
+                        app, AgreementDocumentService.ermPreviewOverrides());
+            }
+            List<byte[]> images = agreementDocumentService
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail, false);
+            pages = new ArrayList<>(images.size());
+            for (byte[] png : images) {
+                pages.add(java.util.Base64.getEncoder().encodeToString(png));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Couldn't render the selected version."));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pages", pages);
+        payload.put("pageCount", pages.size());
+        payload.put("viewerEmail", viewerEmail);
+        payload.put("versionNumber", versionNumber);
+        return ResponseEntity.ok(ApiResponse.success("Version ready", payload));
+    }
+
     @PostMapping("/api/agreement-approver/applications/{appId}/approve")
     public ResponseEntity<ApiResponse<ConsultantApplication>> approve(
             @PathVariable String appId,

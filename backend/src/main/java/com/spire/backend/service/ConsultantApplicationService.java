@@ -96,6 +96,7 @@ public class ConsultantApplicationService {
     private final ConsultantVersionService consultantVersionService;
     private final AgreementUserRepository agreementUserRepository;
     private final com.spire.backend.repository.AgreementApprovalRepository approvalRepository;
+    private final com.spire.backend.repository.ConsultantAgreementVersionRepository agreementVersionRepository;
     private final AgreementAssignmentService assignmentService;
     private final ConsultantVerificationRepository verificationRepository;
     private final PasswordEncoder passwordEncoder;
@@ -1725,6 +1726,7 @@ public class ConsultantApplicationService {
             String applicationId,
             String managerUserId,
             String accountsUserId,
+            Integer versionNumber,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
@@ -1797,6 +1799,21 @@ public class ConsultantApplicationService {
                             .approverName(appr.getFullName())
                             .build());
         }
+        // Build V — resolve + record the consultant-version the ERM is sending
+        // for approval (defaults to the latest). The approver reviews THIS
+        // version's frozen snapshot; the selection is recorded for the round.
+        Integer selectedVersion = versionNumber;
+        if (selectedVersion == null) {
+            selectedVersion = agreementVersionRepository
+                    .findTopByApplicationIdOrderByVersionNumberDesc(app.getId())
+                    .map(com.spire.backend.entity.ConsultantAgreementVersion::getVersionNumber)
+                    .orElse(null);
+        } else if (agreementVersionRepository
+                .findByApplicationIdAndVersionNumber(app.getId(), selectedVersion).isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Selected version V" + selectedVersion + " was not found for this agreement.");
+        }
+        app.setApprovalVersionNumber(selectedVersion);
         app.setStatus(ConsultantApplication.Status.AWAITING_APPROVALS.name());
         applicationRepository.save(app);
 
@@ -1835,6 +1852,53 @@ public class ConsultantApplicationService {
                         "resend", resend),
                 request);
         return app;
+    }
+
+    /**
+     * Build V — all immutable approved-consultant-version snapshots (V1, V2, …)
+     * for an agreement, oldest → newest. ERM-gated (per-ERM isolation). Drives
+     * the version history + the version selector at send-for-approval.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<com.spire.backend.entity.ConsultantAgreementVersion> listAgreementVersions(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        return agreementVersionRepository.findByApplicationIdOrderByVersionNumberAsc(app.getId());
+    }
+
+    /**
+     * Build V — the stored PDF bytes of a numbered consultant-version snapshot,
+     * for the ERM's view-only preview. ERM-gated. The bytes come straight from
+     * the version's immutable S3 object (no re-render).
+     */
+    @Transactional(readOnly = true)
+    public byte[] agreementVersionPdf(
+            String applicationId, int versionNumber, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        com.spire.backend.entity.ConsultantAgreementVersion v = agreementVersionRepository
+                .findByApplicationIdAndVersionNumber(app.getId(), versionNumber)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "ConsultantAgreementVersion", "versionNumber", String.valueOf(versionNumber)));
+        return agreementDocumentService.readStoredPdfBytes(v.getS3Key());
+    }
+
+    /**
+     * Build V — the frozen snapshot bytes of the version routed for THIS
+     * approval round ({@code app.approvalVersionNumber}), or {@code null} when
+     * no version was routed (legacy rounds) so the caller can fall back to a
+     * live render. Takes the already-authorized application (the approver gate
+     * is enforced by the controller via {@code getForApprover}).
+     */
+    @Transactional(readOnly = true)
+    public byte[] versionSnapshotBytes(ConsultantApplication app) {
+        Integer vn = app.getApprovalVersionNumber();
+        if (vn == null) return null;
+        return agreementVersionRepository
+                .findByApplicationIdAndVersionNumber(app.getId(), vn)
+                .map(v -> agreementDocumentService.readStoredPdfBytes(v.getS3Key()))
+                .orElse(null);
     }
 
     /**
@@ -2331,6 +2395,22 @@ public class ConsultantApplicationService {
         app.setConsultantCopyReleasedBy(resolveActorErmId(request));
         applicationRepository.save(app);
 
+        // Build V — snapshot this approval as the next immutable numbered
+        // version (V1, V2, …). The consultant-version PDF already lives under a
+        // unique, timestamped S3 key, so prior versions are never overwritten.
+        int nextVersion = agreementVersionRepository
+                .findTopByApplicationIdOrderByVersionNumberDesc(app.getId())
+                .map(v -> v.getVersionNumber() + 1)
+                .orElse(1);
+        agreementVersionRepository.save(
+                com.spire.backend.entity.ConsultantAgreementVersion.builder()
+                        .applicationId(app.getId())
+                        .versionNumber(nextVersion)
+                        .s3Key(s3Key)
+                        .documentHash(release.sha256Hex())
+                        .phase(app.getPhase())
+                        .build());
+
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.CONSULTANT_VERSION_APPROVED,
                 ConsultantApplicationEvent.ActorType.ERM,
@@ -2338,6 +2418,7 @@ public class ConsultantApplicationService {
                 Map.of(
                         "s3Key", s3Key,
                         "documentHash", release.sha256Hex(),
+                        "version", String.valueOf(nextVersion),
                         "bytes", String.valueOf(release.bytes().length)),
                 request);
 

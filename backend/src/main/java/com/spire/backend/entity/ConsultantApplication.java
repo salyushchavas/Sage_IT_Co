@@ -488,6 +488,14 @@ public class ConsultantApplication {
     @Column(name = "phase1_final_pdf_s3_key", length = 512)
     private String phase1FinalPdfS3Key;
 
+    /**
+     * Build V — the approved consultant-version number the ERM selected for the
+     * CURRENT approval round (set at send-for-approval). The approver reviews
+     * THIS version's frozen snapshot. Null before any send-for-approval.
+     */
+    @Column(name = "approval_version_number")
+    private Integer approvalVersionNumber;
+
     // ── Phase 5 (S3) — consultant-UPLOAD + SIGNATURE storage keys ─────
     //
     // Parallel S3 keys for the two remaining agreements artifact classes

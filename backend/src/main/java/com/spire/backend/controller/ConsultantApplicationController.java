@@ -285,7 +285,38 @@ public class ConsultantApplicationController {
                         appId,
                         body == null ? null : body.managerUserId,
                         body == null ? null : body.accountsUserId,
+                        body == null ? null : body.versionNumber,
                         request)));
+    }
+
+    /** Build V — the approved consultant-version snapshots (V1, V2, …) for the ERM view. */
+    @GetMapping("/api/agreement-erm/applications/{appId}/versions")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<java.util.List<com.spire.backend.entity.ConsultantAgreementVersion>>>
+            agreementVersions(@PathVariable String appId, HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                consultantService.listAgreementVersions(appId, request)));
+    }
+
+    /** Build V — stream a numbered consultant-version PDF snapshot (ERM preview, view-only). */
+    @GetMapping("/api/agreement-erm/applications/{appId}/versions/{versionNumber}/pdf")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> agreementVersionPdf(
+            @PathVariable String appId,
+            @PathVariable int versionNumber,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        byte[] pdf = consultantService.agreementVersionPdf(appId, versionNumber, request);
+        if (pdf == null || pdf.length == 0) return ResponseEntity.notFound().build();
+        String mode = "attachment".equalsIgnoreCase(disposition) ? "attachment" : "inline";
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(pdf.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        mode + "; filename=\"SageITCO-ConsultantVersion-V"
+                                + versionNumber + "_" + appId + ".pdf\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(pdf);
     }
 
     /** Build K — the approvers this ERM may route the agreement to (for the pickers). */
@@ -303,6 +334,8 @@ public class ConsultantApplicationController {
         public String managerUserId;
         /** Build K — chosen ACCOUNTS approver (Phase 2 only). */
         public String accountsUserId;
+        /** Build V — chosen approved consultant-version number (defaults to latest). */
+        public Integer versionNumber;
     }
 
     @PostMapping("/api/agreement-erm/applications/{appId}/approve-and-sign")

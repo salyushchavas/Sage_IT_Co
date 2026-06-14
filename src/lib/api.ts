@@ -3428,6 +3428,9 @@ export interface ConsultantApplication {
   // 1 = pre-employment (creation default); 2 = post-offer, reached
   // via the ERM "Advance to Phase 2" action on the same document.
   phase?: number | null;
+  // Build V — the approved consultant-version number the ERM routed for the
+  // CURRENT approval round (the approver reviews this version's snapshot).
+  approvalVersionNumber?: number | null;
   // Build G — Appendix 5 security cheque upload. The public_id is
   // persisted; the wizard treats a non-null value as "uploaded".
   chequePublicId?: string | null;
@@ -4558,6 +4561,8 @@ export interface ConsultantPreviewImages {
   pages: string[];
   pageCount: number;
   viewerEmail: string;
+  /** Build V — present on the approver version-preview (the routed version). */
+  versionNumber?: number | null;
 }
 
 export async function fetchConsultantPreviewImages(
@@ -4601,6 +4606,24 @@ export async function fetchApproverSignedPreviewImages(
   const qs = role ? `?role=${role}` : "";
   return agreementErmFetch<ConsultantPreviewImages>(
     `/api/agreement-approver/applications/${applicationId}/signed-preview-images${qs}`,
+  );
+}
+
+/**
+ * Build V — approver inline preview of the FROZEN consultant version the ERM
+ * routed for this approval round ({@code approvalVersionNumber}). Same
+ * non-copyable PNG shape as {@link fetchApproverPreviewImages}; the backend
+ * rasterizes the version's immutable snapshot, falling back to a live pre-sign
+ * render for legacy rounds with no routed version. The response carries the
+ * {@code versionNumber} being reviewed (null when falling back).
+ */
+export async function fetchApproverVersionPreviewImages(
+  applicationId: string,
+  role?: ApproverRole,
+): Promise<ConsultantPreviewImages> {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ConsultantPreviewImages>(
+    `/api/agreement-approver/applications/${applicationId}/version-preview-images${qs}`,
   );
 }
 
@@ -4695,14 +4718,67 @@ export async function ermFetchEligibleApprovers(applicationId: string) {
   );
 }
 
+/** Build V — one immutable approved consultant-version snapshot (V1, V2, …). */
+export interface AgreementVersion {
+  id: number;
+  applicationId: number;
+  versionNumber: number;
+  s3Key?: string | null;
+  documentHash?: string | null;
+  phase?: number | null;
+  approvedAt?: string | null;
+}
+
+/**
+ * Build V — the approved consultant-version history (V1, V2, …) for the ERM
+ * consultant view. Each row is an immutable snapshot created when the ERM
+ * approved a consultant version; the ERM previews + selects which to send.
+ */
+export async function ermFetchAgreementVersions(applicationId: string) {
+  return agreementErmFetch<AgreementVersion[]>(
+    `/api/agreement-erm/applications/${applicationId}/versions`,
+  );
+}
+
+/**
+ * Build V — ERM view-only preview of a numbered consultant-version snapshot.
+ * Streams the stored PDF via an authenticated bearer fetch (same session
+ * handling as {@link fetchErmPreviewPdfBlob}); the caller turns the response
+ * into a blob URL. The PDF is never presigned to the client.
+ */
+export async function fetchAgreementVersionPdfBlob(
+  applicationId: string,
+  versionNumber: number,
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-erm/applications/${applicationId}/versions/${versionNumber}/pdf`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  if (res.status === 401 || res.status === 403) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
+}
+
 /**
  * ERM routes a consultant-signed agreement to the phase's approvers (also
  * re-send). Build K — the chosen manager (Phase 1+2) + accounts (Phase 2)
- * are required; routing is bound to those specific users.
+ * are required; routing is bound to those specific users. Build V — an
+ * optional {@code versionNumber} selects which approved consultant version
+ * the approver(s) review (defaults to the latest when omitted).
  */
 export async function ermSendForApproval(
   applicationId: string,
-  routing?: { managerUserId?: string; accountsUserId?: string },
+  routing?: {
+    managerUserId?: string;
+    accountsUserId?: string;
+    versionNumber?: number;
+  },
 ) {
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/send-for-approval`,
