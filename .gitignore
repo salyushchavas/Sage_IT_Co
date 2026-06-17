@@ -44,6 +44,9 @@ backend/.mvn/wrapper/maven-wrapper.jar
 backend/logs/
 backend/*.log
 
+# Editor / IDE settings (machine-local)
+.vscode/
+
 # Secrets / credentials
 credentials.xlsx
 ~$*.xlsx
