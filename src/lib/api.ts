@@ -4048,10 +4048,22 @@ export async function ermRequestRevision(
   applicationId: string,
   sections: RevisionSectionSelection[],
   ach?: { achDebitDates?: string; achDebitAmounts?: string },
+  // Build W — optional Phase-2 Rate Schedule correction (free-text,
+  // pre-filled). A changed value auto-scopes the main agreement so the
+  // consultant re-reviews + re-signs the corrected rate.
+  rate?: {
+    ratePeriod1?: string;
+    rateAmount1?: string;
+    ratePeriod2?: string;
+    rateAmount2?: string;
+  },
 ) {
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/request-revision`,
-    { method: "POST", body: JSON.stringify({ sections, ...(ach ?? {}) }) },
+    {
+      method: "POST",
+      body: JSON.stringify({ sections, ...(ach ?? {}), ...(rate ?? {}) }),
+    },
   );
 }
 

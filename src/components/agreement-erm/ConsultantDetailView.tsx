@@ -440,6 +440,10 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           appId={app.applicationId}
           achDebitDates={app.achDebitDates}
           achDebitAmounts={app.achDebitAmounts}
+          ratePeriod1={app.ratePeriod1}
+          rateAmount1={app.rateAmount1}
+          ratePeriod2={app.ratePeriod2}
+          rateAmount2={app.rateAmount2}
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
@@ -2528,12 +2532,20 @@ function RequestRevisionModal({
   appId,
   achDebitDates,
   achDebitAmounts,
+  ratePeriod1,
+  rateAmount1,
+  ratePeriod2,
+  rateAmount2,
   onClose,
   onDone,
 }: {
   appId: string;
   achDebitDates?: string | null;
   achDebitAmounts?: string | null;
+  ratePeriod1?: string | null;
+  rateAmount1?: string | null;
+  ratePeriod2?: string | null;
+  rateAmount2?: string | null;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
@@ -2545,6 +2557,11 @@ function RequestRevisionModal({
   // Build U — editable ACH debit schedule, pre-filled with the current values.
   const [achDates, setAchDates] = useState(achDebitDates ?? "");
   const [achAmounts, setAchAmounts] = useState(achDebitAmounts ?? "");
+  // Build W — editable Phase-2 Rate Schedule, pre-filled with current values.
+  const [ratePer1, setRatePer1] = useState(ratePeriod1 ?? "");
+  const [rateAmt1, setRateAmt1] = useState(rateAmount1 ?? "");
+  const [ratePer2, setRatePer2] = useState(ratePeriod2 ?? "");
+  const [rateAmt2, setRateAmt2] = useState(rateAmount2 ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -2554,7 +2571,14 @@ function RequestRevisionModal({
   // when ACH changes the backend auto-scopes appendix2 for the consultant.
   const achChanged = achDates.trim() !== (achDebitDates ?? "").trim()
     || achAmounts.trim() !== (achDebitAmounts ?? "").trim();
-  const canSubmit = (selectedIds.length > 0 || achChanged) && !busy;
+  // Build W — rate schedule changed vs stored (trim-compared, mirrors backend).
+  // When it changes the backend auto-scopes the main agreement (Section 11
+  // carries the rate card) for the consultant to re-review + re-sign.
+  const rateChanged = ratePer1.trim() !== (ratePeriod1 ?? "").trim()
+    || rateAmt1.trim() !== (rateAmount1 ?? "").trim()
+    || ratePer2.trim() !== (ratePeriod2 ?? "").trim()
+    || rateAmt2.trim() !== (rateAmount2 ?? "").trim();
+  const canSubmit = (selectedIds.length > 0 || achChanged || rateChanged) && !busy;
 
   const toggle = (id: string) =>
     setPicked((p) => ({ ...p, [id]: !p[id] }));
@@ -2570,10 +2594,20 @@ function RequestRevisionModal({
         const note = (notes[id] ?? "").trim();
         return note ? { key: id, note } : { key: id };
       });
-      await ermRequestRevision(appId, sections, {
-        achDebitDates: achDates,
-        achDebitAmounts: achAmounts,
-      });
+      await ermRequestRevision(
+        appId,
+        sections,
+        {
+          achDebitDates: achDates,
+          achDebitAmounts: achAmounts,
+        },
+        {
+          ratePeriod1: ratePer1,
+          rateAmount1: rateAmt1,
+          ratePeriod2: ratePer2,
+          rateAmount2: rateAmt2,
+        },
+      );
       await onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't send revision request.");
@@ -2688,9 +2722,74 @@ function RequestRevisionModal({
           </p>
         )}
       </div>
+      {/* Build W — correct the ERM-set Phase-2 Rate Schedule within the revision.
+          Pre-filled, free-text; editing sends the corrected values, which the
+          consultant re-reviews (read-only) in the main agreement (Section 11)
+          and re-signs over. */}
+      <div className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2.5">
+        <p className="text-sm font-medium text-gray-800">Rate schedule</p>
+        <p className="text-[11px] text-gray-500 mb-2">
+          Correct the rate period(s) / amount(s) if they changed. The consultant
+          re-reviews the main agreement (read-only) and re-signs over the
+          corrected rate.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-[11px] text-gray-600">Rate period 1</span>
+            <input
+              type="text"
+              value={ratePer1}
+              onChange={(e) => setRatePer1(e.target.value.slice(0, 200))}
+              disabled={busy}
+              placeholder="e.g. Months 1–3"
+              className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-gray-600">Amount 1</span>
+            <input
+              type="text"
+              value={rateAmt1}
+              onChange={(e) => setRateAmt1(e.target.value.slice(0, 200))}
+              disabled={busy}
+              placeholder="e.g. $40/hr"
+              className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-gray-600">Rate period 2</span>
+            <input
+              type="text"
+              value={ratePer2}
+              onChange={(e) => setRatePer2(e.target.value.slice(0, 200))}
+              disabled={busy}
+              placeholder="e.g. Months 4+"
+              className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </label>
+          <label className="block">
+            <span className="text-[11px] text-gray-600">Amount 2</span>
+            <input
+              type="text"
+              value={rateAmt2}
+              onChange={(e) => setRateAmt2(e.target.value.slice(0, 200))}
+              disabled={busy}
+              placeholder="e.g. $55/hr"
+              className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </label>
+        </div>
+        {rateChanged && (
+          <p className="mt-2 text-[11px] text-sage-copper-deep">
+            The main agreement will be added to the revision so the consultant
+            re-reviews the corrected rate and re-signs.
+          </p>
+        )}
+      </div>
       <p className="mt-2 text-[11px] text-gray-500">
         {selectedIds.length} section{selectedIds.length === 1 ? "" : "s"} selected
-        {achChanged ? " · ACH schedule edited" : ""}.
+        {achChanged ? " · ACH schedule edited" : ""}
+        {rateChanged ? " · Rate schedule edited" : ""}.
       </p>
       {error && (
         <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-600">

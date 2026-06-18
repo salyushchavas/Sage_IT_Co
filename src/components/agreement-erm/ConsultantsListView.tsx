@@ -116,7 +116,7 @@ export default function ConsultantsListView() {
   // Sent on, Created); super-admin adds the Owner column. Build Q removed
   // the "Expires" column — agreements never expire (only the consultant
   // link does, shown as the "Link expired · Resend" badge in Status).
-  const colCount = isSuperAdmin ? 8 : 7;
+  const colCount = isSuperAdmin ? 9 : 8;
 
   return (
     <div className="space-y-4">
@@ -201,6 +201,7 @@ export default function ConsultantsListView() {
               {isSuperAdmin && <th className="text-left px-4 py-2">Owner</th>}
               <th className="text-left px-4 py-2">Application ID</th>
               <th className="text-left px-4 py-2">Status</th>
+              <th className="text-left px-4 py-2">Pending Appendix</th>
               <th className="text-left px-4 py-2">Manager</th>
               <th className="text-left px-4 py-2">Accounts</th>
               <th className="text-left px-4 py-2">Sent on</th>
@@ -261,6 +262,9 @@ export default function ConsultantsListView() {
                         />
                       </div>
                     )}
+                  </td>
+                  <td className="px-4 py-2 align-top">
+                    <PendingAppendixCell app={r} />
                   </td>
                   <td className="px-4 py-2">
                     <ApprovalBadge status={r.managerStatus} />
@@ -375,6 +379,111 @@ function ResendLinkButton({
       </button>
       {err && <span className="text-[10px] text-red-600">{err}</span>}
     </span>
+  );
+}
+
+// ── Build W — Pending Appendix status (required appendices only) ──────
+//
+// Per agreement, surface the appendices that aren't yet done. An appendix
+// counts ONLY when the ERM marked it required. State per required appendix:
+//   - "signed"   → consultant affirmed it (affirmedAppendixN) — not pending
+//   - "awaiting" → sent (in the consultant's fill scope) but not affirmed
+//   - "not-sent" → not yet in scope (link not issued, or a Phase-2 appendix
+//                  before Phase 2 is reached)
+// "sent" is derived from existing row fields: nothing is sent while DRAFT;
+// Appendix 1 (the Phase-2 Employment Confirmation) is sent once phase >= 2;
+// Appendices 2–5 are sent once the consultant link is issued (status != DRAFT).
+
+interface PendingAppendix {
+  n: number;
+  label: string;
+  state: "not-sent" | "awaiting";
+}
+
+const APPENDIX_LABELS: Record<number, string> = {
+  1: "Appendix 1 — Employment Confirmation",
+  2: "Appendix 2 — ACH Authorization",
+  3: "Appendix 3 — Background Check",
+  4: "Appendix 4 — Portal Access",
+  5: "Appendix 5 — Security Cheque",
+};
+
+function computePendingAppendices(app: ConsultantApplication): PendingAppendix[] {
+  const required: Record<number, boolean> = {
+    1: app.requireAppendix1 === true,
+    2: app.requireAppendix2 === true,
+    3: app.requireAppendix3 === true,
+    4: app.requireAppendix4 === true,
+    5: app.requireAppendix5 === true,
+  };
+  const affirmed: Record<number, boolean> = {
+    1: app.affirmedAppendix1 === true,
+    2: app.affirmedAppendix2 === true,
+    3: app.affirmedAppendix3 === true,
+    4: app.affirmedAppendix4 === true,
+    5: app.affirmedAppendix5 === true,
+  };
+  const isDraft = app.status === "DRAFT";
+  const phase = app.phase ?? 1;
+  const pending: PendingAppendix[] = [];
+  for (let n = 1; n <= 5; n++) {
+    if (!required[n]) continue; // required-only
+    if (affirmed[n]) continue; // signed → done
+    const sent = !isDraft && (n === 1 ? phase >= 2 : true);
+    pending.push({
+      n,
+      label: APPENDIX_LABELS[n],
+      state: sent ? "awaiting" : "not-sent",
+    });
+  }
+  return pending;
+}
+
+// "None" when every required appendix is sent + signed; otherwise a compact
+// chip summary ("N not sent" / "N awaiting") that expands to the per-appendix
+// detail. Required-only — not-required appendices never appear.
+function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
+  const pending = computePendingAppendices(app);
+  if (pending.length === 0) {
+    return <span className="text-[11px] text-gray-400">None</span>;
+  }
+  const notSent = pending.filter((p) => p.state === "not-sent").length;
+  const awaiting = pending.filter((p) => p.state === "awaiting").length;
+  return (
+    <details className="group">
+      <summary className="flex flex-wrap items-center gap-1 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        {notSent > 0 && (
+          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+            {notSent} not sent
+          </span>
+        )}
+        {awaiting > 0 && (
+          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+            {awaiting} awaiting
+          </span>
+        )}
+      </summary>
+      <ul className="mt-1.5 space-y-1">
+        {pending.map((p) => (
+          <li
+            key={p.n}
+            className="flex items-start gap-1.5 text-[11px] text-gray-600"
+          >
+            <span
+              className={
+                "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold " +
+                (p.state === "not-sent"
+                  ? "border-gray-200 bg-gray-50 text-gray-500"
+                  : "border-amber-200 bg-amber-50 text-amber-700")
+              }
+            >
+              {p.state === "not-sent" ? "Not sent" : "Awaiting signature"}
+            </span>
+            <span>{p.label}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

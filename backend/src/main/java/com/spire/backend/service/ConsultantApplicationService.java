@@ -1395,6 +1395,8 @@ public class ConsultantApplicationService {
     public ConsultantApplication ermRequestRevision(
             String applicationId, JsonNode sections,
             String achDebitDates, String achDebitAmounts,
+            String ratePeriod1, String rateAmount1,
+            String ratePeriod2, String rateAmount2,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
@@ -1447,6 +1449,37 @@ public class ConsultantApplicationService {
         }
         if (achChanged && !selectedKeys.contains("appendix2")) {
             selectedKeys.add("appendix2");
+        }
+
+        // Build W — apply an ERM Phase-2 Rate Schedule correction sent with the
+        // revision (Rate period 1/2 + Amount 1/2). Only CHANGED values persist;
+        // when any changes, scope the MAIN AGREEMENT in (Section 11 carries the
+        // rate card) so the consultant re-reviews + re-signs the corrected
+        // schedule. The values stay read-only to the consultant and stamp into
+        // the agreement PDF (buildContext already maps the rate keys).
+        boolean rateChanged = false;
+        if (ratePeriod1 != null && !java.util.Objects.equals(
+                blankToNull(ratePeriod1), blankToNull(app.getRatePeriod1()))) {
+            app.setRatePeriod1(blankToNull(ratePeriod1));
+            rateChanged = true;
+        }
+        if (rateAmount1 != null && !java.util.Objects.equals(
+                blankToNull(rateAmount1), blankToNull(app.getRateAmount1()))) {
+            app.setRateAmount1(blankToNull(rateAmount1));
+            rateChanged = true;
+        }
+        if (ratePeriod2 != null && !java.util.Objects.equals(
+                blankToNull(ratePeriod2), blankToNull(app.getRatePeriod2()))) {
+            app.setRatePeriod2(blankToNull(ratePeriod2));
+            rateChanged = true;
+        }
+        if (rateAmount2 != null && !java.util.Objects.equals(
+                blankToNull(rateAmount2), blankToNull(app.getRateAmount2()))) {
+            app.setRateAmount2(blankToNull(rateAmount2));
+            rateChanged = true;
+        }
+        if (rateChanged && !selectedKeys.contains("main-agreement")) {
+            selectedKeys.add("main-agreement");
         }
 
         if (selectedKeys.isEmpty()) {
@@ -1536,6 +1569,11 @@ public class ConsultantApplicationService {
             m.put(f, "cover");
         }
         m.put("affirmedMainAgreement", "main-agreement");
+        // Build W — the Phase-2 rate card (Section 11) lives in the main
+        // agreement; ERM-set + read-only to the consultant, but mapped so a
+        // rate revision scopes the main agreement for re-review/re-signature.
+        for (String f : new String[]{"ratePeriod1", "rateAmount1",
+                "ratePeriod2", "rateAmount2"}) m.put(f, "main-agreement");
         for (String f : new String[]{"technologyTrack", "customScopeNotes",
                 "affirmedExhibitA"}) m.put(f, "exhibit-a");
         m.put("affirmedExhibitB", "exhibit-b");

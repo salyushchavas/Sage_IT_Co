@@ -263,6 +263,10 @@ public class ConsultantApplicationController {
                         body == null ? null : body.sections,
                         body == null ? null : body.achDebitDates,
                         body == null ? null : body.achDebitAmounts,
+                        body == null ? null : body.ratePeriod1,
+                        body == null ? null : body.rateAmount1,
+                        body == null ? null : body.ratePeriod2,
+                        body == null ? null : body.rateAmount2,
                         request)));
     }
 
@@ -1513,6 +1517,14 @@ public class ConsultantApplicationController {
         // the consultant re-reviews the corrected schedule before re-signing.
         public String achDebitDates;
         public String achDebitAmounts;
+        // Build W — optional Phase-2 Rate Schedule correction sent WITH the
+        // revision (free-text, pre-filled from current values). Null = leave
+        // unchanged; a CHANGED value is persisted and auto-scopes the main
+        // agreement so the consultant re-reviews + re-signs the corrected rate.
+        public String ratePeriod1;
+        public String rateAmount1;
+        public String ratePeriod2;
+        public String rateAmount2;
     }
 
     public static class ApproveAndSignBody {
