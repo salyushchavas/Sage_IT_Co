@@ -44,6 +44,7 @@ public class AgreementAdminController {
     private final ConsultantApplicationService consultantService;
     private final com.spire.backend.service.AgreementAssignmentService assignmentService;
     private final com.spire.backend.repository.ConsultantApplicationRepository applicationRepository;
+    private final com.spire.backend.service.EmailTemplateService emailTemplateService;
 
     @GetMapping("/users")
     public ResponseEntity<ApiResponse<List<AgreementUserDto>>> listUsers(
@@ -191,6 +192,59 @@ public class AgreementAdminController {
     }
 
     /**
+     * Update a console user's display title (the Name / Title that renders in
+     * the agreement signature block). Cosmetic — allowed for every user
+     * including the super-admin. Trimmed + length-bounded.
+     */
+    @PatchMapping("/users/{id}/title")
+    @Transactional
+    public ResponseEntity<ApiResponse<AgreementUserDto>> updateTitle(
+            @PathVariable String id,
+            @RequestBody TitleBody body,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        String title = body == null || body.title == null ? "" : body.title.trim();
+        if (title.isEmpty()) {
+            throw new IllegalArgumentException("Title is required.");
+        }
+        if (title.length() > 255) {
+            throw new IllegalArgumentException("Title is too long (max 255 characters).");
+        }
+        AgreementUser user = agreementUserRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
+        user.setTitle(title);
+        user = agreementUserRepository.save(user);
+        return ResponseEntity.ok(ApiResponse.success("Title updated", AgreementUserDto.from(user)));
+    }
+
+    /**
+     * Email a console user their sign-in credentials (email + temporary
+     * password) from the brand no-reply address. The plaintext password is
+     * supplied by the caller (super-admin) because it is only known at create
+     * / reset time — it is hashed in storage and can never be re-derived. The
+     * send is best-effort inside EmailService (failures are logged, not
+     * thrown), so a mail outage won't 500 the console.
+     */
+    @PostMapping("/users/{id}/send-credentials")
+    public ResponseEntity<ApiResponse<Void>> sendCredentials(
+            @PathVariable String id,
+            @RequestBody SendCredentialsBody body,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        String password = body == null || body.password == null ? "" : body.password;
+        if (password.isBlank()) {
+            throw new IllegalArgumentException(
+                    "A temporary password is required to email credentials.");
+        }
+        AgreementUser user = agreementUserRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
+        emailTemplateService.sendAgreementUserCredentials(
+                user.getEmail(), user.getFullName(), password);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Credentials emailed to " + user.getEmail(), null));
+    }
+
+    /**
      * Build K2 — super-admin changes a console user's role (ERM / MANAGER /
      * ACCOUNTS). Re-roling purges the user's assignment links and un-routes
      * any pending approval gates routed to them (so nothing is stranded).
@@ -254,6 +308,14 @@ public class AgreementAdminController {
 
     public static class RoleBody {
         public String role;
+    }
+
+    public static class TitleBody {
+        public String title;
+    }
+
+    public static class SendCredentialsBody {
+        public String password;
     }
 
     // ── Build K — per-ERM Manager / Accounts assignments ─────────────

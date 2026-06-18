@@ -711,6 +711,34 @@ public class EmailTemplateService {
         );
     }
 
+    /**
+     * Emails an agreement-console user their sign-in credentials (email +
+     * admin-set temporary password) from the brand NO-REPLY address. Sent
+     * manually by the super-admin from the admin console. The plaintext
+     * password is supplied by the caller because it is only known at create /
+     * reset time — it is hashed in storage and can never be re-derived.
+     */
+    public void sendAgreementUserCredentials(
+            String email, String fullName, String tempPassword) {
+        String loginUrl = appUrl + "/agreements/login";
+        String name = (fullName == null || fullName.isBlank()) ? "there" : fullName.trim();
+        String body = p("Hi " + escape(name) + ",")
+                + p("An account has been created for you on the " + brandName()
+                        + " agreement console. Use the temporary credentials below to sign in:")
+                + receipt(
+                        "Email: " + email,
+                        "Temporary password: " + tempPassword)
+                + button("Sign in", loginUrl)
+                + muted("This is a temporary password — please contact your "
+                        + "administrator if you need it changed. If you weren't "
+                        + "expecting this email, you can safely ignore it.");
+        emailService.sendEmailFrom(
+                brandConfig.getNoreplyEmail(),
+                email,
+                "Your " + brandName() + " console sign-in details",
+                wrap("Your console account", body));
+    }
+
     // ── Consultant Agreement feature (hidden / internal) ────────────
 
     /**

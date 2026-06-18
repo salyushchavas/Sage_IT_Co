@@ -3831,6 +3831,26 @@ export async function adminResetUserPassword(id: string, newPassword: string) {
   );
 }
 
+/** Update a console user's display title (signature-block Name / Title). */
+export async function adminUpdateUserTitle(id: string, title: string) {
+  return agreementAdminFetch<AgreementUserDto>(
+    `/api/agreements/admin/users/${id}/title`,
+    { method: "PATCH", body: JSON.stringify({ title }) },
+  );
+}
+
+/**
+ * Email a console user their sign-in credentials (email + temporary password)
+ * from noreply@sageitco.com. The plaintext password is only known right after
+ * create/reset (it's hashed in storage), so the caller passes it through here.
+ */
+export async function adminSendUserCredentials(id: string, password: string) {
+  return agreementAdminFetch<null>(
+    `/api/agreements/admin/users/${id}/send-credentials`,
+    { method: "POST", body: JSON.stringify({ password }) },
+  );
+}
+
 // Build K2 — super-admin changes a user's role / deletes a user.
 export async function adminChangeUserRole(
   id: string,

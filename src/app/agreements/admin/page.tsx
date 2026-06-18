@@ -13,6 +13,8 @@ import {
   FileText,
   KeyRound,
   Loader2,
+  Mail,
+  Pencil,
   RefreshCw,
   ShieldCheck,
   Trash2,
@@ -32,8 +34,10 @@ import {
   adminGetErmAssignments,
   adminListUsers,
   adminResetUserPassword,
+  adminSendUserCredentials,
   adminSetErmAssignments,
   adminSetUserStatus,
+  adminUpdateUserTitle,
   fetchMe,
   getAgreementErmToken,
   type AgreementMe,
@@ -44,8 +48,10 @@ import { formatUsDateTime } from "@/lib/dates";
 type AdminTab = "users" | "agreements";
 
 // One-time credential reveal shown after create / reset. The password
-// is never returned by the server again, so the admin must copy it now.
+// is never returned by the server again, so the admin must copy it now (or
+// email it — the id lets the banner POST it to the send-credentials endpoint).
 interface RevealedCredential {
+  id: string;
   email: string;
   password: string;
   kind: "created" | "reset";
@@ -63,6 +69,7 @@ export default function AgreementsAdminPage() {
   const [resetTarget, setResetTarget] = useState<AgreementUserDto | null>(null);
   const [assignTarget, setAssignTarget] = useState<AgreementUserDto | null>(null);
   const [roleTarget, setRoleTarget] = useState<AgreementUserDto | null>(null);
+  const [titleTarget, setTitleTarget] = useState<AgreementUserDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AgreementUserDto | null>(null);
   const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
@@ -244,6 +251,15 @@ export default function AgreementsAdminPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
+                          {/* Edit the display title (signature-block Name /
+                              Title). Cosmetic — available for every user. */}
+                          <button
+                            type="button"
+                            onClick={() => setTitleTarget(u)}
+                            className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
+                          >
+                            <Pencil size={11} /> Edit title
+                          </button>
                           {/* Build K — assign Managers/Accounts to an ERM. */}
                           {u.role === "ERM" && (
                             <button
@@ -321,9 +337,9 @@ export default function AgreementsAdminPage() {
       {createOpen && (
         <CreateUserModal
           onClose={() => setCreateOpen(false)}
-          onCreated={(email, password) => {
+          onCreated={(id, email, password) => {
             setCreateOpen(false);
-            setRevealed({ email, password, kind: "created" });
+            setRevealed({ id, email, password, kind: "created" });
             void loadUsers();
           }}
         />
@@ -333,9 +349,20 @@ export default function AgreementsAdminPage() {
         <ResetPasswordModal
           target={resetTarget}
           onClose={() => setResetTarget(null)}
-          onReset={(email, password) => {
+          onReset={(id, email, password) => {
             setResetTarget(null);
-            setRevealed({ email, password, kind: "reset" });
+            setRevealed({ id, email, password, kind: "reset" });
+          }}
+        />
+      )}
+
+      {titleTarget && (
+        <EditTitleModal
+          user={titleTarget}
+          onClose={() => setTitleTarget(null)}
+          onDone={() => {
+            setTitleTarget(null);
+            void loadUsers();
           }}
         />
       )}
@@ -384,6 +411,23 @@ function CredentialBanner({
   credential: RevealedCredential;
   onDismiss: () => void;
 }) {
+  const [sending, setSending] = useState(false);
+  const [sent, setSent] = useState(false);
+  const [sendError, setSendError] = useState("");
+
+  const emailToUser = async () => {
+    setSending(true);
+    setSendError("");
+    try {
+      await adminSendUserCredentials(credential.id, credential.password);
+      setSent(true);
+    } catch (e) {
+      setSendError(e instanceof Error ? e.message : "Couldn't email the credentials.");
+    } finally {
+      setSending(false);
+    }
+  };
+
   return (
     <div className="rounded-xl border border-sage-copper/40 bg-sage-copper/5 px-4 py-3">
       <div className="flex items-start gap-3">
@@ -396,11 +440,34 @@ function CredentialBanner({
             — share these credentials now
           </p>
           <p className="text-[11px] text-gray-500 mb-2">
-            This won&apos;t be shown again. Send it to the user out-of-band.
+            This won&apos;t be shown again. Copy it, or email it to the user
+            (from noreply@sageitco.com).
           </p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <CopyField label="Email" value={credential.email} />
             <CopyField label="Temporary password" value={credential.password} mono />
+          </div>
+          <div className="mt-2 flex items-center gap-3 flex-wrap">
+            <button
+              type="button"
+              onClick={emailToUser}
+              disabled={sending || sent}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-50"
+            >
+              {sending ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : sent ? (
+                <Check size={12} />
+              ) : (
+                <Mail size={12} />
+              )}
+              {sent ? `Emailed to ${credential.email}` : "Email to user"}
+            </button>
+            {sendError && (
+              <span className="text-[11px] text-red-600 inline-flex items-center gap-1">
+                <AlertCircle size={11} /> {sendError}
+              </span>
+            )}
           </div>
         </div>
         <button
@@ -470,7 +537,7 @@ function CreateUserModal({
   onCreated,
 }: {
   onClose: () => void;
-  onCreated: (email: string, password: string) => void;
+  onCreated: (id: string, email: string, password: string) => void;
 }) {
   const [email, setEmail] = useState("");
   const [fullName, setFullName] = useState("");
@@ -494,14 +561,14 @@ function CreateUserModal({
     }
     setSubmitting(true);
     try {
-      await adminCreateUser({
+      const created = await adminCreateUser({
         email: email.trim(),
         fullName: fullName.trim(),
         title: title.trim(),
         temporaryPassword: password,
         role,
       });
-      onCreated(email.trim().toLowerCase(), password);
+      onCreated(created.id, email.trim().toLowerCase(), password);
     } catch (e) {
       // Build K3 — only the genuine "email already in use" conflict should
       // show the inline email error. Every other server error (incl. other
@@ -632,7 +699,7 @@ function ResetPasswordModal({
 }: {
   target: AgreementUserDto;
   onClose: () => void;
-  onReset: (email: string, password: string) => void;
+  onReset: (id: string, email: string, password: string) => void;
 }) {
   const [password, setPassword] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -649,7 +716,7 @@ function ResetPasswordModal({
     setSubmitting(true);
     try {
       await adminResetUserPassword(target.id, password);
-      onReset(target.email, password);
+      onReset(target.id, target.email, password);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't reset password.");
       setSubmitting(false);
@@ -694,6 +761,78 @@ function ResetPasswordModal({
         onSubmit={handleSubmit}
         submitting={submitting}
         submitLabel="Reset password"
+        canSubmit={canSubmit}
+      />
+    </Modal>
+  );
+}
+
+// ── Edit title modal ────────────────────────────────────────────
+
+function EditTitleModal({
+  user,
+  onClose,
+  onDone,
+}: {
+  user: AgreementUserDto;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [title, setTitle] = useState(user.title ?? "");
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
+
+  const trimmed = title.trim();
+  const canSubmit =
+    trimmed.length > 0 && trimmed !== (user.title ?? "").trim() && !submitting;
+
+  const handleSubmit = async () => {
+    setError("");
+    if (trimmed.length === 0) {
+      setError("Title is required.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      await adminUpdateUserTitle(user.id, trimmed);
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't update title.");
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Modal title={`Edit title — ${user.fullName}`} onClose={onClose} disabled={submitting}>
+      <div className="space-y-3">
+        <ModalField label="Title" required>
+          <input
+            type="text"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+            disabled={submitting}
+            placeholder="e.g. Program Manager"
+            className={modalInput}
+            autoFocus
+          />
+          <p className="mt-1 text-[10px] text-gray-400">
+            Shown in the console and stamped as Name / Title in the agreement
+            signature block.
+          </p>
+        </ModalField>
+
+        {error && (
+          <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
+            <AlertCircle size={11} /> {error}
+          </p>
+        )}
+      </div>
+
+      <ModalActions
+        onClose={onClose}
+        onSubmit={handleSubmit}
+        submitting={submitting}
+        submitLabel="Save title"
         canSubmit={canSubmit}
       />
     </Modal>

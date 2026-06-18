@@ -65,6 +65,23 @@ public class EmailService {
      * this method never to throw.
      */
     public void sendEmail(String to, String subject, String htmlBody, List<Attachment> attachments) {
+        sendFrom(fromEmail, to, subject, htmlBody, attachments);
+    }
+
+    /**
+     * Send with an EXPLICIT From address (e.g. the brand no-reply mailbox),
+     * overriding the default SMTP-account sender. Note: the SMTP provider
+     * (Gmail / Workspace) must permit "send-as" the given address, or it may
+     * rewrite the header to the authenticated account. Falls back to the
+     * configured sender when {@code fromAddress} is blank.
+     */
+    public void sendEmailFrom(String fromAddress, String to, String subject, String htmlBody) {
+        String from = (fromAddress == null || fromAddress.isBlank()) ? fromEmail : fromAddress;
+        sendFrom(from, to, subject, htmlBody, List.of());
+    }
+
+    private void sendFrom(String fromAddress, String to, String subject,
+                          String htmlBody, List<Attachment> attachments) {
         if (!isConfigured()) {
             log.warn("SMTP not configured -- skipping send: subject='{}' to='{}'", subject, to);
             return;
@@ -75,7 +92,7 @@ public class EmailService {
             // / body encoded properly for non-ASCII content.
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
 
-            helper.setFrom(fromEmail, brandConfig.getName());
+            helper.setFrom(fromAddress, brandConfig.getName());
             helper.setTo(to);
             helper.setSubject(subject);
             helper.setText(htmlBody, true);
