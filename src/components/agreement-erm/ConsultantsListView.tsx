@@ -382,17 +382,23 @@ function ResendLinkButton({
   );
 }
 
-// ── Build W — Pending Appendix status (required appendices only) ──────
+// ── Build X — Pending Appendix status (full set, all phases) ──────────
 //
-// Per agreement, surface the appendices that aren't yet done. An appendix
-// counts ONLY when the ERM marked it required. State per required appendix:
-//   - "signed"   → consultant affirmed it (affirmedAppendixN) — not pending
-//   - "awaiting" → sent (in the consultant's fill scope) but not affirmed
-//   - "not-sent" → not yet in scope (link not issued, or a Phase-2 appendix
-//                  before Phase 2 is reached)
-// "sent" is derived from existing row fields: nothing is sent while DRAFT;
-// Appendix 1 (the Phase-2 Employment Confirmation) is sent once phase >= 2;
-// Appendices 2–5 are sent once the consultant link is issued (status != DRAFT).
+// Build W shipped this required-only, which masked genuinely-pending
+// appendices: a Phase-1 COMPLETED agreement skipped its Phase-2 appendices
+// (not yet require…=true) and read "None" despite 3 unsent appendices.
+//
+// Build X derives from the REAL per-appendix state across the FULL defined
+// set (Appendix 1–5), with NO dependence on the headline agreement status
+// (a Phase-1 "Completed" must not mask pending Phase-2 appendices):
+//   - sent   ⇐ requireAppendixN  (the ERM included/sent it; the only signal)
+//   - signed ⇐ affirmedAppendixN (the consultant signed/completed it)
+//   - done   = sent AND signed   → not pending
+//   - "not-sent"  = !sent  (not-required appendices included — they read here)
+//   - "awaiting"  = sent && !signed
+// Status is used ONLY to treat a never-issued DRAFT as "nothing sent yet";
+// it is never used to short-circuit to "None". "None" shows only when every
+// one of the five appendices is sent + signed.
 
 interface PendingAppendix {
   n: number;
@@ -423,13 +429,14 @@ function computePendingAppendices(app: ConsultantApplication): PendingAppendix[]
     4: app.affirmedAppendix4 === true,
     5: app.affirmedAppendix5 === true,
   };
+  // DRAFT = the consultant link was never issued → nothing is sent yet. This
+  // is the ONLY status use; COMPLETED/SIGNED/etc. never mask pending here.
   const isDraft = app.status === "DRAFT";
-  const phase = app.phase ?? 1;
   const pending: PendingAppendix[] = [];
   for (let n = 1; n <= 5; n++) {
-    if (!required[n]) continue; // required-only
-    if (affirmed[n]) continue; // signed → done
-    const sent = !isDraft && (n === 1 ? phase >= 2 : true);
+    const sent = required[n] && !isDraft;
+    const signed = affirmed[n];
+    if (sent && signed) continue; // genuinely done — sent AND signed
     pending.push({
       n,
       label: APPENDIX_LABELS[n],
@@ -439,9 +446,10 @@ function computePendingAppendices(app: ConsultantApplication): PendingAppendix[]
   return pending;
 }
 
-// "None" when every required appendix is sent + signed; otherwise a compact
-// chip summary ("N not sent" / "N awaiting") that expands to the per-appendix
-// detail. Required-only — not-required appendices never appear.
+// "None" when all five appendices are sent + signed; otherwise a compact chip
+// summary ("N not sent" / "N awaiting") that expands to the per-appendix
+// detail. Build X — the full Appendix 1–5 set is considered; not-required
+// appendices appear as "Not sent".
 function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
   const pending = computePendingAppendices(app);
   if (pending.length === 0) {
