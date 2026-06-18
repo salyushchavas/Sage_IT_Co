@@ -3831,11 +3831,14 @@ export async function adminResetUserPassword(id: string, newPassword: string) {
   );
 }
 
-/** Update a console user's display title (signature-block Name / Title). */
-export async function adminUpdateUserTitle(id: string, title: string) {
+/** Update a console user's display details — name + title (signature block). */
+export async function adminUpdateUserDetails(
+  id: string,
+  details: { fullName: string; title: string },
+) {
   return agreementAdminFetch<AgreementUserDto>(
-    `/api/agreements/admin/users/${id}/title`,
-    { method: "PATCH", body: JSON.stringify({ title }) },
+    `/api/agreements/admin/users/${id}/details`,
+    { method: "PATCH", body: JSON.stringify(details) },
   );
 }
 

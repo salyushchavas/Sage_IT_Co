@@ -192,29 +192,38 @@ public class AgreementAdminController {
     }
 
     /**
-     * Update a console user's display title (the Name / Title that renders in
-     * the agreement signature block). Cosmetic — allowed for every user
-     * including the super-admin. Trimmed + length-bounded.
+     * Update a console user's display details — full name + title (the Name /
+     * Title that render in the agreement signature block). Cosmetic identity
+     * fields; the login email and role have their own flows. Allowed for every
+     * user including the super-admin. Both are trimmed, required, length-bounded.
      */
-    @PatchMapping("/users/{id}/title")
+    @PatchMapping("/users/{id}/details")
     @Transactional
-    public ResponseEntity<ApiResponse<AgreementUserDto>> updateTitle(
+    public ResponseEntity<ApiResponse<AgreementUserDto>> updateDetails(
             @PathVariable String id,
-            @RequestBody TitleBody body,
+            @RequestBody DetailsBody body,
             HttpServletRequest request) {
         AgreementAuthz.requireSuperAdmin(request);
+        String fullName = body == null || body.fullName == null ? "" : body.fullName.trim();
         String title = body == null || body.title == null ? "" : body.title.trim();
+        if (fullName.isEmpty()) {
+            throw new IllegalArgumentException("Name is required.");
+        }
         if (title.isEmpty()) {
             throw new IllegalArgumentException("Title is required.");
+        }
+        if (fullName.length() > 255) {
+            throw new IllegalArgumentException("Name is too long (max 255 characters).");
         }
         if (title.length() > 255) {
             throw new IllegalArgumentException("Title is too long (max 255 characters).");
         }
         AgreementUser user = agreementUserRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
+        user.setFullName(fullName);
         user.setTitle(title);
         user = agreementUserRepository.save(user);
-        return ResponseEntity.ok(ApiResponse.success("Title updated", AgreementUserDto.from(user)));
+        return ResponseEntity.ok(ApiResponse.success("Details updated", AgreementUserDto.from(user)));
     }
 
     /**
@@ -310,7 +319,8 @@ public class AgreementAdminController {
         public String role;
     }
 
-    public static class TitleBody {
+    public static class DetailsBody {
+        public String fullName;
         public String title;
     }
 

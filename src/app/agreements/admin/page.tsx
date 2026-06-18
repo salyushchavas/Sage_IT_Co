@@ -37,7 +37,7 @@ import {
   adminSendUserCredentials,
   adminSetErmAssignments,
   adminSetUserStatus,
-  adminUpdateUserTitle,
+  adminUpdateUserDetails,
   fetchMe,
   getAgreementErmToken,
   type AgreementMe,
@@ -69,7 +69,7 @@ export default function AgreementsAdminPage() {
   const [resetTarget, setResetTarget] = useState<AgreementUserDto | null>(null);
   const [assignTarget, setAssignTarget] = useState<AgreementUserDto | null>(null);
   const [roleTarget, setRoleTarget] = useState<AgreementUserDto | null>(null);
-  const [titleTarget, setTitleTarget] = useState<AgreementUserDto | null>(null);
+  const [detailsTarget, setDetailsTarget] = useState<AgreementUserDto | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<AgreementUserDto | null>(null);
   const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
   const [busyRowId, setBusyRowId] = useState<string | null>(null);
@@ -251,14 +251,14 @@ export default function AgreementsAdminPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
-                          {/* Edit the display title (signature-block Name /
-                              Title). Cosmetic — available for every user. */}
+                          {/* Edit the display details (name + title shown in
+                              the signature block). Available for every user. */}
                           <button
                             type="button"
-                            onClick={() => setTitleTarget(u)}
+                            onClick={() => setDetailsTarget(u)}
                             className="inline-flex items-center gap-1 px-2 py-1 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer"
                           >
-                            <Pencil size={11} /> Edit title
+                            <Pencil size={11} /> Edit details
                           </button>
                           {/* Build K — assign Managers/Accounts to an ERM. */}
                           {u.role === "ERM" && (
@@ -356,12 +356,12 @@ export default function AgreementsAdminPage() {
         />
       )}
 
-      {titleTarget && (
-        <EditTitleModal
-          user={titleTarget}
-          onClose={() => setTitleTarget(null)}
+      {detailsTarget && (
+        <EditDetailsModal
+          user={detailsTarget}
+          onClose={() => setDetailsTarget(null)}
           onDone={() => {
-            setTitleTarget(null);
+            setDetailsTarget(null);
             void loadUsers();
           }}
         />
@@ -767,9 +767,9 @@ function ResetPasswordModal({
   );
 }
 
-// ── Edit title modal ────────────────────────────────────────────
+// ── Edit details modal (name + title) ───────────────────────────
 
-function EditTitleModal({
+function EditDetailsModal({
   user,
   onClose,
   onDone,
@@ -778,33 +778,52 @@ function EditTitleModal({
   onClose: () => void;
   onDone: () => void;
 }) {
+  const [fullName, setFullName] = useState(user.fullName ?? "");
   const [title, setTitle] = useState(user.title ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
-  const trimmed = title.trim();
+  const trimmedName = fullName.trim();
+  const trimmedTitle = title.trim();
+  const changed =
+    trimmedName !== (user.fullName ?? "").trim() ||
+    trimmedTitle !== (user.title ?? "").trim();
   const canSubmit =
-    trimmed.length > 0 && trimmed !== (user.title ?? "").trim() && !submitting;
+    trimmedName.length > 0 && trimmedTitle.length > 0 && changed && !submitting;
 
   const handleSubmit = async () => {
     setError("");
-    if (trimmed.length === 0) {
-      setError("Title is required.");
+    if (trimmedName.length === 0 || trimmedTitle.length === 0) {
+      setError("Name and title are both required.");
       return;
     }
     setSubmitting(true);
     try {
-      await adminUpdateUserTitle(user.id, trimmed);
+      await adminUpdateUserDetails(user.id, {
+        fullName: trimmedName,
+        title: trimmedTitle,
+      });
       onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't update title.");
+      setError(e instanceof Error ? e.message : "Couldn't update details.");
       setSubmitting(false);
     }
   };
 
   return (
-    <Modal title={`Edit title — ${user.fullName}`} onClose={onClose} disabled={submitting}>
+    <Modal title={`Edit details — ${user.email}`} onClose={onClose} disabled={submitting}>
       <div className="space-y-3">
+        <ModalField label="Full name" required>
+          <input
+            type="text"
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            disabled={submitting}
+            placeholder="Jane Q. ERM"
+            className={modalInput}
+            autoFocus
+          />
+        </ModalField>
         <ModalField label="Title" required>
           <input
             type="text"
@@ -813,11 +832,11 @@ function EditTitleModal({
             disabled={submitting}
             placeholder="e.g. Program Manager"
             className={modalInput}
-            autoFocus
           />
           <p className="mt-1 text-[10px] text-gray-400">
-            Shown in the console and stamped as Name / Title in the agreement
-            signature block.
+            Name + title show in the console and stamp into the agreement
+            signature block. To change the login email or role, use those
+            actions.
           </p>
         </ModalField>
 
@@ -832,7 +851,7 @@ function EditTitleModal({
         onClose={onClose}
         onSubmit={handleSubmit}
         submitting={submitting}
-        submitLabel="Save title"
+        submitLabel="Save details"
         canSubmit={canSubmit}
       />
     </Modal>
