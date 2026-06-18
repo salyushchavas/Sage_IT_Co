@@ -1297,14 +1297,30 @@ public class ConsultantApplicationController {
     // ── Build G: in-memory PDF previews (no Cloudinary fetch) ──────
 
     /**
+     * Statuses in which the consultant is still editing / submitting and a
+     * pre-signature preview is valid. MUST mirror the editable set in
+     * {@link ConsultantApplicationService#updateApplication} — the autosave
+     * flips a freshly-opened SUBMITTED row to UPDATED on the first edit, so a
+     * gate that omitted UPDATED/DRAFT 409'd the review-step preview for every
+     * consultant who'd touched the form (surfaced to them as a misleading
+     * "portal didn't respond" because the 409 carried no body).
+     */
+    static boolean isConsultantPreviewable(String status) {
+        return ConsultantApplication.Status.DRAFT.name().equals(status)
+                || ConsultantApplication.Status.SUBMITTED.name().equals(status)
+                || ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)
+                || ConsultantApplication.Status.UPDATED.name().equals(status);
+    }
+
+    /**
      * Consultant-side review-step preview. Renders the agreement PDF
      * from CURRENT entity data + the primary signature the consultant
      * just drew (passed as a data: URL since it hasn't been uploaded
      * yet). Streams the bytes inline -- no Cloudinary upload, no
      * persistence; the bytes are throw-away for this preview.
      *
-     * Status guard mirrors the consultant fill flow (SUBMITTED |
-     * REVISION_REQUESTED); COMPLETED rows use the existing
+     * Status guard mirrors the consultant fill flow (DRAFT | SUBMITTED |
+     * REVISION_REQUESTED | UPDATED); COMPLETED rows use the existing
      * {@code /pdf} endpoint.
      */
     @PostMapping("/api/consultant/applications/{appId}/preview-pdf")
@@ -1321,8 +1337,7 @@ public class ConsultantApplicationController {
         // Build K — preview is reachable ONLY while the consultant can
         // still edit / submit. Once they've signed (VERIFIED) or the
         // ERM has approved (COMPLETED), there is no PDF view at all.
-        if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
-                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
+        if (!isConsultantPreviewable(status)) {
             return ResponseEntity.status(HttpStatus.CONFLICT).build();
         }
         String primarySig = body == null ? null : body.primarySignatureBase64;
@@ -1369,9 +1384,12 @@ public class ConsultantApplicationController {
         // Build K — preview is reachable ONLY while the consultant can
         // still edit / submit. Once they've signed (VERIFIED) or the
         // ERM has approved (COMPLETED), there is no PDF view at all.
-        if (!ConsultantApplication.Status.SUBMITTED.name().equals(status)
-                && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(status)) {
-            return ResponseEntity.status(HttpStatus.CONFLICT).build();
+        if (!isConsultantPreviewable(status)) {
+            // Carry a JSON body so the client surfaces a real reason instead of
+            // mislabeling an empty 409 as "the portal didn't respond".
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(ApiResponse.error(
+                            "This agreement is no longer open for editing, so there's no preview."));
         }
         String primarySig = body == null ? null : body.primarySignatureBase64;
         List<String> pages;
