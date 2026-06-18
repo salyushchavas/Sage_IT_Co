@@ -29,6 +29,8 @@ interface FormState {
   rateAmount1: string;
   ratePeriod2: string;
   rateAmount2: string;
+  // Appendix 1 Schedule 1 — ERM-set Phase 2 deliverables period (merged cell).
+  phase2DeliverablePeriod: string;
   // F-4: ERM-set visa status, persisted on the workAuthCategory column.
   // Locked + visible to the consultant on the cover step.
   visaStatus: string;
@@ -80,6 +82,7 @@ const EMPTY: FormState = {
   rateAmount1: "",
   ratePeriod2: "",
   rateAmount2: "",
+  phase2DeliverablePeriod: "",
   visaStatus: "",
   visaStatusOther: "",
   requireAppendix1: false,
@@ -146,6 +149,7 @@ export default function NewConsultantApplicationPage() {
     rateAmount1: form.rateAmount1.trim(),
     ratePeriod2: form.ratePeriod2.trim(),
     rateAmount2: form.rateAmount2.trim(),
+    phase2DeliverablePeriod: form.phase2DeliverablePeriod.trim(),
     visaStatus: form.visaStatus.trim(),
     visaStatusOther: form.visaStatusOther.trim(),
     // Build I — Service Track (ERM-set). Track required, Scope optional.
@@ -164,6 +168,7 @@ export default function NewConsultantApplicationPage() {
     trimmedStrings.rateAmount1,
     trimmedStrings.ratePeriod2,
     trimmedStrings.rateAmount2,
+    trimmedStrings.phase2DeliverablePeriod,
     trimmedStrings.visaStatus,
     trimmedStrings.technologyTrack,
   ];
@@ -442,6 +447,26 @@ export default function NewConsultantApplicationPage() {
                 but usually a typo.
               </p>
             )}
+          </section>
+
+          <section className="space-y-3">
+            <SectionHeader title="Phase 2 monthly deliverables" />
+            <p className="text-[11px] text-gray-500">
+              The single Month / Period value shown in Appendix 1&apos;s
+              &ldquo;Schedule 1 – Phase 2 Monthly Deliverables&rdquo; table
+              (read-only to the consultant).
+            </p>
+            <Field label="Month / Period" required>
+              <input
+                type="text"
+                value={form.phase2DeliverablePeriod}
+                onChange={setText("phase2DeliverablePeriod")}
+                disabled={isSubmitting}
+                required
+                placeholder="Months 1-12"
+                className={inputClass}
+              />
+            </Field>
           </section>
 
           <section className="space-y-3">

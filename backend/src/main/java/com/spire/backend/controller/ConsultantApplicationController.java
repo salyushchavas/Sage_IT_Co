@@ -121,6 +121,7 @@ public class ConsultantApplicationController {
                 body.rateAmount1,
                 body.ratePeriod2,
                 body.rateAmount2,
+                body.phase2DeliverablePeriod,
                 body.visaStatus,
                 body.visaStatusOther,
                 body.requireAppendix1,
@@ -267,6 +268,7 @@ public class ConsultantApplicationController {
                         body == null ? null : body.rateAmount1,
                         body == null ? null : body.ratePeriod2,
                         body == null ? null : body.rateAmount2,
+                        body == null ? null : body.phase2DeliverablePeriod,
                         request)));
     }
 
@@ -1485,6 +1487,9 @@ public class ConsultantApplicationController {
         public String rateAmount1;
         public String ratePeriod2;
         public String rateAmount2;
+        // Appendix 1 Schedule 1 — ERM-set Phase 2 monthly-deliverables period
+        // (single merged cell; stamps ${phase2DeliverablePeriod}).
+        public String phase2DeliverablePeriod;
         // F-4: ERM-set visa / work-authorization status. Persisted into
         // workAuthCategory; the wizard renders it read-only on the
         // cover step. Build W — visaStatusOther carries the custom value
@@ -1543,6 +1548,10 @@ public class ConsultantApplicationController {
         public String rateAmount1;
         public String ratePeriod2;
         public String rateAmount2;
+        // Appendix 1 Schedule 1 — optional Phase-2 deliverables-period
+        // correction (free-text, pre-filled). Null = leave unchanged; a
+        // CHANGED value persists and auto-scopes Appendix 1 for re-review.
+        public String phase2DeliverablePeriod;
     }
 
     public static class ApproveAndSignBody {

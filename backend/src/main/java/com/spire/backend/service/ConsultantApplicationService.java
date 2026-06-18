@@ -143,6 +143,7 @@ public class ConsultantApplicationService {
             String rateAmount1,
             String ratePeriod2,
             String rateAmount2,
+            String phase2DeliverablePeriod,
             String visaStatus,
             String visaStatusOther,
             Boolean requireAppendix1,
@@ -205,6 +206,7 @@ public class ConsultantApplicationService {
                 .rateAmount1(rateAmount1)
                 .ratePeriod2(ratePeriod2)
                 .rateAmount2(rateAmount2)
+                .phase2DeliverablePeriod(blankToNull(phase2DeliverablePeriod))
                 // F-4: ERM-set visa on workAuthCategory. Build W adds the
                 // custom "Others" free-text on work_authorization_other.
                 .workAuthorizationCategory(cat)
@@ -1397,6 +1399,7 @@ public class ConsultantApplicationService {
             String achDebitDates, String achDebitAmounts,
             String ratePeriod1, String rateAmount1,
             String ratePeriod2, String rateAmount2,
+            String phase2DeliverablePeriod,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
@@ -1480,6 +1483,20 @@ public class ConsultantApplicationService {
         }
         if (rateChanged && !selectedKeys.contains("main-agreement")) {
             selectedKeys.add("main-agreement");
+        }
+
+        // Appendix 1 Schedule 1 — apply an ERM Phase-2 deliverables-period
+        // correction sent with the revision. Only a CHANGED value persists;
+        // when it changes, scope APPENDIX 1 in (where the Monthly Deliverables
+        // table lives) so the consultant re-reviews + re-signs the corrected
+        // schedule. Read-only to the consultant; stamps into the agreement PDF.
+        if (phase2DeliverablePeriod != null && !java.util.Objects.equals(
+                blankToNull(phase2DeliverablePeriod),
+                blankToNull(app.getPhase2DeliverablePeriod()))) {
+            app.setPhase2DeliverablePeriod(blankToNull(phase2DeliverablePeriod));
+            if (!selectedKeys.contains("appendix1")) {
+                selectedKeys.add("appendix1");
+            }
         }
 
         if (selectedKeys.isEmpty()) {
@@ -1579,6 +1596,7 @@ public class ConsultantApplicationService {
         m.put("affirmedExhibitB", "exhibit-b");
         for (String f : new String[]{"employerPayrollEntity", "implementationPartner",
                 "endClient", "roleTitle", "verifiedStartDate", "payrollCycle",
+                "phase2DeliverablePeriod",
                 "affirmedAppendix1"}) m.put(f, "appendix1");
         for (String f : new String[]{"achAccountType", "achBankName",
                 "achAccountHolderName", "achRoutingNumber", "achAccountNumber",

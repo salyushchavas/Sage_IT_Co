@@ -1356,6 +1356,9 @@ public class DataSeeder implements CommandLineRunner {
                 // Build V — ERM-selected consultant-version number for the
                 // current approval round (the approver reviews this version).
                 {"approval_version_number INTEGER", "approval_version_number"},
+                // Appendix 1 Schedule 1 — ERM-set Phase 2 deliverables period
+                // (single merged cell; revisable like the rate schedule).
+                {"phase2_deliverable_period VARCHAR(255)", "phase2_deliverable_period"},
                 // Phase 5 (S3) — storage keys for the S3-backed consultant
                 // UPLOADS (cheque/work-auth/offer-letter/DL/SSN) + SIGNATURES
                 // (consultant primary + final, ERM). Additive; the parallel

@@ -246,6 +246,10 @@ public class ConsultantApplication {
     @Column(name = "rate_period_2") private String ratePeriod2;
     @Column(name = "rate_amount_2") private String rateAmount2;
 
+    // Appendix 1 "Schedule 1 – Phase 2 Monthly Deliverables" period — ERM-set,
+    // single merged cell; stamps the ${phase2DeliverablePeriod} placeholder.
+    @Column(name = "phase2_deliverable_period") private String phase2DeliverablePeriod;
+
     // ── Consultant-filled: personal (required) ───────────────────────
 
     @Column(name = "primary_phone") private String primaryPhone;

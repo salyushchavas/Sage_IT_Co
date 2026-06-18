@@ -444,6 +444,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           rateAmount1={app.rateAmount1}
           ratePeriod2={app.ratePeriod2}
           rateAmount2={app.rateAmount2}
+          phase2DeliverablePeriod={app.phase2DeliverablePeriod}
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
@@ -1312,6 +1313,10 @@ function ErmFilledCard({ app }: { app: ConsultantApplication }) {
         <ReadOnlyRow label="Amount 1" value={app.rateAmount1} />
         <ReadOnlyRow label="Rate period 2" value={app.ratePeriod2} />
         <ReadOnlyRow label="Amount 2" value={app.rateAmount2} />
+        <ReadOnlyRow
+          label="Phase 2 deliverables period"
+          value={app.phase2DeliverablePeriod}
+        />
       </dl>
     </section>
   );
@@ -2536,6 +2541,7 @@ function RequestRevisionModal({
   rateAmount1,
   ratePeriod2,
   rateAmount2,
+  phase2DeliverablePeriod,
   onClose,
   onDone,
 }: {
@@ -2546,6 +2552,7 @@ function RequestRevisionModal({
   rateAmount1?: string | null;
   ratePeriod2?: string | null;
   rateAmount2?: string | null;
+  phase2DeliverablePeriod?: string | null;
   onClose: () => void;
   onDone: () => Promise<void>;
 }) {
@@ -2562,6 +2569,8 @@ function RequestRevisionModal({
   const [rateAmt1, setRateAmt1] = useState(rateAmount1 ?? "");
   const [ratePer2, setRatePer2] = useState(ratePeriod2 ?? "");
   const [rateAmt2, setRateAmt2] = useState(rateAmount2 ?? "");
+  // Appendix 1 Schedule 1 — editable Phase-2 deliverables period, pre-filled.
+  const [delivPeriod, setDelivPeriod] = useState(phase2DeliverablePeriod ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -2578,7 +2587,12 @@ function RequestRevisionModal({
     || rateAmt1.trim() !== (rateAmount1 ?? "").trim()
     || ratePer2.trim() !== (ratePeriod2 ?? "").trim()
     || rateAmt2.trim() !== (rateAmount2 ?? "").trim();
-  const canSubmit = (selectedIds.length > 0 || achChanged || rateChanged) && !busy;
+  // Appendix 1 deliverables period changed vs stored. When it changes the
+  // backend auto-scopes Appendix 1 for the consultant to re-review + re-sign.
+  const delivChanged =
+    delivPeriod.trim() !== (phase2DeliverablePeriod ?? "").trim();
+  const canSubmit =
+    (selectedIds.length > 0 || achChanged || rateChanged || delivChanged) && !busy;
 
   const toggle = (id: string) =>
     setPicked((p) => ({ ...p, [id]: !p[id] }));
@@ -2607,6 +2621,7 @@ function RequestRevisionModal({
           ratePeriod2: ratePer2,
           rateAmount2: rateAmt2,
         },
+        { phase2DeliverablePeriod: delivPeriod },
       );
       await onDone();
     } catch (e) {
@@ -2786,10 +2801,40 @@ function RequestRevisionModal({
           </p>
         )}
       </div>
+      {/* Appendix 1 Schedule 1 — correct the Phase-2 deliverables period within
+          the revision. Pre-filled, free-text; the consultant re-reviews
+          Appendix 1 (read-only) and re-signs over the corrected schedule. */}
+      <div className="mt-3 rounded-md border border-gray-200 bg-white px-3 py-2.5">
+        <p className="text-sm font-medium text-gray-800">
+          Phase 2 deliverables period
+        </p>
+        <p className="text-[11px] text-gray-500 mb-2">
+          The single Month / Period value in Appendix 1&apos;s deliverables
+          table. The consultant re-reviews Appendix 1 (read-only) and re-signs.
+        </p>
+        <label className="block">
+          <span className="text-[11px] text-gray-600">Month / Period</span>
+          <input
+            type="text"
+            value={delivPeriod}
+            onChange={(e) => setDelivPeriod(e.target.value.slice(0, 200))}
+            disabled={busy}
+            placeholder="e.g. Months 1-12"
+            className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+          />
+        </label>
+        {delivChanged && (
+          <p className="mt-2 text-[11px] text-sage-copper-deep">
+            Appendix 1 will be added to the revision so the consultant re-reviews
+            the corrected deliverables period and re-signs.
+          </p>
+        )}
+      </div>
       <p className="mt-2 text-[11px] text-gray-500">
         {selectedIds.length} section{selectedIds.length === 1 ? "" : "s"} selected
         {achChanged ? " · ACH schedule edited" : ""}
-        {rateChanged ? " · Rate schedule edited" : ""}.
+        {rateChanged ? " · Rate schedule edited" : ""}
+        {delivChanged ? " · Deliverables period edited" : ""}.
       </p>
       {error && (
         <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-600">

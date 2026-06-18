@@ -747,6 +747,9 @@ public class AgreementDocumentService {
         c.put("rateAmount1", nz.apply(app.getRateAmount1()));
         c.put("ratePeriod2", nz.apply(app.getRatePeriod2()));
         c.put("rateAmount2", nz.apply(app.getRateAmount2()));
+        // Appendix 1 Schedule 1 — Phase 2 monthly-deliverables period (ERM-set,
+        // single merged cell).
+        c.put("phase2DeliverablePeriod", nz.apply(app.getPhase2DeliverablePeriod()));
 
         // Exhibit A.
         c.put("technologyTrack", nz.apply(app.getTechnologyTrack()));
@@ -884,6 +887,7 @@ public class AgreementDocumentService {
         v.put("rateAmount1", nz.apply(app.getRateAmount1()));
         v.put("ratePeriod2", nz.apply(app.getRatePeriod2()));
         v.put("rateAmount2", nz.apply(app.getRateAmount2()));
+        v.put("phase2DeliverablePeriod", nz.apply(app.getPhase2DeliverablePeriod()));
         v.put("ermName", nz.apply(app.getErmName()));
         v.put("ermTitle", nz.apply(app.getErmTitle()));
         v.put("ermEmail", resolveOwnerEmail(app));

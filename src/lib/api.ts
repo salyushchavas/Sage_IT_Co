@@ -3286,6 +3286,8 @@ export interface ConsultantApplication {
   rateAmount1: string | null;
   ratePeriod2: string | null;
   rateAmount2: string | null;
+  // Appendix 1 Schedule 1 — ERM-set Phase 2 monthly-deliverables period.
+  phase2DeliverablePeriod?: string | null;
   // Consultant personal block (required at fill-in time)
   primaryPhone: string | null;
   workAuthorizationCategory: string | null;
@@ -3947,6 +3949,9 @@ export async function createConsultantApplication(data: {
   rateAmount1?: string;
   ratePeriod2?: string;
   rateAmount2?: string;
+  // Appendix 1 Schedule 1 — ERM-set Phase 2 monthly-deliverables period
+  // (single merged cell, e.g. "Months 1-12"); read-only to the consultant.
+  phase2DeliverablePeriod?: string;
   // F-4: ERM-set visa status (persisted into workAuthCategory) and
   // per-appendix requirement flags. Drive the wizard's effective
   // requirements + the submit-time gate.
@@ -4080,12 +4085,20 @@ export async function ermRequestRevision(
     ratePeriod2?: string;
     rateAmount2?: string;
   },
+  // Appendix 1 Schedule 1 — optional Phase-2 deliverables-period correction.
+  // A changed value auto-scopes Appendix 1 for the consultant's re-review.
+  deliverable?: { phase2DeliverablePeriod?: string },
 ) {
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/request-revision`,
     {
       method: "POST",
-      body: JSON.stringify({ sections, ...(ach ?? {}), ...(rate ?? {}) }),
+      body: JSON.stringify({
+        sections,
+        ...(ach ?? {}),
+        ...(rate ?? {}),
+        ...(deliverable ?? {}),
+      }),
     },
   );
 }
