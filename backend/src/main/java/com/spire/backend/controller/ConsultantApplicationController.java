@@ -482,7 +482,7 @@ public class ConsultantApplicationController {
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
+        if (!rateLimiter.allowUpload(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
@@ -536,7 +536,7 @@ public class ConsultantApplicationController {
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
+        if (!rateLimiter.allowUpload(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
@@ -610,7 +610,7 @@ public class ConsultantApplicationController {
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
+        if (!rateLimiter.allowUpload(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
@@ -688,7 +688,7 @@ public class ConsultantApplicationController {
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
+        if (!rateLimiter.allowUpload(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
@@ -755,7 +755,7 @@ public class ConsultantApplicationController {
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
+        if (!rateLimiter.allowUpload(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
@@ -809,7 +809,7 @@ public class ConsultantApplicationController {
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
+        if (!rateLimiter.allowUpload(appId)) {
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
