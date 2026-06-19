@@ -2452,7 +2452,7 @@ function SectionStep({
               </div>
               <div id="field-ssnDoc">
                 <DocUploadBlock
-                  title="SSN document (optional)"
+                  title="SSN document"
                   description="Optional — upload a copy of your SSN card or document if you have one (≤10 MB). You can submit without it."
                   inputId="ssndoc-file"
                   uploaded={ssnDocUploaded}
@@ -2460,6 +2460,7 @@ function SectionStep({
                   error={ssnDocError}
                   onUpload={onUploadSsnDoc}
                   needsAttention={false}
+                  optional
                 />
               </div>
             </div>
@@ -3651,6 +3652,7 @@ function DocUploadBlock({
   error,
   onUpload,
   needsAttention,
+  optional = false,
 }: {
   title: string;
   description: string;
@@ -3660,6 +3662,9 @@ function DocUploadBlock({
   error: string;
   onUpload: (file: File) => void;
   needsAttention: boolean;
+  // When true, omit the required-style "*" mark (the field is optional).
+  // Cosmetic only — validation lives in the section's required-items logic.
+  optional?: boolean;
 }) {
   return (
     <section
@@ -3674,8 +3679,13 @@ function DocUploadBlock({
     >
       <div>
         <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
-          {title}{" "}
-          <span className="text-sage-copper-deep" aria-hidden>*</span>
+          {title}
+          {!optional && (
+            <>
+              {" "}
+              <span className="text-sage-copper-deep" aria-hidden>*</span>
+            </>
+          )}
         </p>
         <p className="mt-1 text-[12px] text-stone-500">
           {description}
