@@ -156,6 +156,8 @@ public class ConsultantApplicationService {
             String achDebitAmounts,
             String technologyTrack,
             String customScopeNotes,
+            String portalAuthorizedActions,
+            String portalRevocationContact,
             String emailPretext,
             JsonNode payload,
             String ownerErmId,
@@ -224,6 +226,11 @@ public class ConsultantApplicationService {
                 // the consultant; rendered into the agreement.
                 .technologyTrack(blankToNull(technologyTrack))
                 .customScopeNotes(blankToNull(customScopeNotes))
+                // Build Z — ERM-set Appendix 4 Authorized Actions + Revocation
+                // Contact; read-only to the consultant; stamped into Appendix 4
+                // (${portalAuthorizedActions} / ${portalRevocationContact}).
+                .portalAuthorizedActions(blankToNull(portalAuthorizedActions))
+                .portalRevocationContact(blankToNull(portalRevocationContact))
                 // Build O — optional ERM-authored invitation email pre-text
                 // (blank → the default copy at send time).
                 .emailPretext(blankToNull(emailPretext))
@@ -1607,9 +1614,12 @@ public class ConsultantApplicationService {
                 "bgCurrentAddressCity", "bgCurrentAddressState", "bgCurrentAddressZip",
                 "bgCurrentSameAsResidence", "bgDateOfBirth", "bgFullSsn", "idType",
                 "bgDriverLicense", "affirmedAppendix3"}) m.put(f, "appendix3");
+        // Build Z — portalAuthorizedActions + portalRevocationContact are now
+        // ERM-set/read-only (not consultant-writable), so they are omitted here
+        // (mirrors ACH debit being ERM-only).
         for (String f : new String[]{"portalPlatform", "portalUsername",
-                "portalEntries", "portalAuthorizedActions", "portalEffectiveDate",
-                "portalRevocationContact", "affirmedAppendix4"}) m.put(f, "appendix4");
+                "portalEntries", "portalEffectiveDate",
+                "affirmedAppendix4"}) m.put(f, "appendix4");
         for (String f : new String[]{"securityCheckCount", "securityCheckBank",
                 "securityCheckHolderName", "securityCheckAmount",
                 "securityCheckNumbers", "securityCheckDates",
@@ -2977,9 +2987,10 @@ public class ConsultantApplicationService {
         public String portalUsername;
         // Build J — repeatable platform+username entries (JSON-in-TEXT).
         public String portalEntries;
-        public String portalAuthorizedActions;
+        // Build Z — portalAuthorizedActions + portalRevocationContact are now
+        // ERM-set (create-time), read-only to the consultant, so they are NOT
+        // accepted on the consultant fill patch (mirrors ACH debit).
         public java.time.LocalDate portalEffectiveDate;
-        public String portalRevocationContact;
         public String securityCheckCount;
         public String securityCheckNumbers;
         public String securityCheckBank;
@@ -3050,9 +3061,7 @@ public class ConsultantApplicationService {
             if (portalPlatform != null)           { app.setPortalPlatform(portalPlatform); changed = true; }
             if (portalUsername != null)           { app.setPortalUsername(portalUsername); changed = true; }
             if (portalEntries != null)            { app.setPortalEntries(portalEntries); changed = true; }
-            if (portalAuthorizedActions != null)  { app.setPortalAuthorizedActions(portalAuthorizedActions); changed = true; }
             if (portalEffectiveDate != null)      { app.setPortalEffectiveDate(portalEffectiveDate); changed = true; }
-            if (portalRevocationContact != null)  { app.setPortalRevocationContact(portalRevocationContact); changed = true; }
             if (securityCheckCount != null)       { app.setSecurityCheckCount(securityCheckCount); changed = true; }
             if (securityCheckNumbers != null)     { app.setSecurityCheckNumbers(securityCheckNumbers); changed = true; }
             if (securityCheckBank != null)        { app.setSecurityCheckBank(securityCheckBank); changed = true; }
@@ -3117,9 +3126,7 @@ public class ConsultantApplicationService {
             if (portalPlatform != null) names.add("portalPlatform");
             if (portalUsername != null) names.add("portalUsername");
             if (portalEntries != null) names.add("portalEntries");
-            if (portalAuthorizedActions != null) names.add("portalAuthorizedActions");
             if (portalEffectiveDate != null) names.add("portalEffectiveDate");
-            if (portalRevocationContact != null) names.add("portalRevocationContact");
             if (securityCheckCount != null) names.add("securityCheckCount");
             if (securityCheckNumbers != null) names.add("securityCheckNumbers");
             if (securityCheckBank != null) names.add("securityCheckBank");

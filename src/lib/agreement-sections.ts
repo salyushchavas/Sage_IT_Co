@@ -583,12 +583,16 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
       // Build J — platform + username are now a REPEATABLE list, rendered by
       // a dedicated add/remove block in the wizard (PortalEntriesBlock), not
       // as single fields here. The remaining fields stay section-level.
+      // Build Z — Authorized Actions + Revocation Contact are now ERM-set
+      // (filled at create), read-only to the consultant. required:false +
+      // readOnly:true so they never gate consultant submit.
       {
         key: "portalAuthorizedActions",
         label: "Authorized actions",
         type: "textarea",
-        required: true,
-        help: "Describe what we may do on your behalf (search, apply, message recruiters).",
+        required: false,
+        readOnly: true,
+        help: "Set by Sage IT on this agreement.",
       },
       {
         key: "portalEffectiveDate",
@@ -600,8 +604,9 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         key: "portalRevocationContact",
         label: "Revocation contact",
         type: "text",
-        required: true,
-        help: "Who we should notify if you revoke access (usually your Sage IT contact).",
+        required: false,
+        readOnly: true,
+        help: "Set by Sage IT on this agreement.",
       },
     ],
     requiresSignature: false,

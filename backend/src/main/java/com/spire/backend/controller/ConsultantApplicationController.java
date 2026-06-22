@@ -134,6 +134,8 @@ public class ConsultantApplicationController {
                 body.achDebitAmounts,
                 body.technologyTrack,
                 body.customScopeNotes,
+                body.portalAuthorizedActions,
+                body.portalRevocationContact,
                 body.emailPretext,
                 body.payload,
                 // Authenticated agreement user, stamped as the owner.
@@ -1520,6 +1522,12 @@ public class ConsultantApplicationController {
         // consultant; rendered via ${technologyTrack}/${customScopeNotes}.
         public String technologyTrack;
         public String customScopeNotes;
+        // Build Z — ERM-set Appendix 4 Authorized Actions + Revocation Contact.
+        // Read-only to the consultant; rendered via ${portalAuthorizedActions}
+        // / ${portalRevocationContact}. Authorized Actions carries a default
+        // bracketed string (set in the ERM create form, editable).
+        public String portalAuthorizedActions;
+        public String portalRevocationContact;
         // Build O — optional ERM-authored invitation email pre-text. Blank
         // → the Sage IT Co default. Becomes the intro of the consultant's
         // "complete your details" email.

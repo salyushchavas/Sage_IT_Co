@@ -56,6 +56,11 @@ interface FormState {
   // required to send; Custom Scope is optional. Read-only to the consultant.
   technologyTrack: string;
   customScopeNotes: string;
+  // Build Z — ERM-set Appendix 4 fields (read-only to the consultant).
+  // Authorized Actions carries a default bracketed string (editable);
+  // Revocation Contact is free-text with no default.
+  portalAuthorizedActions: string;
+  portalRevocationContact: string;
   // Build O — optional ERM-authored invitation email message. Prefilled
   // with the Sage IT Co default; becomes the intro of the consultant's
   // invitation email. Blank → backend falls back to the default.
@@ -68,6 +73,10 @@ interface FormState {
 const DEFAULT_EMAIL_PRETEXT =
   "Sage IT Co has prepared your engagement agreement and needs you to " +
   "complete a few details so the document can be finalized.";
+
+// Build Z — default Appendix 4 "Authorized actions" (ERM-set, editable).
+const DEFAULT_PORTAL_AUTHORIZED_ACTIONS =
+  "[Review / update profile / submit applications / respond to recruiters / schedule interviews / other limited actions]";
 
 // Build W — the eight ERM-selectable work-authorization options, shared
 // with the consultant read-only view via agreement-sections.
@@ -95,6 +104,8 @@ const EMPTY: FormState = {
   achDebitAmounts: "",
   technologyTrack: "",
   customScopeNotes: "",
+  portalAuthorizedActions: DEFAULT_PORTAL_AUTHORIZED_ACTIONS,
+  portalRevocationContact: "",
   emailPretext: DEFAULT_EMAIL_PRETEXT,
 };
 
@@ -212,6 +223,9 @@ export default function NewConsultantApplicationPage() {
         // Build Y — single ERM-filled debit date/amount free-text.
         achDebitDates: form.achDebitDates.trim(),
         achDebitAmounts: form.achDebitAmounts.trim(),
+        // Build Z — ERM-set Appendix 4 (read-only to the consultant).
+        portalAuthorizedActions: form.portalAuthorizedActions.trim(),
+        portalRevocationContact: form.portalRevocationContact.trim(),
       });
       router.replace(`/agreements/${app.applicationId}`);
     } catch (err) {
@@ -498,6 +512,35 @@ export default function NewConsultantApplicationPage() {
                 />
               </Field>
             </div>
+          </section>
+
+          <section className="space-y-3">
+            <SectionHeader title="Appendix 4 — Portal access (optional)" />
+            <p className="text-[11px] text-gray-500">
+              Pre-fill the Appendix 4 Authorized Actions + Revocation Contact.
+              Read-only to the consultant. (Platform / Username and the Access
+              Effective Date are still filled by the consultant.)
+            </p>
+            <Field label="Authorized actions">
+              <textarea
+                value={form.portalAuthorizedActions}
+                onChange={setText("portalAuthorizedActions")}
+                disabled={isSubmitting}
+                rows={3}
+                placeholder={DEFAULT_PORTAL_AUTHORIZED_ACTIONS}
+                className={inputClass + " min-h-[72px]"}
+              />
+            </Field>
+            <Field label="Revocation contact">
+              <input
+                type="text"
+                value={form.portalRevocationContact}
+                onChange={setText("portalRevocationContact")}
+                disabled={isSubmitting}
+                placeholder="Who we notify if access is revoked (e.g. your Sage IT contact)"
+                className={inputClass}
+              />
+            </Field>
           </section>
 
           <section className="space-y-3">

@@ -3972,6 +3972,10 @@ export async function createConsultantApplication(data: {
   // optional; read-only to the consultant.
   technologyTrack?: string;
   customScopeNotes?: string;
+  // Build Z — ERM-set Appendix 4 Authorized Actions + Revocation Contact;
+  // read-only to the consultant. Authorized Actions carries a default.
+  portalAuthorizedActions?: string;
+  portalRevocationContact?: string;
   // Build O — optional ERM-authored invitation email pre-text. Blank →
   // the Sage IT Co default copy. Becomes the intro of the consultant's
   // "complete your details" email.
