@@ -679,6 +679,100 @@ public class ConsultantApplicationService {
     }
 
     /**
+     * Build AA — DESTRUCTIVE operator backfill. Re-renders every executed
+     * (COMPLETED) agreement from the CURRENT template and overwrites its stored
+     * copies, then recomputes the SHA-256. Used to propagate a template
+     * correction into already-signed records when product explicitly accepts
+     * that the as-signed bytes + signing-time hash are replaced (super-admin
+     * decision).
+     *
+     * <p>The live record will no longer match the bytes the consultant signed,
+     * and {@code documentHash} is recomputed. The OLD S3 objects are NOT
+     * deleted — renders write new timestamped keys, so the originals remain
+     * retrievable from the bucket as a safety net. {@code dryRun=true} reports
+     * the affected count WITHOUT rendering or writing anything.
+     *
+     * <p>Not method-transactional: each record is saved independently so one
+     * render failure (LibreOffice/S3) doesn't roll back the rest. The immutable
+     * ConsultantAgreementVersion snapshots (Build V) are intentionally left
+     * untouched — they remain the historical record of what was approved.
+     */
+    public java.util.Map<String, Object> regenerateCompletedAgreements(
+            boolean dryRun, HttpServletRequest request) {
+        java.util.List<ConsultantApplication> completed = applicationRepository
+                .findByStatusAndDeletedFalse(
+                        ConsultantApplication.Status.COMPLETED.name(),
+                        org.springframework.data.domain.Pageable.unpaged())
+                .getContent();
+        int processed = 0, regenerated = 0, failed = 0;
+        java.util.List<String> errors = new java.util.ArrayList<>();
+        for (ConsultantApplication app : completed) {
+            processed++;
+            if (dryRun) continue;
+            try {
+                regenerateOneCompleted(app, request);
+                regenerated++;
+            } catch (Exception e) {
+                failed++;
+                errors.add(app.getApplicationId() + ": " + e.getMessage());
+                log.error("Build AA regenerate failed for {}: {}",
+                        app.getApplicationId(), e.getMessage(), e);
+            }
+        }
+        java.util.Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("dryRun", dryRun);
+        summary.put("status", "COMPLETED");
+        summary.put("matched", completed.size());
+        summary.put("processed", processed);
+        summary.put("regenerated", regenerated);
+        summary.put("failed", failed);
+        summary.put("errors", errors);
+        return summary;
+    }
+
+    /**
+     * Build AA — re-render + overwrite one COMPLETED agreement's stored copies.
+     * Plain helper (not {@code @Transactional} — the per-item {@code save}
+     * carries its own transaction; a class-internal {@code @Transactional} call
+     * would be a proxy no-op anyway).
+     */
+    private void regenerateOneCompleted(ConsultantApplication app, HttpServletRequest request)
+            throws Exception {
+        String oldS3Key = app.getS3Key();
+        String oldHash = app.getDocumentHash();
+        // 1. Re-render the FINAL ERM-signed PDF (all stored signatures) from the
+        //    corrected template → new timestamped key (old object retained).
+        AgreementDocumentService.PdfUploadResult finalPdf =
+                agreementDocumentService.generateAgreementPdf(app);
+        app.setS3Key(finalPdf.publicId());
+        Integer phase = app.getPhase();
+        if (phase == null || phase == 1) {
+            app.setPhase1FinalPdfS3Key(finalPdf.publicId());
+        }
+        // 2. If a consultant-version copy was released, re-render it + the
+        //    Certificate of Completion, recompute SHA-256, repoint the key.
+        if (Boolean.TRUE.equals(app.getConsultantCopyReleased())) {
+            ConsultantVersionService.ReleaseResult release =
+                    consultantVersionService.renderConsultantVersionWithCertificate(app);
+            String cvKey = agreementDocumentService.storeConsultantVersionPdf(app, release.bytes());
+            app.setConsultantPdfS3Key(cvKey);
+            app.setDocumentHash(release.sha256Hex());
+        }
+        applicationRepository.save(app);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.PDF_GENERATED,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("kind", "regenerated",
+                        "reason", "template-correction-build-AA",
+                        "oldS3Key", oldS3Key == null ? "" : oldS3Key,
+                        "newS3Key", app.getS3Key() == null ? "" : app.getS3Key(),
+                        "oldDocumentHash", oldHash == null ? "" : oldHash,
+                        "newDocumentHash", app.getDocumentHash() == null ? "" : app.getDocumentHash()),
+                request);
+    }
+
+    /**
      * Build L — super-admin soft-deletes ANY agreement, regardless of
      * status. The row stays in the DB (recoverable; audit history +
      * Cloudinary PDF preserved) but is hidden from every console list

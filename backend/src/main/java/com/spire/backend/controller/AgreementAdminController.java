@@ -92,6 +92,32 @@ public class AgreementAdminController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * Build AA — DESTRUCTIVE operator backfill. Re-renders EVERY executed
+     * (COMPLETED) agreement from the current template, overwrites its stored PDF
+     * copies, and recomputes {@code documentHash} — propagating a template
+     * correction into already-signed records (replacing the as-signed bytes +
+     * signing-time hash). Old S3 objects are retained (renders write new
+     * timestamped keys). DRY-RUN BY DEFAULT: it only reports the affected count;
+     * pass {@code {"dryRun": false}} to actually execute. Super-admin only.
+     */
+    @PostMapping("/regenerate-completed-agreements")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> regenerateCompletedAgreements(
+            @RequestBody(required = false) RegenerateBody body,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        // Default to a dry run; only an explicit {"dryRun": false} executes.
+        boolean dryRun = body == null || body.dryRun == null || body.dryRun;
+        return ResponseEntity.ok(ApiResponse.success(
+                dryRun ? "Dry run — no changes made" : "Regeneration complete",
+                consultantService.regenerateCompletedAgreements(dryRun, request)));
+    }
+
+    public static class RegenerateBody {
+        /** Defaults to true (dry run) when null/absent — must be explicitly false to execute. */
+        public Boolean dryRun;
+    }
+
     @PostMapping("/users")
     @Transactional
     public ResponseEntity<ApiResponse<AgreementUserDto>> createUser(
