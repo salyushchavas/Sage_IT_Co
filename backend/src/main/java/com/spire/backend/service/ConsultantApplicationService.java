@@ -4348,9 +4348,13 @@ public class ConsultantApplicationService {
             if (!hasCompletePortalEntry(app)) {
                 missing.add("portalEntries");
             }
-            addIfBlank(missing, "portalAuthorizedActions", app.getPortalAuthorizedActions());
+            // Build Z — portalAuthorizedActions + portalRevocationContact are
+            // now ERM-set (read-only to the consultant) and may legitimately be
+            // blank, so they are NO LONGER validated as consultant-required here.
+            // (Validating them deadlocked appendix-4 revision submits: the
+            // consultant cannot fill a field that is now ERM-only, so a blank
+            // one made the submit permanently fail.)
             if (app.getPortalEffectiveDate() == null) missing.add("portalEffectiveDate");
-            addIfBlank(missing, "portalRevocationContact", app.getPortalRevocationContact());
         }
 
         // Appendix 5 -- security cheque(s) required when active.

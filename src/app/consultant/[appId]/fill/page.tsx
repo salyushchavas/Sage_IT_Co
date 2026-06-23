@@ -4154,6 +4154,11 @@ function ReviewStep({
   /** Build W — final signature missing on the last failed submit. */
   missingFinalSignature: boolean;
 }) {
+  // Build V — in a section-restricted revision the main-agreement step is NOT
+  // shown, so the consultant can't (re)draw the primary here; it's reused from
+  // their original signing. Drives the review-step primary-signature copy so it
+  // doesn't tell them to "go back to the main agreement step" that isn't shown.
+  const mainStepInScope = visibleSections.some((s) => s.id === "main-agreement");
   return (
     <div className="space-y-6">
       <div>
@@ -4362,10 +4367,16 @@ function ReviewStep({
               style={{ maxHeight: 64, maxWidth: 240 }}
             />
           </div>
-        ) : (
+        ) : mainStepInScope ? (
           <p className="mt-2 text-[12.5px] text-sage-copper-deep inline-flex items-center gap-1.5">
             <AlertCircle size={12} /> Not captured. Go back to the main
             agreement step to add it.
+          </p>
+        ) : (
+          <p className="mt-2 text-[12.5px] text-stone-600 inline-flex items-center gap-1.5">
+            <CheckCircle2 size={12} className="text-emerald-600" /> Your
+            signature from your original signing will be reused for this
+            revision.
           </p>
         )}
         {form.signedLegalName && (
