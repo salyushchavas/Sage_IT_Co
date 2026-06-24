@@ -4455,20 +4455,87 @@ async function consultantFetch<T>(
  * forces application/json. This wrapper attaches the consultant token
  * but lets the browser set the multipart Content-Type with boundary.
  */
+/**
+ * Build AB — downscale a large raster image before upload so phone-camera
+ * photos (often 5–12 MB) don't time out or hit upload limits on mobile data.
+ * Only touches images that are actually large; PDFs, GIFs, and already-small
+ * images pass through untouched. Documents stay legible (max 2400px, JPEG 0.85).
+ */
+async function downscaleImageFile(file: File): Promise<File> {
+  if (typeof document === "undefined") return file;
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  const MAX_DIM = 2400;
+  const SIZE_THRESHOLD = 1_500_000; // ~1.5 MB — leave smaller files alone
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= SIZE_THRESHOLD) {
+      bitmap.close?.();
+      return file;
+    }
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85),
+    );
+    if (!blob || blob.size >= file.size) return file; // keep original if not smaller
+    const base = file.name.replace(/\.[^.]+$/, "") || "upload";
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file; // any decode / canvas failure → upload the original
+  }
+}
+
 async function consultantMultipartFetch(
   applicationId: string,
   path: string,
   formData: FormData,
 ): Promise<void> {
   const token = getConsultantToken();
-  const res = await fetch(
-    `${BASE_URL}/api/consultant/applications/${applicationId}${path}`,
-    {
-      method: "POST",
-      headers: token ? { Authorization: `Bearer ${token}` } : {},
-      body: formData,
-    },
-  );
+  // Build AB — shrink an oversized image in place before sending (mobile data).
+  const original = formData.get("file");
+  if (original instanceof File) {
+    const slimmed = await downscaleImageFile(original);
+    if (slimmed !== original) formData.set("file", slimmed);
+  }
+  // Build AB — bound the request so a stalled mobile upload can't hang the
+  // wizard forever; surface a real reason instead of an endless spinner.
+  const controller = new AbortController();
+  const timeout =
+    typeof window !== "undefined"
+      ? window.setTimeout(() => controller.abort(), 90_000)
+      : undefined;
+  let res: Response;
+  try {
+    res = await fetch(
+      `${BASE_URL}/api/consultant/applications/${applicationId}${path}`,
+      {
+        method: "POST",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+        signal: controller.signal,
+      },
+    );
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("The upload timed out. Check your connection and try again.");
+    }
+    throw new Error("Couldn't reach the server. Check your connection and try again.");
+  } finally {
+    if (timeout !== undefined && typeof window !== "undefined") {
+      window.clearTimeout(timeout);
+    }
+  }
   if (res.status === 401) {
     clearConsultantToken();
     if (typeof window !== "undefined") {
@@ -4478,14 +4545,19 @@ async function consultantMultipartFetch(
         `/consultant/${encodeURIComponent(applicationId)}/login`,
       );
     }
-    throw new Error("Verification required.");
+    throw new Error("Your session expired. Please verify again to continue.");
+  }
+  if (res.status === 413) {
+    throw new Error(
+      "That file is too large to upload. Please use a smaller or more compressed photo.",
+    );
   }
   if (res.status === 429) {
     throw new Error("Too many requests. Try again in a minute.");
   }
   const body = await readApiResponse<unknown>(res);
   if (!res.ok || !body?.success) {
-    throw new Error(body?.message || `Request failed (${res.status})`);
+    throw new Error(body?.message || `Upload failed (${res.status}).`);
   }
 }
 
