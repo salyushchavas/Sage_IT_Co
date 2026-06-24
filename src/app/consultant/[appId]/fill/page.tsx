@@ -1214,6 +1214,56 @@ export default function ConsultantWizardPage() {
     [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, attestation, previewSeen],
   );
 
+  // Build AB — never let Submit be a silent no-op on mobile. When the agreement
+  // is incomplete, surface the FIRST blocker and scroll it into view (the bug
+  // was a disabled sticky-footer Submit, so the tap did nothing and the reason
+  // sat off-screen). When complete, run the real submit.
+  const attemptSubmit = useCallback(() => {
+    if (allComplete) {
+      void handleSubmit();
+      return;
+    }
+    const scrollToId = (id: string) => {
+      if (typeof document === "undefined") return;
+      document
+        .getElementById(id)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    };
+    // A required section is incomplete (rare on the review step — the wizard
+    // blocks advancing past one — but handle it): jump back to fix it.
+    const firstIncomplete = visibleSections.slice(0, -1).findIndex(
+      (s) => !isSectionComplete(
+        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded),
+    );
+    if (firstIncomplete >= 0) {
+      setSubmitError("Some sections still need attention before you can submit.");
+      setCurrentStep(firstIncomplete);
+      return;
+    }
+    if (!previewSeen) {
+      setSubmitError("Please scroll through the full agreement to the end before submitting.");
+      scrollToId("agreement-preview");
+      return;
+    }
+    if (!attestation) {
+      setSubmitError("Please tick the box confirming you have read the agreement.");
+      scrollToId("consultant-review-attestation");
+      return;
+    }
+    if (!form.finalSignature) {
+      setSubmitError("Please add your final signature to execute the agreement.");
+      scrollToId("final-signature-block");
+      return;
+    }
+    setSubmitError("Some items are still needed before you can submit.");
+  }, [allComplete, handleSubmit, visibleSections, form, reqs, chequeEntries,
+      workAuthUploaded, offerLetterUploaded, dlDocUploaded, previewSeen, attestation]);
+
+  // Build AB — clear the submit error once everything is satisfied.
+  useEffect(() => {
+    if (allComplete) setSubmitError("");
+  }, [allComplete]);
+
   // Build W — live re-evaluation of the missing list. The backend
   // payload is the source of truth at the moment of the failed
   // submit, but the consultant fixes items in place; we re-check
@@ -1544,8 +1594,9 @@ export default function ConsultantWizardPage() {
             previewSeen={previewSeen}
             onPreviewSeen={markPreviewSeen}
             onBack={() => setCurrentStep((s) => Math.max(0, s - 1))}
-            onSubmit={() => void handleSubmit()}
+            onSubmit={attemptSubmit}
             submitting={submitting}
+            submitError={submitError}
             missingFinalSignature={Boolean(liveMissing?.missingFinalSignature)}
           />
         ) : (
@@ -1691,7 +1742,7 @@ export default function ConsultantWizardPage() {
             Math.min(visibleSections.length - 1, s + 1),
           )
         }
-        onSubmit={() => void handleSubmit()}
+        onSubmit={attemptSubmit}
         isReviewStep={isReviewStep}
       />
 
@@ -3521,6 +3572,7 @@ function ConsultantImagesPreview({
   const [loading, setLoading] = useState(true);
   const [reachedEnd, setReachedEnd] = useState(false);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const endSentinelRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -3566,22 +3618,30 @@ function ConsultantImagesPreview({
     }
   };
 
+  // Build AB — "read to end" detection that works on TOUCH + page scroll. The
+  // old logic only fired when the INNER scroll box reached its bottom (desktop)
+  // OR the doc fit without scrolling; on mobile the consultant scrolls the PAGE
+  // (not the inner box), so previewSeen never flipped → the attestation stayed
+  // locked → the sticky-footer Submit was disabled and the tap looked dead.
+  // An end-sentinel observed against the VIEWPORT fires once the bottom of the
+  // preview is reached, whether the inner box (desktop) or the page (mobile) is
+  // scrolled — and immediately when a short agreement already fits on screen.
   useEffect(() => {
     if (!pages || reachedEnd) return;
-    const el = scrollerRef.current;
-    if (!el) return;
-    const check = () => {
-      if (el.scrollHeight <= el.clientHeight + 1) markEnd();
-    };
-    check();
-    const observer = new ResizeObserver(check);
-    observer.observe(el);
-    Array.from(el.querySelectorAll("img")).forEach((img) => observer.observe(img));
-    return () => observer.disconnect();
+    const sentinel = endSentinelRef.current;
+    if (!sentinel) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) markEnd();
+      },
+      { root: null, threshold: 0 },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
   }, [pages, reachedEnd, markEnd]);
 
   return (
-    <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
+    <section id="agreement-preview" className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
       <header className="px-5 sm:px-6 pt-5 pb-3 border-b border-stone-100">
         <p className="text-[10px] font-bold uppercase tracking-widest text-sage-copper">
           Your agreement (read-only preview)
@@ -3614,7 +3674,10 @@ function ConsultantImagesPreview({
           <div
             ref={scrollerRef}
             onScroll={handleScroll}
-            className="max-h-[640px] overflow-y-auto space-y-3 pr-2"
+            // Build AB — inner scroll box on desktop only; on mobile the pages
+            // flow in the PAGE so the consultant scrolls naturally (the
+            // end-sentinel below detects "read to end" either way).
+            className="lg:max-h-[640px] lg:overflow-y-auto space-y-3 pr-2"
           >
             {pages.map((b64, idx) => (
               // eslint-disable-next-line @next/next/no-img-element
@@ -3629,6 +3692,8 @@ function ConsultantImagesPreview({
                 style={{ userSelect: "none", WebkitUserDrag: "none" } as CSSProperties}
               />
             ))}
+            {/* Build AB — read-to-end sentinel (drives previewSeen on touch). */}
+            <div ref={endSentinelRef} aria-hidden className="h-2 w-full" />
           </div>
         )}
       </div>
@@ -4127,6 +4192,7 @@ function ReviewStep({
   onBack,
   onSubmit,
   submitting,
+  submitError,
   missingFinalSignature,
 }: {
   appId: string;
@@ -4151,6 +4217,8 @@ function ReviewStep({
   onBack: () => void;
   onSubmit: () => void;
   submitting: boolean;
+  /** Build AB — visible reason a Submit attempt was blocked (in-viewport). */
+  submitError: string;
   /** Build W — final signature missing on the last failed submit. */
   missingFinalSignature: boolean;
 }) {
@@ -4410,6 +4478,20 @@ function ReviewStep({
         </div>
       )}
 
+      {/* Build AB — a Submit attempt while incomplete is no longer a silent
+          no-op: this surfaces the specific blocker (the tap also scrolls it
+          into view). Also shows a real backend submit failure, which used to
+          be set but never rendered. */}
+      {submitError && (
+        <div
+          role="alert"
+          className="rounded-md border border-red-300 bg-red-50 px-4 py-3 text-[13.5px] text-red-700 inline-flex items-start gap-2 max-w-[min(100%,860px)]"
+        >
+          <AlertCircle size={14} className="mt-0.5 shrink-0" />
+          <span>{submitError}</span>
+        </div>
+      )}
+
       {/* Build P / hotfix — desktop submit cluster. FooterNav is
           lg:hidden so the desktop layout needs its own Submit
           affordance. Mobile users still get the sticky FooterNav
@@ -4430,12 +4512,12 @@ function ReviewStep({
         <button
           type="button"
           onClick={onSubmit}
-          disabled={!allComplete || submitting}
+          // Build AB — tappable even when incomplete; onSubmit (attemptSubmit)
+          // surfaces + scrolls to the blocker instead of a dead disabled tap.
+          disabled={submitting}
           className={
             "inline-flex items-center gap-1.5 px-5 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
-            + (allComplete && !submitting
-              ? "text-white"
-              : "cursor-not-allowed")
+            + (allComplete && !submitting ? "text-white" : "")
           }
           style={
             allComplete && !submitting
@@ -4663,12 +4745,12 @@ function FooterNav({
           <button
             type="button"
             onClick={onSubmit}
-            disabled={!canAdvance || submitting}
+            // Build AB — tappable even when incomplete; attemptSubmit surfaces
+            // + scrolls to the blocker instead of a dead disabled tap.
+            disabled={submitting}
             className={
               "inline-flex items-center gap-1.5 px-4 py-2.5 rounded-md text-sm font-semibold motion-safe:transition-colors cursor-pointer "
-              + (canAdvance && !submitting
-                ? "text-white"
-                : "cursor-not-allowed")
+              + (canAdvance && !submitting ? "text-white" : "")
             }
             style={
               canAdvance && !submitting
