@@ -1386,10 +1386,13 @@ public class ConsultantApplicationService {
                     "This invitation link has expired. Please ask your Sage IT "
                             + "contact to resend it.");
         }
-        if (signedLegalName == null
-                || signedLegalName.trim().split("\\s+").length < 2) {
-            throw new IllegalArgumentException(
-                    "Please enter your full legal name (first and last).");
+        // Build AB-2 — require a NON-BLANK legal name, not two+ words. The old
+        // "first and last" (>=2 tokens) rule made submit a hard 400 for any
+        // consultant with a single-word legal name (mononym) — they could never
+        // submit (the client didn't pre-check this, so it surfaced only as a
+        // swallowed 400). Trust the consultant's typed legal name.
+        if (signedLegalName == null || signedLegalName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Please enter your full legal name.");
         }
 
         // F-4 effective-requirements gate. CORE fields/affirmations are

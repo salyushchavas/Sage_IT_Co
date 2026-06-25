@@ -1124,6 +1124,12 @@ export default function ConsultantWizardPage() {
       if (!form.finalSignature) {
         throw new Error("Please draw your final signature on the review step before submitting.");
       }
+      // Build AB-2 — require a non-blank legal name client-side too (backend now
+      // requires non-blank, no longer first+last), so a cleared name surfaces
+      // here instead of a swallowed backend 400.
+      if (!form.signedLegalName || !form.signedLegalName.trim()) {
+        throw new Error("Please type your full legal name to execute the agreement.");
+      }
       const updated = await signConsultantApplication(
         appId,
         form.signedLegalName.trim(),
