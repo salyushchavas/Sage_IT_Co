@@ -41,11 +41,14 @@ import {
   fetchMe,
   getAgreementErmToken,
   type AgreementMe,
+  adminRevokeErmSignatures,
+  adminRegenerateCompletedAgreements,
+  type AdminBackfillSummary,
   type AgreementUserDto,
 } from "@/lib/api";
 import { formatUsDateTime } from "@/lib/dates";
 
-type AdminTab = "users" | "agreements";
+type AdminTab = "users" | "agreements" | "maintenance";
 
 // One-time credential reveal shown after create / reset. The password
 // is never returned by the server again, so the admin must copy it now (or
@@ -170,9 +173,21 @@ export default function AgreementsAdminPage() {
         >
           <FileText size={12} /> Agreements by ERM
         </button>
+        <button
+          type="button"
+          onClick={() => setTab("maintenance")}
+          className={
+            "inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md font-semibold cursor-pointer " +
+            (tab === "maintenance" ? "bg-sage-navy text-white" : "text-gray-600 hover:text-sage-navy")
+          }
+        >
+          <RefreshCw size={12} /> Maintenance
+        </button>
       </div>
 
       {tab === "agreements" && <AgreementsByErmView />}
+
+      {tab === "maintenance" && <MaintenancePanel />}
 
       {tab === "users" && (
       <>
@@ -399,6 +414,113 @@ export default function AgreementsAdminPage() {
       </>
       )}
     </AgreementErmShell>
+  );
+}
+
+// ── Maintenance (super-admin operator backfills) ─────────────────
+//
+// One-click wrappers for the destructive backfills: each runs a DRY RUN first
+// to show how many COMPLETED agreements would be affected, then asks for
+// confirmation before executing {dryRun:false}. Removes the curl + token + flag
+// friction so the operator can't accidentally run a no-op dry run.
+
+function MaintenancePanel() {
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-gray-500 max-w-2xl">
+        Super-admin maintenance. Each action previews the affected count (a dry
+        run), then asks you to confirm before it executes. These are{" "}
+        <span className="font-semibold text-red-700">destructive and visible to consultants</span>.
+      </p>
+      <BackfillAction
+        title="Revoke ERM signatures (re-approve + re-sign)"
+        description="Clears the ERM countersignature on every COMPLETED agreement and reverts each to VERIFIED ('awaiting signature'), so the ERM re-sends for approval, approvers re-approve, and the ERM re-signs. The consultant signature + approval history are kept; old signed PDFs stay in S3."
+        confirmVerb="revoke + revert"
+        run={adminRevokeErmSignatures}
+        resultKey="reverted"
+      />
+      <BackfillAction
+        title="Regenerate executed agreements (re-render from template)"
+        description="Re-renders every COMPLETED agreement from the current template, overwrites its stored PDFs, and recomputes the SHA-256 hash (propagates a template correction into already-signed records)."
+        confirmVerb="regenerate"
+        run={adminRegenerateCompletedAgreements}
+        resultKey="regenerated"
+      />
+    </div>
+  );
+}
+
+function BackfillAction({
+  title,
+  description,
+  confirmVerb,
+  run,
+  resultKey,
+}: {
+  title: string;
+  description: string;
+  confirmVerb: string;
+  run: (dryRun: boolean) => Promise<AdminBackfillSummary>;
+  resultKey: "reverted" | "regenerated";
+}) {
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+
+  const handle = async () => {
+    setBusy(true);
+    setMsg("");
+    setErr("");
+    try {
+      const preview = await run(true); // dry run — counts, changes nothing
+      const ok = window.confirm(
+        `${preview.matched} COMPLETED agreement(s) will be affected.\n\n`
+          + `This is DESTRUCTIVE and visible to consultants. `
+          + `Proceed to ${confirmVerb} all ${preview.matched}?`,
+      );
+      if (!ok) {
+        setBusy(false);
+        return;
+      }
+      const result = await run(false); // execute
+      const done = (result[resultKey] as number | undefined) ?? 0;
+      setMsg(
+        `Done — ${done} of ${result.matched} processed`
+          + (result.failed ? `, ${result.failed} failed` : "")
+          + "."
+          + (result.errors.length ? ` First error: ${result.errors[0]}` : ""),
+      );
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Action failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="bg-white rounded-2xl border border-red-200 shadow-sm p-5 max-w-2xl">
+      <h3 className="font-serif text-lg text-gray-900">{title}</h3>
+      <p className="text-[13px] text-gray-600 mt-1 leading-relaxed">{description}</p>
+      <button
+        type="button"
+        onClick={handle}
+        disabled={busy}
+        className="mt-3 inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-red-300 bg-white text-red-700 hover:bg-red-50 cursor-pointer disabled:opacity-50"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <AlertCircle size={12} />}
+        {busy ? "Working…" : "Run (preview first)"}
+      </button>
+      {msg && (
+        <p className="mt-2 text-[12px] text-emerald-700 inline-flex items-start gap-1.5">
+          <CheckCircle2 size={12} className="mt-0.5 shrink-0" /> {msg}
+        </p>
+      )}
+      {err && (
+        <p className="mt-2 text-[12px] text-red-600 inline-flex items-start gap-1.5">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" /> {err}
+        </p>
+      )}
+    </section>
   );
 }
 

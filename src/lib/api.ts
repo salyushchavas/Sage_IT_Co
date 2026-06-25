@@ -3805,6 +3805,41 @@ export async function adminListUsers() {
   return agreementAdminFetch<AgreementUserDto[]>("/api/agreements/admin/users");
 }
 
+/** Build AA/AC — operator backfill summary (dry-run reports without changing). */
+export interface AdminBackfillSummary {
+  dryRun: boolean;
+  status: string;
+  matched: number;
+  processed: number;
+  reverted?: number; // revoke-erm-signatures
+  regenerated?: number; // regenerate-completed-agreements
+  failed: number;
+  errors: string[];
+}
+
+/**
+ * Build AC — revoke the ERM countersignature on every COMPLETED agreement and
+ * revert each to VERIFIED for re-approval + re-signature. DESTRUCTIVE +
+ * consultant-visible. Pass dryRun=true first to preview the affected count.
+ */
+export async function adminRevokeErmSignatures(dryRun: boolean) {
+  return agreementAdminFetch<AdminBackfillSummary>(
+    "/api/agreements/admin/revoke-erm-signatures",
+    { method: "POST", body: JSON.stringify({ dryRun }) },
+  );
+}
+
+/**
+ * Build AA — re-render every COMPLETED agreement from the current template and
+ * overwrite its stored PDFs + hash. DESTRUCTIVE. dryRun=true previews the count.
+ */
+export async function adminRegenerateCompletedAgreements(dryRun: boolean) {
+  return agreementAdminFetch<AdminBackfillSummary>(
+    "/api/agreements/admin/regenerate-completed-agreements",
+    { method: "POST", body: JSON.stringify({ dryRun }) },
+  );
+}
+
 export async function adminCreateUser(body: {
   email: string;
   fullName: string;
