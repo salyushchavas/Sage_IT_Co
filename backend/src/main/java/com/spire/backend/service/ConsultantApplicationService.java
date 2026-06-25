@@ -4243,13 +4243,18 @@ public class ConsultantApplicationService {
     }
 
     private static boolean isAppendix4Touched(ConsultantApplication app) {
+        // "Touched" = the CONSULTANT engaged with Appendix 4. Build AB-2 —
+        // portalAuthorizedActions + portalRevocationContact are ERM-SET (Build
+        // Z), and Authorized Actions carries a DEFAULT at create, so they are
+        // non-blank on every agreement. Counting them here flipped Appendix 4 to
+        // "active/required" for EVERY consultant — forcing portalEntries +
+        // effective date + the affirmation even when the ERM never required it
+        // (a silent backend 400). Only consultant-entered fields count now.
         return nonBlank(app.getPortalPlatform())
                 || nonBlank(app.getPortalUsername())
                 // Build J — repeatable entries also count as touched.
                 || nonBlank(app.getPortalEntries())
-                || nonBlank(app.getPortalAuthorizedActions())
                 || app.getPortalEffectiveDate() != null
-                || nonBlank(app.getPortalRevocationContact())
                 || Boolean.TRUE.equals(app.getAffirmedAppendix4());
     }
 
