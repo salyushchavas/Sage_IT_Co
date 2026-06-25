@@ -4474,10 +4474,10 @@ public class ConsultantApplicationService {
                     && !app.getAchRoutingNumber().replaceAll("\\D", "").matches("\\d{9}")) {
                 missing.add("achRoutingNumber");
             }
-            if (nonBlank(app.getAchAccountNumber())
-                    && !app.getAchAccountNumber().replaceAll("\\D", "").matches("\\d{10}")) {
-                missing.add("achAccountNumber");
-            }
+            // Build AD — account number is free-type (no fixed-length rule):
+            // bank account numbers vary in length, so the old exactly-10-digits
+            // check rejected valid accounts. Presence is still enforced (the
+            // addIfBlank above), only the format/length constraint is dropped.
         }
         if (app3Active && Boolean.TRUE.equals(app.getRequireSsn())) {
             // Build W — SSN is strictly alphanumeric (A-Z, a-z, 0-9);

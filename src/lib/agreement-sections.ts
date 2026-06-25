@@ -424,7 +424,10 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
       {
         key: "achAccountNumber",
         label: "Account number",
-        type: "account",
+        // Build AD — free-type (no fixed-length rule). Bank account numbers
+        // vary in length, so the old "exactly 10 digits" rule rejected valid
+        // accounts. Still required; just no format/length constraint.
+        type: "text",
         required: true,
         sensitive: true,
       },
