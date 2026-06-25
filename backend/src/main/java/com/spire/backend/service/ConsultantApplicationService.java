@@ -1369,6 +1369,10 @@ public class ConsultantApplicationService {
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         String fromStatus = app.getStatus();
+        // Build AB-2 — submit reached the service. Pairs with the [submit]
+        // received/REJECTED/SUCCESS lines to pinpoint where a submit dies.
+        log.info("[submit] start appId={} email={} fromStatus={}",
+                applicationId, app.getConsultantEmail(), fromStatus);
         if (!ConsultantApplication.Status.SUBMITTED.name().equals(fromStatus)
                 && !ConsultantApplication.Status.REVISION_REQUESTED.name().equals(fromStatus)) {
             throw new IllegalStateException(
@@ -1413,6 +1417,12 @@ public class ConsultantApplicationService {
         java.util.List<String> missingFields = collectMissingConsultantFields(app);
         java.util.List<String> missingAffs = collectMissingAffirmations(app);
         if (!missingFields.isEmpty() || !missingAffs.isEmpty() || missingSig || missingFinalSig) {
+            // Build AB-2 — the exact reason submit was rejected for this
+            // consultant (resolves "validation thinks X is incomplete").
+            log.warn("[submit] REJECTED appId={} fromStatus={} missingFields={} missingAffirmations={} "
+                            + "missingPrimarySig={} missingFinalSig={} hasNewPrimary={} hasExistingPrimary={}",
+                    applicationId, fromStatus, missingFields, missingAffs,
+                    missingSig, missingFinalSig, hasNewPrimary, hasExistingPrimary);
             throw new com.spire.backend.exception.IncompleteSubmissionException(
                     missingFields, missingAffs, missingSig, missingFinalSig);
         }
@@ -1461,6 +1471,7 @@ public class ConsultantApplicationService {
         app.setRevisionSections(null);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
+        log.info("[submit] SUCCESS appId={} {} -> VERIFIED", applicationId, fromStatus);
 
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.SIGNED,

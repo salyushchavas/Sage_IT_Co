@@ -49,6 +49,7 @@ import java.util.Map;
  */
 @RestController
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 public class ConsultantApplicationController {
 
     private final ConsultantApplicationService consultantService;
@@ -1283,8 +1284,18 @@ public class ConsultantApplicationController {
             @PathVariable String appId,
             @RequestBody ConsultantSubmitBody body,
             HttpServletRequest request) {
+        // Build AB-2 — submit-path ENTRY log: proves the request REACHED the
+        // backend (CASE B) vs not (CASE A). Booleans / lengths only, no PII or
+        // signature bytes. Logged before the token/rate-limit checks so any
+        // arrival is recorded even if those reject.
+        log.info("[submit] received appId={} ip={} hasPrimarySig={} hasFinalSig={} legalNameLen={}",
+                appId, clientIp(request),
+                body != null && body.signatureBase64 != null && !body.signatureBase64.isBlank(),
+                body != null && body.finalSignatureBase64 != null && !body.finalSignatureBase64.isBlank(),
+                body == null || body.signedLegalName == null ? 0 : body.signedLegalName.trim().length());
         requireConsultantToken(appId, request);
         if (!rateLimiter.allowWrite(appId)) {
+            log.warn("[submit] RATE-LIMITED appId={}", appId);
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
                     .body(ApiResponse.error("Too many requests. Try again in a minute."));
         }
