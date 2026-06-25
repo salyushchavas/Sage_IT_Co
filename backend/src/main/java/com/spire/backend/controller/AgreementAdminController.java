@@ -118,6 +118,27 @@ public class AgreementAdminController {
         public Boolean dryRun;
     }
 
+    /**
+     * Build AC — DESTRUCTIVE operator backfill. Revokes the ERM
+     * countersignature on EVERY executed (COMPLETED) agreement and reverts it to
+     * VERIFIED so the full approval + countersign gate re-runs (ERM re-sends →
+     * approvers re-approve → ERM re-signs). Consultant-visible: completed
+     * agreements revert to "awaiting signature". The consultant signature +
+     * approval history are kept; old ERM-signed PDFs are retained in S3.
+     * DRY-RUN BY DEFAULT: it only reports the affected count; pass
+     * {@code {"dryRun": false}} to actually execute. Super-admin only.
+     */
+    @PostMapping("/revoke-erm-signatures")
+    public ResponseEntity<ApiResponse<java.util.Map<String, Object>>> revokeErmSignatures(
+            @RequestBody(required = false) RegenerateBody body,
+            HttpServletRequest request) {
+        AgreementAuthz.requireSuperAdmin(request);
+        boolean dryRun = body == null || body.dryRun == null || body.dryRun;
+        return ResponseEntity.ok(ApiResponse.success(
+                dryRun ? "Dry run — no changes made" : "ERM signatures revoked",
+                consultantService.revokeErmSignaturesOnCompleted(dryRun, request)));
+    }
+
     @PostMapping("/users")
     @Transactional
     public ResponseEntity<ApiResponse<AgreementUserDto>> createUser(

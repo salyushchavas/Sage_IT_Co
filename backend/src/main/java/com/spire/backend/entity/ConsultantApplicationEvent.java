@@ -126,7 +126,10 @@ public class ConsultantApplicationEvent {
         DOWNLOAD_OTP_SENT,
         // Build T — consultant successfully downloaded the released
         // consultant-version PDF (post-OTP verify).
-        CONSULTANT_DOWNLOAD
+        CONSULTANT_DOWNLOAD,
+        // Build AC — super-admin revoked the ERM countersignature on a
+        // COMPLETED agreement and reverted it for re-approval + re-signature.
+        ERM_SIGNATURE_REVOKED
     }
 
     public enum ActorType {

@@ -2062,6 +2062,82 @@ public class ConsultantApplicationService {
     }
 
     /**
+     * Build AC — DESTRUCTIVE operator backfill. Revokes the ERM
+     * countersignature on EVERY executed (COMPLETED) agreement and reverts it
+     * to VERIFIED, so the FULL approval + countersign gate re-runs: the owning
+     * ERM re-sends for approval (a fresh approver round), the approvers
+     * re-approve, and the ERM re-countersigns — all via the normal pipeline, no
+     * fabricated state. The consultant signature + the approval HISTORY are
+     * preserved; only the ERM signature image + date are cleared.
+     *
+     * <p>This is consultant-visible: a COMPLETED agreement reverts to "awaiting
+     * signature", so any "completed" copy already delivered is stale until the
+     * ERM re-signs. The old ERM-signed PDFs are NOT deleted (they keep their old
+     * timestamped S3 keys); the live final PDF is overwritten at re-sign.
+     * {@code dryRun=true} reports the affected count without changing anything.
+     *
+     * <p>Not method-transactional: each record saves independently so one
+     * failure doesn't roll back the rest.
+     */
+    public java.util.Map<String, Object> revokeErmSignaturesOnCompleted(
+            boolean dryRun, HttpServletRequest request) {
+        java.util.List<ConsultantApplication> completed = applicationRepository
+                .findByStatusAndDeletedFalse(
+                        ConsultantApplication.Status.COMPLETED.name(),
+                        org.springframework.data.domain.Pageable.unpaged())
+                .getContent();
+        int processed = 0, reverted = 0, failed = 0;
+        java.util.List<String> errors = new java.util.ArrayList<>();
+        for (ConsultantApplication app : completed) {
+            processed++;
+            if (dryRun) continue;
+            try {
+                revokeOneErmSignature(app, request);
+                reverted++;
+            } catch (Exception e) {
+                failed++;
+                errors.add(app.getApplicationId() + ": " + e.getMessage());
+                log.error("Build AC revoke-ERM-signature failed for {}: {}",
+                        app.getApplicationId(), e.getMessage(), e);
+            }
+        }
+        java.util.Map<String, Object> summary = new java.util.LinkedHashMap<>();
+        summary.put("dryRun", dryRun);
+        summary.put("status", "COMPLETED");
+        summary.put("matched", completed.size());
+        summary.put("processed", processed);
+        summary.put("reverted", reverted);
+        summary.put("failed", failed);
+        summary.put("errors", errors);
+        return summary;
+    }
+
+    /** Build AC — clear one agreement's ERM countersignature + revert to VERIFIED. */
+    private void revokeOneErmSignature(ConsultantApplication app, HttpServletRequest request) {
+        String fromStatus = app.getStatus();
+        String oldSigKey = app.getErmSignatureS3Key();
+        // Clear the ERM countersignature (image refs + date). ermName/ermTitle
+        // stay as the re-sign prefill; the ${ermSignature*} placeholders render
+        // blank again until the ERM re-countersigns.
+        app.setErmSignatureS3Key(null);
+        app.setErmSignatureUrl(null);
+        app.setErmSignatureDate(null);
+        // Revert so the whole gate re-runs (ERM re-sends → approvers re-approve
+        // → ERM re-signs). The consultant signature + approval history are kept.
+        app.setStatus(ConsultantApplication.Status.VERIFIED.name());
+        applicationRepository.save(app);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.ERM_SIGNATURE_REVOKED,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("fromStatus", fromStatus == null ? "" : fromStatus,
+                        "toStatus", ConsultantApplication.Status.VERIFIED.name(),
+                        "clearedErmSignatureKey", oldSigKey == null ? "" : oldSigKey,
+                        "reason", "re-sign-after-template-correction"),
+                request);
+    }
+
+    /**
      * Build K — the approvers an ERM may route this agreement to: their
      * assigned, active MANAGER (always) + ACCOUNTS (Phase 2). Used to drive
      * the send-for-approval pickers.
