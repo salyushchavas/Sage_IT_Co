@@ -157,9 +157,11 @@ export default function NewConsultantApplicationPage() {
     lastName: form.lastName.trim(),
     consultantEmail: form.consultantEmail.trim(),
     ratePeriod1: form.ratePeriod1.trim(),
-    rateAmount1: form.rateAmount1.trim(),
+    // The "$" is a fixed prefix (rendered as an adornment + stripped from
+    // input), so prepend it back onto the stored/stamped value.
+    rateAmount1: form.rateAmount1.trim() ? "$" + form.rateAmount1.trim() : "",
     ratePeriod2: form.ratePeriod2.trim(),
-    rateAmount2: form.rateAmount2.trim(),
+    rateAmount2: form.rateAmount2.trim() ? "$" + form.rateAmount2.trim() : "",
     phase2DeliverablePeriod: form.phase2DeliverablePeriod.trim(),
     visaStatus: form.visaStatus.trim(),
     visaStatusOther: form.visaStatusOther.trim(),
@@ -421,15 +423,25 @@ export default function NewConsultantApplicationPage() {
                 />
               </Field>
               <Field label="Amount 1" required>
-                <input
-                  type="text"
-                  value={form.rateAmount1}
-                  onChange={setText("rateAmount1")}
-                  disabled={isSubmitting}
-                  required
-                  placeholder="$2,400"
-                  className={inputClass}
-                />
+                <div className="relative">
+                  <span className="pointer-events-none select-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    value={form.rateAmount1}
+                    onChange={(e) =>
+                      setForm((s) => ({
+                        ...s,
+                        rateAmount1: e.target.value.replace(/\$/g, ""),
+                      }))
+                    }
+                    disabled={isSubmitting}
+                    required
+                    placeholder="2,400"
+                    className={inputClass + " pl-7"}
+                  />
+                </div>
               </Field>
               <Field label="Rate period 2" required>
                 <input
@@ -443,15 +455,25 @@ export default function NewConsultantApplicationPage() {
                 />
               </Field>
               <Field label="Amount 2" required>
-                <input
-                  type="text"
-                  value={form.rateAmount2}
-                  onChange={setText("rateAmount2")}
-                  disabled={isSubmitting}
-                  required
-                  placeholder="$1,920"
-                  className={inputClass}
-                />
+                <div className="relative">
+                  <span className="pointer-events-none select-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-gray-500">
+                    $
+                  </span>
+                  <input
+                    type="text"
+                    value={form.rateAmount2}
+                    onChange={(e) =>
+                      setForm((s) => ({
+                        ...s,
+                        rateAmount2: e.target.value.replace(/\$/g, ""),
+                      }))
+                    }
+                    disabled={isSubmitting}
+                    required
+                    placeholder="1,920"
+                    className={inputClass + " pl-7"}
+                  />
+                </div>
               </Field>
             </div>
             {periodsMatch && (

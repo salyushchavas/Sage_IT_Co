@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -416,6 +416,9 @@ function ApprovalCard({
   // Build V — the frozen consultant version this round is reviewing (null when
   // the round predates versioning and falls back to a live render).
   const [previewVersion, setPreviewVersion] = useState<number | null>(null);
+  // Build AE — the approver must scroll through the FULL agreement preview
+  // before Approve / Request revision unlock (mirrors the consultant gate).
+  const [previewedFully, setPreviewedFully] = useState(false);
 
   const previewAgreement = async () => {
     setBusy("preview");
@@ -482,19 +485,6 @@ function ApprovalCard({
             {app.effectiveDate && <span>· Eff. {formatUsDate(app.effectiveDate)}</span>}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={previewAgreement}
-          disabled={busy !== null}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
-        >
-          {busy === "preview" ? (
-            <Loader2 size={12} className="animate-spin" />
-          ) : (
-            <FileText size={12} />
-          )}
-          Preview agreement
-        </button>
       </div>
 
       {previewPages !== null && (
@@ -505,6 +495,7 @@ function ApprovalCard({
               ? `Agreement preview — Version V${previewVersion}`
               : undefined
           }
+          onScrolledToEnd={() => setPreviewedFully(true)}
           onClose={() => {
             setPreviewPages(null);
             setPreviewVersion(null);
@@ -538,28 +529,56 @@ function ApprovalCard({
       )}
 
       {!showRevise ? (
-        <div className="mt-4 flex items-center gap-2">
-          <button
-            type="button"
-            onClick={approve}
-            disabled={busy !== null}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
-          >
-            {busy === "approve" ? (
-              <Loader2 size={12} className="animate-spin" />
-            ) : (
-              <CheckCircle2 size={12} />
-            )}
-            Approve
-          </button>
-          <button
-            type="button"
-            onClick={() => setShowRevise(true)}
-            disabled={busy !== null}
-            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold border border-stone-300 text-gray-700 hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
-          >
-            <RotateCcw size={12} /> Request revision
-          </button>
+        <div className="mt-4">
+          {/* Build AE — order: 1. Preview  2. Request revision  3. Approve.
+              Approve + Request revision stay disabled until the approver has
+              scrolled through the whole agreement preview. */}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button
+              type="button"
+              onClick={previewAgreement}
+              disabled={busy !== null}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+            >
+              {busy === "preview" ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : previewedFully ? (
+                <CheckCircle2 size={12} className="text-emerald-600" />
+              ) : (
+                <FileText size={12} />
+              )}
+              {previewedFully ? "Previewed" : "Preview agreement"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowRevise(true)}
+              disabled={busy !== null || !previewedFully}
+              title={!previewedFully ? "Preview the full agreement first" : undefined}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold border border-stone-300 text-gray-700 hover:bg-stone-50 disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
+            >
+              <RotateCcw size={12} /> Request revision
+            </button>
+            <button
+              type="button"
+              onClick={approve}
+              disabled={busy !== null || !previewedFully}
+              title={!previewedFully ? "Preview the full agreement first" : undefined}
+              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+            >
+              {busy === "approve" ? (
+                <Loader2 size={12} className="animate-spin" />
+              ) : (
+                <CheckCircle2 size={12} />
+              )}
+              Approve
+            </button>
+          </div>
+          {!previewedFully && (
+            <p className="mt-2 text-[11px] text-sage-copper-deep inline-flex items-center gap-1.5">
+              <AlertCircle size={12} /> Open the preview and scroll to the end of
+              the agreement to enable Approve / Request revision.
+            </p>
+          )}
         </div>
       ) : (
         <div className="mt-4 space-y-2">
@@ -613,11 +632,32 @@ function ApproverPreviewModal({
   pages,
   onClose,
   title,
+  onScrolledToEnd,
 }: {
   pages: string[];
   onClose: () => void;
   title?: string;
+  onScrolledToEnd?: () => void;
 }) {
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  // Build AE — fire onScrolledToEnd when the end-sentinel enters the modal's
+  // scroll viewport (the approver reached the bottom), or immediately when a
+  // short agreement already fits without scrolling.
+  useEffect(() => {
+    const root = scrollerRef.current;
+    const sentinel = sentinelRef.current;
+    if (!root || !sentinel || !onScrolledToEnd) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) onScrolledToEnd();
+      },
+      { root, threshold: 0 },
+    );
+    io.observe(sentinel);
+    return () => io.disconnect();
+  }, [pages, onScrolledToEnd]);
+
   return (
     <div
       role="dialog"
@@ -643,6 +683,7 @@ function ApproverPreviewModal({
           </button>
         </header>
         <div
+          ref={scrollerRef}
           className="bg-stone-100 p-4 max-h-[78vh] overflow-y-auto space-y-3 select-none"
           style={{ userSelect: "none", WebkitUserSelect: "none", MozUserSelect: "none" }}
           onContextMenu={(e) => e.preventDefault()}
@@ -655,19 +696,23 @@ function ApproverPreviewModal({
               Nothing to preview.
             </p>
           ) : (
-            pages.map((b64, i) => (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                key={i}
-                src={`data:image/png;base64,${b64}`}
-                alt={`Agreement page ${i + 1}`}
-                draggable={false}
-                onDragStart={(e) => e.preventDefault()}
-                onContextMenu={(e) => e.preventDefault()}
-                className="block w-full rounded-md border border-stone-200 shadow-sm"
-                style={{ userSelect: "none", WebkitUserSelect: "none" }}
-              />
-            ))
+            <>
+              {pages.map((b64, i) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={i}
+                  src={`data:image/png;base64,${b64}`}
+                  alt={`Agreement page ${i + 1}`}
+                  draggable={false}
+                  onDragStart={(e) => e.preventDefault()}
+                  onContextMenu={(e) => e.preventDefault()}
+                  className="block w-full rounded-md border border-stone-200 shadow-sm"
+                  style={{ userSelect: "none", WebkitUserSelect: "none" }}
+                />
+              ))}
+              {/* Build AE — read-to-end sentinel (drives the approve/revise gate). */}
+              <div ref={sentinelRef} aria-hidden className="h-2 w-full" />
+            </>
           )}
         </div>
       </div>
