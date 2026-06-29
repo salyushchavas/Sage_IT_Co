@@ -858,9 +858,42 @@ public class AgreementDocumentService {
         // review step and stamps the closing/execution block.
         // Phase 5 — dual-read signatures: S3 bytes when the *_s3_key is set,
         // else the legacy Cloudinary URL. Blank box on failure (render-safe).
-        c.put("signatureImage", signatureImage(app.getSignatureS3Key(), app.getSignatureImage()));
+        Object consultantSig = signatureImage(app.getSignatureS3Key(), app.getSignatureImage());
+        Object ermSig = signatureImage(app.getErmSignatureS3Key(), app.getErmSignatureUrl());
+        c.put("signatureImage", consultantSig);
         c.put("finalSignatureImage", signatureImage(app.getFinalSignatureS3Key(), app.getFinalSignatureImage()));
-        c.put("ermSignatureImage", signatureImage(app.getErmSignatureS3Key(), app.getErmSignatureUrl()));
+        c.put("ermSignatureImage", ermSig);
+
+        // Build AF — per-appendix signature gating. The Appendix 1-5
+        // authorization blocks used to stamp the GLOBAL consultant + ERM
+        // signature and a today-fallback date into EVERY block, so an
+        // appendix the ERM never sent (and the consultant never filled)
+        // still rendered as "signed" with empty fields. Each appendix block
+        // now carries its own ${appendixNSignature} / ${appendixNErmSignature}
+        // / ${appendixNSignatureDate} / ${appendixNErmSignatureDate} /
+        // ${appendixNEmail} placeholders, populated ONLY when the consultant
+        // affirmed that appendix (i.e. it was sent AND filled). When the
+        // appendix is inactive every slot is blank (""), so the whole block
+        // renders unsigned — no signature image, no date, no email line.
+        String consultantSigDate = resolveSignatureDate(app);
+        String ermSigDate = resolveErmSignatureDate(app);
+        String consultantEmail = nz.apply(app.getConsultantEmail());
+        boolean[] appendixAffirmed = {
+                Boolean.TRUE.equals(app.getAffirmedAppendix1()),
+                Boolean.TRUE.equals(app.getAffirmedAppendix2()),
+                Boolean.TRUE.equals(app.getAffirmedAppendix3()),
+                Boolean.TRUE.equals(app.getAffirmedAppendix4()),
+                Boolean.TRUE.equals(app.getAffirmedAppendix5()),
+        };
+        for (int i = 0; i < appendixAffirmed.length; i++) {
+            int n = i + 1;
+            boolean on = appendixAffirmed[i];
+            c.put("appendix" + n + "Signature", on ? consultantSig : "");
+            c.put("appendix" + n + "ErmSignature", on ? ermSig : "");
+            c.put("appendix" + n + "SignatureDate", on ? consultantSigDate : "");
+            c.put("appendix" + n + "ErmSignatureDate", on ? ermSigDate : "");
+            c.put("appendix" + n + "Email", on ? consultantEmail : "");
+        }
 
         return c;
     }
@@ -1206,6 +1239,16 @@ public class AgreementDocumentService {
         c.put("signatureImage", "");
         c.put("finalSignatureImage", "");
         c.put("ermSignatureImage", "");
+        // Build AF — per-appendix signature slots (Appendix 1-5). Empty image
+        // boxes + underscore date / email lines, mirroring the global blanks
+        // above so the master reference form looks identical to before.
+        for (int n = 1; n <= 5; n++) {
+            c.put("appendix" + n + "Signature", "");
+            c.put("appendix" + n + "ErmSignature", "");
+            c.put("appendix" + n + "SignatureDate", LINE);
+            c.put("appendix" + n + "ErmSignatureDate", LINE);
+            c.put("appendix" + n + "Email", LINE);
+        }
         return c;
     }
 
@@ -1698,7 +1741,13 @@ public class AgreementDocumentService {
             sb.append(xml, lastEnd, tableMatcher.start());
             if (table.contains("${signatureImage}")
                     || table.contains("${ermSignatureImage}")
-                    || table.contains("${finalSignatureImage}")) {
+                    || table.contains("${finalSignatureImage}")
+                    // Build AF — appendix authorization blocks now carry
+                    // per-appendix signature keys (${appendixNSignature} /
+                    // ${appendixNErmSignature}); both end in "Signature}", and
+                    // only signature tables contain them, so keep recognising
+                    // them so the keep-together consolidation still applies.
+                    || table.contains("Signature}")) {
                 String consolidated = consolidateSignatureTable(table);
                 if (consolidated != null) {
                     sb.append(consolidated);
