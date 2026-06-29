@@ -662,14 +662,14 @@ function ApproverPreviewModal({
     <div
       role="dialog"
       aria-modal="true"
-      className="fixed inset-0 z-50 bg-black/60 flex items-start justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-2 sm:p-3"
       onClick={onClose}
     >
       <div
-        className="bg-white w-full sm:max-w-3xl rounded-xl shadow-xl my-6"
+        className="bg-white w-full max-w-6xl h-[96vh] rounded-xl shadow-xl flex flex-col overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
-        <header className="flex items-center justify-between px-4 py-3 border-b border-stone-100">
+        <header className="shrink-0 flex items-center justify-between px-4 py-3 border-b border-stone-100">
           <p className="text-sm font-bold text-sage-navy inline-flex items-center gap-1.5">
             <FileText size={14} /> {title ?? "Agreement preview"}
           </p>
@@ -684,7 +684,7 @@ function ApproverPreviewModal({
         </header>
         <div
           ref={scrollerRef}
-          className="bg-stone-100 p-4 max-h-[78vh] overflow-y-auto space-y-3 select-none"
+          className="bg-stone-100 p-4 flex-1 min-h-0 overflow-y-auto space-y-3 select-none"
           style={{ userSelect: "none", WebkitUserSelect: "none", MozUserSelect: "none" }}
           onContextMenu={(e) => e.preventDefault()}
           onCopy={(e) => e.preventDefault()}
