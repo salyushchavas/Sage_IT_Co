@@ -2334,8 +2334,9 @@ function SendForApprovalModal({
                     ))}
                   </select>
                   <p className="text-[11px] text-gray-400 mt-1">
-                    The approver(s) review this frozen version. Defaults to the
-                    latest.
+                    The approver(s) review this version. The latest is refreshed
+                    to the consultant&apos;s current content when you send (a new
+                    version is created if they revised).
                   </p>
                 </div>
               ) : versions.length === 1 ? (
@@ -2354,6 +2355,10 @@ function SendForApprovalModal({
                         : "—"}
                     </p>
                   </div>
+                  <p className="text-[11px] text-gray-400 mt-1">
+                    Sending refreshes this to the consultant&apos;s current
+                    content (a new version is created if they revised).
+                  </p>
                 </div>
               ) : null}
               {renderPicker("Manager", eligible?.managers ?? [], managerId, setManagerId, "manager")}
