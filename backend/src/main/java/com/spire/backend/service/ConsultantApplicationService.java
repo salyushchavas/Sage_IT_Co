@@ -1472,6 +1472,15 @@ public class ConsultantApplicationService {
         // fresh VERIFIED row is no longer restricted (the next
         // ermRequestRevision sets a new scope).
         app.setRevisionSections(null);
+        // Build AH — a (re)submission supersedes any previously released
+        // consultant-version copy. Clear the release flag so the ERM must
+        // re-approve the consultant version — which mints the NEXT numbered
+        // version (V2, V3, …) — before re-sending for approval. This re-enables
+        // the "Approve consultant version" button and re-gates "Send for
+        // approval" until the revised version is released. No-op on a first
+        // submit, where the copy was never released.
+        app.setConsultantCopyReleased(false);
+        app.setConsultantCopyReleasedAt(null);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
         log.info("[submit] SUCCESS appId={} {} -> VERIFIED", applicationId, fromStatus);
@@ -1973,27 +1982,24 @@ public class ConsultantApplicationService {
                             .approverName(appr.getFullName())
                             .build());
         }
-        // Build V / AG — resolve the consultant-version the approver reviews.
-        // Sending "the latest" (the default — versionNumber null, or equal to
-        // the newest snapshot) REFRESHES the snapshot to the consultant's
-        // CURRENT content, so a revision the consultant just resubmitted is what
-        // the approver sees (fixes the stale-V1 bug where a re-send kept routing
-        // the first frozen version). An explicit OLDER version is honoured as-is
-        // (a deliberate historical pick). ensureCurrentConsultantVersion reuses
-        // the latest when nothing changed, so no duplicate snapshot is created.
-        Integer latestVersion = agreementVersionRepository
-                .findTopByApplicationIdOrderByVersionNumberDesc(app.getId())
-                .map(com.spire.backend.entity.ConsultantAgreementVersion::getVersionNumber)
-                .orElse(null);
-        Integer selectedVersion;
-        if (versionNumber == null || versionNumber.equals(latestVersion)) {
-            selectedVersion = ensureCurrentConsultantVersion(app, request);
+        // Build V — resolve + record the consultant-version the ERM is sending
+        // for approval (defaults to the latest). The approver reviews THIS
+        // version's frozen snapshot. The consultant version is (re-)created
+        // EXPLICITLY by the ERM via "Approve consultant version"
+        // (ermApproveConsultantVersion); a revision resubmit clears
+        // consultantCopyReleased (Build AH) so the ERM must re-approve — which
+        // mints the next numbered version — before this send. So "the latest"
+        // here is the just-released revised version.
+        Integer selectedVersion = versionNumber;
+        if (selectedVersion == null) {
+            selectedVersion = agreementVersionRepository
+                    .findTopByApplicationIdOrderByVersionNumberDesc(app.getId())
+                    .map(com.spire.backend.entity.ConsultantAgreementVersion::getVersionNumber)
+                    .orElse(null);
         } else if (agreementVersionRepository
-                .findByApplicationIdAndVersionNumber(app.getId(), versionNumber).isEmpty()) {
+                .findByApplicationIdAndVersionNumber(app.getId(), selectedVersion).isEmpty()) {
             throw new IllegalArgumentException(
-                    "Selected version V" + versionNumber + " was not found for this agreement.");
-        } else {
-            selectedVersion = versionNumber;
+                    "Selected version V" + selectedVersion + " was not found for this agreement.");
         }
         app.setApprovalVersionNumber(selectedVersion);
         app.setStatus(ConsultantApplication.Status.AWAITING_APPROVALS.name());
@@ -2694,77 +2700,6 @@ public class ConsultantApplicationService {
         }
 
         return app;
-    }
-
-    /**
-     * Build AG — refresh-on-send. Renders the CURRENT consultant version and
-     * returns the version number the approver should review:
-     *   - When the freshly-rendered bytes match the latest existing snapshot
-     *     (same SHA-256), that version is reused — a re-send with no edits
-     *     creates no duplicate.
-     *   - Otherwise (no snapshot yet, or the consultant resubmitted a revision
-     *     so the content changed), the new bytes are stored under a fresh
-     *     immutable S3 key and the next numbered version (V2, V3, …) is created.
-     *
-     * This is what fixes the stale-version bug: a Manager/Accounts revision
-     * round sends the agreement back, the consultant revises and resubmits, and
-     * the next "send for approval" now routes the consultant's CURRENT content
-     * instead of the frozen V1. Runs inside the caller's transaction; a render
-     * or store failure throws so the whole send rolls back rather than silently
-     * routing stale content to the approver.
-     */
-    private Integer ensureCurrentConsultantVersion(
-            ConsultantApplication app, HttpServletRequest request) {
-        java.util.Optional<com.spire.backend.entity.ConsultantAgreementVersion> latest =
-                agreementVersionRepository.findTopByApplicationIdOrderByVersionNumberDesc(app.getId());
-
-        ConsultantVersionService.ReleaseResult release;
-        try {
-            release = consultantVersionService.renderConsultantVersionWithCertificate(app);
-        } catch (Exception e) {
-            log.error("Send-for-approval snapshot render failed for {}: {}",
-                    app.getApplicationId(), e.getMessage(), e);
-            throw new IllegalStateException(
-                    "Couldn't refresh the consultant version to send: " + e.getMessage(), e);
-        }
-        String hash = release.sha256Hex();
-
-        if (latest.isPresent() && hash.equals(latest.get().getDocumentHash())) {
-            // Content unchanged since the last snapshot — route it as-is.
-            return latest.get().getVersionNumber();
-        }
-
-        String s3Key;
-        try {
-            s3Key = agreementDocumentService.storeConsultantVersionPdf(app, release.bytes());
-        } catch (Exception e) {
-            log.error("Send-for-approval snapshot store failed for {}: {}",
-                    app.getApplicationId(), e.getMessage(), e);
-            throw new IllegalStateException(
-                    "Couldn't store the refreshed consultant version: " + e.getMessage(), e);
-        }
-
-        int nextVersion = latest.map(v -> v.getVersionNumber() + 1).orElse(1);
-        agreementVersionRepository.save(
-                com.spire.backend.entity.ConsultantAgreementVersion.builder()
-                        .applicationId(app.getId())
-                        .versionNumber(nextVersion)
-                        .s3Key(s3Key)
-                        .documentHash(hash)
-                        .phase(app.getPhase())
-                        .build());
-        appendEvent(app.getId(),
-                ConsultantApplicationEvent.EventType.CONSULTANT_VERSION_APPROVED,
-                ConsultantApplicationEvent.ActorType.ERM,
-                AGREEMENT_ERM_USER_ID,
-                Map.of("s3Key", s3Key,
-                        "documentHash", hash,
-                        "version", String.valueOf(nextVersion),
-                        "trigger", "send-for-approval"),
-                request);
-        log.info("Build AG — auto-snapshotted consultant version V{} at send-for-approval for {}",
-                nextVersion, app.getApplicationId());
-        return nextVersion;
     }
 
     /**
