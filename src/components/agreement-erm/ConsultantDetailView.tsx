@@ -326,9 +326,10 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
    */
   const handleApproveConsultantVersion = async () => {
     if (!confirm(
-      "Release a consultant-version PDF (with Certificate of Completion) "
-      + "for audit/records? The consultant will see their agreement as "
-      + "Verified; this does not countersign the agreement.",
+      "Release the consultant's current content as a consultant-version PDF "
+      + "(with Certificate of Completion)? This creates the next numbered "
+      + "version (V1, V2, …) for audit/records and re-notifies the consultant; "
+      + "it does not countersign the agreement.",
     )) {
       return;
     }
@@ -932,20 +933,19 @@ function StateActionBar({
           <button
             type="button"
             onClick={onApproveConsultantVersion}
-            disabled={released || releaseConsultantBusy}
-            className={
-              "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border cursor-pointer "
-              + (released
-                ? "border-emerald-300 bg-emerald-50 text-emerald-700 cursor-default"
-                : "border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5 disabled:opacity-60 disabled:cursor-not-allowed")
+            disabled={releaseConsultantBusy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border cursor-pointer border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5 disabled:opacity-60 disabled:cursor-not-allowed"
+            title={
+              released
+                ? "Release the consultant's current content as a new version (V2, V3, …)"
+                : undefined
             }
-            title={released ? "Consultant version already released" : undefined}
           >
             <CheckCircle2 size={12} />
-            {released
-              ? "Consultant version released"
-              : releaseConsultantBusy
-                ? "Releasing…"
+            {releaseConsultantBusy
+              ? "Releasing…"
+              : released
+                ? "Re-approve consultant version"
                 : "Approve consultant version"}
           </button>
           <button
@@ -959,6 +959,13 @@ function StateActionBar({
             {sendApprovalBusy ? "Sending…" : "Send for approval"}
           </button>
         </div>
+        {released && (
+          <p className="text-[11px] text-gray-500">
+            A consultant version is already released. If the consultant revised
+            after that, <strong>re-approve</strong> to release the updated
+            content as a new version, then send the latest for approval.
+          </p>
+        )}
       </BarShell>
     );
   }
