@@ -332,6 +332,50 @@ public class AgreementApproverController {
         return ResponseEntity.ok(ApiResponse.success("Version ready", payload));
     }
 
+    /**
+     * Build AJ — inline preview of the LATEST consultant version for an agreement
+     * in the approver's "All agreements" status list. Rasterizes the newest
+     * immutable version snapshot (highest V#) to watermark-free PNGs, falling
+     * back to a live pre-sign render for legacy agreements with no version. Gated
+     * by {@link ConsultantApplicationService#getForApproverAnyRound} — any round
+     * the approver was routed, not just the current one — so a Manager can review
+     * agreements that have since moved past their gate (ready-to-sign, completed).
+     */
+    @GetMapping("/api/agreement-approver/applications/{appId}/latest-version-preview-images")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> latestVersionPreviewImages(
+            @PathVariable String appId,
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        ConsultantApplication app = consultantService.getForApproverAnyRound(
+                appId, gate, AgreementAuthz.userId(request));
+        String viewerEmail = (String) request.getAttribute(AgreementAuthz.ATTR_EMAIL);
+        List<String> pages;
+        try {
+            byte[] pdfBytes = consultantService.latestVersionSnapshotBytes(app);
+            if (pdfBytes == null) {
+                // No version snapshot yet — live pre-sign render (consultant
+                // signatures present, ERM signature blank).
+                pdfBytes = agreementDocumentService.renderPdfBytes(
+                        app, AgreementDocumentService.ermPreviewOverrides());
+            }
+            List<byte[]> images = agreementDocumentService
+                    .renderWatermarkedPageImages(pdfBytes, viewerEmail, false);
+            pages = new ArrayList<>(images.size());
+            for (byte[] png : images) {
+                pages.add(java.util.Base64.getEncoder().encodeToString(png));
+            }
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Couldn't render the latest version."));
+        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("pages", pages);
+        payload.put("pageCount", pages.size());
+        payload.put("viewerEmail", viewerEmail);
+        return ResponseEntity.ok(ApiResponse.success("Latest version ready", payload));
+    }
+
     @PostMapping("/api/agreement-approver/applications/{appId}/approve")
     public ResponseEntity<ApiResponse<ConsultantApplication>> approve(
             @PathVariable String appId,

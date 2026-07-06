@@ -34,6 +34,7 @@ import {
   ermApproveAndSign,
   ermApproveConsultantVersion,
   ermRequestRevision,
+  ermRequestSignatureRevision,
   ermSendForApproval,
   ermFetchEligibleApprovers,
   type EligibleApprovers,
@@ -233,7 +234,7 @@ const SECTIONS: readonly SectionDef[] = [
   },
 ];
 
-type ModalKind = null | "revision" | "approve" | "send" | "editContact" | "advancePhase2" | "sendApproval";
+type ModalKind = null | "revision" | "signatureRevision" | "approve" | "send" | "editContact" | "advancePhase2" | "sendApproval";
 
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
@@ -391,6 +392,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         app={app}
         approvals={detail.approvals ?? []}
         onRequestRevision={() => setModal("revision")}
+        onRequestSignatureRevision={() => setModal("signatureRevision")}
         onApproveAndSign={() => setModal("approve")}
         onApproveConsultantVersion={handleApproveConsultantVersion}
         onSendForApproval={() => setModal("sendApproval")}
@@ -450,6 +452,17 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           onDone={async () => {
             setModal(null);
             setFeedback("Revision requested. Consultant notified.");
+            await onRefresh();
+          }}
+        />
+      )}
+      {modal === "signatureRevision" && (
+        <SignatureRevisionModal
+          appId={app.applicationId}
+          onClose={() => setModal(null)}
+          onDone={async () => {
+            setModal(null);
+            setFeedback("Signature re-sign requested. Consultant notified.");
             await onRefresh();
           }}
         />
@@ -837,11 +850,27 @@ function ApproverBadges({ approvals }: { approvals: AgreementApproval[] }) {
   );
 }
 
+// Build AJ — asks the consultant to re-sign with a proper signature (content
+// unchanged). Shown alongside "Request revision" in the revisable states.
+function SignatureReSignButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title="Ask the consultant to re-sign with a proper signature — their details stay unchanged"
+      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5 cursor-pointer"
+    >
+      <PenLine size={12} /> Signature re-sign
+    </button>
+  );
+}
+
 function StateActionBar({
   status,
   app,
   approvals,
   onRequestRevision,
+  onRequestSignatureRevision,
   onApproveAndSign,
   onApproveConsultantVersion,
   onSendForApproval,
@@ -859,6 +888,7 @@ function StateActionBar({
   app: ConsultantApplication;
   approvals: AgreementApproval[];
   onRequestRevision: () => void;
+  onRequestSignatureRevision: () => void;
   onApproveAndSign: () => void;
   onApproveConsultantVersion: () => void;
   onSendForApproval: () => void;
@@ -930,6 +960,7 @@ function StateActionBar({
           >
             <MessageSquare size={12} /> Request revision
           </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
           <button
             type="button"
             onClick={onApproveConsultantVersion}
@@ -986,6 +1017,7 @@ function StateActionBar({
           >
             <MessageSquare size={12} /> Send to consultant for revision
           </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
         </div>
       </BarShell>
     );
@@ -1022,6 +1054,7 @@ function StateActionBar({
           >
             <MessageSquare size={12} /> Send to consultant
           </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
         </div>
       </BarShell>
     );
@@ -1043,6 +1076,7 @@ function StateActionBar({
           >
             <MessageSquare size={12} /> Request revision
           </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
           <button
             type="button"
             onClick={onApproveAndSign}
@@ -2536,6 +2570,92 @@ function AdvanceToPhase2Modal({
           <AlertCircle size={14} /> {error}
         </p>
       )}
+    </ModalShell>
+  );
+}
+
+// Build AJ — signature-only revision. Clears the consultant's stored signatures
+// and sends the agreement back so they re-sign with a proper signature; all
+// content stays as-is. Optional note for the consultant.
+function SignatureRevisionModal({
+  appId,
+  onClose,
+  onDone,
+}: {
+  appId: string;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await ermRequestSignatureRevision(appId, note.trim() || undefined);
+      await onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't request the signature re-sign.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title="Request signature re-sign"
+      subtitle="Send the agreement back for a fresh signature. The consultant's details stay unchanged — only their signature is cleared and must be re-drawn."
+      onClose={onClose}
+      closeable={!busy}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <PenLine size={12} />}
+            Send signature re-sign
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="rounded-lg border border-sage-navy/15 bg-sage-navy/5 px-3 py-2.5 text-[12px] text-gray-700">
+          The consultant re-draws <strong>both signatures</strong> (main
+          agreement + execution) on their next visit and re-submits. Everything
+          else they filled stays exactly as-is.
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wider text-sage-navy mb-1">
+            Note to consultant{" "}
+            <span className="text-gray-400 normal-case font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="e.g. Your signature was unclear — please sign your full name legibly."
+            className="w-full px-3 py-2 text-[13px] rounded-md border border-stone-300 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 resize-none"
+          />
+        </div>
+        {error && (
+          <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+            <AlertCircle size={12} /> {error}
+          </p>
+        )}
+      </div>
     </ModalShell>
   );
 }

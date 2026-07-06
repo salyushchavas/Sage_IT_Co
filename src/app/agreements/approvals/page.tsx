@@ -21,6 +21,7 @@ import {
   approverFetchApproved,
   approverFetchQueue,
   approverRequestRevision,
+  fetchApproverLatestVersionPreviewImages,
   fetchApproverVersionPreviewImages,
   fetchApproverSignedPreviewImages,
   fetchApproverPhase1SignedPreviewImages,
@@ -265,6 +266,26 @@ function AllAgreementsTable({
 }) {
   const [statusTab, setStatusTab] = useState("ALL");
   const [search, setSearch] = useState("");
+  // Build AJ — inline preview of the latest consultant version (reuses the
+  // approver preview modal; no scroll-gate since this view is read-only).
+  const [previewPages, setPreviewPages] = useState<string[] | null>(null);
+  const [previewTitle, setPreviewTitle] = useState<string | undefined>(undefined);
+  const [previewBusy, setPreviewBusy] = useState<string | null>(null);
+  const [previewErr, setPreviewErr] = useState("");
+
+  const openPreview = async (appId: string, name: string) => {
+    setPreviewBusy(appId);
+    setPreviewErr("");
+    try {
+      const data = await fetchApproverLatestVersionPreviewImages(appId);
+      setPreviewPages(data.pages);
+      setPreviewTitle(`Latest version — ${name}`);
+    } catch (e) {
+      setPreviewErr(e instanceof Error ? e.message : "Couldn't load the preview.");
+    } finally {
+      setPreviewBusy(null);
+    }
+  };
 
   const active = APPROVER_STATUS_TABS.find((t) => t.id === statusTab) ?? APPROVER_STATUS_TABS[0];
   const q = search.trim().toLowerCase();
@@ -306,6 +327,12 @@ function AllAgreementsTable({
         </div>
       </div>
 
+      {previewErr && (
+        <p className="inline-flex items-center gap-1.5 text-xs text-red-700">
+          <AlertCircle size={12} /> {previewErr}
+        </p>
+      )}
+
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
@@ -318,18 +345,19 @@ function AllAgreementsTable({
               <th className="text-left px-4 py-2">Accounts</th>
               <th className="text-left px-4 py-2">Sent on</th>
               <th className="text-left px-4 py-2">Created</th>
+              <th className="text-right px-4 py-2">Preview</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {loading ? (
               <tr>
-                <td colSpan={8} className="text-center py-8">
+                <td colSpan={9} className="text-center py-8">
                   <Loader2 size={18} className="animate-spin text-sage-navy inline" />
                 </td>
               </tr>
             ) : filtered.length === 0 ? (
               <tr>
-                <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-400 italic">
+                <td colSpan={9} className="px-4 py-6 text-center text-sm text-gray-400 italic">
                   No agreements match this view.
                 </td>
               </tr>
@@ -363,12 +391,37 @@ function AllAgreementsTable({
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {r.createdAt ? formatUsDate(r.createdAt) : "—"}
                   </td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openPreview(r.applicationId, r.consultantName || r.consultantEmail)
+                      }
+                      disabled={previewBusy !== null}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                    >
+                      {previewBusy === r.applicationId ? (
+                        <Loader2 size={12} className="animate-spin" />
+                      ) : (
+                        <FileText size={12} />
+                      )}
+                      Preview
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
           </tbody>
         </table>
       </div>
+
+      {previewPages !== null && (
+        <ApproverPreviewModal
+          pages={previewPages}
+          title={previewTitle}
+          onClose={() => setPreviewPages(null)}
+        />
+      )}
     </div>
   );
 }

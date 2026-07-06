@@ -1678,6 +1678,89 @@ public class ConsultantApplicationService {
         return app;
     }
 
+    /**
+     * Build AJ — SIGNATURE-ONLY revision. The consultant re-signs the agreement
+     * with a fresh signature; content (fields + affirmations) is left intact and
+     * read-only. Used when the consultant's drawn/uploaded signature is wrong or
+     * inappropriate. Clears BOTH stored consultant signatures so a fresh draw is
+     * required (hasExistingPrimary would otherwise let them reuse the primary),
+     * scopes the wizard to the two signing steps via the dedicated "signature"
+     * key, and bounces to REVISION_REQUESTED with a signature-specific note.
+     * Valid from the same states as {@link #ermRequestRevision}.
+     */
+    @Transactional
+    public ConsultantApplication ermRequestSignatureRevision(
+            String applicationId, String note, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        String st = app.getStatus();
+        boolean revisable =
+                ConsultantApplication.Status.VERIFIED.name().equals(st)
+                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
+                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
+                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
+        if (!revisable) {
+            throw new IllegalStateException(
+                    "A signature re-sign can't be requested from status " + st + ".");
+        }
+
+        // Clear BOTH consultant signatures so a fresh re-draw is required. The
+        // primary MUST be cleared explicitly (else hasExistingPrimary lets the
+        // consultant reuse it); the final is always re-captured but is cleared
+        // here too so the "signed" record is unambiguously reset. Content fields
+        // + affirmations are untouched — this is signature-only.
+        app.setSignatureS3Key(null);
+        app.setSignatureImage(null);
+        app.setFinalSignatureS3Key(null);
+        app.setFinalSignatureImage(null);
+        app.setSigningAt(null);
+        app.setSigningIp(null);
+        app.setFinalSignedAt(null);
+        app.setFinalSigningIp(null);
+        app.setSignatureDate(null);
+
+        // Scope the wizard to the signing steps only (dedicated key; the
+        // consultant fill flow maps "signature" to main-agreement + review).
+        com.fasterxml.jackson.databind.node.ArrayNode arr = objectMapper.createArrayNode();
+        com.fasterxml.jackson.databind.node.ObjectNode o = objectMapper.createObjectNode();
+        o.put("key", "signature");
+        String trimmedNote = note == null ? null : note.trim();
+        if (trimmedNote != null && !trimmedNote.isEmpty()) o.put("note", trimmedNote);
+        arr.add(o);
+        app.setRevisionSections(arr.toString());
+
+        String summary = "Please re-sign the agreement with a clear, valid signature."
+                + (trimmedNote != null && !trimmedNote.isEmpty() ? " " + trimmedNote : "");
+        app.setCurrentRevisionRemarks(summary);
+
+        Integer prevCount = app.getRevisionCount();
+        app.setRevisionCount((prevCount == null ? 0 : prevCount) + 1);
+        app.setStatus(ConsultantApplication.Status.REVISION_REQUESTED.name());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.REVISION_REQUESTED,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("signatureRevision", true,
+                        "revisionCount", app.getRevisionCount()),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantRevisionRequest(app, summary);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("template", "consultant_revision_request"),
+                    null);
+        } catch (Exception e) {
+            log.warn("Failed to notify consultant of signature revision for {}: {}",
+                    applicationId, e.getMessage());
+        }
+
+        return app;
+    }
+
     // ── Build Y — section-picker revision support ────────────────────
 
     /** Sections the ERM may select in the revision picker (review/sign excluded). */
@@ -2391,6 +2474,50 @@ public class ConsultantApplicationService {
                     "ConsultantApplication", "applicationId", applicationId);
         }
         return app;
+    }
+
+    /**
+     * Build AJ — gate for the approver "All agreements" latest-version preview.
+     * Admits any approver who has EVER held a gate for this application in this
+     * role (any round/status) — matching the scope of {@link #approverApplications}
+     * (the status list the preview button lives on), which is broader than
+     * {@link #getForApprover}'s current-round check. 404 (no ID probing) when the
+     * caller was never routed this agreement.
+     */
+    @Transactional(readOnly = true)
+    public ConsultantApplication getForApproverAnyRound(
+            String applicationId,
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        if (Boolean.TRUE.equals(app.getDeleted())) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        boolean routed = approverUserId != null && !approverUserId.isBlank()
+                && approvalRepository.existsByApplicationIdAndRoleAndApproverUserId(
+                        app.getId(), role, approverUserId);
+        if (!routed) {
+            throw new com.spire.backend.exception.ResourceNotFoundException(
+                    "ConsultantApplication", "applicationId", applicationId);
+        }
+        return app;
+    }
+
+    /**
+     * Build AJ — bytes of the LATEST approved consultant-version snapshot (the
+     * highest V#), or {@code null} when the agreement has no version yet (legacy
+     * rounds), so the caller falls back to a live pre-sign render. Unlike
+     * {@link #versionSnapshotBytes} (the version routed for THIS round), this
+     * always returns the newest, so the approver preview shows the current
+     * agreement regardless of which version a past round reviewed.
+     */
+    @Transactional(readOnly = true)
+    public byte[] latestVersionSnapshotBytes(ConsultantApplication app) {
+        return agreementVersionRepository
+                .findTopByApplicationIdOrderByVersionNumberDesc(app.getId())
+                .map(v -> agreementDocumentService.readStoredPdfBytes(v.getS3Key()))
+                .orElse(null);
     }
 
     /**

@@ -474,6 +474,12 @@ function restrictedVisibleSections(
   includePrimarySign = false,
 ): readonly AgreementSection[] {
   const set = new Set(selectedKeys);
+  // Build AJ — a signature-only revision (the ERM "signature" scope) re-signs
+  // BOTH steps: the primary on main-agreement + the execution on review. The
+  // backend cleared both stored signatures, so main-agreement's signature pad
+  // is empty and must be re-drawn; content + affirmations stay as-is (read
+  // view), never re-armed.
+  const reSignBoth = includePrimarySign || set.has("signature");
   return AGREEMENT_SECTIONS.filter(
     (s) =>
       set.has(s.id)
@@ -481,7 +487,7 @@ function restrictedVisibleSections(
       // Build R — Phase 2 re-signs BOTH signature steps: the PRIMARY
       // (main-agreement) is always signable too, not just the final
       // execution signature on "review".
-      || (includePrimarySign && s.id === "main-agreement"),
+      || (reSignBoth && s.id === "main-agreement"),
   );
 }
 
@@ -1571,7 +1577,9 @@ export default function ConsultantWizardPage() {
                     {app.currentRevisionRemarks}
                   </p>
                   <p className="text-xs text-stone-600 mt-2">
-                    {revisionScopeKeys(app).length > 0
+                    {revisionScopeKeys(app).includes("signature")
+                      ? "Re-draw your signature on the pages below and submit to send it back for verification. Your details are unchanged — only your signature needs redoing."
+                      : revisionScopeKeys(app).length > 0
                       ? "Only the section(s) Sage IT flagged are shown below. Update them, re-affirm, re-sign, and submit to send it back for verification."
                       : "Update the highlighted fields, then submit to send it back for verification."}
                   </p>

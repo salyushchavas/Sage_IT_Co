@@ -4142,6 +4142,21 @@ export async function ermRequestRevision(
   );
 }
 
+/**
+ * Build AJ — ERM "Request signature re-sign": a signature-only revision. Clears
+ * the consultant's stored signatures and bounces the agreement back so they
+ * re-sign with a proper signature (content untouched). Optional note.
+ */
+export async function ermRequestSignatureRevision(
+  applicationId: string,
+  note?: string,
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/request-signature-revision`,
+    { method: "POST", body: JSON.stringify({ note: note ?? "" }) },
+  );
+}
+
 export async function ermApproveAndSign(
   applicationId: string,
   body: { ermName: string; ermTitle: string; ermSignatureBase64: string },
@@ -4783,6 +4798,22 @@ export async function fetchApproverVersionPreviewImages(
   const qs = role ? `?role=${role}` : "";
   return agreementErmFetch<ConsultantPreviewImages>(
     `/api/agreement-approver/applications/${applicationId}/version-preview-images${qs}`,
+  );
+}
+
+/**
+ * Build AJ — approver preview of the LATEST consultant version, for the "All
+ * agreements" status list. Same non-copyable PNG shape; the backend rasterizes
+ * the newest immutable version snapshot (falling back to a live pre-sign render
+ * for legacy rows) and gates on any round the approver was routed.
+ */
+export async function fetchApproverLatestVersionPreviewImages(
+  applicationId: string,
+  role?: ApproverRole,
+): Promise<ConsultantPreviewImages> {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ConsultantPreviewImages>(
+    `/api/agreement-approver/applications/${applicationId}/latest-version-preview-images${qs}`,
   );
 }
 

@@ -39,6 +39,15 @@ public interface AgreementApprovalRepository
      */
     List<AgreementApproval> findByRoleAndApproverUserId(ApproverRole role, String approverUserId);
 
+    /**
+     * Build AJ — has this approver EVER held a gate for this application in this
+     * role (any round/status)? Gates the "All agreements" latest-version preview
+     * — broader than the current-round {@code getForApprover} check, matching the
+     * scope of the status list where the preview button lives.
+     */
+    boolean existsByApplicationIdAndRoleAndApproverUserId(
+            Long applicationId, ApproverRole role, String approverUserId);
+
     /** Build L — an approver's own approved decisions for a role (newest first). */
     List<AgreementApproval> findByStatusAndRoleAndDecidedByOrderByDecidedAtDesc(
             Decision status, ApproverRole role, String decidedBy);

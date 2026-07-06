@@ -276,6 +276,24 @@ public class ConsultantApplicationController {
     }
 
     /**
+     * Build AJ — ERM "Request signature re-sign": a signature-only revision.
+     * Clears the consultant's stored signatures and bounces the agreement back
+     * so they re-sign with a proper signature (content untouched). Used when the
+     * drawn signature is wrong or inappropriate.
+     */
+    @PostMapping("/api/agreement-erm/applications/{appId}/request-signature-revision")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> ermRequestSignatureRevision(
+            @PathVariable String appId,
+            @RequestBody(required = false) SignatureRevisionBody body,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Signature re-sign requested",
+                consultantService.ermRequestSignatureRevision(
+                        appId, body == null ? null : body.note, request)));
+    }
+
+    /**
      * 3B — ERM "Send for Approval". Routes a consultant-signed,
      * consultant-version-released agreement to the phase's required
      * approvers (Phase 1 = Manager; Phase 2 = Manager + Accounts). Also
@@ -1571,6 +1589,11 @@ public class ConsultantApplicationController {
         // correction (free-text, pre-filled). Null = leave unchanged; a
         // CHANGED value persists and auto-scopes Appendix 1 for re-review.
         public String phase2DeliverablePeriod;
+    }
+
+    /** Build AJ — signature-only revision: an optional note for the consultant. */
+    public static class SignatureRevisionBody {
+        public String note;
     }
 
     public static class ApproveAndSignBody {
