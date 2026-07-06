@@ -4973,6 +4973,20 @@ export async function approverFetchApproved(role?: ApproverRole) {
   );
 }
 
+/**
+ * Build AI — the approver's "All agreements" status list: every agreement ever
+ * routed to me (this gate), across all statuses, carrying the same summary
+ * fields the ERM list uses (status, managerStatus / accountsStatus,
+ * sentForApprovalAt, ownerName, appendix fields), so the manager dashboard can
+ * render the ERM-style status table.
+ */
+export async function approverFetchApplications(role?: ApproverRole) {
+  const qs = role ? `?role=${role}` : "";
+  return agreementErmFetch<ConsultantApplication[]>(
+    `/api/agreement-approver/applications${qs}`,
+  );
+}
+
 /** Approver's read-only detail (+ approval history) for one agreement. */
 export async function approverFetchDetail(
   applicationId: string,

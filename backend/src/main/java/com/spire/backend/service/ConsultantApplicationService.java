@@ -2326,6 +2326,43 @@ public class ConsultantApplicationService {
     }
 
     /**
+     * Build AI — every distinct agreement ever routed to THIS approver in a
+     * role, across all lifecycle statuses. Drives the approver dashboard's
+     * "All agreements" status table (the read-only counterpart to the ERM's
+     * owner-scoped list). Scope = the approver's own gate rows, so it exposes
+     * nothing that wasn't sent to them; drafts/submissions never routed to them
+     * stay hidden. The transient summary fields (managerStatus/accountsStatus/
+     * sentForApprovalAt) + owner name are populated exactly as the ERM list, so
+     * the frontend reuses the same row rendering. Newest activity first.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<ConsultantApplication> approverApplications(
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
+        if (approverUserId == null || approverUserId.isBlank()) {
+            return java.util.List.of();
+        }
+        // Distinct application ids this approver holds a gate for (any round).
+        java.util.LinkedHashSet<Long> appIds = new java.util.LinkedHashSet<>();
+        for (var row : approvalRepository.findByRoleAndApproverUserId(role, approverUserId)) {
+            if (row.getApplicationId() != null) appIds.add(row.getApplicationId());
+        }
+        if (appIds.isEmpty()) return java.util.List.of();
+        java.util.List<ConsultantApplication> apps = new java.util.ArrayList<>();
+        for (Long id : appIds) {
+            ConsultantApplication app = applicationRepository.findById(id).orElse(null);
+            if (app == null || Boolean.TRUE.equals(app.getDeleted())) continue;
+            apps.add(app);
+        }
+        populateOwnerNames(apps);
+        populateApprovalSummary(apps);
+        apps.sort(java.util.Comparator.comparing(
+                ConsultantApplication::getUpdatedAt,
+                java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
+        return apps;
+    }
+
+    /**
      * Fetch an application for an approver's read-only preview/detail.
      * The approver may only see agreements where they hold a gate in the
      * current round; anything else 404s (so a token can't probe IDs).

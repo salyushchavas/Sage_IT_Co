@@ -32,6 +32,13 @@ public interface AgreementApprovalRepository
     /** Build K2 — pending gates routed to a user being re-roled/deleted (to un-route). */
     List<AgreementApproval> findByApproverUserIdAndStatus(String approverUserId, Decision status);
 
+    /**
+     * Build AI — every gate row (any status/round) routed to a specific approver
+     * in a role. Drives the approver's "All agreements" status list: the distinct
+     * applications they've ever been routed for, across all lifecycle statuses.
+     */
+    List<AgreementApproval> findByRoleAndApproverUserId(ApproverRole role, String approverUserId);
+
     /** Build L — an approver's own approved decisions for a role (newest first). */
     List<AgreementApproval> findByStatusAndRoleAndDecidedByOrderByDecidedAtDesc(
             Decision status, ApproverRole role, String decidedBy);

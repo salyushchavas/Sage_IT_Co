@@ -9,6 +9,7 @@ import {
   FileText,
   Loader2,
   RotateCcw,
+  Search,
   X,
 } from "lucide-react";
 
@@ -16,6 +17,7 @@ import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
 import AgreementStatusPill from "@/components/agreement-erm/AgreementStatusPill";
 import {
   approverApprove,
+  approverFetchApplications,
   approverFetchApproved,
   approverFetchQueue,
   approverRequestRevision,
@@ -27,8 +29,10 @@ import {
   type ApproverApprovedItem,
   type ApproverQueueItem,
   type ApproverRole,
+  type ConsultantApplication,
   type ConsultantApplicationStatus,
 } from "@/lib/api";
+import { computePendingAppendices } from "@/lib/pending-appendix";
 import { formatUsDate } from "@/lib/dates";
 
 /**
@@ -45,11 +49,16 @@ export default function ApprovalsPage() {
   const [items, setItems] = useState<ApproverQueueItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  // Build L — Pending queue vs the read-only "Approved" record.
-  const [tab, setTab] = useState<"pending" | "approved">("pending");
+  // Build L — Pending queue vs the read-only "Approved" record. Build AI adds
+  // an "All agreements" status table (every agreement routed to me).
+  const [tab, setTab] = useState<"pending" | "all" | "approved">("pending");
   const [approved, setApproved] = useState<ApproverApprovedItem[]>([]);
   const [approvedLoading, setApprovedLoading] = useState(false);
   const [approvedLoaded, setApprovedLoaded] = useState(false);
+  // Build AI — the full status list (lazy-loaded on first open).
+  const [allApps, setAllApps] = useState<ConsultantApplication[]>([]);
+  const [allLoading, setAllLoading] = useState(false);
+  const [allLoaded, setAllLoaded] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -74,6 +83,19 @@ export default function ApprovalsPage() {
       setError(e instanceof Error ? e.message : "Couldn't load your approved record.");
     } finally {
       setApprovedLoading(false);
+    }
+  }, []);
+
+  const loadAll = useCallback(async () => {
+    setAllLoading(true);
+    setError("");
+    try {
+      setAllApps(await approverFetchApplications());
+      setAllLoaded(true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't load your agreements.");
+    } finally {
+      setAllLoading(false);
     }
   }, []);
 
@@ -108,6 +130,13 @@ export default function ApprovalsPage() {
     }
   }, [checked, tab, approvedLoaded, loadApproved]);
 
+  // Build AI — lazily load the full status list the first time that tab opens.
+  useEffect(() => {
+    if (checked && tab === "all" && !allLoaded) {
+      void loadAll();
+    }
+  }, [checked, tab, allLoaded, loadAll]);
+
   if (!checked) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -140,6 +169,16 @@ export default function ApprovalsPage() {
           }
         >
           Pending approval
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("all")}
+          className={
+            "px-3.5 py-1.5 rounded-md text-xs font-semibold cursor-pointer " +
+            (tab === "all" ? "bg-sage-navy text-white" : "text-gray-600 hover:bg-gray-50")
+          }
+        >
+          All agreements
         </button>
         <button
           type="button"
@@ -180,6 +219,8 @@ export default function ApprovalsPage() {
             ))}
           </div>
         )
+      ) : tab === "all" ? (
+        <AllAgreementsTable loading={allLoading} rows={allApps} />
       ) : (
         <ApprovedRecord
           loading={approvedLoading}
@@ -190,6 +231,209 @@ export default function ApprovalsPage() {
         />
       )}
     </AgreementErmShell>
+  );
+}
+
+// Build AI — the approver's read-only "All agreements" status table: every
+// agreement routed to them, filterable by status + searchable, mirroring the
+// ERM's ConsultantsListView (minus owner-only actions). Actions live on the
+// Pending tab; this view is informational.
+const APPROVER_STATUS_TABS: ReadonlyArray<{
+  id: string;
+  label: string;
+  match: (status: string) => boolean;
+}> = [
+  { id: "ALL", label: "All", match: () => true },
+  { id: "AWAITING", label: "Awaiting approval", match: (s) => s === "AWAITING_APPROVALS" },
+  {
+    id: "REVISION",
+    label: "In revision",
+    match: (s) =>
+      ["APPROVAL_REVISION_REQUESTED", "REVISION_REQUESTED", "UPDATED", "VERIFIED"].includes(s),
+  },
+  { id: "READY", label: "Ready to sign", match: (s) => s === "READY_TO_SIGN" },
+  { id: "COMPLETED", label: "Completed", match: (s) => ["COMPLETED", "SIGNED"].includes(s) },
+  { id: "CANCELLED", label: "Cancelled", match: (s) => ["CANCELLED", "EXPIRED"].includes(s) },
+];
+
+function AllAgreementsTable({
+  loading,
+  rows,
+}: {
+  loading: boolean;
+  rows: ConsultantApplication[];
+}) {
+  const [statusTab, setStatusTab] = useState("ALL");
+  const [search, setSearch] = useState("");
+
+  const active = APPROVER_STATUS_TABS.find((t) => t.id === statusTab) ?? APPROVER_STATUS_TABS[0];
+  const q = search.trim().toLowerCase();
+  const filtered = rows.filter((r) => {
+    if (!active.match(r.status)) return false;
+    if (!q) return true;
+    return [r.consultantEmail, r.consultantName ?? "", r.applicationId, r.ownerName ?? ""].some(
+      (v) => v.toLowerCase().includes(q),
+    );
+  });
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
+          {APPROVER_STATUS_TABS.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setStatusTab(t.id)}
+              className={
+                "px-2.5 py-1 rounded-md font-semibold cursor-pointer " +
+                (statusTab === t.id ? "bg-sage-navy text-white" : "text-gray-600 hover:text-sage-navy")
+              }
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="relative">
+          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input
+            type="search"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search email, name, ID…"
+            className="pl-8 pr-3 py-1.5 text-xs rounded-md border border-gray-200 w-56 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+          />
+        </div>
+      </div>
+
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
+            <tr>
+              <th className="text-left px-4 py-2">Consultant</th>
+              <th className="text-left px-4 py-2">ERM</th>
+              <th className="text-left px-4 py-2">Status</th>
+              <th className="text-left px-4 py-2">Pending Appendix</th>
+              <th className="text-left px-4 py-2">Manager</th>
+              <th className="text-left px-4 py-2">Accounts</th>
+              <th className="text-left px-4 py-2">Sent on</th>
+              <th className="text-left px-4 py-2">Created</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {loading ? (
+              <tr>
+                <td colSpan={8} className="text-center py-8">
+                  <Loader2 size={18} className="animate-spin text-sage-navy inline" />
+                </td>
+              </tr>
+            ) : filtered.length === 0 ? (
+              <tr>
+                <td colSpan={8} className="px-4 py-6 text-center text-sm text-gray-400 italic">
+                  No agreements match this view.
+                </td>
+              </tr>
+            ) : (
+              filtered.map((r) => (
+                <tr key={r.applicationId} className="hover:bg-gray-50">
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-gray-900">{r.consultantName || "—"}</div>
+                    <div className="text-[11px] text-gray-500">{r.consultantEmail}</div>
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-700">{r.ownerName || "—"}</td>
+                  <td className="px-4 py-2">
+                    <AgreementStatusPill status={r.status} />
+                  </td>
+                  <td className="px-4 py-2 align-top">
+                    <PendingAppendixCell app={r} />
+                  </td>
+                  <td className="px-4 py-2">
+                    <ApprovalBadge status={r.managerStatus} />
+                  </td>
+                  <td className="px-4 py-2">
+                    {(r.phase ?? 1) >= 2 ? (
+                      <ApprovalBadge status={r.accountsStatus} />
+                    ) : (
+                      <span className="text-[11px] text-gray-400">N/A</span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-500">
+                    {r.sentForApprovalAt ? formatUsDate(r.sentForApprovalAt) : "—"}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-500">
+                    {r.createdAt ? formatUsDate(r.createdAt) : "—"}
+                  </td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// Mirrors ConsultantsListView's compact appendix summary (chips that expand to
+// the per-appendix "not sent / awaiting signature" detail).
+function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
+  const pending = computePendingAppendices(app);
+  if (pending.length === 0) {
+    return <span className="text-[11px] text-gray-400">None</span>;
+  }
+  const notSent = pending.filter((p) => p.state === "not-sent").length;
+  const awaiting = pending.filter((p) => p.state === "awaiting").length;
+  return (
+    <details className="group">
+      <summary className="flex flex-wrap items-center gap-1 cursor-pointer list-none [&::-webkit-details-marker]:hidden">
+        {notSent > 0 && (
+          <span className="inline-flex items-center rounded-full border border-gray-200 bg-gray-50 px-2 py-0.5 text-[10px] font-semibold text-gray-600">
+            {notSent} not sent
+          </span>
+        )}
+        {awaiting > 0 && (
+          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700">
+            {awaiting} awaiting
+          </span>
+        )}
+      </summary>
+      <ul className="mt-1.5 space-y-1">
+        {pending.map((p) => (
+          <li key={p.n} className="flex items-start gap-1.5 text-[11px] text-gray-600">
+            <span
+              className={
+                "inline-flex shrink-0 items-center rounded-full border px-1.5 py-0.5 text-[9px] font-semibold " +
+                (p.state === "not-sent"
+                  ? "border-gray-200 bg-gray-50 text-gray-500"
+                  : "border-amber-200 bg-amber-50 text-amber-700")
+              }
+            >
+              {p.state === "not-sent" ? "Not sent" : "Awaiting signature"}
+            </span>
+            <span>{p.label}</span>
+          </li>
+        ))}
+      </ul>
+    </details>
+  );
+}
+
+// Compact Manager/Accounts gate-status badge (mirrors ConsultantsListView).
+function ApprovalBadge({ status }: { status: string | null | undefined }) {
+  if (!status) return <span className="text-[11px] text-gray-400">—</span>;
+  const map: Record<string, { label: string; cls: string }> = {
+    APPROVED: { label: "Approved", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    PENDING: { label: "Pending", cls: "bg-amber-50 text-amber-700 border-amber-200" },
+    REVISION_REQUESTED: { label: "Revision", cls: "bg-rose-50 text-rose-700 border-rose-200" },
+  };
+  const m = map[status] ?? { label: status, cls: "bg-gray-50 text-gray-600 border-gray-200" };
+  return (
+    <span
+      className={
+        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold " + m.cls
+      }
+    >
+      {m.label}
+    </span>
   );
 }
 

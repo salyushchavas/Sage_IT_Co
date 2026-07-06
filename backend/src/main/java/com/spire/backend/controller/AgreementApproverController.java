@@ -83,6 +83,22 @@ public class AgreementApproverController {
     }
 
     /**
+     * Build AI — the approver's "All agreements" status list: every agreement
+     * ever routed to them (this gate), across all lifecycle statuses, with the
+     * same summary fields the ERM list carries (managerStatus / accountsStatus /
+     * sentForApprovalAt / ownerName). Read-only overview; actions stay on the
+     * pending queue. Scoped to the approver's own gate rows.
+     */
+    @GetMapping("/api/agreement-approver/applications")
+    public ResponseEntity<ApiResponse<List<ConsultantApplication>>> applications(
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        return ResponseEntity.ok(ApiResponse.success(
+                consultantService.approverApplications(gate, AgreementAuthz.userId(request))));
+    }
+
+    /**
      * Build L — read-only record of agreements I (this approver) have
      * approved. Manager renders a flat list; Accounts groups by ermName.
      * Each row: appId, consultantName, ermId, ermName, phase, decidedAt,
