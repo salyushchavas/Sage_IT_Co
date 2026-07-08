@@ -773,6 +773,11 @@ export interface EffectiveRequirements {
   appendix5: boolean;
   /** True iff SSN inside Appendix 3 must be supplied when Appendix 3 is being completed. */
   ssn: boolean;
+  /**
+   * Build AK — true iff the ERM requested a re-upload of the (normally
+   * optional) SSN document this round, so it is required again until replaced.
+   */
+  ssnDocRequired: boolean;
 }
 
 /**
@@ -791,6 +796,8 @@ export function effectiveRequirements(
     appendix4: app?.requireAppendix4 === true,
     appendix5: app?.requireAppendix5 === true,
     ssn: app?.requireSsn === true,
+    // Set by the wizard's reqs memo only during a doc:ssn-doc revision round.
+    ssnDocRequired: false,
   };
 }
 

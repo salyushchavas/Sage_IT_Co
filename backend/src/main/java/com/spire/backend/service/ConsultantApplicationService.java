@@ -1770,14 +1770,15 @@ public class ConsultantApplicationService {
      * hosting section. These keys are deliberately NOT in REVISABLE_SECTION_IDS
      * (mirrors how "signature" is a dedicated non-section key).
      */
-    // Note: the SSN document is intentionally NOT re-requestable — it is always
-    // optional, so a re-upload request could not be enforced on resubmit and
-    // would silently delete the file without requiring a replacement.
+    // The SSN document is normally optional, but a re-upload request makes it
+    // required again for that round (see collectMissingConsultantFields), so it
+    // can't be resubmitted until replaced.
     private static final java.util.Map<String, String> DOC_REVISION_SECTION = java.util.Map.of(
             "doc:workauth", "cover",
             "doc:offer-letter", "appendix1",
             "doc:dl-doc", "appendix3",
             "doc:state-id", "appendix3",
+            "doc:ssn-doc", "appendix3",
             "doc:cheque", "appendix5");
 
     private static final java.util.Map<String, String> DOC_REVISION_LABELS = java.util.Map.of(
@@ -1785,6 +1786,7 @@ public class ConsultantApplicationService {
             "doc:offer-letter", "offer letter",
             "doc:dl-doc", "Driver's License document",
             "doc:state-id", "State ID document",
+            "doc:ssn-doc", "SSN document",
             "doc:cheque", "security cheque(s)");
 
     /**
@@ -1920,6 +1922,13 @@ public class ConsultantApplicationService {
                 app.setStateIdDocPublicId(null);
                 app.setStateIdDocContentType(null);
                 app.setStateIdDocUploadedAt(null);
+            }
+            case "doc:ssn-doc" -> {
+                destroyCloudinaryDoc(app.getSsnDocPublicId(), app.getSsnDocContentType());
+                app.setSsnDocS3Key(null);
+                app.setSsnDocPublicId(null);
+                app.setSsnDocContentType(null);
+                app.setSsnDocUploadedAt(null);
             }
             case "doc:cheque" -> clearChequeFiles(app);
             default -> { /* unknown key — ignore */ }
@@ -4873,10 +4882,21 @@ public class ConsultantApplicationService {
                     if (!stateDoc) missing.add("stateIdDoc");
                 }
             }
-            // Build J — SSN document is ALWAYS optional; never validated here.
+            // Build J — SSN document is ALWAYS optional at first fill; never
+            // validated here. (An ERM re-upload request re-requires it below.)
             if (Boolean.TRUE.equals(app.getRequireSsn())) {
                 addIfBlank(missing, "bgFullSsn", app.getBgFullSsn());
             }
+        }
+
+        // Build AK — the SSN document is optional at first fill, but an ERM
+        // "Request re-upload" (doc:ssn-doc in the revision scope) makes it
+        // required again until the consultant uploads a replacement. Independent
+        // of app3Active so it holds even for a doc-only SSN revision round.
+        if (forced.contains("doc:ssn-doc")
+                && !nonBlank(app.getSsnDocS3Key())
+                && !nonBlank(app.getSsnDocPublicId())) {
+            missing.add("ssnDoc");
         }
 
         // Appendix 4 -- portal access.

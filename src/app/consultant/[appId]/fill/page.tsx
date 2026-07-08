@@ -336,6 +336,7 @@ function isSectionComplete(
   offerLetterUploaded: boolean,
   dlDocUploaded: boolean,
   stateIdDocUploaded: boolean,
+  ssnDocUploaded: boolean,
 ): boolean {
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
@@ -370,6 +371,9 @@ function isSectionComplete(
     if (!dlProvided && !stateProvided) return false;
     if (dlProvided && (!dlNum || !dlDocUploaded)) return false;
     if (stateProvided && (!stateNum || !stateIdDocUploaded)) return false;
+    // Build AK — the SSN document is optional at first fill, but an ERM
+    // "Request re-upload" makes it required again until it's replaced.
+    if (reqs.ssnDocRequired && !ssnDocUploaded) return false;
   }
   // Build J — Appendix 4 completeness: at least one COMPLETE platform +
   // username entry is required when the section applies.
@@ -447,10 +451,11 @@ function firstIncompleteIndex(
   offerLetterUploaded: boolean,
   dlDocUploaded: boolean,
   stateIdDocUploaded: boolean,
+  ssnDocUploaded: boolean,
 ): number {
   for (let i = 0; i < sections.length - 1; i++) {
     if (!isSectionComplete(sections[i], form, reqs, chequeEntries,
-        workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded)) return i;
+        workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded)) return i;
   }
   return sections.length - 1;
 }
@@ -491,7 +496,7 @@ const DOC_REVISION_HOST_SECTION: Record<string, string> = {
   "doc:offer-letter": "appendix1",
   "doc:dl-doc": "appendix3",
   "doc:state-id": "appendix3",
-  // Note: no "doc:ssn-doc" — the SSN document is optional and not re-requestable.
+  "doc:ssn-doc": "appendix3",
   "doc:cheque": "appendix5",
 };
 
@@ -719,9 +724,10 @@ export default function ConsultantWizardPage() {
         const loadedOffer = Boolean(data.offerLetterPublicId || data.offerLetterS3Key);
         const loadedDl = Boolean(data.dlDocPublicId || data.dlDocS3Key);
         const loadedStateId = Boolean(data.stateIdDocPublicId || data.stateIdDocS3Key);
+        const loadedSsn = Boolean(data.ssnDocPublicId || data.ssnDocS3Key);
         setCurrentStep(firstIncompleteIndex(
             loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer,
-            loadedDl, loadedStateId));
+            loadedDl, loadedStateId, loadedSsn));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -1120,6 +1126,9 @@ export default function ConsultantWizardPage() {
       // (doc:workauth → cover, which is CORE/always-active, so no flag needed.)
       else if (k === "doc:offer-letter") o.appendix1 = true;
       else if (k === "doc:dl-doc" || k === "doc:state-id") o.appendix3 = true;
+      // Build AK — an SSN-doc re-upload request makes the (normally optional)
+      // SSN document required again until the consultant replaces it.
+      else if (k === "doc:ssn-doc") { o.appendix3 = true; o.ssnDocRequired = true; }
       else if (k === "doc:cheque") o.appendix5 = true;
     }
     return o;
@@ -1273,14 +1282,14 @@ export default function ConsultantWizardPage() {
         const complete =
           i === visibleSections.length - 1
             ? visibleSections.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded),
+                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded);
+            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded);
   const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -1290,12 +1299,12 @@ export default function ConsultantWizardPage() {
   const allComplete = useMemo(
     () =>
       visibleSections.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded),
+        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, attestation, previewSeen],
   );
 
   // Build AB — never let Submit be a silent no-op on mobile. When the agreement
@@ -1317,7 +1326,7 @@ export default function ConsultantWizardPage() {
     // blocks advancing past one — but handle it): jump back to fix it.
     const firstIncomplete = visibleSections.slice(0, -1).findIndex(
       (s) => !isSectionComplete(
-        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded),
+        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded),
     );
     if (firstIncomplete >= 0) {
       setSubmitError("Some sections still need attention before you can submit.");
@@ -1341,7 +1350,7 @@ export default function ConsultantWizardPage() {
     }
     setSubmitError("Some items are still needed before you can submit.");
   }, [allComplete, handleSubmit, visibleSections, form, reqs, chequeEntries,
-      workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, previewSeen, attestation]);
+      workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, previewSeen, attestation]);
 
   // Build AB — clear the submit error once everything is satisfied.
   useEffect(() => {
@@ -1385,6 +1394,9 @@ export default function ConsultantWizardPage() {
       if (k === "stateIdDoc") {
         return !stateIdDocUploaded;
       }
+      if (k === "ssnDoc") {
+        return !ssnDocUploaded;
+      }
       // Build J — Appendix 4 needs ≥1 complete platform+username entry.
       if (k === "portalEntries") {
         const entries = parsePortalEntries(form.fields["portalEntries"]);
@@ -1420,7 +1432,7 @@ export default function ConsultantWizardPage() {
       missingSignature: missingSig,
       missingFinalSignature: missingFinalSig,
     };
-  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded]);
+  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded]);
 
   // Build W — auto-dismiss the panel the moment the list empties.
   useEffect(() => {
@@ -1681,6 +1693,7 @@ export default function ConsultantWizardPage() {
             offerLetterUploaded={offerLetterUploaded}
             dlDocUploaded={dlDocUploaded}
             stateIdDocUploaded={stateIdDocUploaded}
+            ssnDocUploaded={ssnDocUploaded}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -2645,14 +2658,18 @@ function SectionStep({
               <div id="field-ssnDoc">
                 <DocUploadBlock
                   title="SSN document"
-                  description="Optional — upload a copy of your SSN card or document if you have one (≤10 MB). You can submit without it."
+                  description={
+                    reqs.ssnDocRequired
+                      ? "Sage IT asked you to re-upload your SSN document — please upload a clear copy (image or PDF, ≤10 MB) before submitting."
+                      : "Optional — upload a copy of your SSN card or document if you have one (≤10 MB). You can submit without it."
+                  }
                   inputId="ssndoc-file"
                   uploaded={ssnDocUploaded}
                   uploading={ssnDocUploading}
                   error={ssnDocError}
                   onUpload={onUploadSsnDoc}
-                  needsAttention={false}
-                  optional
+                  needsAttention={missingFieldKeys.has("ssnDoc")}
+                  optional={!reqs.ssnDocRequired}
                 />
               </div>
             </div>
@@ -4327,6 +4344,7 @@ function ReviewStep({
   offerLetterUploaded,
   dlDocUploaded,
   stateIdDocUploaded,
+  ssnDocUploaded,
   attestation,
   onAttestation,
   previewSeen,
@@ -4353,6 +4371,7 @@ function ReviewStep({
   offerLetterUploaded: boolean;
   dlDocUploaded: boolean;
   stateIdDocUploaded: boolean;
+  ssnDocUploaded: boolean;
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -4440,7 +4459,7 @@ function ReviewStep({
       </div>
 
       {visibleSections.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix

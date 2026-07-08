@@ -1732,15 +1732,14 @@ function ConsultantSections({
         docKey="doc:state-id"
         onRequestReupload={onRequestReupload}
       />
-      {/* Build AK — the SSN document is always optional, so it is NOT
-          re-requestable: a re-upload couldn't be enforced on resubmit and would
-          just delete the file. View-only (no docKey/onRequestReupload). */}
       <UploadedDocCard
         title="SSN document"
         uploaded={Boolean(app.ssnDocPublicId || app.ssnDocS3Key)}
         uploadedAt={app.ssnDocUploadedAt}
         applicationId={app.applicationId}
         docPath="/ssn-doc"
+        docKey="doc:ssn-doc"
+        onRequestReupload={onRequestReupload}
       />
       <SecurityChequeCard app={app} onRequestReupload={onRequestReupload} />
     </div>
