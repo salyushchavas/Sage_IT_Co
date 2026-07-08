@@ -1460,13 +1460,20 @@ public class ConsultantApplicationService {
         // F-4 — final (review-step) signature record (stored on S3 above).
         app.setFinalSignedAt(now);
         app.setFinalSigningIp(ip);
+        // Build AL — record the per-section signing dates BEFORE overwriting
+        // the global date, so only the section(s) actually (re)signed this
+        // round move. A targeted appendix/phase revision no longer bumps the
+        // untouched appendices' dates. Must run before setSignatureDate(now)
+        // below (it reads the PRIOR global date to backfill legacy rows).
+        stampSectionSignatureDates(app, now, hasNewPrimary);
         // Build Q — persist the signing date here so the
         // ${signatureDate} placeholder in every consultant signature
         // block ("Date / Email: ${signatureDate} / ${primaryEmail}")
         // shows the actual moment of submission. ermApproveAndSign
         // OVERWRITES this if/when the ERM countersigns later, which is
         // the right behaviour: the final PDF's signature date should
-        // reflect the most recent signing action.
+        // reflect the most recent signing action. Retained as the global
+        // fallback (legacy rows) + the execution-trace date.
         app.setSignatureDate(now);
         // Build Y — the revision round is complete; clear the scope so a
         // fresh VERIFIED row is no longer restricted (the next
@@ -1507,6 +1514,91 @@ public class ConsultantApplicationService {
         }
 
         return app;
+    }
+
+    // ── Build AL — per-section consultant signature dates ─────────────
+
+    /**
+     * Record the per-section consultant signing dates so a targeted revision
+     * only re-stamps the section(s) actually (re)signed this round. The primary
+     * (main-agreement) date moves ONLY when a fresh primary was drawn; each
+     * appendix date moves only when that appendix is affirmed AND either this is
+     * an unrestricted (first/full) submit OR the appendix is in the current
+     * revision / Phase-2 scope. Untouched appendices keep their prior dates.
+     *
+     * <p>Must be called BEFORE {@code setSignatureDate(now)} — it reads the
+     * prior global date to backfill any already-signed section that predates
+     * this feature, so legacy rows don't collapse to a single "now" date.
+     */
+    private void stampSectionSignatureDates(
+            ConsultantApplication app, LocalDateTime now, boolean primaryReSigned) {
+        java.util.Optional<java.util.Set<String>> scopeOpt = consultantWriteScope(app);
+        boolean restricted = scopeOpt.isPresent();
+        java.util.Set<String> scope = scopeOpt.orElseGet(java.util.Collections::emptySet);
+
+        java.util.Map<String, String> dates =
+                parseSectionSignatureDates(app.getSectionSignatureDates());
+
+        // Backfill: an already-signed section with no per-section date inherits
+        // the PRIOR global signing date (else it would fall back to the freshly
+        // updated global date and read "now" after this feature ships).
+        LocalDateTime prevGlobal = app.getSignatureDate();
+        if (prevGlobal != null) {
+            String prev = prevGlobal.toString();
+            boolean hasPrimary = primaryReSigned
+                    || nonBlank(app.getSignatureS3Key()) || nonBlank(app.getSignatureImage());
+            if (hasPrimary) dates.putIfAbsent("main-agreement", prev);
+            for (int n = 1; n <= 5; n++) {
+                if (appendixAffirmed(app, n)) dates.putIfAbsent("appendix" + n, prev);
+            }
+        }
+
+        // (Re)stamp ONLY what was signed this round.
+        String nowStr = now.toString();
+        if (primaryReSigned) dates.put("main-agreement", nowStr);
+        for (int n = 1; n <= 5; n++) {
+            if (appendixAffirmed(app, n) && (!restricted || scope.contains("appendix" + n))) {
+                dates.put("appendix" + n, nowStr);
+            }
+        }
+        app.setSectionSignatureDates(writeSectionSignatureDates(dates));
+    }
+
+    private static boolean appendixAffirmed(ConsultantApplication app, int n) {
+        return switch (n) {
+            case 1 -> Boolean.TRUE.equals(app.getAffirmedAppendix1());
+            case 2 -> Boolean.TRUE.equals(app.getAffirmedAppendix2());
+            case 3 -> Boolean.TRUE.equals(app.getAffirmedAppendix3());
+            case 4 -> Boolean.TRUE.equals(app.getAffirmedAppendix4());
+            case 5 -> Boolean.TRUE.equals(app.getAffirmedAppendix5());
+            default -> false;
+        };
+    }
+
+    private java.util.Map<String, String> parseSectionSignatureDates(String json) {
+        java.util.Map<String, String> out = new java.util.LinkedHashMap<>();
+        if (json != null && !json.isBlank()) {
+            try {
+                JsonNode node = objectMapper.readTree(json);
+                if (node != null && node.isObject()) {
+                    node.fields().forEachRemaining(e -> {
+                        if (e.getValue() != null && e.getValue().isTextual()) {
+                            out.put(e.getKey(), e.getValue().asText());
+                        }
+                    });
+                }
+            } catch (Exception ignored) { /* treat as no per-section dates */ }
+        }
+        return out;
+    }
+
+    private String writeSectionSignatureDates(java.util.Map<String, String> dates) {
+        try {
+            return objectMapper.writeValueAsString(dates);
+        } catch (Exception e) {
+            log.warn("Failed to serialise section signature dates: {}", e.getMessage());
+            return null;
+        }
     }
 
     /**

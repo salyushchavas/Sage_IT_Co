@@ -1156,6 +1156,8 @@ public class DataSeeder implements CommandLineRunner {
                 {"erm_title VARCHAR(255)", "erm_title"},
                 {"erm_signature_url TEXT", "erm_signature_url"},
                 {"signature_date TIMESTAMP", "signature_date"},
+                // Build AL — per-section consultant signing dates (JSON).
+                {"section_signature_dates TEXT", "section_signature_dates"},
                 // Revision tracking.
                 {"current_revision_remarks TEXT", "current_revision_remarks"},
                 {"revision_count INTEGER DEFAULT 0", "revision_count"},

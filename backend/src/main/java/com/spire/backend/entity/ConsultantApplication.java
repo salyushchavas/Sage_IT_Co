@@ -399,6 +399,16 @@ public class ConsultantApplication {
      */
     @Column(name = "signature_date") private LocalDateTime signatureDate;
     /**
+     * Build AL — per-section consultant signing dates, JSON map of section id
+     * ("main-agreement", "appendix1".."appendix5") → ISO timestamp. Only the
+     * section(s) the consultant actually (re)signs in a given round are
+     * re-stamped, so a targeted revision no longer bumps the untouched
+     * appendices' signature dates. {@link #signatureDate} above remains the
+     * global fallback (and the execution-trace date) for legacy rows.
+     */
+    @Column(name = "section_signature_dates", columnDefinition = "TEXT")
+    private String sectionSignatureDates;
+    /**
      * Build W — ERM countersign date. Set ONLY when the ERM signs
      * ({@code ermApproveAndSign}); null until then. Rendered on the ERM
      * "Date:" line via {@code ${ermSignatureDate}}. Stays blank while

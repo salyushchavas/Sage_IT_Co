@@ -867,7 +867,10 @@ public class AgreementDocumentService {
         // submits, signatureDate is persisted (see
         // ConsultantApplicationService.consultantSubmit) and this
         // fallback stops firing.
-        c.put("signatureDate", resolveSignatureDate(app));
+        // Build AL — the main-agreement (primary) signing date comes from the
+        // per-section map so a revision that didn't re-sign the primary keeps
+        // its original date.
+        c.put("signatureDate", resolveSectionSignatureDate(app, "main-agreement"));
 
         // Build R — final signing IP, rendered as a faint trace line
         // ("IP: <ip> · Signed: <utc>") under the Date / Email line in
@@ -906,7 +909,6 @@ public class AgreementDocumentService {
         // affirmed that appendix (i.e. it was sent AND filled). When the
         // appendix is inactive every slot is blank (""), so the whole block
         // renders unsigned — no signature image, no date, no email line.
-        String consultantSigDate = resolveSignatureDate(app);
         String ermSigDate = resolveErmSignatureDate(app);
         String consultantEmail = nz.apply(app.getConsultantEmail());
         boolean[] appendixAffirmed = {
@@ -921,7 +923,10 @@ public class AgreementDocumentService {
             boolean on = appendixAffirmed[i];
             c.put("appendix" + n + "Signature", on ? consultantSig : "");
             c.put("appendix" + n + "ErmSignature", on ? ermSig : "");
-            c.put("appendix" + n + "SignatureDate", on ? consultantSigDate : "");
+            // Build AL — each appendix uses its OWN per-section signing date, so
+            // re-signing one appendix's revision leaves the others' dates alone.
+            c.put("appendix" + n + "SignatureDate",
+                    on ? resolveSectionSignatureDate(app, "appendix" + n) : "");
             c.put("appendix" + n + "ErmSignatureDate", on ? ermSigDate : "");
             c.put("appendix" + n + "Email", on ? consultantEmail : "");
         }
@@ -957,8 +962,9 @@ public class AgreementDocumentService {
         v.put("ermEmail", resolveOwnerEmail(app));
         // Build Q — same today-fallback as buildContext so the
         // inline-clause read view in the wizard shows the date in
-        // every signature block before submit.
-        v.put("signatureDate", resolveSignatureDate(app));
+        // every signature block before submit. Build AL — the main-agreement
+        // (primary) date comes from the per-section map.
+        v.put("signatureDate", resolveSectionSignatureDate(app, "main-agreement"));
         // Build W — ERM "Date:" line. Blank until the ERM countersigns,
         // so the consultant's inline read view shows no ERM date.
         v.put("ermSignatureDate", resolveErmSignatureDate(app));
@@ -983,6 +989,31 @@ public class AgreementDocumentService {
             return stamped.toLocalDate().format(US_SHORT_DATE_FMT);
         }
         return LocalDate.now().format(US_SHORT_DATE_FMT);
+    }
+
+    private static final com.fasterxml.jackson.databind.ObjectMapper SECTION_DATES_MAPPER =
+            new com.fasterxml.jackson.databind.ObjectMapper();
+
+    /**
+     * Build AL — the consultant signing date for ONE section id
+     * ("main-agreement", "appendix1".."appendix5"), read from the per-section
+     * {@code section_signature_dates} JSON map. Falls back to the global
+     * {@link #resolveSignatureDate} (persisted global date, else today) for
+     * legacy rows or sections with no per-section stamp, so pre-feature
+     * agreements render exactly as before.
+     */
+    private static String resolveSectionSignatureDate(ConsultantApplication app, String sectionKey) {
+        String json = app.getSectionSignatureDates();
+        if (json != null && !json.isBlank()) {
+            try {
+                com.fasterxml.jackson.databind.JsonNode node = SECTION_DATES_MAPPER.readTree(json);
+                com.fasterxml.jackson.databind.JsonNode v = node == null ? null : node.get(sectionKey);
+                if (v != null && v.isTextual() && !v.asText().isBlank()) {
+                    return LocalDateTime.parse(v.asText()).toLocalDate().format(US_SHORT_DATE_FMT);
+                }
+            } catch (Exception ignored) { /* fall through to the global date */ }
+        }
+        return resolveSignatureDate(app);
     }
 
     /**
