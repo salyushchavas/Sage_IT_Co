@@ -99,8 +99,10 @@ public class ConsultantApplicationEvent {
         // Build I — consultant uploads their Phase 2 Employment offer letter.
         OFFER_LETTER_UPLOADED,
         // Build J — Background Check uploads: DL/State-ID doc (required) and
-        // SSN doc (optional).
+        // SSN doc (optional). Build AK splits the ID doc into a Driver's
+        // License doc and a State-ID doc (at least one required).
         DL_DOC_UPLOADED,
+        STATE_ID_DOC_UPLOADED,
         SSN_DOC_UPLOADED,
         // 3B — role-based approval workflow. SENT_FOR_APPROVAL when the
         // ERM routes a VERIFIED agreement to the phase's required

@@ -1761,6 +1761,198 @@ public class ConsultantApplicationService {
         return app;
     }
 
+    // ── Build AK — per-document re-upload revision ───────────────────
+
+    /**
+     * Dedicated document re-upload scope keys → the wizard section that hosts
+     * that upload tile. Used both to un-gate the upload server-side
+     * ({@link #assertSectionWritable}) and, on the consultant, to surface the
+     * hosting section. These keys are deliberately NOT in REVISABLE_SECTION_IDS
+     * (mirrors how "signature" is a dedicated non-section key).
+     */
+    // Note: the SSN document is intentionally NOT re-requestable — it is always
+    // optional, so a re-upload request could not be enforced on resubmit and
+    // would silently delete the file without requiring a replacement.
+    private static final java.util.Map<String, String> DOC_REVISION_SECTION = java.util.Map.of(
+            "doc:workauth", "cover",
+            "doc:offer-letter", "appendix1",
+            "doc:dl-doc", "appendix3",
+            "doc:state-id", "appendix3",
+            "doc:cheque", "appendix5");
+
+    private static final java.util.Map<String, String> DOC_REVISION_LABELS = java.util.Map.of(
+            "doc:workauth", "work-authorization document",
+            "doc:offer-letter", "offer letter",
+            "doc:dl-doc", "Driver's License document",
+            "doc:state-id", "State ID document",
+            "doc:cheque", "security cheque(s)");
+
+    /**
+     * Build AK — ERM "Request document re-upload": a per-document revision. For
+     * each requested document key the stored file pointer(s) are CLEARED so a
+     * fresh upload is required (the backend submit-gate then blocks resubmit
+     * until it's replaced), the wizard is scoped to the hosting section(s) via
+     * the dedicated {@code doc:*} keys, and the agreement bounces to
+     * REVISION_REQUESTED. Content/affirmations/signatures are untouched — this
+     * is document-only. Valid from the same states as
+     * {@link #ermRequestRevision}. Used when the consultant uploaded a wrong or
+     * inappropriate document.
+     */
+    @Transactional
+    public ConsultantApplication ermRequestDocumentRevision(
+            String applicationId, java.util.List<String> docKeys, String note,
+            HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+        String st = app.getStatus();
+        boolean revisable =
+                ConsultantApplication.Status.VERIFIED.name().equals(st)
+                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
+                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
+                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
+        if (!revisable) {
+            throw new IllegalStateException(
+                    "A document re-upload can't be requested from status " + st + ".");
+        }
+
+        // Validate + de-dupe the requested keys (drop anything not a known doc key).
+        java.util.LinkedHashSet<String> keys = new java.util.LinkedHashSet<>();
+        if (docKeys != null) {
+            for (String k : docKeys) {
+                if (k != null && DOC_REVISION_SECTION.containsKey(k)) keys.add(k);
+            }
+        }
+        if (keys.isEmpty()) {
+            throw new IllegalArgumentException("Select at least one document to re-upload.");
+        }
+
+        // Clear each requested document so a fresh upload is required. The
+        // submit-gate (collectMissingConsultantFields) then flags the cleared
+        // doc as missing until the consultant re-uploads it.
+        for (String k : keys) clearDocument(app, k);
+
+        // Scope the wizard to the document keys (each maps to its hosting section
+        // on the consultant; field writes to that section stay locked).
+        com.fasterxml.jackson.databind.node.ArrayNode arr = objectMapper.createArrayNode();
+        String trimmedNote = note == null ? null : note.trim();
+        boolean hasNote = trimmedNote != null && !trimmedNote.isEmpty();
+        for (String k : keys) {
+            com.fasterxml.jackson.databind.node.ObjectNode o = objectMapper.createObjectNode();
+            o.put("key", k);
+            if (hasNote) o.put("note", trimmedNote);
+            arr.add(o);
+        }
+        app.setRevisionSections(arr.toString());
+
+        StringBuilder sb = new StringBuilder("Please re-upload the following document(s): ");
+        int i = 0;
+        for (String k : keys) {
+            if (i++ > 0) sb.append(", ");
+            sb.append(DOC_REVISION_LABELS.getOrDefault(k, k));
+        }
+        sb.append('.');
+        if (hasNote) sb.append(' ').append(trimmedNote);
+        String summary = sb.toString();
+        app.setCurrentRevisionRemarks(summary);
+
+        Integer prevCount = app.getRevisionCount();
+        app.setRevisionCount((prevCount == null ? 0 : prevCount) + 1);
+        app.setStatus(ConsultantApplication.Status.REVISION_REQUESTED.name());
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.REVISION_REQUESTED,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("documentRevision", true,
+                        "documents", String.join(",", keys),
+                        "revisionCount", app.getRevisionCount()),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantRevisionRequest(app, summary);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("template", "consultant_revision_request"),
+                    null);
+        } catch (Exception e) {
+            log.warn("Failed to notify consultant of document revision for {}: {}",
+                    applicationId, e.getMessage());
+        }
+
+        return app;
+    }
+
+    /**
+     * Build AK — null the stored pointer(s) for one requested document key so a
+     * fresh upload is required. A legacy Cloudinary object is destroyed first
+     * (best-effort) so nulling the pointer doesn't orphan it — the re-upload's
+     * own {@code destroyCloudinaryDoc} could no longer see it once the pointer
+     * is gone. New S3-stored objects are left to the standard re-upload path.
+     */
+    private void clearDocument(ConsultantApplication app, String docKey) {
+        switch (docKey) {
+            case "doc:workauth" -> {
+                destroyCloudinaryDoc(app.getWorkAuthDocPublicId(), app.getWorkAuthDocContentType());
+                app.setWorkAuthDocS3Key(null);
+                app.setWorkAuthDocPublicId(null);
+                app.setWorkAuthDocContentType(null);
+                app.setWorkAuthDocUploadedAt(null);
+            }
+            case "doc:offer-letter" -> {
+                destroyCloudinaryDoc(app.getOfferLetterPublicId(), app.getOfferLetterContentType());
+                app.setOfferLetterS3Key(null);
+                app.setOfferLetterPublicId(null);
+                app.setOfferLetterContentType(null);
+                app.setOfferLetterUploadedAt(null);
+            }
+            case "doc:dl-doc" -> {
+                destroyCloudinaryDoc(app.getDlDocPublicId(), app.getDlDocContentType());
+                app.setDlDocS3Key(null);
+                app.setDlDocPublicId(null);
+                app.setDlDocContentType(null);
+                app.setDlDocUploadedAt(null);
+            }
+            case "doc:state-id" -> {
+                destroyCloudinaryDoc(app.getStateIdDocPublicId(), app.getStateIdDocContentType());
+                app.setStateIdDocS3Key(null);
+                app.setStateIdDocPublicId(null);
+                app.setStateIdDocContentType(null);
+                app.setStateIdDocUploadedAt(null);
+            }
+            case "doc:cheque" -> clearChequeFiles(app);
+            default -> { /* unknown key — ignore */ }
+        }
+    }
+
+    /**
+     * Build AK — clear the uploaded FILE of every cheque while preserving its
+     * number/date, so the consultant only re-attaches files (not re-enters the
+     * schedule). The per-cheque completeness gate (number + upload) then blocks
+     * resubmit until each file is replaced.
+     */
+    private void clearChequeFiles(ConsultantApplication app) {
+        java.util.List<ChequeEntry> entries = parseCheques(app);
+        if (!entries.isEmpty()) {
+            java.util.List<ChequeEntry> cleared = new java.util.ArrayList<>(entries.size());
+            for (ChequeEntry e : entries) {
+                // Destroy any legacy Cloudinary object first (best-effort) so it
+                // isn't orphaned once its pointer is dropped.
+                destroyCloudinaryDoc(e.publicId(), e.contentType());
+                cleared.add(new ChequeEntry(
+                        e.index(), e.number(), e.date(), "", "", "", ""));
+            }
+            app.setCheques(serialiseCheques(cleared));
+        }
+        // Legacy single-cheque pointers (index 0 fallback).
+        destroyCloudinaryDoc(app.getChequePublicId(), app.getChequeContentType());
+        app.setChequeS3Key(null);
+        app.setChequePublicId(null);
+        app.setChequeContentType(null);
+        app.setChequeUploadedAt(null);
+    }
+
     // ── Build Y — section-picker revision support ────────────────────
 
     /** Sections the ERM may select in the revision picker (review/sign excluded). */
@@ -1813,7 +2005,7 @@ public class ConsultantApplicationService {
                 "bgCurrentAddress", "bgCurrentAddressLine1", "bgCurrentAddressLine2",
                 "bgCurrentAddressCity", "bgCurrentAddressState", "bgCurrentAddressZip",
                 "bgCurrentSameAsResidence", "bgDateOfBirth", "bgFullSsn", "idType",
-                "bgDriverLicense", "affirmedAppendix3"}) m.put(f, "appendix3");
+                "bgDriverLicense", "bgStateId", "affirmedAppendix3"}) m.put(f, "appendix3");
         // Build Z — portalAuthorizedActions + portalRevocationContact are now
         // ERM-set/read-only (not consultant-writable), so they are omitted here
         // (mirrors ACH debit being ERM-only).
@@ -1866,6 +2058,18 @@ public class ConsultantApplicationService {
      * No-op when unrestricted.
      */
     private void assertSectionWritable(ConsultantApplication app, String sectionId) {
+        assertUploadWritable(app, sectionId, null);
+    }
+
+    /**
+     * Build AK — upload write-gate. Like {@link #assertSectionWritable} but a
+     * per-document re-upload round ({@code doc:<x>} scope keys) unlocks ONLY the
+     * upload whose exact {@code docKey} was requested — not every upload sharing
+     * the same host section. A full-section revision (scope contains
+     * {@code sectionId}) still unlocks all of that section's uploads.
+     */
+    private void assertUploadWritable(
+            ConsultantApplication app, String sectionId, String docKey) {
         // Build P — the out-of-band upload endpoints (cheque, work-auth,
         // DL/SSN, offer-letter) carry no status guard of their own, so gate
         // them here: a consultant may only write while actively filling
@@ -1889,10 +2093,20 @@ public class ConsultantApplicationService {
         }
         java.util.Optional<java.util.Set<String>> scope = consultantWriteScope(app);
         if (scope.isEmpty()) return;
-        if (!scope.get().contains(sectionId)) {
-            throw new IllegalArgumentException(
-                    "This change is outside the section(s) currently open for editing.");
-        }
+        java.util.Set<String> allowed = scope.get();
+        // Full-section revision (or Phase-2 reopened): the whole host section is
+        // writable, so every upload it hosts is allowed.
+        if (allowed.contains(sectionId)) return;
+        // Build AK — a per-document re-upload round scopes on dedicated
+        // "doc:<x>" keys and unlocks ONLY the exact requested document. Two
+        // docs sharing a host section (e.g. appendix3's DL / State-ID / SSN)
+        // therefore stay independent: requesting a DL re-upload does NOT let
+        // the consultant overwrite the State-ID or SSN document. Field/
+        // affirmation edits go through consultantFill's own FIELD_SECTION
+        // check, so they stay locked regardless.
+        if (docKey != null && allowed.contains(docKey)) return;
+        throw new IllegalArgumentException(
+                "This change is outside the section(s) currently open for editing.");
     }
 
     /** The section keys currently in the consultant's revision scope (empty = unrestricted). */
@@ -3346,6 +3560,8 @@ public class ConsultantApplicationService {
         public java.time.LocalDate bgDateOfBirth;
         public String bgFullSsn;
         public String bgDriverLicense;
+        // Build AK — Appendix 3 State-ID number (DL number + State-ID number).
+        public String bgStateId;
         public String portalPlatform;
         public String portalUsername;
         // Build J — repeatable platform+username entries (JSON-in-TEXT).
@@ -3421,6 +3637,7 @@ public class ConsultantApplicationService {
             if (bgDateOfBirth != null)            { app.setBgDateOfBirth(bgDateOfBirth); changed = true; }
             if (bgFullSsn != null)                { app.setBgFullSsn(bgFullSsn); changed = true; }
             if (bgDriverLicense != null)          { app.setBgDriverLicense(bgDriverLicense); changed = true; }
+            if (bgStateId != null)                { app.setBgStateId(bgStateId); changed = true; }
             if (portalPlatform != null)           { app.setPortalPlatform(portalPlatform); changed = true; }
             if (portalUsername != null)           { app.setPortalUsername(portalUsername); changed = true; }
             if (portalEntries != null)            { app.setPortalEntries(portalEntries); changed = true; }
@@ -3486,6 +3703,7 @@ public class ConsultantApplicationService {
             if (bgDateOfBirth != null) names.add("bgDateOfBirth");
             if (bgFullSsn != null) names.add("bgFullSsn");
             if (bgDriverLicense != null) names.add("bgDriverLicense");
+            if (bgStateId != null) names.add("bgStateId");
             if (portalPlatform != null) names.add("portalPlatform");
             if (portalUsername != null) names.add("portalUsername");
             if (portalEntries != null) names.add("portalEntries");
@@ -3528,7 +3746,7 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix5"); // Build Y (B5)
+        assertUploadWritable(app, "appendix5", "doc:cheque"); // Build Y (B5) / AK
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Cheque file is empty.");
         }
@@ -3707,7 +3925,7 @@ public class ConsultantApplicationService {
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
         // Build I — the work-auth doc now lives in Personal Information (cover).
-        assertSectionWritable(app, "cover"); // Build Y (B5)
+        assertUploadWritable(app, "cover", "doc:workauth"); // Build Y (B5) / AK
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Work-authorization file is empty.");
         }
@@ -3772,7 +3990,7 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix1"); // Build Y (B5)
+        assertUploadWritable(app, "appendix1", "doc:offer-letter"); // Build Y (B5) / AK
         if (bytes == null || bytes.length == 0) {
             throw new IllegalArgumentException("Offer letter file is empty.");
         }
@@ -3848,15 +4066,15 @@ public class ConsultantApplicationService {
         return readAgreementDoc(s3Key, publicId, contentType);
     }
 
-    /** Build J — Driver's-License / State-ID document upload (Appendix 3). */
+    /** Build J — Driver's License document upload (Appendix 3). */
     @Transactional
     public ConsultantApplication uploadDlDoc(
             String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix3"); // Build Y (B5)
+        assertUploadWritable(app, "appendix3", "doc:dl-doc"); // Build Y (B5) / AK
         String oldPublicId = app.getDlDocPublicId();
         String oldContentType = app.getDlDocContentType();
-        String normalisedType = validateBgDoc(bytes, contentType, "Driver's License / State ID document");
+        String normalisedType = validateBgDoc(bytes, contentType, "Driver's License document");
         String s3Key = agreementUploadKey(app, "dldoc", normalisedType);
         documentStorage.store(bytes, s3Key, normalisedType);
         app.setDlDocS3Key(s3Key);
@@ -3873,10 +4091,42 @@ public class ConsultantApplicationService {
         return app;
     }
 
-    /** Build J — streams the uploaded DL/State-ID document (S3 → S3; else Cloudinary). */
+    /** Build J — streams the uploaded Driver's License document (S3 → S3; else Cloudinary). */
     public ChequeBytes fetchDlDocBytes(String applicationId) throws java.io.IOException {
         ConsultantApplication app = getByApplicationId(applicationId);
         return fetchBgDoc(app.getDlDocS3Key(), app.getDlDocPublicId(), app.getDlDocContentType());
+    }
+
+    /** Build AK — State-ID document upload (Appendix 3). Mirrors {@link #uploadDlDoc}. */
+    @Transactional
+    public ConsultantApplication uploadStateIdDoc(
+            String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertUploadWritable(app, "appendix3", "doc:state-id"); // Build Y (B5) / AK
+        String oldPublicId = app.getStateIdDocPublicId();
+        String oldContentType = app.getStateIdDocContentType();
+        String normalisedType = validateBgDoc(bytes, contentType, "State ID document");
+        String s3Key = agreementUploadKey(app, "stateiddoc", normalisedType);
+        documentStorage.store(bytes, s3Key, normalisedType);
+        app.setStateIdDocS3Key(s3Key);
+        app.setStateIdDocPublicId(null);
+        app.setStateIdDocContentType(normalisedType);
+        app.setStateIdDocUploadedAt(LocalDateTime.now());
+        applicationRepository.save(app);
+        destroyCloudinaryDoc(oldPublicId, oldContentType);
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.STATE_ID_DOC_UPLOADED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("s3Key", s3Key, "contentType", normalisedType, "bytes", bytes.length),
+                request);
+        return app;
+    }
+
+    /** Build AK — streams the uploaded State-ID document (S3 → S3; else Cloudinary). */
+    public ChequeBytes fetchStateIdDocBytes(String applicationId) throws java.io.IOException {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        return fetchBgDoc(app.getStateIdDocS3Key(), app.getStateIdDocPublicId(),
+                app.getStateIdDocContentType());
     }
 
     /** Build J — SSN document upload (Appendix 3). ALWAYS optional. */
@@ -3884,7 +4134,7 @@ public class ConsultantApplicationService {
     public ConsultantApplication uploadSsnDoc(
             String applicationId, byte[] bytes, String contentType, HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix3"); // Build Y (B5)
+        assertUploadWritable(app, "appendix3", "doc:ssn-doc"); // Build Y (B5) / AK
         String oldPublicId = app.getSsnDocPublicId();
         String oldContentType = app.getSsnDocContentType();
         String normalisedType = validateBgDoc(bytes, contentType, "SSN document");
@@ -4068,7 +4318,7 @@ public class ConsultantApplicationService {
             ChequeMetadataPatch patch,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix5"); // Build Y (B5)
+        assertUploadWritable(app, "appendix5", "doc:cheque"); // Build Y (B5) / AK
         if (index < 0 || index > 50) {
             throw new IllegalArgumentException("Cheque index out of range.");
         }
@@ -4104,7 +4354,7 @@ public class ConsultantApplicationService {
             String contentType,
             HttpServletRequest request) {
         ConsultantApplication app = getByApplicationId(applicationId);
-        assertSectionWritable(app, "appendix5"); // Build Y (B5)
+        assertUploadWritable(app, "appendix5", "doc:cheque"); // Build Y (B5) / AK
         if (index < 0 || index > 50) {
             throw new IllegalArgumentException("Cheque index out of range.");
         }
@@ -4415,6 +4665,7 @@ public class ConsultantApplicationService {
                 || app.getBgDateOfBirth() != null
                 || nonBlank(app.getBgFullSsn())
                 || nonBlank(app.getBgDriverLicense())
+                || nonBlank(app.getBgStateId()) // Build AK — State-ID number
                 // Document uploads do NOT mark the section touched (consistent
                 // with the work-auth / offer-letter uploads) — only entered
                 // form data + the affirmation do.
@@ -4599,14 +4850,28 @@ public class ConsultantApplicationService {
                 addIfBlank(missing, "bgCurrentAddressZip", app.getBgCurrentAddressZip());
             }
             if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
-            String t = app.getIdType();
-            if (t == null || (!"DL".equals(t) && !"STATE_ID".equals(t))) {
-                missing.add("idType");
-            }
-            addIfBlank(missing, "bgDriverLicense", app.getBgDriverLicense());
-            // Build J — DL / State-ID document required when Appendix 3 applies.
-            if (!nonBlank(app.getDlDocS3Key()) && !nonBlank(app.getDlDocPublicId())) {
+            // Build AK — the consultant may provide a Driver's License AND/OR a
+            // State ID. Rules: at least ONE must be provided; and any ID they
+            // START (a number OR a document) must be COMPLETE (number + doc).
+            boolean dlNum = nonBlank(app.getBgDriverLicense());
+            boolean dlDoc = nonBlank(app.getDlDocS3Key()) || nonBlank(app.getDlDocPublicId());
+            boolean stateNum = nonBlank(app.getBgStateId());
+            boolean stateDoc = nonBlank(app.getStateIdDocS3Key())
+                    || nonBlank(app.getStateIdDocPublicId());
+            boolean dlProvided = dlNum || dlDoc;
+            boolean stateProvided = stateNum || stateDoc;
+            if (!dlProvided && !stateProvided) {
+                // Nothing provided — require at least one ID document.
                 missing.add("dlDoc");
+            } else {
+                if (dlProvided) {
+                    if (!dlNum) missing.add("bgDriverLicense");
+                    if (!dlDoc) missing.add("dlDoc");
+                }
+                if (stateProvided) {
+                    if (!stateNum) missing.add("bgStateId");
+                    if (!stateDoc) missing.add("stateIdDoc");
+                }
             }
             // Build J — SSN document is ALWAYS optional; never validated here.
             if (Boolean.TRUE.equals(app.getRequireSsn())) {

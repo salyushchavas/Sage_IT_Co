@@ -538,28 +538,42 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         sensitive: true,
         placeholder: "Letters and numbers only",
       },
-      {
-        key: "idType",
-        label: "ID type",
-        type: "id-type",
-        required: true,
-      },
+      // Build AK — the consultant may provide a Driver's License AND/OR a State
+      // ID. At least one is required; whichever they provide needs its number +
+      // its document (enforced by the wizard's custom Appendix 3 completion
+      // rules, so these number fields are marked optional in the blueprint).
       {
         key: "bgDriverLicense",
-        label: "Driver's License / State ID number",
+        label: "Driver's License number",
         type: "text",
-        required: true,
+        required: false,
         sensitive: true,
-        help: "Include the issuing state.",
+        help: "Include the issuing state. Provide this if you're uploading a Driver's License.",
       },
-      // Build J — DL/State-ID document upload (required) sits with the ID
-      // number; SSN document upload (optional) sits with the SSN.
+      {
+        key: "bgStateId",
+        label: "State ID number",
+        type: "text",
+        required: false,
+        sensitive: true,
+        help: "Include the issuing state. Provide this if you're uploading a State ID.",
+      },
+      // Build AK — Driver's License + State ID document uploads (at least one
+      // required); SSN document upload (optional) sits with the SSN. These
+      // file fields are custom-rendered in the wizard's Appendix 3 block.
       {
         key: "dlDoc",
-        label: "Driver's License / State ID document",
+        label: "Driver's License document",
         type: "file",
-        required: true,
-        help: "Upload a copy of your Driver's License or State ID (image or PDF).",
+        required: false,
+        help: "Upload a copy of your Driver's License (image or PDF).",
+      },
+      {
+        key: "stateIdDoc",
+        label: "State ID document",
+        type: "file",
+        required: false,
+        help: "Upload a copy of your State ID (image or PDF).",
       },
       {
         key: "ssnDoc",

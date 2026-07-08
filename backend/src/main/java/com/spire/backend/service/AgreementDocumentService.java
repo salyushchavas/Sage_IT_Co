@@ -240,8 +240,10 @@ public class AgreementDocumentService {
         boolean hasWorkAuth = nonBlank(app.getWorkAuthDocS3Key()) || nonBlank(app.getWorkAuthDocPublicId());
         boolean hasOffer = nonBlank(app.getOfferLetterS3Key()) || nonBlank(app.getOfferLetterPublicId());
         boolean hasDl = nonBlank(app.getDlDocS3Key()) || nonBlank(app.getDlDocPublicId());
+        // Build AK — dedicated State-ID document (separate from the DL doc).
+        boolean hasStateId = nonBlank(app.getStateIdDocS3Key()) || nonBlank(app.getStateIdDocPublicId());
         boolean hasSsn = nonBlank(app.getSsnDocS3Key()) || nonBlank(app.getSsnDocPublicId());
-        if (!hasWorkAuth && !hasOffer && !hasDl && !hasSsn) return body;
+        if (!hasWorkAuth && !hasOffer && !hasDl && !hasStateId && !hasSsn) return body;
         try (PDDocument doc = Loader.loadPDF(body)) {
             if (hasWorkAuth) {
                 appendOneAttachment(doc, "Attachment — Work Authorization Document",
@@ -252,8 +254,17 @@ public class AgreementDocumentService {
                         app.getOfferLetterS3Key(), app.getOfferLetterPublicId(), app.getOfferLetterContentType());
             }
             if (hasDl) {
-                appendOneAttachment(doc, "Attachment — Driver's License / State ID",
+                // Legacy compat: a pre-AK single ID doc lived on dlDoc with the
+                // kind in idType — label it State ID when that legacy kind was
+                // STATE_ID and there's no dedicated State-ID doc.
+                boolean legacyStateId = !hasStateId && "STATE_ID".equals(app.getIdType());
+                appendOneAttachment(doc,
+                        legacyStateId ? "Attachment — State ID" : "Attachment — Driver's License",
                         app.getDlDocS3Key(), app.getDlDocPublicId(), app.getDlDocContentType());
+            }
+            if (hasStateId) {
+                appendOneAttachment(doc, "Attachment — State ID",
+                        app.getStateIdDocS3Key(), app.getStateIdDocPublicId(), app.getStateIdDocContentType());
             }
             if (hasSsn) {
                 appendOneAttachment(doc, "Attachment — SSN Document",
@@ -781,18 +792,38 @@ public class AgreementDocumentService {
         c.put("bgCurrentAddress", assembledCurrentAddress(app));
         c.put("bgDateOfBirth", fd.apply(app.getBgDateOfBirth()));
         c.put("bgFullSsn", nz.apply(app.getBgFullSsn()));
-        // Build G — Appendix 3 renders "Driver's License: 12345" or
-        // "State ID: 12345" via $bgDriverLicense (the existing
-        // placeholder; we now prefix with the chosen idType label).
-        // Pure $idType is also exposed so the template can drop the
-        // label separately if it wants.
-        String idTypeLabel = idTypeLabel(app.getIdType());
-        c.put("idType", idTypeLabel);
-        String dl = nz.apply(app.getBgDriverLicense());
-        c.put("bgDriverLicense",
-                idTypeLabel.isEmpty() || dl.isEmpty()
-                        ? dl
-                        : idTypeLabel + ": " + dl);
+        // Build AK — Appendix 3 accepts a Driver's License AND/OR a State ID.
+        // Both numbers render into the existing $bgDriverLicense placeholder
+        // ("Driver's License: 123; State ID: 456") and the provided kinds into
+        // $idType ("Driver's License / State ID"), so the DOCX template is
+        // unchanged. Legacy compat: a pre-AK row stored ONE number in
+        // bgDriverLicense with the kind in idType — honour that when there's no
+        // new State-ID number (a legacy STATE_ID row's number is a State ID).
+        String dlNum = nz.apply(app.getBgDriverLicense());
+        String stateNum = nz.apply(app.getBgStateId());
+        // Legacy compat: a pre-split row stored its single ID number in
+        // bgDriverLicense with the KIND in idType. For a legacy STATE_ID row
+        // that number is a State-ID number, NEVER a Driver's License — so never
+        // render bgDriverLicense as a DL for such a row (prefer the dedicated
+        // bgStateId when present, else fall back to the legacy column). Without
+        // this, a legacy State-ID number would be re-labeled "Driver's License"
+        // the moment bgStateId is populated.
+        if ("STATE_ID".equals(app.getIdType())) {
+            if (stateNum.isEmpty()) stateNum = dlNum;
+            dlNum = "";
+        }
+        java.util.List<String> idKinds = new java.util.ArrayList<>();
+        java.util.List<String> idLines = new java.util.ArrayList<>();
+        if (!dlNum.isEmpty()) {
+            idKinds.add("Driver's License");
+            idLines.add("Driver's License: " + dlNum);
+        }
+        if (!stateNum.isEmpty()) {
+            idKinds.add("State ID");
+            idLines.add("State ID: " + stateNum);
+        }
+        c.put("idType", String.join(" / ", idKinds));
+        c.put("bgDriverLicense", String.join("; ", idLines));
 
         // Appendix 4 -- portal access (optional).
         // Build J — flatten the repeatable platform+username entries into the

@@ -24,6 +24,7 @@ import {
   PenLine,
   Pencil,
   ShieldAlert,
+  Upload,
   X,
 } from "lucide-react";
 
@@ -35,6 +36,7 @@ import {
   ermApproveConsultantVersion,
   ermRequestRevision,
   ermRequestSignatureRevision,
+  ermRequestDocumentRevision,
   ermSendForApproval,
   ermFetchEligibleApprovers,
   type EligibleApprovers,
@@ -205,8 +207,8 @@ const SECTIONS: readonly SectionDef[] = [
       { key: "bgCurrentAddress", label: "Current address", wide: true },
       { key: "bgDateOfBirth", label: "Date of birth", isDate: true },
       { key: "bgFullSsn", label: "Full SSN", pii: true },
-      { key: "idType", label: "ID type" },
-      { key: "bgDriverLicense", label: "Driver's License / State ID", pii: true },
+      { key: "bgDriverLicense", label: "Driver's License number", pii: true },
+      { key: "bgStateId", label: "State ID number", pii: true },
     ],
   },
   {
@@ -239,6 +241,12 @@ type ModalKind = null | "revision" | "signatureRevision" | "approve" | "send" | 
 export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
   const [modal, setModal] = useState<ModalKind>(null);
+  // Build AK — the per-document "Request re-upload" target (doc key + label),
+  // set from a document card; null hides the modal.
+  const [docRevisionTarget, setDocRevisionTarget] = useState<{
+    key: string;
+    label: string;
+  } | null>(null);
   const [busy, setBusy] = useState<
     "resend" | "cancel" | "releaseConsultant" | "sendApproval" | null
   >(null);
@@ -267,6 +275,14 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
 
   const status = app.status;
   const isLocked = ["SIGNED", "COMPLETED", "CANCELLED", "EXPIRED"].includes(status);
+  // Build AK — the states from which the ERM may request a document re-upload
+  // (mirrors the backend guard). Outside these, the per-card button is hidden.
+  const canRequestReupload = [
+    "VERIFIED",
+    "AWAITING_APPROVALS",
+    "APPROVAL_REVISION_REQUESTED",
+    "READY_TO_SIGN",
+  ].includes(status);
 
   // Clear any banner feedback after refresh fires so it doesn't
   // linger across actions.
@@ -424,7 +440,14 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         <ErmPdfPreview appId={app.applicationId} />
       )}
 
-      <ConsultantSections app={app} />
+      <ConsultantSections
+        app={app}
+        onRequestReupload={
+          canRequestReupload
+            ? (key, label) => setDocRevisionTarget({ key, label })
+            : undefined
+        }
+      />
 
       <SignaturesPreview app={app} />
 
@@ -463,6 +486,19 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
           onDone={async () => {
             setModal(null);
             setFeedback("Signature re-sign requested. Consultant notified.");
+            await onRefresh();
+          }}
+        />
+      )}
+      {docRevisionTarget && (
+        <DocRevisionModal
+          appId={app.applicationId}
+          docKey={docRevisionTarget.key}
+          docLabel={docRevisionTarget.label}
+          onClose={() => setDocRevisionTarget(null)}
+          onDone={async () => {
+            setDocRevisionTarget(null);
+            setFeedback("Document re-upload requested. Consultant notified.");
             await onRefresh();
           }}
         />
@@ -1432,7 +1468,13 @@ function DocViewButton({
 
 // ── Build W — Appendix 1 work-authorization document (read-only) ──
 
-function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
+function WorkAuthDocCard({
+  app,
+  onRequestReupload,
+}: {
+  app: ConsultantApplication;
+  onRequestReupload?: (docKey: string, docLabel: string) => void;
+}) {
   const has = Boolean(app.workAuthDocPublicId || app.workAuthDocS3Key);
   if (!has) return null;
   return (
@@ -1450,7 +1492,14 @@ function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
             ? ` ${formatUsDate(app.workAuthDocUploadedAt)}`
             : ""}
         </p>
-        <DocViewButton applicationId={app.applicationId} docPath="/workauth" />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <DocViewButton applicationId={app.applicationId} docPath="/workauth" />
+          <RequestReuploadButton
+            docKey="doc:workauth"
+            docLabel="Work-authorization document"
+            onRequestReupload={onRequestReupload}
+          />
+        </div>
       </div>
     </section>
   );
@@ -1458,7 +1507,13 @@ function WorkAuthDocCard({ app }: { app: ConsultantApplication }) {
 
 // ── Build I — Phase 2 Employment offer letter (read-only) ─────────
 
-function OfferLetterCard({ app }: { app: ConsultantApplication }) {
+function OfferLetterCard({
+  app,
+  onRequestReupload,
+}: {
+  app: ConsultantApplication;
+  onRequestReupload?: (docKey: string, docLabel: string) => void;
+}) {
   if (!app.offerLetterPublicId && !app.offerLetterS3Key) return null;
   return (
     <section className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-hidden">
@@ -1473,7 +1528,14 @@ function OfferLetterCard({ app }: { app: ConsultantApplication }) {
             ? ` ${formatUsDate(app.offerLetterUploadedAt)}`
             : ""}
         </p>
-        <DocViewButton applicationId={app.applicationId} docPath="/offer-letter" />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <DocViewButton applicationId={app.applicationId} docPath="/offer-letter" />
+          <RequestReuploadButton
+            docKey="doc:offer-letter"
+            docLabel="Offer letter"
+            onRequestReupload={onRequestReupload}
+          />
+        </div>
       </div>
     </section>
   );
@@ -1487,12 +1549,16 @@ function UploadedDocCard({
   uploadedAt,
   applicationId,
   docPath,
+  docKey,
+  onRequestReupload,
 }: {
   title: string;
   uploaded: boolean;
   uploadedAt: string | null;
   applicationId: string;
   docPath: string;
+  docKey?: string;
+  onRequestReupload?: (docKey: string, docLabel: string) => void;
 }) {
   if (!uploaded) return null;
   return (
@@ -1505,7 +1571,16 @@ function UploadedDocCard({
           <CheckCircle2 size={13} className="text-emerald-600" />
           Uploaded{uploadedAt ? ` ${formatUsDate(uploadedAt)}` : ""}
         </p>
-        <DocViewButton applicationId={applicationId} docPath={docPath} />
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <DocViewButton applicationId={applicationId} docPath={docPath} />
+          {docKey && (
+            <RequestReuploadButton
+              docKey={docKey}
+              docLabel={title}
+              onRequestReupload={onRequestReupload}
+            />
+          )}
+        </div>
       </div>
     </section>
   );
@@ -1623,21 +1698,43 @@ function VersionHistory({ app }: { app: ConsultantApplication }) {
 
 // ── Consultant-filled sections (read-only) ────────────────────
 
-function ConsultantSections({ app }: { app: ConsultantApplication }) {
+function ConsultantSections({
+  app,
+  onRequestReupload,
+}: {
+  app: ConsultantApplication;
+  // Build AK — present only in a revisable state; each document card renders a
+  // "Request re-upload" button that opens the scoped re-upload modal.
+  onRequestReupload?: (docKey: string, docLabel: string) => void;
+}) {
   return (
     <div className="space-y-4">
       {SECTIONS.map((section) => (
         <ConsultantSectionCard key={section.id} section={section} app={app} />
       ))}
-      <WorkAuthDocCard app={app} />
-      <OfferLetterCard app={app} />
+      <WorkAuthDocCard app={app} onRequestReupload={onRequestReupload} />
+      <OfferLetterCard app={app} onRequestReupload={onRequestReupload} />
       <UploadedDocCard
-        title="Driver's License / State ID document"
+        title="Driver's License document"
         uploaded={Boolean(app.dlDocPublicId || app.dlDocS3Key)}
         uploadedAt={app.dlDocUploadedAt}
         applicationId={app.applicationId}
         docPath="/dl-doc"
+        docKey="doc:dl-doc"
+        onRequestReupload={onRequestReupload}
       />
+      <UploadedDocCard
+        title="State ID document"
+        uploaded={Boolean(app.stateIdDocPublicId || app.stateIdDocS3Key)}
+        uploadedAt={app.stateIdDocUploadedAt}
+        applicationId={app.applicationId}
+        docPath="/state-id-doc"
+        docKey="doc:state-id"
+        onRequestReupload={onRequestReupload}
+      />
+      {/* Build AK — the SSN document is always optional, so it is NOT
+          re-requestable: a re-upload couldn't be enforced on resubmit and would
+          just delete the file. View-only (no docKey/onRequestReupload). */}
       <UploadedDocCard
         title="SSN document"
         uploaded={Boolean(app.ssnDocPublicId || app.ssnDocS3Key)}
@@ -1645,8 +1742,35 @@ function ConsultantSections({ app }: { app: ConsultantApplication }) {
         applicationId={app.applicationId}
         docPath="/ssn-doc"
       />
-      <SecurityChequeCard app={app} />
+      <SecurityChequeCard app={app} onRequestReupload={onRequestReupload} />
     </div>
+  );
+}
+
+/**
+ * Build AK — per-document "Request re-upload" button (revisable states only).
+ * Opens the scoped re-upload modal for {@code docKey}; clearing + bouncing is
+ * handled by the modal → {@link ermRequestDocumentRevision}.
+ */
+function RequestReuploadButton({
+  docKey,
+  docLabel,
+  onRequestReupload,
+}: {
+  docKey: string;
+  docLabel: string;
+  onRequestReupload?: (docKey: string, docLabel: string) => void;
+}) {
+  if (!onRequestReupload) return null;
+  return (
+    <button
+      type="button"
+      onClick={() => onRequestReupload(docKey, docLabel)}
+      title="Ask the consultant to replace this document"
+      className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-sage-copper/40 bg-white text-sage-copper-deep hover:bg-[#FBF1E8] cursor-pointer"
+    >
+      <Upload size={12} /> Request re-upload
+    </button>
   );
 }
 
@@ -1730,7 +1854,13 @@ function ErmPdfPreview({ appId }: { appId: string }) {
  * Cloudinary URL each call), wrapped in a blob URL for the open/
  * download action -- the raw Cloudinary URL never reaches the DOM.
  */
-function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
+function SecurityChequeCard({
+  app,
+  onRequestReupload,
+}: {
+  app: ConsultantApplication;
+  onRequestReupload?: (docKey: string, docLabel: string) => void;
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState("");
   // Build U — pull the cheque list from the JSON column, falling back
@@ -1802,16 +1932,25 @@ function SecurityChequeCard({ app }: { app: ConsultantApplication }) {
             Per-cheque uploads the consultant provided for Appendix 5.
           </p>
         </div>
-        <span
-          className={
-            "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
-            (uploadedCount > 0
-              ? "bg-emerald-100 text-emerald-800"
-              : "bg-stone-200 text-gray-700")
-          }
-        >
-          {uploadedCount > 0 ? `${uploadedCount} uploaded` : "Not uploaded"}
-        </span>
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          <span
+            className={
+              "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider " +
+              (uploadedCount > 0
+                ? "bg-emerald-100 text-emerald-800"
+                : "bg-stone-200 text-gray-700")
+            }
+          >
+            {uploadedCount > 0 ? `${uploadedCount} uploaded` : "Not uploaded"}
+          </span>
+          {uploadedCount > 0 && (
+            <RequestReuploadButton
+              docKey="doc:cheque"
+              docLabel="Security cheque(s)"
+              onRequestReupload={onRequestReupload}
+            />
+          )}
+        </div>
       </header>
       <div className="px-5 sm:px-6 py-4 space-y-3">
         {entries.length === 0 ? (
@@ -2647,6 +2786,98 @@ function SignatureRevisionModal({
             onChange={(e) => setNote(e.target.value)}
             rows={3}
             placeholder="e.g. Your signature was unclear — please sign your full name legibly."
+            className="w-full px-3 py-2 text-[13px] rounded-md border border-stone-300 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 resize-none"
+          />
+        </div>
+        {error && (
+          <p className="text-[12px] text-red-600 inline-flex items-center gap-1">
+            <AlertCircle size={12} /> {error}
+          </p>
+        )}
+      </div>
+    </ModalShell>
+  );
+}
+
+/**
+ * Build AK — ERM "Request re-upload" for ONE document. Clears that document
+ * server-side (so a fresh upload is forced) and bounces the agreement back to
+ * the consultant, scoped to just that document. Optional note.
+ */
+function DocRevisionModal({
+  appId,
+  docKey,
+  docLabel,
+  onClose,
+  onDone,
+}: {
+  appId: string;
+  docKey: string;
+  docLabel: string;
+  onClose: () => void;
+  onDone: () => Promise<void>;
+}) {
+  const [note, setNote] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const submit = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await ermRequestDocumentRevision(appId, [docKey], note.trim() || undefined);
+      await onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't request the re-upload.");
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title="Request document re-upload"
+      subtitle="Send the agreement back so the consultant uploads a fresh file. Their other details stay unchanged."
+      onClose={onClose}
+      closeable={!busy}
+      footer={
+        <>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={busy}
+            className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={submit}
+            disabled={busy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
+          >
+            {busy ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+            Send re-upload request
+          </button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="rounded-lg border border-sage-copper/25 bg-[#FBF1E8] px-3 py-2.5 text-[12px] text-gray-700">
+          The current <strong>{docLabel}</strong> will be removed and the
+          consultant must upload a new one before they can resubmit. Everything
+          else they filled stays exactly as-is.
+        </div>
+        <div>
+          <label className="block text-[11px] font-semibold uppercase tracking-wider text-sage-navy mb-1">
+            Note to consultant{" "}
+            <span className="text-gray-400 normal-case font-normal">(optional)</span>
+          </label>
+          <textarea
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            rows={3}
+            placeholder="e.g. The document was blurry — please upload a clearer copy."
             className="w-full px-3 py-2 text-[13px] rounded-md border border-stone-300 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 resize-none"
           />
         </div>

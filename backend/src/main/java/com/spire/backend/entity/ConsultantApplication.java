@@ -344,13 +344,21 @@ public class ConsultantApplication {
     @Column(name = "bg_date_of_birth") private LocalDate bgDateOfBirth;
     @Column(name = "bg_full_ssn", columnDefinition = "TEXT") private String bgFullSsn;
     @Column(name = "bg_driver_license", columnDefinition = "TEXT") private String bgDriverLicense;
+    // Build AK — Appendix 3 now accepts a Driver's License AND/OR a State ID.
+    // bgDriverLicense is the DL number; bgStateId is the State-ID number.
+    @Column(name = "bg_state_id", columnDefinition = "TEXT") private String bgStateId;
 
     // ── Build J: Background Check document uploads ────────────────────
-    // DL / State-ID doc (required when Appendix 3 applies) + SSN doc
-    // (always optional). Same Cloudinary/append pipeline as Build I.
+    // DL doc + State-ID doc (Build AK — at least one required when Appendix 3
+    // applies; both required if both are provided) + SSN doc (always optional).
+    // Same Cloudinary/append pipeline as Build I.
     @Column(name = "dl_doc_public_id") private String dlDocPublicId;
     @Column(name = "dl_doc_uploaded_at") private LocalDateTime dlDocUploadedAt;
     @Column(name = "dl_doc_content_type", length = 64) private String dlDocContentType;
+    // Build AK — State-ID document (mirrors the DL doc columns).
+    @Column(name = "state_id_doc_public_id") private String stateIdDocPublicId;
+    @Column(name = "state_id_doc_uploaded_at") private LocalDateTime stateIdDocUploadedAt;
+    @Column(name = "state_id_doc_content_type", length = 64) private String stateIdDocContentType;
     @Column(name = "ssn_doc_public_id") private String ssnDocPublicId;
     @Column(name = "ssn_doc_uploaded_at") private LocalDateTime ssnDocUploadedAt;
     @Column(name = "ssn_doc_content_type", length = 64) private String ssnDocContentType;
@@ -522,6 +530,9 @@ public class ConsultantApplication {
 
     @Column(name = "dl_doc_s3_key", length = 512)
     private String dlDocS3Key;
+
+    @Column(name = "state_id_doc_s3_key", length = 512)
+    private String stateIdDocS3Key;
 
     @Column(name = "ssn_doc_s3_key", length = 512)
     private String ssnDocS3Key;

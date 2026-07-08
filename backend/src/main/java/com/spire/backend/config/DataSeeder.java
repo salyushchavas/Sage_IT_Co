@@ -1135,6 +1135,9 @@ public class DataSeeder implements CommandLineRunner {
                 {"bg_date_of_birth DATE", "bg_date_of_birth"},
                 {"bg_full_ssn TEXT", "bg_full_ssn"},
                 {"bg_driver_license TEXT", "bg_driver_license"},
+                // Build AK — Appendix 3 State-ID number (alongside the DL number
+                // in bg_driver_license; either or both may be provided).
+                {"bg_state_id TEXT", "bg_state_id"},
                 // Appendix 4 -- portal access (optional).
                 {"portal_platform VARCHAR(255)", "portal_platform"},
                 {"portal_username VARCHAR(255)", "portal_username"},
@@ -1336,6 +1339,10 @@ public class DataSeeder implements CommandLineRunner {
                 {"dl_doc_public_id VARCHAR(255)", "dl_doc_public_id"},
                 {"dl_doc_uploaded_at TIMESTAMP", "dl_doc_uploaded_at"},
                 {"dl_doc_content_type VARCHAR(64)", "dl_doc_content_type"},
+                // Build AK — State-ID document (mirrors the DL doc columns).
+                {"state_id_doc_public_id VARCHAR(255)", "state_id_doc_public_id"},
+                {"state_id_doc_uploaded_at TIMESTAMP", "state_id_doc_uploaded_at"},
+                {"state_id_doc_content_type VARCHAR(64)", "state_id_doc_content_type"},
                 {"ssn_doc_public_id VARCHAR(255)", "ssn_doc_public_id"},
                 {"ssn_doc_uploaded_at TIMESTAMP", "ssn_doc_uploaded_at"},
                 {"ssn_doc_content_type VARCHAR(64)", "ssn_doc_content_type"},
@@ -1368,6 +1375,7 @@ public class DataSeeder implements CommandLineRunner {
                 {"work_auth_doc_s3_key VARCHAR(512)", "work_auth_doc_s3_key"},
                 {"offer_letter_s3_key VARCHAR(512)", "offer_letter_s3_key"},
                 {"dl_doc_s3_key VARCHAR(512)", "dl_doc_s3_key"},
+                {"state_id_doc_s3_key VARCHAR(512)", "state_id_doc_s3_key"},
                 {"ssn_doc_s3_key VARCHAR(512)", "ssn_doc_s3_key"},
                 {"signature_s3_key VARCHAR(512)", "signature_s3_key"},
                 {"final_signature_s3_key VARCHAR(512)", "final_signature_s3_key"},

@@ -59,6 +59,7 @@ import {
   uploadConsultantWorkAuthDoc,
   uploadConsultantOfferLetter,
   uploadConsultantDlDoc,
+  uploadConsultantStateIdDoc,
   uploadConsultantSsnDoc,
   parsePortalEntries,
   type PortalEntry,
@@ -334,6 +335,7 @@ function isSectionComplete(
   workAuthUploaded: boolean,
   offerLetterUploaded: boolean,
   dlDocUploaded: boolean,
+  stateIdDocUploaded: boolean,
 ): boolean {
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
@@ -356,10 +358,18 @@ function isSectionComplete(
   if (section.id === "appendix1" && isSectionActive(section, form, reqs)) {
     if (!offerLetterUploaded) return false;
   }
-  // Build J — Appendix 3 completeness: when it applies, the DL / State-ID
-  // document must be uploaded (the SSN document is always optional).
+  // Build AK — Appendix 3 completeness: the consultant may provide a Driver's
+  // License AND/OR a State ID. At least ONE must be provided, and any ID they
+  // START (a number OR a document) must be COMPLETE (number + document). The
+  // SSN document is always optional.
   if (section.id === "appendix3" && isSectionActive(section, form, reqs)) {
-    if (!dlDocUploaded) return false;
+    const dlNum = (form.fields["bgDriverLicense"] ?? "").trim().length > 0;
+    const stateNum = (form.fields["bgStateId"] ?? "").trim().length > 0;
+    const dlProvided = dlNum || dlDocUploaded;
+    const stateProvided = stateNum || stateIdDocUploaded;
+    if (!dlProvided && !stateProvided) return false;
+    if (dlProvided && (!dlNum || !dlDocUploaded)) return false;
+    if (stateProvided && (!stateNum || !stateIdDocUploaded)) return false;
   }
   // Build J — Appendix 4 completeness: at least one COMPLETE platform +
   // username entry is required when the section applies.
@@ -436,10 +446,11 @@ function firstIncompleteIndex(
   workAuthUploaded: boolean,
   offerLetterUploaded: boolean,
   dlDocUploaded: boolean,
+  stateIdDocUploaded: boolean,
 ): number {
   for (let i = 0; i < sections.length - 1; i++) {
     if (!isSectionComplete(sections[i], form, reqs, chequeEntries,
-        workAuthUploaded, offerLetterUploaded, dlDocUploaded)) return i;
+        workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded)) return i;
   }
   return sections.length - 1;
 }
@@ -469,11 +480,32 @@ function filterVisibleSections(
  * absent from the wizard, navigator, progress, and submit jumps (mirrors
  * the backend write-scope enforcement). Empty selection ⇒ unrestricted.
  */
+/**
+ * Build AK — per-document re-upload revision. Each dedicated "doc:<x>" scope
+ * key maps to the wizard section that hosts that upload tile, so the consultant
+ * sees exactly that section with the (ERM-cleared) document to redo. Kept in one
+ * place so the visibility, forced-required, and banner logic all agree.
+ */
+const DOC_REVISION_HOST_SECTION: Record<string, string> = {
+  "doc:workauth": "cover",
+  "doc:offer-letter": "appendix1",
+  "doc:dl-doc": "appendix3",
+  "doc:state-id": "appendix3",
+  // Note: no "doc:ssn-doc" — the SSN document is optional and not re-requestable.
+  "doc:cheque": "appendix5",
+};
+
 function restrictedVisibleSections(
   selectedKeys: string[],
   includePrimarySign = false,
 ): readonly AgreementSection[] {
   const set = new Set(selectedKeys);
+  // Build AK — expand any document re-upload key to the section that hosts
+  // its upload tile, so the consultant can reach the (cleared) upload.
+  for (const k of selectedKeys) {
+    const host = DOC_REVISION_HOST_SECTION[k];
+    if (host) set.add(host);
+  }
   // Build AJ — a signature-only revision (the ERM "signature" scope) re-signs
   // BOTH steps: the primary on main-agreement + the execution on review. The
   // backend cleared both stored signatures, so main-agreement's signature pad
@@ -577,10 +609,14 @@ export default function ConsultantWizardPage() {
   const [offerLetterUploaded, setOfferLetterUploaded] = useState(false);
   const [offerLetterUploadError, setOfferLetterUploadError] = useState("");
   const [offerLetterUploading, setOfferLetterUploading] = useState(false);
-  // Build J — Background Check upload state (DL/State-ID required; SSN optional).
+  // Build J/AK — Background Check upload state. DL + State-ID docs (at least
+  // one required, both if both provided); SSN optional.
   const [dlDocUploaded, setDlDocUploaded] = useState(false);
   const [dlDocUploadError, setDlDocUploadError] = useState("");
   const [dlDocUploading, setDlDocUploading] = useState(false);
+  const [stateIdDocUploaded, setStateIdDocUploaded] = useState(false);
+  const [stateIdDocUploadError, setStateIdDocUploadError] = useState("");
+  const [stateIdDocUploading, setStateIdDocUploading] = useState(false);
   const [ssnDocUploaded, setSsnDocUploaded] = useState(false);
   const [ssnDocUploadError, setSsnDocUploadError] = useState("");
   const [ssnDocUploading, setSsnDocUploading] = useState(false);
@@ -660,6 +696,7 @@ export default function ConsultantWizardPage() {
         setWorkAuthUploaded(Boolean(data.workAuthDocPublicId || data.workAuthDocS3Key));
         setOfferLetterUploaded(Boolean(data.offerLetterPublicId || data.offerLetterS3Key));
         setDlDocUploaded(Boolean(data.dlDocPublicId || data.dlDocS3Key));
+        setStateIdDocUploaded(Boolean(data.stateIdDocPublicId || data.stateIdDocS3Key));
         setSsnDocUploaded(Boolean(data.ssnDocPublicId || data.ssnDocS3Key));
         // Build X — resume at the first incomplete section across the
         // VISIBLE set (core + ERM-required appendices). Hidden
@@ -681,8 +718,10 @@ export default function ConsultantWizardPage() {
         const loadedWorkAuth = Boolean(data.workAuthDocPublicId || data.workAuthDocS3Key);
         const loadedOffer = Boolean(data.offerLetterPublicId || data.offerLetterS3Key);
         const loadedDl = Boolean(data.dlDocPublicId || data.dlDocS3Key);
+        const loadedStateId = Boolean(data.stateIdDocPublicId || data.stateIdDocS3Key);
         setCurrentStep(firstIncompleteIndex(
-            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer, loadedDl));
+            loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer,
+            loadedDl, loadedStateId));
       })
       .catch((e) => {
         if (cancelled) return;
@@ -715,6 +754,15 @@ export default function ConsultantWizardPage() {
     () => new Set(revisionScopeKeys(app)),
     [app],
   );
+
+  // Build AK — a document-only re-upload round (every scope key is a "doc:*"
+  // key). The host section is shown only so the consultant can reach the
+  // upload tile; its form fields are dropped by computeDelta, so lock them to
+  // avoid edits that would silently fail to save.
+  const docOnlyRevision = useMemo(() => {
+    const keys = revisionScopeKeys(app);
+    return keys.length > 0 && keys.every((k) => k.startsWith("doc:"));
+  }, [app]);
 
   // Auto-save (reuses Phase 5 internals) ───────────────────────
   const computeDelta = useCallback(
@@ -987,7 +1035,7 @@ export default function ConsultantWizardPage() {
     [appId],
   );
 
-  // Build J — Background Check DL/State-ID document upload (required).
+  // Build J/AK — Background Check Driver's License document upload.
   const handleDlDocUpload = useCallback(
     async (file: File) => {
       if (!appId) return;
@@ -1000,6 +1048,24 @@ export default function ConsultantWizardPage() {
         setDlDocUploadError(e instanceof Error ? e.message : "Couldn't upload.");
       } finally {
         setDlDocUploading(false);
+      }
+    },
+    [appId],
+  );
+
+  // Build AK — Background Check State-ID document upload.
+  const handleStateIdDocUpload = useCallback(
+    async (file: File) => {
+      if (!appId) return;
+      setStateIdDocUploadError("");
+      setStateIdDocUploading(true);
+      try {
+        await uploadConsultantStateIdDoc(appId, file);
+        setStateIdDocUploaded(true);
+      } catch (e) {
+        setStateIdDocUploadError(e instanceof Error ? e.message : "Couldn't upload.");
+      } finally {
+        setStateIdDocUploading(false);
       }
     },
     [appId],
@@ -1049,6 +1115,12 @@ export default function ConsultantWizardPage() {
       else if (k === "appendix3") o.appendix3 = true;
       else if (k === "appendix4") o.appendix4 = true;
       else if (k === "appendix5") o.appendix5 = true;
+      // Build AK — a document re-upload forces its hosting appendix required
+      // so the section stays active and its cleared upload gates completion.
+      // (doc:workauth → cover, which is CORE/always-active, so no flag needed.)
+      else if (k === "doc:offer-letter") o.appendix1 = true;
+      else if (k === "doc:dl-doc" || k === "doc:state-id") o.appendix3 = true;
+      else if (k === "doc:cheque") o.appendix5 = true;
     }
     return o;
   }, [app]);
@@ -1201,14 +1273,14 @@ export default function ConsultantWizardPage() {
         const complete =
           i === visibleSections.length - 1
             ? visibleSections.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded),
+                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded);
+            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded);
   const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -1218,12 +1290,12 @@ export default function ConsultantWizardPage() {
   const allComplete = useMemo(
     () =>
       visibleSections.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded),
+        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, attestation, previewSeen],
   );
 
   // Build AB — never let Submit be a silent no-op on mobile. When the agreement
@@ -1245,7 +1317,7 @@ export default function ConsultantWizardPage() {
     // blocks advancing past one — but handle it): jump back to fix it.
     const firstIncomplete = visibleSections.slice(0, -1).findIndex(
       (s) => !isSectionComplete(
-        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded),
+        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded),
     );
     if (firstIncomplete >= 0) {
       setSubmitError("Some sections still need attention before you can submit.");
@@ -1269,7 +1341,7 @@ export default function ConsultantWizardPage() {
     }
     setSubmitError("Some items are still needed before you can submit.");
   }, [allComplete, handleSubmit, visibleSections, form, reqs, chequeEntries,
-      workAuthUploaded, offerLetterUploaded, dlDocUploaded, previewSeen, attestation]);
+      workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, previewSeen, attestation]);
 
   // Build AB — clear the submit error once everything is satisfied.
   useEffect(() => {
@@ -1310,6 +1382,9 @@ export default function ConsultantWizardPage() {
       if (k === "dlDoc") {
         return !dlDocUploaded;
       }
+      if (k === "stateIdDoc") {
+        return !stateIdDocUploaded;
+      }
       // Build J — Appendix 4 needs ≥1 complete platform+username entry.
       if (k === "portalEntries") {
         const entries = parsePortalEntries(form.fields["portalEntries"]);
@@ -1345,7 +1420,7 @@ export default function ConsultantWizardPage() {
       missingSignature: missingSig,
       missingFinalSignature: missingFinalSig,
     };
-  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded]);
+  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded]);
 
   // Build W — auto-dismiss the panel the moment the list empties.
   useEffect(() => {
@@ -1579,6 +1654,8 @@ export default function ConsultantWizardPage() {
                   <p className="text-xs text-stone-600 mt-2">
                     {revisionScopeKeys(app).includes("signature")
                       ? "Re-draw your signature on the pages below and submit to send it back for verification. Your details are unchanged — only your signature needs redoing."
+                      : revisionScopeKeys(app).some((k) => k.startsWith("doc:"))
+                      ? "Re-upload the requested document(s) on the pages below, then re-sign and submit to send it back for verification. Your details are unchanged — only the flagged document(s) need replacing."
                       : revisionScopeKeys(app).length > 0
                       ? "Only the section(s) Sage IT flagged are shown below. Update them, re-affirm, re-sign, and submit to send it back for verification."
                       : "Update the highlighted fields, then submit to send it back for verification."}
@@ -1603,6 +1680,7 @@ export default function ConsultantWizardPage() {
             workAuthUploaded={workAuthUploaded}
             offerLetterUploaded={offerLetterUploaded}
             dlDocUploaded={dlDocUploaded}
+            stateIdDocUploaded={stateIdDocUploaded}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -1635,6 +1713,7 @@ export default function ConsultantWizardPage() {
             onSignature={setSignature}
             onLegalName={setLegalName}
             revision={!visibleSections.some((s) => s.id === "main-agreement")}
+            lockFields={docOnlyRevision}
             consultantEmail={app.consultantEmail}
             effectiveDateText={formatUsDate(app.effectiveDate)}
             onOpenTemplate={() => setTemplateOpen(true)}
@@ -1668,6 +1747,14 @@ export default function ConsultantWizardPage() {
             missingDlDoc={
               section.id === "appendix3"
               && missingByField.has("dlDoc")
+            }
+            stateIdDocUploaded={stateIdDocUploaded}
+            stateIdDocUploading={stateIdDocUploading}
+            stateIdDocError={stateIdDocUploadError}
+            onUploadStateIdDoc={(f) => void handleStateIdDocUpload(f)}
+            missingStateIdDoc={
+              section.id === "appendix3"
+              && missingByField.has("stateIdDoc")
             }
             ssnDocUploaded={ssnDocUploaded}
             ssnDocUploading={ssnDocUploading}
@@ -2052,6 +2139,11 @@ function SectionStep({
   dlDocError,
   onUploadDlDoc,
   missingDlDoc,
+  stateIdDocUploaded,
+  stateIdDocUploading,
+  stateIdDocError,
+  onUploadStateIdDoc,
+  missingStateIdDoc,
   ssnDocUploaded,
   ssnDocUploading,
   ssnDocError,
@@ -2069,6 +2161,7 @@ function SectionStep({
   missingSignature,
   missingCheques,
   revision,
+  lockFields = false,
 }: {
   section: AgreementSection;
   content: AgreementContent | null;
@@ -2105,12 +2198,18 @@ function SectionStep({
   offerLetterError: string;
   onUploadOfferLetter: (file: File) => void;
   missingOfferLetter: boolean;
-  /** Build J — Background Check DL/State-ID (required) + SSN (optional) uploads. */
+  /** Build J/AK — Background Check Driver's License + State-ID (at least one)
+   *  + SSN (optional) document uploads. */
   dlDocUploaded: boolean;
   dlDocUploading: boolean;
   dlDocError: string;
   onUploadDlDoc: (file: File) => void;
   missingDlDoc: boolean;
+  stateIdDocUploaded: boolean;
+  stateIdDocUploading: boolean;
+  stateIdDocError: string;
+  onUploadStateIdDoc: (file: File) => void;
+  missingStateIdDoc: boolean;
   ssnDocUploaded: boolean;
   ssnDocUploading: boolean;
   ssnDocError: string;
@@ -2130,6 +2229,9 @@ function SectionStep({
    *  revision); the per-section signature preview is covered by the
    *  review-step execution signature, not the (absent) main-step primary. */
   revision: boolean;
+  /** Build AK — a doc-only re-upload round: lock this section's form fields so
+   *  the consultant can only interact with the upload tile(s). */
+  lockFields?: boolean;
   submitting: boolean;
   isFirstStep: boolean;
   onReadProgress: (pct: number) => void;
@@ -2464,7 +2566,10 @@ function SectionStep({
                     revealed={revealed.has(field.key)}
                     onRevealToggle={(on) => onRevealed(field.key, on)}
                     needsAttention={missingFieldKeys.has(field.key)}
-                    locked={sameAsResidence && CURRENT_ADDRESS_KEYS.has(field.key)}
+                    locked={
+                      lockFields
+                      || (sameAsResidence && CURRENT_ADDRESS_KEYS.has(field.key))
+                    }
                   />
                 ))}
               </div>
@@ -2503,16 +2608,38 @@ function SectionStep({
 
           {section.id === "appendix3" && (
             <div className="space-y-4">
+              {/* Build AK — provide a Driver's License AND/OR a State ID. At
+                  least one is required; whichever you provide needs both its
+                  number (above) and its document. */}
+              <p className="text-[12px] text-stone-600">
+                Provide a <strong>Driver&apos;s License</strong> and/or a{" "}
+                <strong>State ID</strong> — at least one is required. For each one
+                you provide, enter its number above and upload its document below.
+              </p>
               <div id="field-dlDoc">
                 <DocUploadBlock
-                  title="Driver's License / State ID document"
-                  description="Upload a copy of your Driver's License or State ID — an image or PDF (≤10 MB)."
+                  title="Driver's License document"
+                  description="Upload a copy of your Driver's License — an image or PDF (≤10 MB)."
                   inputId="dldoc-file"
                   uploaded={dlDocUploaded}
                   uploading={dlDocUploading}
                   error={dlDocError}
                   onUpload={onUploadDlDoc}
                   needsAttention={missingDlDoc}
+                  optional
+                />
+              </div>
+              <div id="field-stateIdDoc">
+                <DocUploadBlock
+                  title="State ID document"
+                  description="Upload a copy of your State ID — an image or PDF (≤10 MB)."
+                  inputId="stateiddoc-file"
+                  uploaded={stateIdDocUploaded}
+                  uploading={stateIdDocUploading}
+                  error={stateIdDocError}
+                  onUpload={onUploadStateIdDoc}
+                  needsAttention={missingStateIdDoc}
+                  optional
                 />
               </div>
               <div id="field-ssnDoc">
@@ -4199,6 +4326,7 @@ function ReviewStep({
   workAuthUploaded,
   offerLetterUploaded,
   dlDocUploaded,
+  stateIdDocUploaded,
   attestation,
   onAttestation,
   previewSeen,
@@ -4224,6 +4352,7 @@ function ReviewStep({
   workAuthUploaded: boolean;
   offerLetterUploaded: boolean;
   dlDocUploaded: boolean;
+  stateIdDocUploaded: boolean;
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -4311,7 +4440,7 @@ function ReviewStep({
       </div>
 
       {visibleSections.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix

@@ -294,6 +294,27 @@ public class ConsultantApplicationController {
     }
 
     /**
+     * Build AK — ERM "Request document re-upload": a per-document revision.
+     * Clears the requested uploaded document(s) so the consultant must upload
+     * fresh files (content/signatures untouched) and bounces the agreement
+     * back. Used when the consultant uploaded a wrong or inappropriate file.
+     */
+    @PostMapping("/api/agreement-erm/applications/{appId}/request-document-revision")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> ermRequestDocumentRevision(
+            @PathVariable String appId,
+            @RequestBody(required = false) DocumentRevisionBody body,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Document re-upload requested",
+                consultantService.ermRequestDocumentRevision(
+                        appId,
+                        body == null ? null : body.docKeys,
+                        body == null ? null : body.note,
+                        request)));
+    }
+
+    /**
      * 3B — ERM "Send for Approval". Routes a consultant-signed,
      * consultant-version-released agreement to the phase's required
      * approvers (Phase 1 = Manager; Phase 2 = Manager + Accounts). Also
@@ -771,7 +792,7 @@ public class ConsultantApplicationController {
 
     // ── Build J — Background Check document uploads (DL/State-ID + SSN) ──
 
-    /** Consultant uploads their Driver's-License / State-ID document. */
+    /** Consultant uploads their Driver's License document. */
     @PostMapping("/api/consultant/applications/{appId}/dl-doc")
     public ResponseEntity<ApiResponse<Map<String, Object>>> uploadDlDoc(
             @PathVariable String appId,
@@ -792,7 +813,7 @@ public class ConsultantApplicationController {
                     .body(ApiResponse.error("Couldn't read uploaded file."));
         }
         return ResponseEntity.ok(ApiResponse.success(
-                Map.of("message", "Driver's License / State ID document uploaded.")));
+                Map.of("message", "Driver's License document uploaded.")));
     }
 
     @GetMapping("/api/consultant/applications/{appId}/dl-doc")
@@ -822,7 +843,61 @@ public class ConsultantApplicationController {
         } catch (java.io.IOException e) {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
-        return streamDoc(doc, "SageITCO-IDDoc_" + appId, disposition);
+        return streamDoc(doc, "SageITCO-DLDoc_" + appId, disposition);
+    }
+
+    /** Build AK — consultant uploads their State-ID document. */
+    @PostMapping("/api/consultant/applications/{appId}/state-id-doc")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> uploadStateIdDoc(
+            @PathVariable String appId,
+            @RequestParam("file") MultipartFile file,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        if (!rateLimiter.allowUpload(appId)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
+        }
+        if (file == null || file.isEmpty()) {
+            return ResponseEntity.badRequest().body(ApiResponse.error("File is required."));
+        }
+        try {
+            consultantService.uploadStateIdDoc(appId, file.getBytes(), file.getContentType(), request);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY)
+                    .body(ApiResponse.error("Couldn't read uploaded file."));
+        }
+        return ResponseEntity.ok(ApiResponse.success(
+                Map.of("message", "State ID document uploaded.")));
+    }
+
+    @GetMapping("/api/consultant/applications/{appId}/state-id-doc")
+    public ResponseEntity<byte[]> consultantViewStateIdDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        requireConsultantToken(appId, request);
+        return streamStateIdDoc(appId, disposition);
+    }
+
+    @GetMapping("/api/agreement-erm/applications/{appId}/state-id-doc")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<byte[]> ermViewStateIdDoc(
+            @PathVariable String appId,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.getByApplicationId(appId);
+        consultantService.assertErmCanAccess(app, request);
+        return streamStateIdDoc(appId, disposition);
+    }
+
+    private ResponseEntity<byte[]> streamStateIdDoc(String appId, String disposition) {
+        ConsultantApplicationService.ChequeBytes doc;
+        try {
+            doc = consultantService.fetchStateIdDocBytes(appId);
+        } catch (java.io.IOException e) {
+            return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
+        }
+        return streamDoc(doc, "SageITCO-StateIDDoc_" + appId, disposition);
     }
 
     /** Consultant uploads their (optional) SSN document. */
@@ -1593,6 +1668,17 @@ public class ConsultantApplicationController {
 
     /** Build AJ — signature-only revision: an optional note for the consultant. */
     public static class SignatureRevisionBody {
+        public String note;
+    }
+
+    /**
+     * Build AK — document-only revision: the document keys to re-request
+     * ({@code doc:workauth}, {@code doc:offer-letter}, {@code doc:dl-doc},
+     * {@code doc:state-id}, {@code doc:ssn-doc}, {@code doc:cheque}) + an
+     * optional note.
+     */
+    public static class DocumentRevisionBody {
+        public java.util.List<String> docKeys;
         public String note;
     }
 

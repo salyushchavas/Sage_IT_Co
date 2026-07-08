@@ -3328,6 +3328,11 @@ export interface ConsultantApplication {
   dlDocS3Key?: string | null;
   dlDocContentType: string | null;
   dlDocUploadedAt: string | null;
+  // Build AK — State-ID document (mirrors the DL doc pointers).
+  stateIdDocPublicId: string | null;
+  stateIdDocS3Key?: string | null;
+  stateIdDocContentType: string | null;
+  stateIdDocUploadedAt: string | null;
   ssnDocPublicId: string | null;
   ssnDocS3Key?: string | null;
   ssnDocContentType: string | null;
@@ -3357,6 +3362,8 @@ export interface ConsultantApplication {
   bgDateOfBirth: string | null;
   bgFullSsn: string | null;
   bgDriverLicense: string | null;
+  // Build AK — State-ID number (alongside the DL number; either or both).
+  bgStateId: string | null;
   // Appendix 4 -- portal access
   portalPlatform: string | null;
   portalUsername: string | null;
@@ -3570,6 +3577,8 @@ export interface ConsultantFillPayload {
   bgDateOfBirth?: string;
   bgFullSsn?: string;
   bgDriverLicense?: string;
+  // Build AK — State-ID number.
+  bgStateId?: string;
   portalPlatform?: string;
   portalUsername?: string;
   // Build J — repeatable platform+username entries (JSON-in-TEXT).
@@ -4157,6 +4166,23 @@ export async function ermRequestSignatureRevision(
   );
 }
 
+/**
+ * Build AK — ERM "Request document re-upload": a per-document revision. Clears
+ * the requested uploaded document(s) so the consultant must upload fresh files
+ * (their other details stay unchanged) and bounces the agreement back. Doc
+ * keys: doc:workauth, doc:offer-letter, doc:dl-doc, doc:ssn-doc, doc:cheque.
+ */
+export async function ermRequestDocumentRevision(
+  applicationId: string,
+  docKeys: string[],
+  note?: string,
+) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/request-document-revision`,
+    { method: "POST", body: JSON.stringify({ docKeys, note: note ?? "" }) },
+  );
+}
+
 export async function ermApproveAndSign(
   applicationId: string,
   body: { ermName: string; ermTitle: string; ermSignatureBase64: string },
@@ -4672,6 +4698,16 @@ export async function uploadConsultantDlDoc(
   const form = new FormData();
   form.append("file", file);
   await consultantMultipartFetch(applicationId, "/dl-doc", form);
+}
+
+/** Build AK — upload the Background Check State-ID document. */
+export async function uploadConsultantStateIdDoc(
+  applicationId: string,
+  file: File,
+): Promise<void> {
+  const form = new FormData();
+  form.append("file", file);
+  await consultantMultipartFetch(applicationId, "/state-id-doc", form);
 }
 
 /** Build J — upload the (optional) Background Check SSN document. */
