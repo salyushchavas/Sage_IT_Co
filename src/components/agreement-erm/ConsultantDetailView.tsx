@@ -3316,6 +3316,7 @@ function ApproveAndSignModal({
 
       <div className="mt-4">
         <SignaturePad
+          suggestedName={ermName}
           onChange={setSignature}
           disabled={busy}
           fileInputId="erm-sig-upload"

@@ -3159,6 +3159,7 @@ function SignatureBlock({
       {shouldShowPad ? (
         <div>
           <SignaturePad
+            suggestedName={legalName}
             onChange={(data) => {
               onSignature(data);
               if (data) setRedrawing(false);
@@ -4804,6 +4805,7 @@ function FinalSignatureBlock({
       {shouldShowPad ? (
         <div>
           <SignaturePad
+            suggestedName={legalName}
             onChange={(data) => {
               onFinalSignature(data);
               if (data) setRedrawing(false);

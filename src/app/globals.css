@@ -2,6 +2,28 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Build AM — self-hosted handwriting fonts for the "Type" signature option
+   (three generated styles). Self-hosted (public/fonts) so the signature
+   rasterises deterministically to canvas with no CDN dependency. */
+@font-face {
+  font-family: "Sage Sig Flowing";
+  src: url("/fonts/DancingScript.woff2") format("woff2");
+  font-weight: 600;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Sage Sig Elegant";
+  src: url("/fonts/GreatVibes.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+@font-face {
+  font-family: "Sage Sig Casual";
+  src: url("/fonts/Sacramento.woff2") format("woff2");
+  font-weight: 400;
+  font-display: swap;
+}
+
 :root {
   --background: #FAFAF7;
   --foreground: #0a0a0a;
