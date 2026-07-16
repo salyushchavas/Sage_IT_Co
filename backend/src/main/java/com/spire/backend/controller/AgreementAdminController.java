@@ -239,10 +239,14 @@ public class AgreementAdminController {
     }
 
     /**
-     * Update a console user's display details — full name + title (the Name /
-     * Title that render in the agreement signature block). Cosmetic identity
-     * fields; the login email and role have their own flows. Allowed for every
-     * user including the super-admin. Both are trimmed, required, length-bounded.
+     * Update a console user's details — full name + title (the Name / Title
+     * that render in the agreement signature block) and, optionally, the login
+     * email. Name/title are allowed for every user including the super-admin;
+     * the EMAIL is blocked for the super-admin (its account is re-provisioned
+     * from AGREEMENT_SUPER_ADMIN_EMAIL at boot — changing the stored email
+     * would mint a duplicate admin on the next restart). An email change takes
+     * effect at the user's next login; sessions already issued stay valid
+     * until they expire (authorization rides on the user-id claim).
      */
     @PatchMapping("/users/{id}/details")
     @Transactional
@@ -267,6 +271,27 @@ public class AgreementAdminController {
         }
         AgreementUser user = agreementUserRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
+
+        // Build AN — optional login-email change (omitted / blank = unchanged).
+        String email = body == null || body.email == null
+                ? "" : body.email.trim().toLowerCase();
+        if (!email.isEmpty() && !email.equalsIgnoreCase(user.getEmail())) {
+            if (user.getRole() == AgreementUserRole.SUPER_ADMIN) {
+                throw new IllegalStateException(
+                        "The super-admin's email is provisioned from the environment "
+                                + "and cannot be changed from the console.");
+            }
+            if (email.length() > 255
+                    || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$")) {
+                throw new IllegalArgumentException("Enter a valid email address.");
+            }
+            if (agreementUserRepository.existsByEmailIgnoreCase(email)) {
+                // 409 via GlobalExceptionHandler(IllegalStateException).
+                throw new IllegalStateException("Email already in use.");
+            }
+            user.setEmail(email);
+        }
+
         user.setFullName(fullName);
         user.setTitle(title);
         user = agreementUserRepository.save(user);
@@ -369,6 +394,8 @@ public class AgreementAdminController {
     public static class DetailsBody {
         public String fullName;
         public String title;
+        /** Build AN — optional new login email; omitted/blank = unchanged. */
+        public String email;
     }
 
     public static class SendCredentialsBody {

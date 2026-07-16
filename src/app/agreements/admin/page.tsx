@@ -266,8 +266,9 @@ export default function AgreementsAdminPage() {
                       </td>
                       <td className="px-4 py-2">
                         <div className="flex items-center justify-end gap-2 flex-wrap">
-                          {/* Edit the display details (name + title shown in
-                              the signature block). Available for every user. */}
+                          {/* Edit the user's details — name + title (signature
+                              block) and, except for the super-admin, the login
+                              email (Build AN). Available for every user. */}
                           <button
                             type="button"
                             onClick={() => setDetailsTarget(u)}
@@ -889,7 +890,7 @@ function ResetPasswordModal({
   );
 }
 
-// ── Edit details modal (name + title) ───────────────────────────
+// ── Edit details modal (name + email + title) ───────────────────
 
 function EditDetailsModal({
   user,
@@ -902,16 +903,32 @@ function EditDetailsModal({
 }) {
   const [fullName, setFullName] = useState(user.fullName ?? "");
   const [title, setTitle] = useState(user.title ?? "");
+  const [email, setEmail] = useState(user.email ?? "");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
 
+  // Build AN — the super-admin's login email is provisioned from the
+  // environment at boot; editing it here would mint a duplicate admin on the
+  // next restart, so the field is locked for that account.
+  const emailLocked = user.role === "SUPER_ADMIN";
+
   const trimmedName = fullName.trim();
   const trimmedTitle = title.trim();
+  const trimmedEmail = email.trim().toLowerCase();
+  const emailChanged =
+    !emailLocked && trimmedEmail !== (user.email ?? "").trim().toLowerCase();
+  const emailValid =
+    !emailChanged || /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(trimmedEmail);
   const changed =
     trimmedName !== (user.fullName ?? "").trim() ||
-    trimmedTitle !== (user.title ?? "").trim();
+    trimmedTitle !== (user.title ?? "").trim() ||
+    emailChanged;
   const canSubmit =
-    trimmedName.length > 0 && trimmedTitle.length > 0 && changed && !submitting;
+    trimmedName.length > 0 &&
+    trimmedTitle.length > 0 &&
+    emailValid &&
+    changed &&
+    !submitting;
 
   const handleSubmit = async () => {
     setError("");
@@ -919,11 +936,16 @@ function EditDetailsModal({
       setError("Name and title are both required.");
       return;
     }
+    if (!emailValid) {
+      setError("Enter a valid email address.");
+      return;
+    }
     setSubmitting(true);
     try {
       await adminUpdateUserDetails(user.id, {
         fullName: trimmedName,
         title: trimmedTitle,
+        ...(emailChanged ? { email: trimmedEmail } : {}),
       });
       onDone();
     } catch (e) {
@@ -946,6 +968,21 @@ function EditDetailsModal({
             autoFocus
           />
         </ModalField>
+        <ModalField label="Login email" required>
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            disabled={submitting || emailLocked}
+            placeholder="jane@sageitco.com"
+            className={modalInput}
+          />
+          <p className="mt-1 text-[10px] text-gray-400">
+            {emailLocked
+              ? "The super-admin email is set from the environment and can't be changed here."
+              : "Changing the email takes effect at their next sign-in — they'll log in with the new address."}
+          </p>
+        </ModalField>
         <ModalField label="Title" required>
           <input
             type="text"
@@ -957,8 +994,7 @@ function EditDetailsModal({
           />
           <p className="mt-1 text-[10px] text-gray-400">
             Name + title show in the console and stamp into the agreement
-            signature block. To change the login email or role, use those
-            actions.
+            signature block. To change the role, use the role action.
           </p>
         </ModalField>
 

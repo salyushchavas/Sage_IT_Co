@@ -3877,10 +3877,15 @@ export async function adminResetUserPassword(id: string, newPassword: string) {
   );
 }
 
-/** Update a console user's display details — name + title (signature block). */
+/**
+ * Update a console user's details — name + title (signature block) and,
+ * optionally, the login email (Build AN; blocked for the super-admin, whose
+ * account is provisioned from the environment). Omit `email` to leave it
+ * unchanged.
+ */
 export async function adminUpdateUserDetails(
   id: string,
-  details: { fullName: string; title: string },
+  details: { fullName: string; title: string; email?: string },
 ) {
   return agreementAdminFetch<AgreementUserDto>(
     `/api/agreements/admin/users/${id}/details`,
