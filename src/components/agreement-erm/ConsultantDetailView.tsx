@@ -1865,9 +1865,18 @@ function SecurityChequeCard({
   // Build U — pull the cheque list from the JSON column, falling back
   // to the legacy single cheque as index 0 (handled by parseChequeList
   // on the backend before serialization; mirror it here).
+  // Build AO — the consultant's DECLARED cheque count (0 = not set).
+  const chequeCount = useMemo(() => {
+    const n = parseInt(String(app.securityCheckCount ?? "").trim(), 10);
+    return Number.isFinite(n) && n > 0 ? Math.min(n, 50) : 0;
+  }, [app.securityCheckCount]);
+
   const entries = useMemo<ChequeEntry[]>(() => {
     const parsed = parseChequeList(app.cheques ?? null);
-    if (parsed.length > 0) return parsed;
+    // Build AO — cap to the declared count so stale over-clicked entries the
+    // consultant left behind (after reducing the count) don't render here.
+    const capped = chequeCount > 0 ? parsed.filter((e) => e.index < chequeCount) : parsed;
+    if (capped.length > 0) return capped;
     if (app.chequePublicId || app.chequeS3Key) {
       return [{
         index: 0,
@@ -1880,7 +1889,7 @@ function SecurityChequeCard({
       }];
     }
     return [];
-  }, [app.cheques, app.chequePublicId, app.chequeS3Key, app.chequeContentType, app.chequeUploadedAt]);
+  }, [app.cheques, chequeCount, app.chequePublicId, app.chequeS3Key, app.chequeContentType, app.chequeUploadedAt]);
 
   const uploadedCount = entries.filter((e) => e.publicId || e.s3Key).length;
 

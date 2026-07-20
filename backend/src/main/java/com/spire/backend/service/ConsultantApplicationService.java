@@ -1488,6 +1488,11 @@ public class ConsultantApplicationService {
         // submit, where the copy was never released.
         app.setConsultantCopyReleased(false);
         app.setConsultantCopyReleasedAt(null);
+        // Build AO — drop any stale over-clicked cheque entries beyond the
+        // declared count so the stored list matches what the consultant signed
+        // (the render + ERM view already cap on read; this cleans storage so a
+        // later count increase doesn't resurface old numbers).
+        pruneChequesToDeclaredCount(app);
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
         applicationRepository.save(app);
         log.info("[submit] SUCCESS appId={} {} -> VERIFIED", applicationId, fromStatus);
@@ -2033,6 +2038,28 @@ public class ConsultantApplicationService {
      * schedule). The per-cheque completeness gate (number + upload) then blocks
      * resubmit until each file is replaced.
      */
+    /**
+     * Build AO — drop cheque entries whose index is at/beyond the declared
+     * {@code securityCheckCount}. When the consultant over-clicks the cheque
+     * count, enters numbers, then reduces the count, the extra entries linger
+     * in the JSON. No-op when the count isn't a positive number (so a non-cheque
+     * agreement's data is never touched).
+     */
+    private void pruneChequesToDeclaredCount(ConsultantApplication app) {
+        int count = parseChequeCountSafe(app.getSecurityCheckCount());
+        if (count <= 0) return;
+        String json = app.getCheques();
+        if (json == null || json.isBlank()) return;
+        java.util.List<ChequeEntry> entries = parseCheques(app);
+        java.util.List<ChequeEntry> kept = new java.util.ArrayList<>();
+        for (ChequeEntry e : entries) {
+            if (e.index() >= 0 && e.index() < count) kept.add(e);
+        }
+        if (kept.size() != entries.size()) {
+            app.setCheques(serialiseCheques(kept));
+        }
+    }
+
     private void clearChequeFiles(ConsultantApplication app) {
         java.util.List<ChequeEntry> entries = parseCheques(app);
         if (!entries.isEmpty()) {

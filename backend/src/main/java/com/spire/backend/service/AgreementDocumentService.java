@@ -1141,12 +1141,18 @@ public class AgreementDocumentService {
         String json = app.getCheques();
         if (json != null && !json.isBlank()) {
             try {
+                // Build AO — cap to the consultant's DECLARED cheque count.
+                // When they over-clicked and later reduced the count, the extra
+                // entries linger in the JSON; without this they'd still render.
+                int count = parseChequeCountSafe(app.getSecurityCheckCount());
                 com.fasterxml.jackson.databind.ObjectMapper m =
                         new com.fasterxml.jackson.databind.ObjectMapper();
                 com.fasterxml.jackson.databind.JsonNode arr = m.readTree(json);
                 if (arr.isArray()) {
                     StringBuilder sb = new StringBuilder();
                     for (com.fasterxml.jackson.databind.JsonNode n : arr) {
+                        int idx = n.path("index").asInt(-1);
+                        if (count > 0 && idx >= count) continue; // stale over-click
                         String v = n.path(key).asText("");
                         if (v.isBlank()) continue;
                         if (sb.length() > 0) sb.append(", ");
@@ -1159,6 +1165,17 @@ public class AgreementDocumentService {
             }
         }
         return legacy == null ? "" : legacy;
+    }
+
+    /** Build AO — parse the consultant-entered cheque count, capped at 50. */
+    private static int parseChequeCountSafe(String raw) {
+        if (raw == null || raw.isBlank()) return 0;
+        try {
+            int n = Integer.parseInt(raw.trim());
+            return n < 0 ? 0 : Math.min(50, n);
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     /**
