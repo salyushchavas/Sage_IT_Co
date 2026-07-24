@@ -3890,6 +3890,8 @@ function DocUploadBlock({
   // Cosmetic only — validation lives in the section's required-items logic.
   optional?: boolean;
 }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+
   return (
     <section
       className={
@@ -3916,8 +3918,11 @@ function DocUploadBlock({
         </p>
       </div>
       <div className="flex items-center gap-3 flex-wrap">
-        <label
-          htmlFor={inputId}
+        <button
+          type="button"
+          aria-controls={inputId}
+          disabled={uploading}
+          onClick={() => fileInputRef.current?.click()}
           className={
             "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border cursor-pointer motion-safe:transition-colors "
             + (uploading
@@ -3937,13 +3942,14 @@ function DocUploadBlock({
               {uploaded ? "Replace file" : "Choose file"}
             </>
           )}
-        </label>
+        </button>
         {uploaded && !uploading && (
           <span className="inline-flex items-center gap-1 text-xs font-semibold text-emerald-800">
             <CheckCircle2 size={13} /> Uploaded
           </span>
         )}
         <input
+          ref={fileInputRef}
           id={inputId}
           type="file"
           accept="image/*,application/pdf"
