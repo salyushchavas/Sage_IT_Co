@@ -1455,7 +1455,8 @@ public class ConsultantApplicationController {
                     app,
                     AgreementDocumentService.consultantPreviewOverrides(primarySig));
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            log.error("Consultant preview render failed for {}", appId, e);
+            return previewFailure(e);
         }
         String filename = AgreementDocumentService.buildPdfFilename(app);
         return ResponseEntity.ok()
@@ -1512,6 +1513,7 @@ public class ConsultantApplicationController {
                 pages.add(java.util.Base64.getEncoder().encodeToString(png));
             }
         } catch (Exception e) {
+            log.error("Consultant preview-images render failed for {}", appId, e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Couldn't render the preview."));
         }
@@ -1553,7 +1555,13 @@ public class ConsultantApplicationController {
             bytes = agreementDocumentService.renderPdfBytes(
                     app, AgreementDocumentService.ermPreviewOverrides());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            // The bare `return 500` this used to be swallowed the cause
+            // entirely: a failing preview left NOTHING in the server log and
+            // nothing on the wire, so "Couldn't render the preview (500)" was
+            // undiagnosable without local repro. Log the stack trace and echo
+            // a short reason back on a header the browser can read.
+            log.error("ERM preview render failed for {}", appId, e);
+            return previewFailure(e);
         }
         String filename = AgreementDocumentService.buildPdfFilename(app);
         return ResponseEntity.ok()
@@ -1563,6 +1571,26 @@ public class ConsultantApplicationController {
                         "inline; filename=\"preview-" + filename + "\"")
                 .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
                 .body(bytes);
+    }
+
+    /**
+     * 500 for a failed PDF render, carrying a SHORT machine-readable reason on
+     * {@code X-Preview-Error} (exception class + message, truncated). The body
+     * stays empty so the client's {@code res.ok} check is unchanged; the header
+     * is what turns "(500)" in the browser into an actual diagnosis. The header
+     * is whitelisted in {@code CorsConfig} — a cross-origin response hides every
+     * non-safelisted header otherwise.
+     */
+    static ResponseEntity<byte[]> previewFailure(Exception e) {
+        String reason = e.getClass().getSimpleName()
+                + (e.getMessage() == null ? "" : ": " + e.getMessage());
+        if (reason.length() > 300) reason = reason.substring(0, 300) + "…";
+        // Header values must be single-line ISO-8859-1; a LibreOffice stderr
+        // dump or a JDBC message can carry newlines and non-ASCII.
+        reason = reason.replaceAll("[\\r\\n]+", " ").replaceAll("[^\\x20-\\x7E]", "?");
+        return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                .header("X-Preview-Error", reason)
+                .build();
     }
 
     private static String clientIp(HttpServletRequest request) {

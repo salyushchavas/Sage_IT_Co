@@ -34,6 +34,7 @@ import java.util.Map;
  */
 @RestController
 @RequiredArgsConstructor
+@lombok.extern.slf4j.Slf4j
 @PreAuthorize("hasAnyRole('AGREEMENT_MANAGER','AGREEMENT_ACCOUNTS')")
 public class AgreementApproverController {
 
@@ -141,7 +142,10 @@ public class AgreementApproverController {
             bytes = agreementDocumentService.renderPdfBytes(
                     app, AgreementDocumentService.ermPreviewOverrides());
         } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+            // Same blind-500 fix as the ERM preview: log the cause and echo a
+            // short reason on X-Preview-Error.
+            log.error("Approver preview render failed for {}", appId, e);
+            return ConsultantApplicationController.previewFailure(e);
         }
         String filename = AgreementDocumentService.buildPdfFilename(app);
         return ResponseEntity.ok()

@@ -2068,33 +2068,92 @@ public class AgreementDocumentService {
 
     // ── LibreOffice headless conversion ─────────────────────────────
 
+    /**
+     * DOCX → PDF via headless LibreOffice.
+     *
+     * Two production hazards this guards against, both of which surfaced as an
+     * undiagnosable 500 on the preview endpoints:
+     *
+     *  1. SHARED USER PROFILE. Without {@code -env:UserInstallation} every
+     *     invocation uses {@code $HOME/.config/libreoffice/4/user}. Two
+     *     concurrent renders (an ERM opening a detail page while a consultant
+     *     previews) contend for that profile's lock file, and the loser exits
+     *     non-zero with no PDF. Worse, a conversion we {@code destroyForcibly}
+     *     on timeout leaves a STALE lock behind, which breaks every subsequent
+     *     conversion in that container until it restarts — i.e. one slow render
+     *     poisons the preview permanently. A private profile per conversion
+     *     makes each run independent.
+     *  2. PIPE-BUFFER DEADLOCK. The old code read the merged output stream only
+     *     AFTER {@code waitFor} returned. LibreOffice's fontconfig/javaldx
+     *     chatter can fill the ~64KB pipe buffer, at which point the child
+     *     blocks on write, never exits, and we report a bogus 60s "timeout".
+     *     The output is now drained concurrently while we wait.
+     */
     private Path convertToPdf(Path docx) throws IOException, InterruptedException {
         Path outDir = docx.getParent();
-        Process p = new ProcessBuilder(
-                "libreoffice", "--headless",
-                "--convert-to", "pdf",
-                "--outdir", outDir.toString(),
-                docx.toString())
-                .redirectErrorStream(true)
-                .start();
-        if (!p.waitFor(LIBREOFFICE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
-            p.destroyForcibly();
-            throw new IOException(
-                    "LibreOffice conversion timed out after "
-                            + LIBREOFFICE_TIMEOUT_SECONDS + "s");
+        Path profileDir = Files.createTempDirectory("lo-profile-");
+        try {
+            Process p = new ProcessBuilder(
+                    "libreoffice",
+                    "-env:UserInstallation=" + profileDir.toUri(),
+                    "--headless",
+                    "--convert-to", "pdf",
+                    "--outdir", outDir.toString(),
+                    docx.toString())
+                    .redirectErrorStream(true)
+                    .start();
+            // Drain concurrently — see hazard 2 above.
+            StringBuilder sink = new StringBuilder();
+            Thread drain = new Thread(() -> {
+                try (InputStream in = p.getInputStream()) {
+                    byte[] buf = new byte[8192];
+                    for (int n; (n = in.read(buf)) > 0; ) {
+                        if (sink.length() < 8192) sink.append(new String(buf, 0, n));
+                    }
+                } catch (IOException ignored) { /* process died; nothing to read */ }
+            });
+            drain.setDaemon(true);
+            drain.start();
+
+            if (!p.waitFor(LIBREOFFICE_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                p.destroyForcibly();
+                drain.join(1_000);
+                throw new IOException(
+                        "LibreOffice conversion timed out after "
+                                + LIBREOFFICE_TIMEOUT_SECONDS + "s. Output: " + sink);
+            }
+            drain.join(2_000);
+            if (p.exitValue() != 0) {
+                throw new IOException(
+                        "LibreOffice failed (exit " + p.exitValue() + "): " + sink);
+            }
+            String pdfName = docx.getFileName().toString()
+                    .replaceFirst("\\.docx$", ".pdf");
+            Path pdf = outDir.resolve(pdfName);
+            if (!Files.exists(pdf)) {
+                // Exit 0 with no output file means LibreOffice bailed early
+                // (unwritable profile, missing filter). Carry its chatter.
+                throw new IOException(
+                        "Expected PDF output missing: " + pdf + ". Output: " + sink);
+            }
+            return pdf;
+        } finally {
+            safeDeleteRecursively(profileDir);
         }
-        if (p.exitValue() != 0) {
-            String err = new String(p.getInputStream().readAllBytes());
-            throw new IOException(
-                    "LibreOffice failed (exit " + p.exitValue() + "): " + err);
+    }
+
+    /** Best-effort recursive delete of a per-conversion LibreOffice profile. */
+    private static void safeDeleteRecursively(Path dir) {
+        if (dir == null) return;
+        try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {
+            walk.sorted(java.util.Comparator.reverseOrder()).forEach(p -> {
+                try {
+                    Files.deleteIfExists(p);
+                } catch (IOException ignored) { /* best effort */ }
+            });
+        } catch (IOException e) {
+            log.warn("Couldn't clean up LibreOffice profile {}: {}", dir, e.getMessage());
         }
-        String pdfName = docx.getFileName().toString()
-                .replaceFirst("\\.docx$", ".pdf");
-        Path pdf = outDir.resolve(pdfName);
-        if (!Files.exists(pdf)) {
-            throw new IOException("Expected PDF output missing: " + pdf);
-        }
-        return pdf;
     }
 
     // ── Cloudinary upload ───────────────────────────────────────────

@@ -1794,6 +1794,14 @@ function ErmPdfPreview({ appId }: { appId: string }) {
       try {
         const res = await fetchErmPreviewPdfBlob(appId);
         if (!res.ok) {
+          // The backend puts the render's actual failure (exception class +
+          // message) on X-Preview-Error. Surfacing it in the console turns a
+          // bare "(500)" into something diagnosable from the browser, without
+          // putting server internals on screen for the ERM.
+          const detail = res.headers.get("X-Preview-Error");
+          if (detail) {
+            console.error(`Preview render failed on the server — ${detail}`);
+          }
           throw new Error(`Couldn't render the preview (${res.status})`);
         }
         const blob = await res.blob();

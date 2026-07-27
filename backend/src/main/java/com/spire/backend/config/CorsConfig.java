@@ -42,7 +42,11 @@ public class CorsConfig {
         config.setAllowedOriginPatterns(new java.util.ArrayList<>(origins));
         config.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"));
         config.setAllowedHeaders(List.of("*"));
-        config.setExposedHeaders(List.of("Authorization", "Content-Type"));
+        // X-Preview-Error carries the server-side reason a PDF render failed.
+        // It must be listed here: this CorsConfiguration SETS the
+        // Access-Control-Expose-Headers response header, so a controller that
+        // adds its own copy is overridden and the browser hides the header.
+        config.setExposedHeaders(List.of("Authorization", "Content-Type", "X-Preview-Error"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 
