@@ -2088,23 +2088,30 @@ public class AgreementDocumentService {
      *     chatter can fill the ~64KB pipe buffer, at which point the child
      *     blocks on write, never exits, and we report a bogus 60s "timeout".
      *     The output is now drained concurrently while we wait.
-     *  3. ORPHANED soffice.bin. The {@code libreoffice} command is a launcher
-     *     that forks {@code soffice.bin} and can return before the child is
-     *     gone; the child then reparents to init and survives us. Each one
-     *     holds ~15-20 threads, and on Linux threads count against the
-     *     container's PID ceiling — the same ceiling whose exhaustion shows up
-     *     as "pthread_create failed (EAGAIN)" / "OutOfMemoryError: unable to
-     *     create native thread", which takes down EVERY request, not just
-     *     renders. Hazard 1's private profile makes this worse on its own (a
-     *     shared profile at least reuses one instance), so each conversion now
-     *     sweeps its own strays, matched by the unique profile path so it can
-     *     never touch a concurrent conversion's process. CONVERSION_SLOTS
-     *     additionally bounds how many can be in flight at once.
+     *  3. PROCESS ACCUMULATION. This is what actually took production down:
+     *     process count climbed 1 → 61 in one hour while live threads stayed
+     *     flat, until the container's PID ceiling was gone and every request
+     *     needing a thread failed with "pthread_create failed (EAGAIN)".
+     *     Hazard 1's private-profile fix CAUSED this — a fresh profile forces
+     *     a brand-new soffice.bin per render, where a reused profile hands the
+     *     job to the instance already running. Fixed by reusing a small fixed
+     *     pool of profiles instead ({@link #PROFILE_SLOTS}), which keeps the
+     *     process count pinned near CONVERSION_SLOT_COUNT no matter how many
+     *     PDFs are rendered, while still avoiding hazard 1's contention.
+     *     Taking a slot doubles as the concurrency bound.
+     *
+     * <p>Reaping is the other half, and it does not live here: this JVM runs as
+     * PID 1, and a JVM never reaps orphaned grandchildren the way a real init
+     * does, so any soffice.bin that does outlive its launcher becomes a
+     * permanent zombie holding a PID. {@code railway.toml} therefore starts the
+     * app under {@code tini}. Keep both — the pool stops processes being
+     * created needlessly, tini cleans up whatever still escapes.
      */
     private Path convertToPdf(Path docx) throws IOException, InterruptedException {
         Path outDir = docx.getParent();
-        Path profileDir = Files.createTempDirectory("lo-profile-");
-        CONVERSION_SLOTS.acquire();
+        // Blocks until a slot frees up, which is also what bounds concurrency.
+        Path profileDir = acquireProfileSlot();
+        boolean healthy = false;
         try {
             Process p = new ProcessBuilder(
                     "libreoffice",
@@ -2149,56 +2156,112 @@ public class AgreementDocumentService {
                 throw new IOException(
                         "Expected PDF output missing: " + pdf + ". Output: " + sink);
             }
+            healthy = true;
             return pdf;
         } finally {
-            reapStrayLibreOffice(profileDir);
-            CONVERSION_SLOTS.release();
-            safeDeleteRecursively(profileDir);
+            // Only a FAILED conversion recycles its slot. A successful one
+            // leaves the profile (and the soffice.bin behind it) intact,
+            // which is the whole point — see PROFILE_SLOTS.
+            if (!healthy) recycleProfileSlot(profileDir);
+            PROFILE_SLOTS.put(profileDir);
         }
     }
 
     /**
-     * Bounds concurrent LibreOffice conversions. Each one costs a process tree
-     * of ~15-20 threads plus its own heap; unbounded, a burst of previews can
-     * exhaust the container's PID ceiling on its own. Two at a time keeps the
-     * ERM and consultant previews responsive without letting the process count
-     * run away. Fair, so a queued render can't be starved indefinitely.
+     * A FIXED, REUSED set of LibreOffice user profiles — the core of the
+     * process-leak fix, and a deliberate reversal of the per-conversion
+     * profile this method used before.
+     *
+     * <p>The gauge showed why. Live thread count was flat (26 → 27) while the
+     * process count went 1 → 61 in a single hour: not a thread leak, a
+     * <em>process</em> leak, and PIDs and threads share one ceiling on Linux,
+     * so exhaustion surfaced as {@code pthread_create failed (EAGAIN)}.
+     *
+     * <p>A fresh profile forces LibreOffice to start a brand-new
+     * {@code soffice.bin} for every single render. Reusing a profile does the
+     * opposite: LibreOffice finds the existing instance through the profile's
+     * lock and hands the job to it, so the launcher exits in milliseconds and
+     * the process count stays pinned near {@code CONVERSION_SLOT_COUNT}
+     * forever, however many PDFs get rendered.
+     *
+     * <p>Why not one shared profile (the original code)? Because concurrent
+     * conversions then contend for a single lock and the loser fails. A small
+     * pool gives bounded processes AND no contention: taking a slot from the
+     * queue both picks a profile and caps concurrency, with no separate
+     * semaphore to keep in sync.
+     *
+     * <p>Failure is self-healing. A conversion that times out or exits
+     * non-zero recycles its slot ({@link #recycleProfileSlot}) so a wedged
+     * instance or a stale lock is cleaned up before the next render, rather
+     * than poisoning that slot for the life of the container — the exact
+     * failure the per-conversion profile was introduced to avoid.
      */
-    private static final java.util.concurrent.Semaphore CONVERSION_SLOTS =
-            new java.util.concurrent.Semaphore(2, true);
+    private static final int CONVERSION_SLOT_COUNT = 2;
+
+    private static final java.util.concurrent.BlockingQueue<Path> PROFILE_SLOTS =
+            new java.util.concurrent.ArrayBlockingQueue<>(CONVERSION_SLOT_COUNT);
+
+    private static boolean profileSlotsReady = false;
+
+    /** Creates the slot directories on first use, then hands one out. */
+    private static Path acquireProfileSlot() throws IOException, InterruptedException {
+        synchronized (PROFILE_SLOTS) {
+            if (!profileSlotsReady) {
+                Path base = Path.of(System.getProperty("java.io.tmpdir"),
+                        "sage-lo-profiles");
+                Files.createDirectories(base);
+                for (int i = 0; i < CONVERSION_SLOT_COUNT; i++) {
+                    Path slot = base.resolve("slot-" + i);
+                    Files.createDirectories(slot);
+                    PROFILE_SLOTS.add(slot);
+                }
+                profileSlotsReady = true;
+                log.info("LibreOffice profile slots ready under {}", base);
+            }
+        }
+        return PROFILE_SLOTS.take();
+    }
 
     /**
-     * Kill any LibreOffice process still holding THIS conversion's profile.
+     * Reset one slot after a failed conversion: kill whatever LibreOffice is
+     * still holding it, then wipe the profile so the next render rebuilds it.
      *
-     * Matching on the unique profile path is what makes this safe: the path was
-     * just created by {@code Files.createTempDirectory} for this call alone, so
-     * a match cannot be another conversion's process, and cannot be some
-     * unrelated LibreOffice a human started. Destroying the launcher's
-     * {@code Process} is not enough — {@code soffice.bin} is a grandchild that
-     * outlives it. Best-effort: a process we can't see or can't signal is left
-     * alone rather than failing a render that already produced its PDF.
+     * <p>Matching on the slot path is what keeps this safe — a slot is held
+     * exclusively by the caller at this point, so a match cannot be a
+     * concurrent conversion's process. Killing the launcher {@code Process}
+     * alone would not do: {@code soffice.bin} is a grandchild that outlives it.
+     *
+     * <p>Note this only runs on the failure path. On success the instance is
+     * left alive ON PURPOSE, to be reused by the next render.
      */
-    private static void reapStrayLibreOffice(Path profileDir) {
-        String marker = profileDir.toUri().toString();
+    private static void recycleProfileSlot(Path profileDir) {
         String plainPath = profileDir.toString();
         try {
             ProcessHandle.allProcesses()
                     .filter(h -> h.info().commandLine()
-                            .map(cmd -> cmd.contains(marker) || cmd.contains(plainPath))
+                            .map(cmd -> cmd.contains(plainPath))
                             .orElse(false))
                     .forEach(h -> {
-                        log.warn("Reaping stray LibreOffice pid {} for profile {}",
-                                h.pid(), profileDir);
+                        log.warn("Recycling slot {} — killing LibreOffice pid {}",
+                                profileDir, h.pid());
                         h.destroyForcibly();
                     });
         } catch (Exception e) {
-            // allProcesses() can throw where /proc is restricted; never let
-            // cleanup failure surface as a failed render.
-            log.warn("Couldn't sweep stray LibreOffice processes: {}", e.getMessage());
+            log.warn("Couldn't sweep LibreOffice for slot {}: {}",
+                    profileDir, e.getMessage());
+        }
+        // Wipe the profile itself: a killed instance leaves a stale .lock that
+        // would make every later conversion on this slot fail.
+        safeDeleteRecursively(profileDir);
+        try {
+            Files.createDirectories(profileDir);
+        } catch (IOException e) {
+            log.warn("Couldn't recreate LibreOffice slot {}: {}",
+                    profileDir, e.getMessage());
         }
     }
 
-    /** Best-effort recursive delete of a per-conversion LibreOffice profile. */
+    /** Best-effort recursive delete of a LibreOffice profile directory. */
     private static void safeDeleteRecursively(Path dir) {
         if (dir == null) return;
         try (java.util.stream.Stream<Path> walk = Files.walk(dir)) {

@@ -14,4 +14,11 @@ aptPkgs = [
     "libreoffice-core",
     "fonts-liberation",
     "fontconfig",
+    # tini — a minimal init that runs as PID 1 and reaps orphaned children.
+    # Without it the JVM is PID 1, and a JVM (unlike a real init) never reaps
+    # grandchildren that reparent to it. Any soffice.bin outliving its
+    # launcher then becomes a permanent zombie holding a PID, until the
+    # container's PID ceiling is exhausted and every request fails with
+    # "pthread_create failed (EAGAIN)". See railway.toml's startCommand.
+    "tini",
 ]

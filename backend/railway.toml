@@ -3,7 +3,19 @@ builder = "nixpacks"
 buildCommand = "./mvnw package -DskipTests"
 
 [deploy]
-startCommand = "java -jar target/*.jar"
+# Run under tini so PID 1 is a real init that reaps orphaned children.
+# The JVM shells out to LibreOffice; any soffice.bin that outlives its
+# launcher reparents to PID 1, and a JVM as PID 1 never reaps it, so it
+# becomes a permanent zombie holding a PID slot. Roughly a week of that
+# exhausts the container's PID ceiling and EVERY request then dies with
+# "pthread_create failed (EAGAIN)" / "OutOfMemoryError: unable to create
+# native thread" — which is exactly how this presented in production.
+#
+# `exec` matters: without it the shell stays PID 1 and tini is a child,
+# which reaps nothing. The fallback matters too — if tini is somehow
+# missing from the image, boot without it rather than crash-looping the
+# service. The gauge in RuntimeResourceJob reports zombies either way.
+startCommand = "if command -v tini >/dev/null 2>&1; then exec tini -- java -jar target/*.jar; else echo 'WARNING: tini not found — running without an init, orphan reaping disabled'; exec java -jar target/*.jar; fi"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 30
 restartPolicyType = "on_failure"
