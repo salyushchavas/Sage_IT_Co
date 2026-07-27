@@ -2088,10 +2088,23 @@ public class AgreementDocumentService {
      *     chatter can fill the ~64KB pipe buffer, at which point the child
      *     blocks on write, never exits, and we report a bogus 60s "timeout".
      *     The output is now drained concurrently while we wait.
+     *  3. ORPHANED soffice.bin. The {@code libreoffice} command is a launcher
+     *     that forks {@code soffice.bin} and can return before the child is
+     *     gone; the child then reparents to init and survives us. Each one
+     *     holds ~15-20 threads, and on Linux threads count against the
+     *     container's PID ceiling — the same ceiling whose exhaustion shows up
+     *     as "pthread_create failed (EAGAIN)" / "OutOfMemoryError: unable to
+     *     create native thread", which takes down EVERY request, not just
+     *     renders. Hazard 1's private profile makes this worse on its own (a
+     *     shared profile at least reuses one instance), so each conversion now
+     *     sweeps its own strays, matched by the unique profile path so it can
+     *     never touch a concurrent conversion's process. CONVERSION_SLOTS
+     *     additionally bounds how many can be in flight at once.
      */
     private Path convertToPdf(Path docx) throws IOException, InterruptedException {
         Path outDir = docx.getParent();
         Path profileDir = Files.createTempDirectory("lo-profile-");
+        CONVERSION_SLOTS.acquire();
         try {
             Process p = new ProcessBuilder(
                     "libreoffice",
@@ -2138,7 +2151,50 @@ public class AgreementDocumentService {
             }
             return pdf;
         } finally {
+            reapStrayLibreOffice(profileDir);
+            CONVERSION_SLOTS.release();
             safeDeleteRecursively(profileDir);
+        }
+    }
+
+    /**
+     * Bounds concurrent LibreOffice conversions. Each one costs a process tree
+     * of ~15-20 threads plus its own heap; unbounded, a burst of previews can
+     * exhaust the container's PID ceiling on its own. Two at a time keeps the
+     * ERM and consultant previews responsive without letting the process count
+     * run away. Fair, so a queued render can't be starved indefinitely.
+     */
+    private static final java.util.concurrent.Semaphore CONVERSION_SLOTS =
+            new java.util.concurrent.Semaphore(2, true);
+
+    /**
+     * Kill any LibreOffice process still holding THIS conversion's profile.
+     *
+     * Matching on the unique profile path is what makes this safe: the path was
+     * just created by {@code Files.createTempDirectory} for this call alone, so
+     * a match cannot be another conversion's process, and cannot be some
+     * unrelated LibreOffice a human started. Destroying the launcher's
+     * {@code Process} is not enough — {@code soffice.bin} is a grandchild that
+     * outlives it. Best-effort: a process we can't see or can't signal is left
+     * alone rather than failing a render that already produced its PDF.
+     */
+    private static void reapStrayLibreOffice(Path profileDir) {
+        String marker = profileDir.toUri().toString();
+        String plainPath = profileDir.toString();
+        try {
+            ProcessHandle.allProcesses()
+                    .filter(h -> h.info().commandLine()
+                            .map(cmd -> cmd.contains(marker) || cmd.contains(plainPath))
+                            .orElse(false))
+                    .forEach(h -> {
+                        log.warn("Reaping stray LibreOffice pid {} for profile {}",
+                                h.pid(), profileDir);
+                        h.destroyForcibly();
+                    });
+        } catch (Exception e) {
+            // allProcesses() can throw where /proc is restricted; never let
+            // cleanup failure surface as a failed render.
+            log.warn("Couldn't sweep stray LibreOffice processes: {}", e.getMessage());
         }
     }
 
