@@ -80,6 +80,8 @@ public class RuntimeResourceJob {
                 log.debug("Process enumeration unavailable: {}", e.getMessage());
             }
 
+            String procBreakdown = procBreakdown();
+
             Runtime rt = Runtime.getRuntime();
             long heapUsedMb = (rt.totalMemory() - rt.freeMemory()) / (1024 * 1024);
             long heapMaxMb = rt.maxMemory() / (1024 * 1024);
@@ -87,17 +89,77 @@ public class RuntimeResourceJob {
                     ManagementFactory.getRuntimeMXBean().getUptime() / 3_600_000L;
 
             String line = "RESOURCE GAUGE uptime={}h threads={} peak={} started={} "
-                    + "processes={} soffice={} heap={}/{}MB";
+                    + "processes={} soffice={} heap={}/{}MB {}";
             if (live >= THREAD_WARN_THRESHOLD) {
                 log.warn(line + " — thread count is high; suspect a leak",
                         uptimeHours, live, peak, started, processes, soffice,
-                        heapUsedMb, heapMaxMb);
+                        heapUsedMb, heapMaxMb, procBreakdown);
             } else {
                 log.info(line, uptimeHours, live, peak, started, processes,
-                        soffice, heapUsedMb, heapMaxMb);
+                        soffice, heapUsedMb, heapMaxMb, procBreakdown);
             }
         } catch (Exception e) {
             log.warn("Resource gauge failed: {}", e.getMessage());
         }
+    }
+
+    /**
+     * Break the process table down by state and name, straight from /proc.
+     *
+     * <p>{@link ProcessHandle} is not enough here: a ZOMBIE has already
+     * released its command line, so {@code info().command()} is empty and a
+     * name-based filter reports zero LibreOffice processes even when the table
+     * is full of dead ones. That blind spot is exactly what made an early
+     * reading say {@code soffice=0} while the process count climbed 1 → 61 in
+     * an hour.
+     *
+     * <p>Zombies matter because this JVM runs as PID 1. LibreOffice's launcher
+     * forks {@code soffice.bin} as a grandchild; when the launcher exits the
+     * grandchild reparents to PID 1, and when it exits it stays a zombie
+     * because a JVM — unlike a real init — never reaps arbitrary children.
+     * Each one holds a PID slot until the container dies, and PIDs and threads
+     * draw on the same limit, which is why exhaustion surfaced as
+     * {@code pthread_create failed (EAGAIN)}.
+     *
+     * <p>Linux-only and entirely best-effort: returns {@code procs=?} wherever
+     * /proc is absent or unreadable rather than failing the gauge.
+     */
+    private static String procBreakdown() {
+        java.nio.file.Path proc = java.nio.file.Path.of("/proc");
+        if (!java.nio.file.Files.isDirectory(proc)) return "procs=?";
+        int zombies = 0;
+        java.util.Map<String, Integer> byName = new java.util.HashMap<>();
+        try (java.util.stream.Stream<java.nio.file.Path> pids =
+                     java.nio.file.Files.list(proc)) {
+            for (java.nio.file.Path dir : pids.toList()) {
+                String pid = dir.getFileName().toString();
+                if (!pid.chars().allMatch(Character::isDigit)) continue;
+                try {
+                    // "pid (comm) STATE ppid ..." — comm can contain spaces and
+                    // parens, so split on the LAST ')' rather than tokenizing.
+                    String stat = java.nio.file.Files.readString(dir.resolve("stat"));
+                    int close = stat.lastIndexOf(')');
+                    if (close < 0 || close + 2 >= stat.length()) continue;
+                    char state = stat.charAt(close + 2);
+                    String name = java.nio.file.Files.readString(dir.resolve("comm")).trim();
+                    if (state == 'Z') {
+                        zombies++;
+                        name = name + "<defunct>";
+                    }
+                    byName.merge(name, 1, Integer::sum);
+                } catch (Exception ignored) {
+                    // The process exited mid-read, or /proc entry is
+                    // permission-restricted. Either way it is not worth a line.
+                }
+            }
+        } catch (Exception e) {
+            return "procs=?";
+        }
+        String top = byName.entrySet().stream()
+                .sorted(java.util.Map.Entry.<String, Integer>comparingByValue().reversed())
+                .limit(6)
+                .map(en -> en.getKey() + ":" + en.getValue())
+                .collect(java.util.stream.Collectors.joining(" "));
+        return "zombies=" + zombies + " top=[" + top + "]";
     }
 }
