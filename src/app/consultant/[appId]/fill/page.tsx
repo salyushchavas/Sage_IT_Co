@@ -388,14 +388,7 @@ function isSectionComplete(
   // every cheque 0..count-1 needs a number AND an upload.
   if (section.id === "appendix5" && isSectionActive(section, form, reqs)) {
     const count = parseChequeCount(form.fields["securityCheckCount"]);
-    if (count <= 0) return false;
-    for (let i = 0; i < count; i++) {
-      const entry = chequeEntries.find((e) => e.index === i);
-      if (!entry) return false;
-      if (!entry.number || !entry.number.trim()) return false;
-      // Phase 5 — uploaded when EITHER the Cloudinary id or the S3 key is set.
-      if (!(entry.publicId?.trim() || entry.s3Key?.trim())) return false;
-    }
+    if (chequeGaps(count, chequeEntries).length > 0) return false;
   }
   // Signature gating: main-agreement -> primary; review -> final.
   if (section.requiresSignature) {
@@ -424,6 +417,56 @@ function parseChequeCount(raw: string | undefined | null): number {
   const n = parseInt(String(raw).trim(), 10);
   if (Number.isNaN(n) || n < 0) return 0;
   return Math.min(50, n);
+}
+
+/**
+ * Build AP — quiet period before a typed cheque number is written.
+ * Shorter than the 1500ms form autosave: the cheque write is small and
+ * a consultant often types the number and immediately reaches for the
+ * upload button, so the write wants to land before they do.
+ */
+const CHEQUE_SAVE_DEBOUNCE_MS = 600;
+
+/** Build AP — one unfinished cheque. {@code index} is -1 for "no count set". */
+type ChequeGap = { index: number; label: string };
+
+/**
+ * Build AP — the exact per-cheque gaps behind the backend's single
+ * opaque "cheques" token. The rule mirrors
+ * {@code ConsultantApplicationService.collectMissingFields}: every
+ * cheque 0..count-1 needs BOTH a number and an upload. Returns one
+ * plain-language line per unfinished cheque so the wizard can name the
+ * cheque that's short instead of pointing at the whole block; empty
+ * when the appendix is complete.
+ *
+ * Single source of truth for the rule — section completeness, the live
+ * missing-items re-check, and the panel all read it, so they can't
+ * drift apart.
+ */
+function chequeGaps(count: number, entries: ChequeEntry[]): ChequeGap[] {
+  if (count <= 0) {
+    return [{
+      index: -1,
+      label: "Enter how many security cheques you're providing",
+    }];
+  }
+  const out: ChequeGap[] = [];
+  for (let i = 0; i < count; i++) {
+    const entry = entries.find((e) => e.index === i);
+    const hasNumber = Boolean(entry?.number?.trim());
+    // Phase 5 — uploaded when EITHER the Cloudinary id or the S3 key is set.
+    const hasFile = Boolean(entry?.publicId?.trim() || entry?.s3Key?.trim());
+    if (hasNumber && hasFile) continue;
+    out.push({
+      index: i,
+      label: !hasNumber && !hasFile
+        ? `Cheque ${i + 1} — enter the cheque number and upload the file`
+        : !hasNumber
+          ? `Cheque ${i + 1} — enter the cheque number`
+          : `Cheque ${i + 1} — upload a photo or PDF of the cheque`,
+    });
+  }
+  return out;
 }
 
 /**
@@ -747,11 +790,17 @@ export default function ConsultantWizardPage() {
   }, [appId, router]);
 
   // Cleanup ────────────────────────────────────────────────────
+  // Build AP — a debounced cheque write still pending at unmount is
+  // fired rather than dropped (the request outlives the component), so
+  // navigating away right after typing a number doesn't lose it.
+  // (Assigned just below where flushChequeMetadata is defined.)
+  const flushChequeRef = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
       if (pauseTimerRef.current) clearTimeout(pauseTimerRef.current);
       abortRef.current?.abort();
+      void flushChequeRef.current();
     };
   }, []);
 
@@ -931,6 +980,28 @@ export default function ConsultantWizardPage() {
     });
   }, []);
 
+  // Build AP — EVERY cheque write (metadata patch AND file upload) is a
+  // read-modify-write of the single `cheques` JSON column on the row,
+  // server-side, with no locking. Two in flight at once means the slower
+  // one's stale read wins: an upload can erase a number that was just
+  // typed, or a straggler keystroke can erase the upload pointer. The
+  // wizard then shows a complete cheque the row says is blank, and the
+  // submit 400s with nothing the consultant can act on.
+  //
+  // Funnel all of them through one promise chain so they're strictly
+  // sequential. They're low-frequency and user-paced, so the queue never
+  // grows meaningfully.
+  const chequeWriteChain = useRef<Promise<unknown>>(Promise.resolve());
+  const enqueueChequeWrite = useCallback(
+    <T,>(job: () => Promise<T>): Promise<T> => {
+      const next = chequeWriteChain.current.then(job, job);
+      // Keep the tail un-rejected so one failure doesn't poison the queue.
+      chequeWriteChain.current = next.catch(() => undefined);
+      return next;
+    },
+    [],
+  );
+
   // Build U — per-cheque upload. One call per index; the wizard mirrors
   // the row's cheques JSON so it doesn't have to refetch after every
   // upload. The "uploaded" signal per index is a non-empty publicId on
@@ -941,7 +1012,9 @@ export default function ConsultantWizardPage() {
       setChequeUploadError("");
       setChequeUploadingIndex(index);
       try {
-        await uploadConsultantChequeAt(appId, index, file);
+        await enqueueChequeWrite(() =>
+          uploadConsultantChequeAt(appId, index, file),
+        );
         setChequeEntries((prev) => {
           const next = prev.filter((e) => e.index !== index);
           const existing = prev.find((e) => e.index === index);
@@ -966,16 +1039,72 @@ export default function ConsultantWizardPage() {
         setChequeUploadingIndex(null);
       }
     },
-    [appId],
+    [appId, enqueueChequeWrite],
   );
+
+  // Build AP — pending (not-yet-written) metadata per cheque index, plus
+  // its debounce timer. The number input fires on every keystroke, so an
+  // immediate write meant one PUT per character: they raced each other on
+  // the shared JSON column and ate the 30/min per-app write budget the
+  // autosave also draws on, so a 429 could drop the number entirely. One
+  // write per pause instead.
+  const chequePendingRef = useRef(
+    new Map<number, { number?: string; date?: string }>(),
+  );
+  const chequeTimersRef = useRef(
+    new Map<number, ReturnType<typeof setTimeout>>(),
+  );
+
+  /** Build AP — write the pending patch for one cheque index, now. */
+  const sendChequeMetadata = useCallback(
+    async (index: number) => {
+      if (!appId) return;
+      const patch = chequePendingRef.current.get(index);
+      if (!patch) return;
+      chequePendingRef.current.delete(index);
+      try {
+        await enqueueChequeWrite(() =>
+          saveConsultantChequeMetadata(appId, index, patch),
+        );
+      } catch (e) {
+        setChequeUploadError(
+          e instanceof Error ? e.message : "Couldn't save.",
+        );
+        // The optimistic entry is now a lie, and an entry the wizard
+        // believes is complete is exactly what hides a rejected submit.
+        // Pull server truth back so the UI shows what's actually stored.
+        try {
+          const fresh = await getConsultantApplicationView(appId);
+          setChequeEntries(parseChequeList(fresh.cheques));
+        } catch {
+          /* the failed-submit resync is the backstop */
+        }
+      }
+    },
+    [appId, enqueueChequeWrite],
+  );
+
+  /** Build AP — write every pending cheque patch immediately (pre-submit). */
+  const flushChequeMetadata = useCallback(async () => {
+    const indices = Array.from(chequeTimersRef.current.keys());
+    for (const index of indices) {
+      const timer = chequeTimersRef.current.get(index);
+      if (timer) clearTimeout(timer);
+      chequeTimersRef.current.delete(index);
+    }
+    // Safe in parallel — enqueueChequeWrite serialises them server-side.
+    await Promise.all(indices.map((i) => sendChequeMetadata(i)));
+  }, [sendChequeMetadata]);
+
+  // Build AP — hand the unmount cleanup (declared above) the current flush.
+  useEffect(() => {
+    flushChequeRef.current = flushChequeMetadata;
+  }, [flushChequeMetadata]);
 
   // Build U — per-cheque metadata patch. Saves only the number / date
   // for one index; the upload bytes (if any) survive untouched.
   const handleChequeMetadataChange = useCallback(
-    async (
-      index: number,
-      patch: { number?: string; date?: string },
-    ) => {
+    (index: number, patch: { number?: string; date?: string }) => {
       if (!appId) return;
       // Optimistic update so the input is responsive.
       setChequeEntries((prev) => {
@@ -993,14 +1122,23 @@ export default function ConsultantWizardPage() {
         next.sort((a, b) => a.index - b.index);
         return next;
       });
-      try {
-        await saveConsultantChequeMetadata(appId, index, patch);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "Couldn't save.";
-        setChequeUploadError(msg);
-      }
+      // Merge into whatever hasn't been written yet for this index, so a
+      // number edit never drops a date edit still sitting in the queue.
+      chequePendingRef.current.set(index, {
+        ...(chequePendingRef.current.get(index) ?? {}),
+        ...patch,
+      });
+      const existingTimer = chequeTimersRef.current.get(index);
+      if (existingTimer) clearTimeout(existingTimer);
+      chequeTimersRef.current.set(
+        index,
+        setTimeout(() => {
+          chequeTimersRef.current.delete(index);
+          void sendChequeMetadata(index);
+        }, CHEQUE_SAVE_DEBOUNCE_MS),
+      );
     },
-    [appId],
+    [appId, sendChequeMetadata],
   );
 
   // Build W — Appendix 1 work-authorization document upload.
@@ -1178,6 +1316,11 @@ export default function ConsultantWizardPage() {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     abortRef.current?.abort();
     try {
+      // Build AP — land any debounced cheque number BEFORE the submit
+      // validates against the row. Without this, typing a number and
+      // hitting submit inside the debounce window submits against a row
+      // that still has it blank.
+      await flushChequeMetadata();
       // Final flush of any pending delta.
       const patch = computeDelta(form);
       if (Object.keys(patch).length > 0) {
@@ -1264,11 +1407,44 @@ export default function ConsultantWizardPage() {
       } catch {
         /* not JSON; fall through with the original message */
       }
+      // Build AP — re-read the row before publishing the payload.
+      //
+      // The cheques JSON and the per-document upload pointers are
+      // written by their OWN endpoints and mirrored here optimistically
+      // (see handleChequeMetadataChange / handleChequeUploadAt), so a
+      // write that was dropped, clobbered by a concurrent write to the
+      // same JSON column, or 429'd leaves the wizard believing an item
+      // is complete that the server has just rejected. liveMissing then
+      // filters that very token back out and the panel says nothing --
+      // the consultant is left staring at a bare "Agreement is
+      // incomplete." with no item to click, and only a full page reload
+      // (which re-reads the row) reveals the real gap.
+      //
+      // Re-reading here makes every rejected item resolvable against
+      // server truth, and awaiting BEFORE setSubmitMissing means
+      // liveMissing's first evaluation already sees the fresh state
+      // (otherwise the auto-dismiss effect races in and clears the
+      // panel before the refetch lands). Form fields are flushed above,
+      // so this only resyncs the non-form signals.
+      if (structured) {
+        try {
+          const fresh = await getConsultantApplicationView(appId);
+          setChequeEntries(parseChequeList(fresh.cheques));
+          setWorkAuthUploaded(Boolean(fresh.workAuthDocPublicId || fresh.workAuthDocS3Key));
+          setOfferLetterUploaded(Boolean(fresh.offerLetterPublicId || fresh.offerLetterS3Key));
+          setDlDocUploaded(Boolean(fresh.dlDocPublicId || fresh.dlDocS3Key));
+          setStateIdDocUploaded(Boolean(fresh.stateIdDocPublicId || fresh.stateIdDocS3Key));
+          setSsnDocUploaded(Boolean(fresh.ssnDocPublicId || fresh.ssnDocS3Key));
+        } catch {
+          /* refetch failed -- a stale panel still beats a silent one */
+        }
+      }
       setSubmitMissing(structured);
       setSubmitError(msg);
       setSubmitting(false);
     }
-  }, [appId, computeDelta, form, reqs, chequeEntries, router, visibleSections]);
+  }, [appId, computeDelta, flushChequeMetadata, form, reqs, chequeEntries,
+      router, visibleSections]);
 
   // Step accessors ──────────────────────────────────────────────
   // Build X — wizard step indexing flows through visibleSections only.
@@ -1371,15 +1547,7 @@ export default function ConsultantWizardPage() {
       if (k === "cheques" || k === "chequeUpload") {
         // Multi-cheque rule: every index 0..count-1 needs number + upload.
         const required = parseChequeCount(form.fields["securityCheckCount"]);
-        if (required <= 0) return true;
-        for (let i = 0; i < required; i++) {
-          const entry = chequeEntries.find((e) => e.index === i);
-          if (!entry || !entry.number?.trim()
-              || !(entry.publicId?.trim() || entry.s3Key?.trim())) {
-            return true;
-          }
-        }
-        return false;
+        return chequeGaps(required, chequeEntries).length > 0;
       }
       // Build W/I/J — uploads have a non-form (upload) completion signal.
       if (k === "workAuthDoc") {
@@ -1809,6 +1977,8 @@ export default function ConsultantWizardPage() {
             <MissingItemsPanel
               missing={liveMissing}
               visibleSections={visibleSections}
+              chequeCount={parseChequeCount(form.fields["securityCheckCount"])}
+              chequeEntries={chequeEntries}
               onJumpToItem={(idx, anchorId) => {
                 setCurrentStep(idx);
                 window.setTimeout(() => {
@@ -3523,6 +3693,8 @@ function fieldFriendlyLabel(key: string): string {
 function MissingItemsPanel({
   missing,
   visibleSections,
+  chequeCount,
+  chequeEntries,
   onJumpToItem,
 }: {
   missing: {
@@ -3531,6 +3703,11 @@ function MissingItemsPanel({
     missingSignature: boolean;
     missingFinalSignature: boolean;
   };
+  /** Build AP — used to expand the backend's opaque "cheques" token into
+   *  a row per unfinished cheque ("Cheque 2 — enter the cheque number")
+   *  instead of one unhelpful "Security cheques". */
+  chequeCount: number;
+  chequeEntries: ChequeEntry[];
   /** Build X — the wizard's filtered section list. Jump targets are
    *  indices into this list so they pair with setCurrentStep. A hidden
    *  appendix would never produce a missing token (backend skips
@@ -3561,26 +3738,52 @@ function MissingItemsPanel({
     }
   };
 
+  // Build AP — anything the server rejected that we can't pin to a
+  // visible step still has to be SAID. Silently dropping it (the old
+  // `continue`) is what left the consultant with an error banner and an
+  // empty panel.
+  const unresolved: string[] = [];
+
   for (const key of missing.missingFields) {
     const section =
       findSectionForFieldKey(key) ?? sectionForSpecialKey(key);
-    if (!section) continue;
-    const idx = visibleSections.findIndex((s) => s.id === section.id);
-    if (idx < 0) continue;
-    upsert(
-      idx,
-      section.title,
-      fieldFriendlyLabel(key),
-      key === "cheques" || key === "chequeUpload"
-        ? "field-cheques"
-        : `field-${key}`,
-    );
+    const idx = section
+      ? visibleSections.findIndex((s) => s.id === section.id)
+      : -1;
+    if (!section || idx < 0) {
+      unresolved.push(fieldFriendlyLabel(key));
+      continue;
+    }
+    // Build AP — "cheques" covers up to 50 cheques × 2 requirements, so
+    // name the ones actually short rather than the whole appendix.
+    if (key === "cheques" || key === "chequeUpload") {
+      const gaps = chequeGaps(chequeCount, chequeEntries);
+      if (gaps.length === 0) {
+        // The server rejected the appendix but our copy of the row looks
+        // complete. Say so plainly instead of showing nothing.
+        upsert(
+          idx,
+          section.title,
+          "Security cheques — re-check each cheque's number and file",
+          "field-cheques",
+        );
+      }
+      for (const gap of gaps) {
+        upsert(idx, section.title, gap.label, "field-cheques");
+      }
+      continue;
+    }
+    upsert(idx, section.title, fieldFriendlyLabel(key), `field-${key}`);
   }
   for (const flag of missing.missingAffirmations) {
     const section = findSectionForAffirmation(flag as AffirmationFlag);
-    if (!section) continue;
-    const idx = visibleSections.findIndex((s) => s.id === section.id);
-    if (idx < 0) continue;
+    const idx = section
+      ? visibleSections.findIndex((s) => s.id === section.id)
+      : -1;
+    if (!section || idx < 0) {
+      unresolved.push("Confirm you've read and agree to every section");
+      continue;
+    }
     upsert(
       idx,
       section.title,
@@ -3592,6 +3795,8 @@ function MissingItemsPanel({
     const idx = visibleSections.findIndex((s) => s.id === "main-agreement");
     if (idx >= 0) {
       upsert(idx, "The Agreement", "Your signature", "signature-block");
+    } else {
+      unresolved.push("Your signature on the agreement");
     }
   }
   if (missing.missingFinalSignature) {
@@ -3603,13 +3808,16 @@ function MissingItemsPanel({
         "Your final signature",
         "final-signature-block",
       );
+    } else {
+      unresolved.push("Your final signature");
     }
   }
 
   const ordered = Array.from(groups.values()).sort(
     (a, b) => a.sectionIdx - b.sectionIdx,
   );
-  const total = ordered.reduce((n, g) => n + g.items.length, 0);
+  const total =
+    ordered.reduce((n, g) => n + g.items.length, 0) + unresolved.length;
 
   return (
     <div
@@ -3686,6 +3894,45 @@ function MissingItemsPanel({
             </ul>
           </li>
         ))}
+        {/* Build AP — items with no step to jump to (a token this build
+            doesn't map, or a section that isn't part of this round) are
+            still listed, so the panel is never empty while the error
+            banner is up. */}
+        {unresolved.length > 0 && (
+          <li
+            className="rounded-xl bg-white p-3"
+            style={{ border: "1px solid var(--line, #e4e7ee)" }}
+          >
+            <p
+              className="text-[10px] font-bold uppercase tracking-widest"
+              style={{ color: "var(--copper-deep, #a8623f)" }}
+            >
+              Still needed
+            </p>
+            <ul className="mt-2 -mx-1">
+              {unresolved.map((label, i) => (
+                <li
+                  key={i}
+                  className="px-2 py-1.5 inline-flex items-center gap-2 text-[13px]"
+                >
+                  <span
+                    aria-hidden
+                    className="block h-1.5 w-1.5 rounded-full shrink-0"
+                    style={{ background: "var(--copper, #C87D5C)" }}
+                  />
+                  <span style={{ color: "var(--ink, #1d2433)" }}>{label}</span>
+                </li>
+              ))}
+            </ul>
+            <p
+              className="text-[11.5px] mt-1 px-2"
+              style={{ color: "var(--muted, #5c6577)" }}
+            >
+              Reload this page to refresh what&apos;s saved. If it still shows
+              here, contact Sage IT and mention this message.
+            </p>
+          </li>
+        )}
       </ul>
     </div>
   );
@@ -4108,13 +4355,27 @@ function ChequeListBlock({
   /** Build W — flagged by a failed submit; surfaces an inline attention banner. */
   needsAttention?: boolean;
 }) {
+  // Build AP — name the cheques actually short instead of restating the
+  // rule at the whole block; the consultant shouldn't have to audit 1..N
+  // entries to find the one that's missing a number.
+  const gaps = needsAttention ? chequeGaps(count, entries) : [];
+  const gapIndices = new Set(gaps.map((g) => g.index));
   const attentionBanner = needsAttention ? (
-    <p
-      className="text-[11.5px] inline-flex items-center gap-1 font-medium"
+    <div
+      className="text-[11.5px] font-medium space-y-0.5"
       style={{ color: "var(--copper-deep)" }}
     >
-      <AlertCircle size={11} /> Each cheque needs both a number and an upload.
-    </p>
+      <p className="inline-flex items-center gap-1">
+        <AlertCircle size={11} /> Each cheque needs both a number and an upload.
+      </p>
+      {gaps.length > 0 && (
+        <ul className="list-disc pl-5 font-normal">
+          {gaps.map((g) => (
+            <li key={g.index}>{g.label}</li>
+          ))}
+        </ul>
+      )}
+    </div>
   ) : null;
   if (count <= 0) {
     return (
@@ -4164,18 +4425,35 @@ function ChequeListBlock({
         const uploaded = Boolean(entry?.publicId || entry?.s3Key);
         const uploading = uploadingIndex === i;
         const inputId = `cheque-${i}-file`;
+        // Build AP — flag THIS cheque when it's one of the unfinished ones.
+        const flagged = gapIndices.has(i);
         return (
           <div
             key={i}
             className={
               "rounded-xl border p-4 space-y-3 "
-              + (uploaded
-                ? "bg-emerald-50/40 border-emerald-300"
-                : "bg-white border-stone-200")
+              + (flagged
+                ? "bg-white"
+                : uploaded
+                  ? "bg-emerald-50/40 border-emerald-300"
+                  : "bg-white border-stone-200")
+            }
+            style={
+              flagged
+                ? { borderColor: "var(--copper)", background: "var(--copper-wash)" }
+                : undefined
             }
           >
             <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
               Cheque {i + 1}
+              {flagged && (
+                <span
+                  className="ml-2 normal-case tracking-normal font-medium"
+                  style={{ color: "var(--copper-deep)" }}
+                >
+                  Needs attention
+                </span>
+              )}
             </p>
             {/* Build W — cheque DATE field removed; only number + upload. */}
             <div className="grid grid-cols-1 gap-3">
