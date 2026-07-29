@@ -4763,14 +4763,27 @@ public class ConsultantApplicationService {
     }
 
     private static boolean isAppendix2Touched(ConsultantApplication app) {
+        // "Touched" = the CONSULTANT engaged with Appendix 2. Build AP —
+        // achDebitDates + achDebitAmounts are ERM-FILLED (Build Y, at create
+        // and again via Request Revision) and read-only to the consultant, so
+        // they were never theirs to enter. Counting them flipped Appendix 2 to
+        // "active/required" on every agreement where the ERM typed a debit
+        // schedule WITHOUT ticking require_appendix2 -- and since the wizard
+        // hides a not-required appendix entirely, that demanded six ACH fields
+        // and an affirmation the consultant had no way to reach. A permanently
+        // unsubmittable agreement. Same bug, same fix as Build AB-2 for
+        // Appendix 4; they are already excluded from the required-field gate
+        // below, so they must not decide the gate applies either.
+        //
+        // Invariant: an ERM-set read-only field NEVER makes a section touched.
+        // The wizard's isAppendixTouched enforces it by skipping field.readOnly;
+        // these per-appendix checks are the server-side half of that contract.
         return nonBlank(app.getAchAccountType())
                 || nonBlank(app.getAchBankName())
                 || nonBlank(app.getAchAccountHolderName())
                 || nonBlank(app.getAchRoutingNumber())
                 || nonBlank(app.getAchAccountNumber())
                 || nonBlank(app.getAchNoticeEmail())
-                || nonBlank(app.getAchDebitDates())
-                || nonBlank(app.getAchDebitAmounts())
                 || Boolean.TRUE.equals(app.getAffirmedAppendix2());
     }
 

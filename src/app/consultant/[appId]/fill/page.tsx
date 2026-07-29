@@ -40,6 +40,7 @@ import {
   findSectionForFieldKey,
   type AffirmationFlag,
   type AgreementSection,
+  type AppendixKey,
   type EffectiveRequirements,
   type SectionField,
 } from "@/lib/agreement-sections";
@@ -1243,6 +1244,28 @@ export default function ConsultantWizardPage() {
     [],
   );
 
+  // Build AP — appendices the LAST failed submit proved the server
+  // treats as required. The wizard hides an appendix the ERM left
+  // not-required, so when the two disagree the consultant is shown no
+  // way to fix what the server keeps rejecting: a permanently
+  // unsubmittable agreement. (An ERM-set read-only field silently
+  // marking Appendix 2 "active" server-side did exactly that.) The
+  // server is the authority on what it will accept, so trust it here.
+  const serverRequiredAppendices = useMemo(() => {
+    const keys = new Set<AppendixKey>();
+    if (!submitMissing) return keys;
+    const add = (section: AgreementSection | undefined) => {
+      if (section?.appendixKey) keys.add(section.appendixKey);
+    };
+    for (const k of submitMissing.missingFields) {
+      add(findSectionForFieldKey(k) ?? sectionForSpecialKey(k));
+    }
+    for (const f of submitMissing.missingAffirmations) {
+      add(findSectionForAffirmation(f as AffirmationFlag));
+    }
+    return keys;
+  }, [submitMissing]);
+
   // Effective requirements derived from the ERM's per-agreement flags.
   // Memoised so per-section gating is a single derivation each render.
   const reqs = useMemo<EffectiveRequirements>(() => {
@@ -1251,7 +1274,23 @@ export default function ConsultantWizardPage() {
     // forced required (so the wizard gates them as must-complete +
     // re-affirm), mirroring the backend's revisionForcedSections.
     const scope = revisionScopeKeys(app);
-    if (scope.length === 0) return base;
+    if (scope.length === 0) {
+      // Build AP — unrestricted fill: fold in whatever the server just
+      // demanded, so the section appears in the wizard, gates completion
+      // and renders its required markers like any other.
+      //
+      // Deliberately NOT applied to a restricted round (revision scope
+      // above, or the Phase-2 branch): there the backend rejects writes
+      // to out-of-scope sections, so revealing one would show fields
+      // that 400 on save. Those surface in the panel's "Still needed"
+      // group instead, which tells the consultant to contact Sage IT.
+      if (serverRequiredAppendices.size === 0 || isPhase2Restricted(app)) {
+        return base;
+      }
+      const revealed: EffectiveRequirements = { ...base };
+      serverRequiredAppendices.forEach((key) => { revealed[key] = true; });
+      return revealed;
+    }
     const o: EffectiveRequirements = { ...base };
     for (const k of scope) {
       if (k === "appendix1") o.appendix1 = true;
@@ -1270,7 +1309,7 @@ export default function ConsultantWizardPage() {
       else if (k === "doc:cheque") o.appendix5 = true;
     }
     return o;
-  }, [app]);
+  }, [app, serverRequiredAppendices]);
 
   // Build X — visible-section source: core sections + ONLY the
   // appendices the ERM marked required. Everything downstream
@@ -1306,6 +1345,23 @@ export default function ConsultantWizardPage() {
       setCurrentStep(Math.max(0, visibleSections.length - 1));
     }
   }, [visibleSections.length, currentStep]);
+
+  // Build AP — the list can also GROW mid-flow now (a failed submit
+  // revealing a server-required appendix). currentStep is positional, so
+  // an insert would silently slide the consultant off the step they were
+  // on — off Review onto some earlier appendix the instant they hit
+  // Submit. Re-anchor to the section they were actually looking at.
+  const prevVisibleRef = useRef(visibleSections);
+  useEffect(() => {
+    const prev = prevVisibleRef.current;
+    prevVisibleRef.current = visibleSections;
+    // Same list (a plain step change) — nothing to re-anchor.
+    if (prev === visibleSections || prev.length === visibleSections.length) return;
+    const wasOn = prev[currentStep]?.id;
+    if (!wasOn) return;
+    const moved = visibleSections.findIndex((s) => s.id === wasOn);
+    if (moved >= 0 && moved !== currentStep) setCurrentStep(moved);
+  }, [visibleSections, currentStep]);
 
   // Submit ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
