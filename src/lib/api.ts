@@ -3483,6 +3483,13 @@ export interface ConsultantApplication {
   // "Link expired — resend" indicator (ERM) and the "contact Sage IT to
   // resend" screen (consultant). Populated on list/consultant reads only.
   linkExpired?: boolean | null;
+  // Build AP — DERIVED: the server's own resolution of which sections the
+  // submit gate applies to, keyed appendix1..appendix5 / ssn /
+  // ssnDocRequired. Computed by the SAME call the submit validator gates
+  // on, so the wizard can render the server's answer instead of
+  // re-deriving its own and risking a section the submit demands but the
+  // wizard hides. Populated on consultant reads only.
+  effectiveRequirements?: Record<string, boolean> | null;
 }
 
 /**

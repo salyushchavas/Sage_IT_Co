@@ -101,6 +101,20 @@ public class ConsultantApplication {
     private Boolean linkExpired;
 
     /**
+     * Build AP — the server's resolved answer to "which sections does the
+     * submit gate apply to for this agreement", keyed
+     * {@code appendix1..appendix5}, {@code ssn}, {@code ssnDocRequired}.
+     * Computed by {@code resolveEffectiveRequirements} — the SAME call the
+     * submit validator gates on — and populated on the consultant read so
+     * the wizard renders the server's answer rather than re-deriving its
+     * own. When the two derivations disagreed, the server demanded fields
+     * the wizard had hidden and the agreement became unsubmittable.
+     * Never persisted; null on ERM/list responses.
+     */
+    @Transient
+    private java.util.Map<String, Boolean> effectiveRequirements;
+
+    /**
      * Phase C — soft delete (archive). Only the super-admin archives,
      * and only CANCELLED applications. The row stays in the DB
      * (recoverable, audit history + Cloudinary PDF preserved); it's

@@ -1023,6 +1023,9 @@ public class ConsultantApplicationService {
         // agreement keeps its status, but the consultant view renders the
         // "link expired — ask Sage IT to resend" screen when it's set.
         app.setLinkExpired(isConsultantLinkExpired(app));
+        // Build AP — hand the wizard the gate it will actually be judged
+        // against, so it never hides a section the submit will demand.
+        app.setEffectiveRequirements(resolveEffectiveRequirements(app));
         appendEvent(app.getId(),
                 ConsultantApplicationEvent.EventType.ACCESSED,
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
@@ -4909,11 +4912,66 @@ public class ConsultantApplicationService {
         return java.util.Collections.emptySet();
     }
 
+    /**
+     * Build AP — THE resolution of "which sections does the submit gate
+     * apply to for this agreement". Everything that needs the answer reads
+     * it from here: the two collectMissing* validators below, and the
+     * consultant view payload (via {@code getForConsultant}), which hands
+     * it to the wizard so the wizard renders the server's answer instead of
+     * re-deriving its own.
+     *
+     * That re-derivation is what kept breaking. The rule lived twice, once
+     * in Java and once in TypeScript, and nothing kept them in step: when
+     * they disagreed the server demanded fields the wizard had hidden, and
+     * the consultant got an agreement they could not submit and could not
+     * fix. Appendix 2 (an ERM-set read-only field marking the section
+     * touched) and Appendix 4 before it (Build AB-2) were both that bug.
+     * There is now one answer, computed here, shipped to the client.
+     *
+     * Keys match the wizard's EffectiveRequirements shape exactly.
+     */
+    public java.util.Map<String, Boolean> resolveEffectiveRequirements(
+            ConsultantApplication app) {
+        return resolveEffectiveRequirements(app, revisionForcedSections(app));
+    }
+
+    /**
+     * The pure half — no instance state, so
+     * {@code ConsultantApplicationRequirementsTest} can pin the rule
+     * directly with an explicit {@code forced} scope.
+     */
+    static java.util.Map<String, Boolean> resolveEffectiveRequirements(
+            ConsultantApplication app, java.util.Set<String> forced) {
+        // Active = the ERM required it, OR the consultant engaged with it
+        // (optional-but-touched is all-or-nothing), OR an ERM revision round
+        // forced it back into scope.
+        java.util.Map<String, Boolean> out = new java.util.LinkedHashMap<>();
+        out.put("appendix1", Boolean.TRUE.equals(app.getRequireAppendix1())
+                || isAppendix1Touched(app) || forced.contains("appendix1"));
+        out.put("appendix2", Boolean.TRUE.equals(app.getRequireAppendix2())
+                || isAppendix2Touched(app) || forced.contains("appendix2"));
+        out.put("appendix3", Boolean.TRUE.equals(app.getRequireAppendix3())
+                || isAppendix3Touched(app) || forced.contains("appendix3"));
+        out.put("appendix4", Boolean.TRUE.equals(app.getRequireAppendix4())
+                || isAppendix4Touched(app) || forced.contains("appendix4"));
+        out.put("appendix5", Boolean.TRUE.equals(app.getRequireAppendix5())
+                || isAppendix5Touched(app) || forced.contains("appendix5"));
+        out.put("ssn", Boolean.TRUE.equals(app.getRequireSsn()));
+        // Build AK — only an ERM re-upload request re-requires the SSN doc.
+        out.put("ssnDocRequired", forced.contains("doc:ssn-doc"));
+        return out;
+    }
+
     /** Returns the keys of every effectively-required consultant field that's blank. */
     private java.util.List<String> collectMissingConsultantFields(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
         java.util.Set<String> forced = revisionForcedSections(app);
+        // Build AP — the gate reads the SAME resolution the wizard is given,
+        // so "what the server enforces" and "what the wizard shows" cannot
+        // drift apart.
+        java.util.Map<String, Boolean> active =
+                resolveEffectiveRequirements(app, forced);
         // CORE (always required).
         // Build W — structured name: first + last required, middle optional.
         addIfBlank(missing, "firstName", app.getFirstName());
@@ -4941,8 +4999,7 @@ public class ConsultantApplicationService {
 
         // Appendix 1 -- employment (per require_appendix1; all-or-nothing
         // if optional but touched). implementationPartner is never required.
-        boolean app1Required = Boolean.TRUE.equals(app.getRequireAppendix1());
-        if (app1Required || isAppendix1Touched(app) || forced.contains("appendix1")) {
+        if (Boolean.TRUE.equals(active.get("appendix1"))) {
             addIfBlank(missing, "employerPayrollEntity", app.getEmployerPayrollEntity());
             addIfBlank(missing, "endClient", app.getEndClient());
             addIfBlank(missing, "roleTitle", app.getRoleTitle());
@@ -4956,9 +5013,7 @@ public class ConsultantApplicationService {
         }
 
         // Appendix 2 -- ACH.
-        boolean app2Required = Boolean.TRUE.equals(app.getRequireAppendix2());
-        boolean app2Active = app2Required || isAppendix2Touched(app)
-                || forced.contains("appendix2");
+        boolean app2Active = Boolean.TRUE.equals(active.get("appendix2"));
         if (app2Active) {
             addIfBlank(missing, "achAccountType", app.getAchAccountType());
             addIfBlank(missing, "achBankName", app.getAchBankName());
@@ -4973,9 +5028,7 @@ public class ConsultantApplicationService {
 
         // Appendix 3 -- background check (SSN gated by require_ssn,
         // idType + ID number always required when the section is active).
-        boolean app3Required = Boolean.TRUE.equals(app.getRequireAppendix3());
-        boolean app3Active = app3Required || isAppendix3Touched(app)
-                || forced.contains("appendix3");
+        boolean app3Active = Boolean.TRUE.equals(active.get("appendix3"));
         if (app3Active) {
             addIfBlank(missing, "bgFullLegalName", app.getBgFullLegalName());
             addIfBlank(missing, "bgOtherNamesUsed", app.getBgOtherNamesUsed());
@@ -5032,8 +5085,7 @@ public class ConsultantApplicationService {
         }
 
         // Appendix 4 -- portal access.
-        boolean app4Required = Boolean.TRUE.equals(app.getRequireAppendix4());
-        if (app4Required || isAppendix4Touched(app) || forced.contains("appendix4")) {
+        if (Boolean.TRUE.equals(active.get("appendix4"))) {
             // Build J — at least one COMPLETE platform+username entry is
             // required (the repeatable list replaces the single pair).
             if (!hasCompletePortalEntry(app)) {
@@ -5053,8 +5105,7 @@ public class ConsultantApplicationService {
         // number AND an upload. The legacy single chequePublicId is
         // honoured via parseCheques (treated as index 0) for pre-Build-U
         // rows that haven't migrated their data.
-        boolean app5Required = Boolean.TRUE.equals(app.getRequireAppendix5());
-        if (app5Required || isAppendix5Touched(app) || forced.contains("appendix5")) {
+        if (Boolean.TRUE.equals(active.get("appendix5"))) {
             addIfBlank(missing, "securityCheckCount", app.getSecurityCheckCount());
             addIfBlank(missing, "securityCheckBank", app.getSecurityCheckBank());
             addIfBlank(missing, "securityCheckHolderName", app.getSecurityCheckHolderName());
@@ -5110,37 +5161,33 @@ public class ConsultantApplicationService {
     private java.util.List<String> collectMissingAffirmations(
             ConsultantApplication app) {
         java.util.List<String> missing = new java.util.ArrayList<>();
+        // Build AP — same single resolution the field gate and the wizard use.
         // Build Y — ERM-selected sections in a restricted revision are
-        // forced required (so the consultant must re-affirm them).
-        java.util.Set<String> forced = revisionForcedSections(app);
+        // forced required (so the consultant must re-affirm them), which
+        // resolveEffectiveRequirements folds in.
+        java.util.Map<String, Boolean> active = resolveEffectiveRequirements(app);
         // Always-required affirmations (main agreement + exhibits).
         if (!Boolean.TRUE.equals(app.getAffirmedMainAgreement())) missing.add("affirmedMainAgreement");
         if (!Boolean.TRUE.equals(app.getAffirmedExhibitA())) missing.add("affirmedExhibitA");
         if (!Boolean.TRUE.equals(app.getAffirmedExhibitB())) missing.add("affirmedExhibitB");
-        // Per-appendix: required directly, OR optional-but-touched (all-or-nothing),
-        // OR forced into scope by the ERM's revision picker.
-        if ((Boolean.TRUE.equals(app.getRequireAppendix1()) || isAppendix1Touched(app)
-                || forced.contains("appendix1"))
+        // Per-appendix: affirmation required exactly when the section is active.
+        if (Boolean.TRUE.equals(active.get("appendix1"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix1())) {
             missing.add("affirmedAppendix1");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix2()) || isAppendix2Touched(app)
-                || forced.contains("appendix2"))
+        if (Boolean.TRUE.equals(active.get("appendix2"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix2())) {
             missing.add("affirmedAppendix2");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix3()) || isAppendix3Touched(app)
-                || forced.contains("appendix3"))
+        if (Boolean.TRUE.equals(active.get("appendix3"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix3())) {
             missing.add("affirmedAppendix3");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix4()) || isAppendix4Touched(app)
-                || forced.contains("appendix4"))
+        if (Boolean.TRUE.equals(active.get("appendix4"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix4())) {
             missing.add("affirmedAppendix4");
         }
-        if ((Boolean.TRUE.equals(app.getRequireAppendix5()) || isAppendix5Touched(app)
-                || forced.contains("appendix5"))
+        if (Boolean.TRUE.equals(active.get("appendix5"))
                 && !Boolean.TRUE.equals(app.getAffirmedAppendix5())) {
             missing.add("affirmedAppendix5");
         }

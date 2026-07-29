@@ -762,6 +762,14 @@ export interface RequirementsInput {
   requireAppendix4?: boolean | null;
   requireAppendix5?: boolean | null;
   requireSsn?: boolean | null;
+  /**
+   * Build AP — the server's own resolution of the submit gate, sent on
+   * the consultant read. Authoritative: it is the exact map the submit
+   * validator gates on. Absent on payloads from an older backend, and on
+   * ERM/list responses, in which case the local derivation below stands
+   * alone.
+   */
+  effectiveRequirements?: Record<string, boolean> | null;
 }
 
 export interface EffectiveRequirements {
@@ -783,21 +791,36 @@ export interface EffectiveRequirements {
 /**
  * Resolves an application's per-agreement requirement flags into the
  * effective required/optional shape the wizard + client-side validator
- * read from. Mirrors the backend's effective-requirements model so the
- * UX matches what the server will accept at submit time.
+ * read from.
+ *
+ * Build AP — the SERVER's resolution wins wherever it says a section is
+ * required. It is the same map the submit validator gates on, so
+ * honouring it is what guarantees the wizard can never hide a section
+ * the submit will demand. That mismatch is what made agreements
+ * unsubmittable: the server counted an ERM-set read-only field as the
+ * consultant "engaging with" Appendix 2 and required the whole section,
+ * while the wizard — deriving only from require_appendix2 — showed no
+ * Appendix 2 at all. The consultant was asked for six fields that did
+ * not exist on their screen.
+ *
+ * Union, not replacement: a require_appendixN flag still forces the
+ * section on even if an older backend sent no map, so a stale server
+ * can only ever under-report, never hide something already required.
  */
 export function effectiveRequirements(
   app: RequirementsInput | null | undefined,
 ): EffectiveRequirements {
+  const server = app?.effectiveRequirements;
+  const fromServer = (key: string): boolean => server?.[key] === true;
   return {
-    appendix1: app?.requireAppendix1 === true,
-    appendix2: app?.requireAppendix2 === true,
-    appendix3: app?.requireAppendix3 === true,
-    appendix4: app?.requireAppendix4 === true,
-    appendix5: app?.requireAppendix5 === true,
-    ssn: app?.requireSsn === true,
-    // Set by the wizard's reqs memo only during a doc:ssn-doc revision round.
-    ssnDocRequired: false,
+    appendix1: app?.requireAppendix1 === true || fromServer("appendix1"),
+    appendix2: app?.requireAppendix2 === true || fromServer("appendix2"),
+    appendix3: app?.requireAppendix3 === true || fromServer("appendix3"),
+    appendix4: app?.requireAppendix4 === true || fromServer("appendix4"),
+    appendix5: app?.requireAppendix5 === true || fromServer("appendix5"),
+    ssn: app?.requireSsn === true || fromServer("ssn"),
+    // Also set by the wizard's reqs memo during a doc:ssn-doc revision round.
+    ssnDocRequired: fromServer("ssnDocRequired"),
   };
 }
 
