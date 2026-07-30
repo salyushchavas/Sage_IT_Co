@@ -380,6 +380,133 @@ public class AgreementApproverController {
         return ResponseEntity.ok(ApiResponse.success("Latest version ready", payload));
     }
 
+    /**
+     * Build AK — the approver's own downloadable copy of an agreement they
+     * approved. Every other document route on this surface rasterizes to PNG
+     * so nothing saveable reaches the browser; this one deliberately does not,
+     * because a Manager / Accounts approver needs the PDF for their records
+     * once their gate is cleared. Three documents, one per preview in the
+     * approved record:
+     *
+     *   {@code doc=final}    the executed agreement (every signature present),
+     *                        COMPLETED only — the stored final PDF when the row
+     *                        has one, else the same live render
+     *                        {@link #signedPreviewImages} shows;
+     *   {@code doc=phase1}   the durable Phase-1 ERM-signed snapshot, MANAGER
+     *                        only, mirroring {@link #phase1SignedPreviewImages};
+     *   {@code doc=approved} the consultant version this approver signed off on
+     *                        (ERM signature still blank) — available as soon as
+     *                        the gate is cleared, so a Manager who has just
+     *                        approved isn't left waiting on the countersign.
+     *                        Mirrors {@link #latestVersionPreviewImages}.
+     *
+     * All three are gated on having APPROVED this agreement in this role
+     * ({@code getForApproverWhoApproved}) — the membership test for the
+     * "Approved agreements" record the Download buttons live on, so an
+     * approver can always retrieve what they signed off on, and nobody else
+     * can (404, no ID probing).
+     *
+     * A {@code byte[]} response has no room for the JSON envelope, so refusals
+     * carry their reason on {@code X-Preview-Error} — the same CORS-exposed
+     * diagnostic header the preview routes already use.
+     */
+    @GetMapping("/api/agreement-approver/applications/{appId}/download-pdf")
+    public ResponseEntity<byte[]> downloadPdf(
+            @PathVariable String appId,
+            @RequestParam(value = "doc", required = false) String doc,
+            @RequestParam(value = "role", required = false) String role,
+            HttpServletRequest request) {
+        ApproverRole gate = resolveRole(request, role);
+        String userId = AgreementAuthz.userId(request);
+        String kind = doc == null || doc.isBlank() ? "final" : doc.trim().toLowerCase();
+        if (!"final".equals(kind) && !"phase1".equals(kind) && !"approved".equals(kind)) {
+            return downloadRefusal(HttpStatus.BAD_REQUEST,
+                    "doc must be final, phase1 or approved.");
+        }
+        if ("phase1".equals(kind) && gate != ApproverRole.MANAGER) {
+            return downloadRefusal(HttpStatus.FORBIDDEN,
+                    "The Phase 1 signed agreement is available to the Manager only.");
+        }
+        ConsultantApplication app = consultantService.getForApproverWhoApproved(
+                appId, gate, userId);
+
+        byte[] bytes;
+        String prefix;
+        try {
+            if ("phase1".equals(kind)) {
+                String key = app.getPhase1FinalPdfS3Key();
+                if (key == null || key.isBlank()) {
+                    return downloadRefusal(HttpStatus.CONFLICT,
+                            "No Phase 1 signed agreement on file for this agreement.");
+                }
+                bytes = agreementDocumentService.readStoredPdfBytes(key);
+                prefix = "phase1-signed-";
+            } else if ("approved".equals(kind)) {
+                bytes = consultantService.latestVersionSnapshotBytes(app);
+                if (bytes == null) {
+                    // Legacy agreement with no version snapshot — live pre-sign
+                    // render (consultant signatures present, ERM blank).
+                    bytes = agreementDocumentService.renderPdfBytes(
+                            app, AgreementDocumentService.ermPreviewOverrides());
+                }
+                prefix = "approved-copy-";
+            } else {
+                if (!ConsultantApplication.Status.COMPLETED.name().equals(app.getStatus())) {
+                    return downloadRefusal(HttpStatus.CONFLICT,
+                            "The signed agreement is available once the ERM has signed it.");
+                }
+                bytes = storedFinalPdfBytes(app);
+                if (bytes == null) {
+                    // null overrides → every signature renders, including the
+                    // ERM countersignature and the appended uploads.
+                    bytes = agreementDocumentService.renderPdfBytes(app, null);
+                }
+                prefix = "signed-";
+            }
+        } catch (Exception e) {
+            log.error("Approver download ({}) failed for {}", kind, appId, e);
+            return ConsultantApplicationController.previewFailure(e);
+        }
+
+        // The approver surface is otherwise no-download by design, so leave a
+        // trace of who took a copy of what.
+        log.info("Approver {} ({}) downloaded '{}' for agreement {}", userId, gate, kind, appId);
+        String filename = prefix + AgreementDocumentService.buildPdfFilename(app);
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .contentLength(bytes.length)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + filename + "\"")
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .body(bytes);
+    }
+
+    /**
+     * The stored executed PDF when the row carries an S3 key, else null so the
+     * caller falls back to a live render (legacy Cloudinary rows, and any row
+     * whose object has gone unreadable — the bytes the approver previewed are
+     * still reproducible from entity state).
+     */
+    private byte[] storedFinalPdfBytes(ConsultantApplication app) {
+        String key = app.getS3Key();
+        if (key == null || key.isBlank()) return null;
+        try {
+            return agreementDocumentService.readStoredPdfBytes(key);
+        } catch (RuntimeException e) {
+            log.warn("Stored final PDF unreadable for {} ({}) — falling back to a live render",
+                    app.getApplicationId(), e.toString());
+            return null;
+        }
+    }
+
+    /** Refusal with a human reason on the CORS-exposed diagnostic header. */
+    private static ResponseEntity<byte[]> downloadRefusal(HttpStatus status, String reason) {
+        return ResponseEntity.status(status)
+                .header("X-Preview-Error", reason)
+                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
+                .build();
+    }
+
     @PostMapping("/api/agreement-approver/applications/{appId}/approve")
     public ResponseEntity<ApiResponse<ConsultantApplication>> approve(
             @PathVariable String appId,

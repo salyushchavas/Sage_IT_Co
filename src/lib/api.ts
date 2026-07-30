@@ -4915,6 +4915,46 @@ export async function fetchApproverPhase1SignedPreviewImages(
   );
 }
 
+/** Which document an approver is downloading (the backend's `doc` param). */
+export type ApproverDownloadDoc = "final" | "phase1" | "approved";
+
+/**
+ * Build AK — the approver's downloadable PDF copy of an agreement they
+ * approved. Every other approver document route returns watermarked PNGs; this
+ * one returns real PDF bytes so the Manager / Accounts console can offer a
+ * Download button once their gate is cleared. `doc` picks the document:
+ * "final" (executed, COMPLETED only), "phase1" (Manager's durable Phase-1
+ * snapshot) or "approved" (the consultant version they signed off on, before
+ * the ERM countersign).
+ *
+ * Returns the raw Response: the caller checks `ok`, reads the reason off
+ * `X-Preview-Error`, and names the saved file itself (Content-Disposition
+ * isn't readable cross-origin).
+ */
+export async function fetchApproverAgreementPdfBlob(
+  applicationId: string,
+  doc: ApproverDownloadDoc = "final",
+  role?: ApproverRole,
+): Promise<Response> {
+  const token = getAgreementErmToken();
+  if (!token) {
+    throw new Error("Session expired. Please sign in again.");
+  }
+  const qs = `?doc=${doc}` + (role ? `&role=${role}` : "");
+  const res = await fetch(
+    `${BASE_URL}/api/agreement-approver/applications/${applicationId}/download-pdf${qs}`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  );
+  // Unlike the other blob helpers, a 403 here can be the endpoint refusing a
+  // document (Phase 1 is Manager-only) rather than a dead session — those
+  // carry X-Preview-Error, so only a bare 401/403 signs the approver out.
+  if (res.status === 401 || (res.status === 403 && !res.headers.get("X-Preview-Error"))) {
+    clearAgreementErmToken();
+    throw new Error("Session expired. Please sign in again.");
+  }
+  return res;
+}
+
 /**
  * Build G — ERM inline preview of the consultant-signed agreement
  * before countersigning. Streams the bytes server-side; no Cloudinary

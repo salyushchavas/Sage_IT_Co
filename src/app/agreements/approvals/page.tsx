@@ -6,6 +6,7 @@ import {
   AlertCircle,
   CheckCircle2,
   ClipboardCheck,
+  Download,
   FileText,
   Loader2,
   RotateCcw,
@@ -21,6 +22,7 @@ import {
   approverFetchApproved,
   approverFetchQueue,
   approverRequestRevision,
+  fetchApproverAgreementPdfBlob,
   fetchApproverLatestVersionPreviewImages,
   fetchApproverVersionPreviewImages,
   fetchApproverSignedPreviewImages,
@@ -28,6 +30,7 @@ import {
   fetchMe,
   getAgreementErmToken,
   type ApproverApprovedItem,
+  type ApproverDownloadDoc,
   type ApproverQueueItem,
   type ApproverRole,
   type ConsultantApplication,
@@ -599,6 +602,10 @@ function ApprovedTable({
   const [previewPages, setPreviewPages] = useState<string[] | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [previewErr, setPreviewErr] = useState("");
+  // Build AK — download of the actual PDF, alongside each preview.
+  const [downloadId, setDownloadId] = useState<string | null>(null);
+  const [downloadErr, setDownloadErr] = useState("");
+  const anyBusy = busyId !== null || downloadId !== null;
 
   const openPreview = async (appId: string) => {
     setBusyId(appId);
@@ -629,11 +636,56 @@ function ApprovedTable({
     }
   };
 
+  /**
+   * Build AK — save the PDF. The bytes come through the backend with the
+   * approver's bearer, so (as everywhere else here) no document URL reaches
+   * the DOM: they land in a session-local blob: URL that stops resolving a
+   * minute later.
+   */
+  const download = async (r: ApproverApprovedItem, doc: ApproverDownloadDoc) => {
+    setDownloadId(r.appId + ":" + doc);
+    setDownloadErr("");
+    try {
+      const res = await fetchApproverAgreementPdfBlob(r.appId, doc);
+      if (!res.ok) {
+        const detail = res.headers.get("X-Preview-Error");
+        // 4xx reasons are written for the approver; a 5xx detail is the raw
+        // render failure — console only, same as the ERM preview.
+        if (res.status >= 500 && detail) {
+          console.error(`Approver download failed on the server — ${detail}`);
+        }
+        throw new Error(
+          res.status < 500 && detail
+            ? detail
+            : `Couldn't download the agreement (${res.status}).`,
+        );
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = approverPdfFilename(r, doc);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setDownloadErr(e instanceof Error ? e.message : "Couldn't download the agreement.");
+    } finally {
+      setDownloadId(null);
+    }
+  };
+
   return (
     <div className="bg-white rounded-2xl border border-stone-200 shadow-sm overflow-x-auto">
       {previewErr && (
         <p className="px-4 pt-3 text-xs text-red-600 inline-flex items-center gap-1">
           <AlertCircle size={12} /> {previewErr}
+        </p>
+      )}
+      {downloadErr && (
+        <p className="px-4 pt-3 text-xs text-red-600 inline-flex items-center gap-1">
+          <AlertCircle size={12} /> {downloadErr}
         </p>
       )}
       <table className="w-full text-sm">
@@ -676,41 +728,70 @@ function ApprovedTable({
                         only; shown once in/past Phase 2, where the live final
                         preview no longer reflects the Phase-1 signed copy). */}
                     {r.hasPhase1Signed && (r.phase ?? 1) >= 2 && (
-                      <button
-                        type="button"
-                        onClick={() => openPhase1Preview(r.appId)}
-                        disabled={busyId !== null}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
-                      >
-                        {busyId === r.appId + ":p1" ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <FileText size={12} />
-                        )}
-                        Phase 1 signed
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openPhase1Preview(r.appId)}
+                          disabled={anyBusy}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                        >
+                          {busyId === r.appId + ":p1" ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <FileText size={12} />
+                          )}
+                          Phase 1 signed
+                        </button>
+                        <DownloadPdfButton
+                          label="Download"
+                          busy={downloadId === r.appId + ":phase1"}
+                          disabled={anyBusy}
+                          onClick={() => download(r, "phase1")}
+                        />
+                      </div>
                     )}
                     {completed ? (
-                      <button
-                        type="button"
-                        onClick={() => openPreview(r.appId)}
-                        disabled={busyId !== null}
-                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
-                      >
-                        {busyId === r.appId ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <FileText size={12} />
-                        )}
-                        {(r.phase ?? 1) >= 2 ? "Phase 2 signed" : "Preview"}
-                      </button>
+                      <div className="flex items-center gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openPreview(r.appId)}
+                          disabled={anyBusy}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+                        >
+                          {busyId === r.appId ? (
+                            <Loader2 size={12} className="animate-spin" />
+                          ) : (
+                            <FileText size={12} />
+                          )}
+                          {(r.phase ?? 1) >= 2 ? "Phase 2 signed" : "Preview"}
+                        </button>
+                        <DownloadPdfButton
+                          label="Download"
+                          busy={downloadId === r.appId + ":final"}
+                          disabled={anyBusy}
+                          onClick={() => download(r, "final")}
+                          title="Save the fully signed agreement as a PDF."
+                        />
+                      </div>
                     ) : (
-                      <span
-                        className="text-[11px] text-gray-400 italic"
-                        title="Available once the ERM has signed the agreement."
-                      >
-                        Awaiting ERM signature
-                      </span>
+                      /* Build AK — the executed copy doesn't exist until the ERM
+                         countersigns, but the approver can still take away the
+                         version they approved. */
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className="text-[11px] text-gray-400 italic"
+                          title="The fully signed copy is available once the ERM has signed the agreement."
+                        >
+                          Awaiting ERM signature
+                        </span>
+                        <DownloadPdfButton
+                          label="Download approved copy"
+                          busy={downloadId === r.appId + ":approved"}
+                          disabled={anyBusy}
+                          onClick={() => download(r, "approved")}
+                          title="Save the version you approved (the ERM signature is still blank)."
+                        />
+                      </div>
                     )}
                   </div>
                 </td>
@@ -728,6 +809,65 @@ function ApprovedTable({
       )}
     </div>
   );
+}
+
+// Build AK — the one Download button used for every document in the approved
+// record, so the three call sites can't drift apart.
+function DownloadPdfButton({
+  label,
+  busy,
+  disabled,
+  onClick,
+  title,
+}: {
+  label: string;
+  busy: boolean;
+  disabled: boolean;
+  onClick: () => void;
+  title?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 disabled:opacity-50 cursor-pointer"
+    >
+      {busy ? (
+        <Loader2 size={12} className="animate-spin" />
+      ) : (
+        <Download size={12} />
+      )}
+      {label}
+    </button>
+  );
+}
+
+/**
+ * Build AK — name for the saved file. Content-Disposition isn't readable
+ * cross-origin, so the anchor supplies its own; the approved-record row only
+ * carries the consultant name, so this is the backend's
+ * {@code SageITCO-Agreement_Name.pdf} shape minus the technology-track slot,
+ * with the same document prefix the backend sets.
+ */
+function approverPdfFilename(
+  r: ApproverApprovedItem,
+  doc: ApproverDownloadDoc,
+): string {
+  const slug = (r.consultantName ?? "")
+    .trim()
+    .replace(/\s+/g, "-")
+    .replace(/[^A-Za-z0-9_-]/g, "")
+    .replace(/[-_]+/g, "-")
+    .replace(/^[-_]+|[-_]+$/g, "");
+  const prefix =
+    doc === "phase1"
+      ? "phase1-signed-"
+      : doc === "approved"
+        ? "approved-copy-"
+        : "signed-";
+  return `${prefix}SageITCO-Agreement_${slug || r.appId}.pdf`;
 }
 
 function ApprovalCard({

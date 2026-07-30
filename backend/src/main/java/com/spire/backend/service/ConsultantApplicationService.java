@@ -2877,18 +2877,39 @@ public class ConsultantApplicationService {
     @Transactional(readOnly = true)
     public ConsultantApplication getForManagerPhase1Preview(
             String applicationId, String managerUserId) {
+        return getForApproverWhoApproved(
+                applicationId,
+                com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER,
+                managerUserId);
+    }
+
+    /**
+     * Build AK — gate for an approver's own copy of an agreement: admits
+     * exactly the approvers whose "Approved agreements" record contains it,
+     * i.e. anyone holding an APPROVED decision on it in this role, any round.
+     * That is the same set {@link #approverApprovedRecords} lists, so every row
+     * in the record stays actionable — including one approved in an earlier
+     * round the approver is no longer routed for (the reasoning
+     * {@link #getForManagerPhase1Preview} already made for Phase 1, generalized
+     * to either gate). 404 (no ID probing) when the caller never approved it.
+     */
+    @Transactional(readOnly = true)
+    public ConsultantApplication getForApproverWhoApproved(
+            String applicationId,
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
         ConsultantApplication app = getByApplicationId(applicationId);
         if (Boolean.TRUE.equals(app.getDeleted())) {
             throw new com.spire.backend.exception.ResourceNotFoundException(
                     "ConsultantApplication", "applicationId", applicationId);
         }
-        boolean approvedAsManager = managerUserId != null && !managerUserId.isBlank()
+        boolean approved = approverUserId != null && !approverUserId.isBlank()
                 && approvalRepository.existsByApplicationIdAndRoleAndStatusAndDecidedBy(
                         app.getId(),
-                        com.spire.backend.entity.AgreementApproval.ApproverRole.MANAGER,
+                        role,
                         com.spire.backend.entity.AgreementApproval.Decision.APPROVED,
-                        managerUserId);
-        if (!approvedAsManager) {
+                        approverUserId);
+        if (!approved) {
             throw new com.spire.backend.exception.ResourceNotFoundException(
                     "ConsultantApplication", "applicationId", applicationId);
         }
