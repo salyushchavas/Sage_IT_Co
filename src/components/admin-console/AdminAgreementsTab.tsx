@@ -130,6 +130,26 @@ interface FilterChipDef {
   tone: StatusTone | null;
 }
 
+/** "1" and "2" rather than numbers so the segmented control keys stay strings. */
+type PhaseFilter = "ALL" | "1" | "2";
+
+const PHASE_OPTIONS: ReadonlyArray<{ key: PhaseFilter; label: string }> = [
+  { key: "ALL", label: "Both phases" },
+  { key: "1", label: "Phase 1" },
+  { key: "2", label: "Phase 2" },
+];
+
+/** Phase split for a set of rows. A null phase is a pre-column Phase 1 row. */
+function splitByPhase(rows: Row[]): { p1: number; p2: number } {
+  let p1 = 0;
+  let p2 = 0;
+  for (const r of rows) {
+    if ((r.app.phase ?? 1) >= 2) p2 += 1;
+    else p1 += 1;
+  }
+  return { p1, p2 };
+}
+
 export default function AdminAgreementsTab({
   initialFilter,
 }: {
@@ -148,6 +168,9 @@ export default function AdminAgreementsTab({
   // A stage key, a raw status, or ALL. The tab is remounted on a new filter by
   // the console shell, so seeding state from the prop is enough.
   const [filter, setFilter] = useState<string>(initialFilter ?? ALL);
+  // Phase is orthogonal to stage — "Phase 2, in approval" is a real question —
+  // so it gets its own control rather than more chips in the stage row.
+  const [phaseFilter, setPhaseFilter] = useState<PhaseFilter>("ALL");
   const [query, setQuery] = useState("");
   const [grouped, setGrouped] = useState(true);
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
@@ -226,14 +249,35 @@ export default function AdminAgreementsTab({
     return decorated.filter((r) => terms.every((t) => r.haystack.includes(t)));
   }, [decorated, query]);
 
+  /** Rows matching the search AND the phase selection. Feeds everything below. */
+  const scoped = useMemo(() => {
+    if (phaseFilter === "ALL") return searched;
+    const want = phaseFilter === "1" ? 1 : 2;
+    // A null phase is a Phase 1 row that predates the column.
+    return searched.filter((r) => (r.app.phase ?? 1) === want);
+  }, [searched, phaseFilter]);
+
+  /** Phase counts come from the SEARCHED set, not the phase-scoped one —
+   *  otherwise picking Phase 2 would show "Phase 1 (0)" and strand the
+   *  operator with no way to read what they had just left. */
+  const phaseCounts = useMemo(() => {
+    let p1 = 0;
+    let p2 = 0;
+    for (const r of searched) {
+      if ((r.app.phase ?? 1) >= 2) p2 += 1;
+      else p1 += 1;
+    }
+    return { all: searched.length, p1, p2 };
+  }, [searched]);
+
   const chips = useMemo<FilterChipDef[]>(() => {
     const counts = new Map<AgreementStage, number>();
-    for (const r of searched) {
+    for (const r of scoped) {
       counts.set(r.meta.stage, (counts.get(r.meta.stage) ?? 0) + 1);
     }
 
     const out: FilterChipDef[] = [
-      { key: ALL, label: "All", count: searched.length, tone: null },
+      { key: ALL, label: "All", count: scoped.length, tone: null },
     ];
     for (const stage of STAGE_ORDER) {
       const count = counts.get(stage) ?? 0;
@@ -257,18 +301,18 @@ export default function AdminAgreementsTab({
       out.push({
         key: filter,
         label: meta.label,
-        count: searched.filter((r) => r.app.status === filter).length,
+        count: scoped.filter((r) => r.app.status === filter).length,
         tone: meta.tone,
       });
     }
     return out;
-  }, [searched, filter]);
+  }, [scoped, filter]);
 
   const visible = useMemo(() => {
-    if (filter === ALL) return searched;
-    if (isStage(filter)) return searched.filter((r) => r.meta.stage === filter);
-    return searched.filter((r) => r.app.status === filter);
-  }, [searched, filter]);
+    if (filter === ALL) return scoped;
+    if (isStage(filter)) return scoped.filter((r) => r.meta.stage === filter);
+    return scoped.filter((r) => r.app.status === filter);
+  }, [scoped, filter]);
 
   const groups = useMemo<ErmGroup[]>(() => {
     const map = new Map<string, ErmGroup>();
@@ -344,7 +388,8 @@ export default function AdminAgreementsTab({
   const truncated = !complete && totalElements > rows.length;
   const allCollapsed =
     groups.length > 0 && groups.every((g) => collapsed.has(g.key));
-  const filtering = filter !== ALL || query.trim() !== "";
+  const filtering =
+    filter !== ALL || query.trim() !== "" || phaseFilter !== "ALL";
 
   return (
     <div className="space-y-4">
@@ -397,6 +442,44 @@ export default function AdminAgreementsTab({
                   <X size={13} />
                 </button>
               )}
+            </div>
+
+            {/* Phase sits beside the view toggle rather than in the stage chip
+                row below: the two are independent, and mixing them would imply
+                an agreement is EITHER "Phase 2" OR "In approval". */}
+            <div className="inline-flex rounded-lg border border-gray-200 bg-white p-0.5">
+              {PHASE_OPTIONS.map((opt) => {
+                const count =
+                  opt.key === "ALL"
+                    ? phaseCounts.all
+                    : opt.key === "1"
+                      ? phaseCounts.p1
+                      : phaseCounts.p2;
+                return (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    onClick={() => setPhaseFilter(opt.key)}
+                    aria-pressed={phaseFilter === opt.key}
+                    className={
+                      "inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold cursor-pointer transition " +
+                      (phaseFilter === opt.key
+                        ? "bg-sage-navy text-white"
+                        : "text-gray-600 hover:text-sage-navy")
+                    }
+                  >
+                    {opt.label}
+                    <span
+                      className={
+                        "tabular-nums text-[10px] " +
+                        (phaseFilter === opt.key ? "text-white/70" : "text-gray-400")
+                      }
+                    >
+                      {count}
+                    </span>
+                  </button>
+                );
+              })}
             </div>
 
             {/* Grouping is a view preference, not a filter — both modes show
@@ -486,7 +569,7 @@ export default function AdminAgreementsTab({
             title={filtering ? "Nothing matches those filters." : "No agreements yet."}
             hint={
               filtering
-                ? "Widen the search or pick another stage."
+                ? "Widen the search, or pick another stage or phase."
                 : "Agreements appear here as soon as an ERM creates one."
             }
           />
@@ -497,6 +580,7 @@ export default function AdminAgreementsTab({
                 onClick={() => {
                   setFilter(ALL);
                   setQuery("");
+                  setPhaseFilter("ALL");
                 }}
                 className={BTN_SECONDARY}
               >
@@ -509,6 +593,11 @@ export default function AdminAgreementsTab({
         groups.map((g) => {
           const isCollapsed = collapsed.has(g.key);
           const stuckCount = g.rows.filter((r) => r.meta.stage === "stuck").length;
+          // Only worth showing when the group actually spans both phases —
+          // with a phase filter applied it would just restate the filter.
+          const phases = splitByPhase(g.rows);
+          const showPhaseSplit =
+            phaseFilter === "ALL" && phases.p1 > 0 && phases.p2 > 0;
           return (
             <SectionCard key={g.key} padded={false}>
               <button
@@ -530,6 +619,12 @@ export default function AdminAgreementsTab({
                       stalled agreement. */}
                   {stuckCount > 0 && (
                     <Chip tone="danger">{stuckCount} needs attention</Chip>
+                  )}
+                  {showPhaseSplit && (
+                    <span className="hidden sm:inline-flex items-center gap-1.5">
+                      <Chip>P1 {phases.p1}</Chip>
+                      <Chip tone="review">P2 {phases.p2}</Chip>
+                    </span>
                   )}
                   <span className="text-[11px] font-semibold text-gray-500">
                     {g.rows.length} agreement{g.rows.length === 1 ? "" : "s"}

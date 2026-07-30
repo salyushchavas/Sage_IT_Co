@@ -156,6 +156,53 @@ export default function AdminLifecycleTab() {
         </p>
       </SectionCard>
 
+      {/* ── 3b. The two phases ─────────────────────────────────── */}
+      <SectionCard
+        title="The two phases"
+        description="The lifecycle above runs once per phase. Phase is a separate axis from status — an agreement is always at one phase AND one status."
+      >
+        <div className="grid gap-4 sm:grid-cols-2 max-w-4xl">
+          <div className="rounded-xl border border-gray-200 p-4">
+            <div className="flex items-center gap-2">
+              <Chip>Phase 1</Chip>
+              <span className="text-[13px] font-semibold text-gray-900">
+                Coaching agreement
+              </span>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-gray-600">
+              Where every agreement starts. It runs the full path — consultant
+              signs, <strong>Manager</strong> approves, ERM countersigns. The
+              Accounts gate does not exist here, which is why the Accounts
+              column reads “N/A” on a Phase 1 row.
+            </p>
+          </div>
+          <div className="rounded-xl border border-violet-200 bg-violet-50/30 p-4">
+            <div className="flex items-center gap-2">
+              <Chip tone="review">Phase 2</Chip>
+              <span className="text-[13px] font-semibold text-gray-900">
+                Post-offer support
+              </span>
+            </div>
+            <p className="mt-2 text-[13px] leading-relaxed text-gray-600">
+              The ERM reopens an executed Phase 1 agreement, promoting the
+              sections the consultant skipped. It is the{" "}
+              <strong>same agreement</strong>, not a new one: it returns to the
+              start of the path and needs{" "}
+              <strong>{phase2Approval.blockedOn}</strong> before the ERM
+              countersigns again.
+            </p>
+          </div>
+        </div>
+        <p className="mt-4 max-w-3xl text-[12px] leading-relaxed text-gray-500">
+          Only an executed agreement can be advanced, so reaching Phase 2 is
+          itself proof that Phase 1 was countersigned. That is why the Overview
+          tab keeps counting a reopened agreement under an ERM’s Phase 1
+          executions — the milestone happened and does not un-happen. Phase 1
+          content is locked once reopened; the consultant re-signs only the
+          final execution block and the promoted sections.
+        </p>
+      </SectionCard>
+
       {/* ── 4. Look like a status, aren't ──────────────────────── */}
       <SectionCard
         title="Two things that look like a status but are not"

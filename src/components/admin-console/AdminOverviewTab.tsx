@@ -107,7 +107,17 @@ interface OwnerRow {
   onDesk: number;
   withConsultant: number;
   withApprovers: number;
-  executed: number;
+  /**
+   * Phase 1 countersignatures. Includes every agreement now at Phase 2:
+   * advanceToPhase2 refuses anything that is not COMPLETED
+   * (ConsultantApplicationService:3497), so reaching Phase 2 IS proof that
+   * Phase 1 was executed, whatever the row's status is today.
+   */
+  executedPhase1: number;
+  /** Phase 2 countersignatures — at Phase 2 AND executed right now. */
+  executedPhase2: number;
+  /** At Phase 2 but not yet re-executed, i.e. a second round in progress. */
+  inPhase2: number;
 }
 
 interface Overview {
@@ -137,7 +147,9 @@ function blankRow(
     onDesk: 0,
     withConsultant: 0,
     withApprovers: 0,
-    executed: 0,
+    executedPhase1: 0,
+    executedPhase2: 0,
+    inPhase2: 0,
   };
 }
 
@@ -210,7 +222,21 @@ function buildOverview(
     if (meta.stage === "with_erm") row.onDesk += 1;
     else if (meta.stage === "with_consultant") row.withConsultant += 1;
     else if (meta.stage === "with_approvers") row.withApprovers += 1;
-    else if (meta.stage === "executed") row.executed += 1;
+
+    // Phase accounting. An agreement carries ONE phase number that moves 1 -> 2,
+    // so a naive "executed, split by current phase" would move a finished Phase 1
+    // out of the Phase 1 column the moment it was reopened — making an ERM's
+    // Phase 1 record shrink as they do more work. Count the milestone, not the
+    // current position.
+    const atPhase2 = (app.phase ?? 1) >= 2;
+    const executedNow = meta.stage === "executed";
+    if (atPhase2) {
+      row.executedPhase1 += 1; // reaching Phase 2 required a Phase 1 countersign
+      if (executedNow) row.executedPhase2 += 1;
+      else row.inPhase2 += 1;
+    } else if (executedNow) {
+      row.executedPhase1 += 1;
+    }
   }
 
   // Array.from, not a spread: the project compiles without downlevelIteration,
@@ -556,7 +582,16 @@ export default function AdminOverviewTab({ onNavigate }: { onNavigate: NavigateF
 
       <SectionCard
         title="Workload by ERM"
-        description="Busiest desk first. Total is every agreement they own; the columns beside it break out the live stages, so cancelled and stalled rows sit in the total without a column of their own."
+        description={
+          <>
+            Busiest desk first. <strong>Total</strong> is every agreement they
+            own, so cancelled and stalled rows sit in it without a column of
+            their own. <strong>Phase 1</strong> counts countersignatures, not
+            current position — an agreement reopened for Phase 2 stays counted,
+            because it could only be reopened after Phase 1 was executed.{" "}
+            <strong>P2 open</strong> is a second round still in progress.
+          </>
+        }
         padded={ownerRows.length === 0}
       >
         {ownerRows.length === 0 ? (
@@ -568,16 +603,43 @@ export default function AdminOverviewTab({ onNavigate }: { onNavigate: NavigateF
         ) : (
           <TableShell
             head={
-              <tr>
-                <th className={TH}>ERM</th>
-                <th className={TH}>Total</th>
-                <th className={TH}>Their desk</th>
-                {/* Stage columns take their names from STAGE_META so the
-                    table and the meter above never drift apart. */}
-                <th className={TH}>{STAGE_META.with_consultant.label}</th>
-                <th className={TH}>{STAGE_META.with_approvers.label}</th>
-                <th className={TH}>{STAGE_META.executed.label}</th>
-              </tr>
+              <>
+                {/* Two-row header: open work and executed work are different
+                    questions ("who is busy" vs "who has delivered"), so they
+                    are banded rather than left as six flat columns. */}
+                <tr>
+                  <th className={TH} rowSpan={2}>
+                    ERM
+                  </th>
+                  <th className={TH} rowSpan={2}>
+                    Total
+                  </th>
+                  <th
+                    className={`${TH} border-l border-gray-200 text-center`}
+                    colSpan={3}
+                  >
+                    Open
+                  </th>
+                  <th
+                    className={`${TH} border-l border-gray-200 text-center`}
+                    colSpan={3}
+                  >
+                    Executed
+                  </th>
+                </tr>
+                <tr>
+                  {/* Stage columns take their names from STAGE_META so the
+                      table and the meter above never drift apart. */}
+                  <th className={`${TH} border-l border-gray-200`}>
+                    {STAGE_META.with_consultant.label}
+                  </th>
+                  <th className={TH}>Their desk</th>
+                  <th className={TH}>{STAGE_META.with_approvers.label}</th>
+                  <th className={`${TH} border-l border-gray-200`}>Phase 1</th>
+                  <th className={TH}>Phase 2</th>
+                  <th className={TH}>P2 open</th>
+                </tr>
+              </>
             }
           >
             {ownerRows.map((row) => (
@@ -602,17 +664,23 @@ export default function AdminOverviewTab({ onNavigate }: { onNavigate: NavigateF
                 <td className={TD}>
                   <Num value={row.total} />
                 </td>
+                <td className={`${TD} border-l border-gray-100`}>
+                  <Num value={row.withConsultant} />
+                </td>
                 <td className={TD}>
                   <Num value={row.onDesk} />
                 </td>
                 <td className={TD}>
-                  <Num value={row.withConsultant} />
-                </td>
-                <td className={TD}>
                   <Num value={row.withApprovers} />
                 </td>
+                <td className={`${TD} border-l border-gray-100`}>
+                  <Num value={row.executedPhase1} />
+                </td>
                 <td className={TD}>
-                  <Num value={row.executed} />
+                  <Num value={row.executedPhase2} />
+                </td>
+                <td className={TD}>
+                  <Num value={row.inPhase2} />
                 </td>
               </tr>
             ))}
