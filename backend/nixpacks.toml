@@ -14,6 +14,14 @@ aptPkgs = [
     "libreoffice-core",
     "fonts-liberation",
     "fontconfig",
+    # Build AQ — heif-convert, for HEIC → JPEG on document previews.
+    # iPhones shoot HEIC by default, so a consultant photographing a
+    # cheque uploads one; no browser can decode it, so "view cheque"
+    # served a file the ERM could only download and still not open.
+    # Ships /usr/bin/heif-convert and pulls in libheif itself.
+    # Without this package the transcode is skipped and the raw HEIC is
+    # served — i.e. exactly the broken behaviour, so keep it installed.
+    "libheif-examples",
     # tini — a minimal init that runs as PID 1 and reaps orphaned children.
     # Without it the JVM is PID 1, and a JVM (unlike a real init) never reaps
     # grandchildren that reparent to it. Any soffice.bin outliving its

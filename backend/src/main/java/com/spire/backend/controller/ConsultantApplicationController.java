@@ -13,6 +13,7 @@ import com.spire.backend.security.JwtService;
 import com.spire.backend.service.AgreementContentService;
 import com.spire.backend.service.AgreementDocumentService;
 import com.spire.backend.service.ConsultantApplicationService;
+import com.spire.backend.service.HeicTranscoder;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
@@ -57,6 +58,8 @@ public class ConsultantApplicationController {
     private final AgreementDocumentService agreementDocumentService;
     private final AgreementContentService agreementContentService;
     private final JwtService jwtService;
+    /** Build AQ — HEIC → JPEG on the way out, so uploads actually preview. */
+    private final HeicTranscoder heicTranscoder;
 
     /**
      * Portal-phase consultant gate. The token represents the verified
@@ -702,25 +705,7 @@ public class ConsultantApplicationController {
         } catch (java.io.IOException e) {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
-        if (doc == null || doc.bytes() == null || doc.bytes().length == 0) {
-            return ResponseEntity.notFound().build();
-        }
-        String contentType = doc.contentType();
-        if (contentType == null || contentType.isBlank()) {
-            contentType = "application/octet-stream";
-        }
-        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
-        String ext = isPdf ? ".pdf" : ".img";
-        String filename = "SageITCO-WorkAuth_" + appId + ext;
-        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
-                ? "attachment" : "inline";
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .contentLength(doc.bytes().length)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        dispositionMode + "; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-                .body(doc.bytes());
+        return streamDoc(doc, "SageITCO-WorkAuth_" + appId, disposition);
     }
 
     // ── Build I — Phase 2 Employment offer-letter upload ──────────────
@@ -954,7 +939,20 @@ public class ConsultantApplicationController {
         return streamDoc(doc, "SageITCO-SSNDoc_" + appId, disposition);
     }
 
-    /** Shared streamer for an uploaded document (inline by default). */
+    /**
+     * Shared streamer for an uploaded document (inline by default).
+     *
+     * Build AQ — HEIC is transcoded to JPEG on the way out. An iPhone
+     * cheque photo is stored as image/heic, which no browser can decode:
+     * clicking "view" produced a Save-As dialog for a file Windows has no
+     * codec for either. Stored bytes are untouched; only what's served
+     * changes. A failed conversion falls through to the original bytes —
+     * that's the pre-existing behaviour, so it can't make things worse.
+     *
+     * The extension is also derived from the served type now. It used to be
+     * a flat ".img" for everything non-PDF, which is why the download
+     * dialog showed a bare UUID with no usable extension.
+     */
     private ResponseEntity<byte[]> streamDoc(
             ConsultantApplicationService.ChequeBytes doc, String filenameBase, String disposition) {
         if (doc == null || doc.bytes() == null || doc.bytes().length == 0) {
@@ -964,17 +962,42 @@ public class ConsultantApplicationController {
         if (contentType == null || contentType.isBlank()) {
             contentType = "application/octet-stream";
         }
-        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
-        String filename = filenameBase + (isPdf ? ".pdf" : ".img");
+        byte[] body = doc.bytes();
+        if (HeicTranscoder.isHeic(contentType, body)) {
+            byte[] jpeg = heicTranscoder.toJpeg(body);
+            if (jpeg != null) {
+                body = jpeg;
+                contentType = "image/jpeg";
+            }
+        }
+        String filename = filenameBase + extensionForContentType(contentType);
         String dispositionMode = "attachment".equalsIgnoreCase(disposition)
                 ? "attachment" : "inline";
         return ResponseEntity.ok()
                 .contentType(MediaType.parseMediaType(contentType))
-                .contentLength(doc.bytes().length)
+                .contentLength(body.length)
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         dispositionMode + "; filename=\"" + filename + "\"")
                 .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-                .body(doc.bytes());
+                .body(body);
+    }
+
+    /**
+     * Build AQ — file extension matching what we actually serve, so the
+     * browser's Save dialog offers something openable instead of a bare id.
+     */
+    private static String extensionForContentType(String contentType) {
+        String ct = contentType == null
+                ? "" : contentType.toLowerCase(java.util.Locale.ROOT).trim();
+        if (ct.startsWith("application/pdf")) return ".pdf";
+        if (ct.startsWith("image/jpeg") || ct.startsWith("image/jpg")) return ".jpg";
+        if (ct.startsWith("image/png")) return ".png";
+        if (ct.startsWith("image/gif")) return ".gif";
+        if (ct.startsWith("image/webp")) return ".webp";
+        if (ct.startsWith("image/tiff")) return ".tiff";
+        if (ct.startsWith("image/heic") || ct.startsWith("image/heif")) return ".heic";
+        if (ct.startsWith("image/")) return ".img";
+        return "";
     }
 
     private ResponseEntity<byte[]> streamChequeAt(String appId, int index, String disposition) {
@@ -984,25 +1007,7 @@ public class ConsultantApplicationController {
         } catch (java.io.IOException e) {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
-        if (cheque == null || cheque.bytes() == null || cheque.bytes().length == 0) {
-            return ResponseEntity.notFound().build();
-        }
-        String contentType = cheque.contentType();
-        if (contentType == null || contentType.isBlank()) {
-            contentType = "application/octet-stream";
-        }
-        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
-        String ext = isPdf ? ".pdf" : ".img";
-        String filename = "SageITCO-Cheque-" + (index + 1) + "_" + appId + ext;
-        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
-                ? "attachment" : "inline";
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .contentLength(cheque.bytes().length)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        dispositionMode + "; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-                .body(cheque.bytes());
+        return streamDoc(cheque, "SageITCO-Cheque-" + (index + 1) + "_" + appId, disposition);
     }
 
     private ResponseEntity<byte[]> streamCheque(String appId, String disposition) {
@@ -1012,25 +1017,7 @@ public class ConsultantApplicationController {
         } catch (java.io.IOException e) {
             return ResponseEntity.status(HttpStatus.BAD_GATEWAY).build();
         }
-        if (cheque == null || cheque.bytes() == null || cheque.bytes().length == 0) {
-            return ResponseEntity.notFound().build();
-        }
-        String contentType = cheque.contentType();
-        if (contentType == null || contentType.isBlank()) {
-            contentType = "application/octet-stream";
-        }
-        boolean isPdf = "application/pdf".equalsIgnoreCase(contentType);
-        String ext = isPdf ? ".pdf" : ".img";
-        String filename = "SageITCO-Cheque_" + appId + ext;
-        String dispositionMode = "attachment".equalsIgnoreCase(disposition)
-                ? "attachment" : "inline";
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .contentLength(cheque.bytes().length)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        dispositionMode + "; filename=\"" + filename + "\"")
-                .header(HttpHeaders.CACHE_CONTROL, "private, no-store")
-                .body(cheque.bytes());
+        return streamDoc(cheque, "SageITCO-Cheque_" + appId, disposition);
     }
 
     // ── Consultant portal auth (PUBLIC — no session token) ──────────

@@ -1856,6 +1856,29 @@ function ErmPdfPreview({ appId }: { appId: string }) {
 }
 
 /**
+ * Build AQ — file extension matching what the backend actually served.
+ * This used to be a flat ".img" for anything that wasn't a PDF, so a
+ * downloaded cheque landed as a file Windows had no handler for. The
+ * backend transcodes HEIC to JPEG on read, so the served type is now
+ * always something a browser can open — name it accordingly.
+ */
+function extensionForBlobType(mime: string | undefined | null): string {
+  const type = (mime ?? "").toLowerCase().split(";")[0].trim();
+  switch (type) {
+    case "application/pdf": return ".pdf";
+    case "image/jpeg":
+    case "image/jpg": return ".jpg";
+    case "image/png": return ".png";
+    case "image/gif": return ".gif";
+    case "image/webp": return ".webp";
+    case "image/tiff": return ".tiff";
+    case "image/heic":
+    case "image/heif": return ".heic";
+    default: return type.startsWith("image/") ? ".img" : "";
+  }
+}
+
+/**
  * Build G — inline view + download of the consultant's Appendix 5
  * cheque. Bytes are streamed through the backend (re-signs the
  * Cloudinary URL each call), wrapped in a blob URL for the open/
@@ -1925,8 +1948,9 @@ function SecurityChequeCard({
       } else {
         const a = document.createElement("a");
         a.href = url;
-        const ext = blob.type === "application/pdf" ? "pdf" : "img";
-        a.download = `SageITCO-Cheque-${entry.index + 1}_${app.applicationId}.${ext}`;
+        a.download =
+          `SageITCO-Cheque-${entry.index + 1}_${app.applicationId}`
+          + extensionForBlobType(blob.type);
         document.body.appendChild(a);
         a.click();
         a.remove();
