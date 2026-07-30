@@ -65,6 +65,59 @@ public class HeicTranscoder {
     private final AtomicBoolean warnedUnavailable = new AtomicBoolean(false);
 
     /**
+     * Build AQ — say at BOOT whether a converter is present, instead of only
+     * finding out when an ERM opens a cheque and gets a download. Whether
+     * libheif-examples actually landed on the image is otherwise invisible:
+     * the failure mode is silent and looks identical to not having deployed.
+     * One line in the startup log answers it.
+     */
+    @jakarta.annotation.PostConstruct
+    void logConverterAvailability() {
+        String found = firstAvailableConverter();
+        if (found != null) {
+            log.info("HEIC preview: converter '{}' found — "
+                    + "HEIC uploads will be transcoded to JPEG on read", found);
+        } else {
+            log.warn("HEIC preview: NO converter on this image "
+                    + "(looked for heif-convert, magick, convert on PATH). "
+                    + "HEIC uploads (iPhone photos) will download instead of "
+                    + "previewing. Fix: add 'libheif-examples' to aptPkgs in "
+                    + "backend/nixpacks.toml and redeploy.");
+        }
+    }
+
+    private static String firstAvailableConverter() {
+        for (String[] template : CONVERTERS) {
+            if (onPath(template[0])) return template[0];
+        }
+        return null;
+    }
+
+    /**
+     * Whether {@code binary} is an executable on PATH. Checked by scanning
+     * PATH rather than running the binary with {@code --version}: the
+     * version flag differs between libheif and ImageMagick releases, and a
+     * probe that spawns a process is a worse thing to run at boot than a
+     * handful of stat calls.
+     */
+    private static boolean onPath(String binary) {
+        String path = System.getenv("PATH");
+        if (path == null || path.isBlank()) return false;
+        for (String dir : path.split(java.io.File.pathSeparator)) {
+            if (dir.isBlank()) continue;
+            try {
+                Path candidate = Path.of(dir, binary);
+                if (Files.isRegularFile(candidate) && Files.isExecutable(candidate)) {
+                    return true;
+                }
+            } catch (Exception ignored) {
+                // Unparseable PATH entry — skip it.
+            }
+        }
+        return false;
+    }
+
+    /**
      * True when these bytes are HEIC/HEIF. Trusts the magic bytes over the
      * declared content type: iOS Safari and several Android browsers post a
      * HEIC as {@code application/octet-stream} or even {@code image/jpeg},
@@ -111,13 +164,15 @@ public class HeicTranscoder {
             Files.write(in, heicBytes);
 
             for (String[] template : CONVERTERS) {
+                if (!onPath(template[0])) continue;
                 byte[] converted = runConverter(template, in, out, workDir);
                 if (converted != null) return converted;
             }
             if (warnedUnavailable.compareAndSet(false, true)) {
-                log.warn("No HEIC converter available on this image "
-                        + "(tried heif-convert/magick/convert). HEIC uploads will "
-                        + "download instead of previewing. Install libheif-examples.");
+                log.warn("HEIC transcode unavailable — serving the original bytes, "
+                        + "which the browser will download rather than display. "
+                        + "Converter on PATH: {}. See the boot log for details.",
+                        firstAvailableConverter() == null ? "none" : firstAvailableConverter());
             }
             return null;
         } catch (Exception e) {
