@@ -33,11 +33,17 @@ import {
   type ApproverDownloadDoc,
   type ApproverQueueItem,
   type ApproverRole,
+  type ApprovalDecision,
   type ConsultantApplication,
   type ConsultantApplicationStatus,
 } from "@/lib/api";
 import { computePendingAppendices } from "@/lib/pending-appendix";
-import { AGREEMENT_STATUS_META, STAGE_META } from "@/lib/agreement-status";
+import {
+  AGREEMENT_STATUS_META,
+  APPROVAL_DECISION_META,
+  STAGE_META,
+  TONE_CLASSES,
+} from "@/lib/agreement-status";
 import { formatUsDate } from "@/lib/dates";
 
 /**
@@ -509,19 +515,24 @@ function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
   );
 }
 
-// Compact Manager/Accounts gate-status badge (mirrors ConsultantsListView).
+// Compact Manager/Accounts gate-status badge. Wording and colour come from
+// APPROVAL_DECISION_META so an approver's own queue names their decision
+// exactly as the ERM dashboard and the admin console report it back.
 function ApprovalBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <span className="text-[11px] text-gray-400">—</span>;
-  const map: Record<string, { label: string; cls: string }> = {
-    APPROVED: { label: "Approved", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    PENDING: { label: "Pending", cls: "bg-amber-50 text-amber-700 border-amber-200" },
-    REVISION_REQUESTED: { label: "Revision", cls: "bg-rose-50 text-rose-700 border-rose-200" },
-  };
-  const m = map[status] ?? { label: status, cls: "bg-gray-50 text-gray-600 border-gray-200" };
+  const m = APPROVAL_DECISION_META[status as ApprovalDecision];
+  if (!m) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700">
+        {status}
+      </span>
+    );
+  }
   return (
     <span
       className={
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold " + m.cls
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold " +
+        TONE_CLASSES[m.tone]
       }
     >
       {m.label}

@@ -8,6 +8,7 @@ import {
   fetchMe,
   listConsultantApplications,
   resendConsultantInvite,
+  type ApprovalDecision,
   type ConsultantApplication,
   type ConsultantApplicationStatus,
   type ConsultantApplicationsPage,
@@ -15,7 +16,12 @@ import {
 import AgreementStatusPill from "./AgreementStatusPill";
 import { formatUsDate } from "@/lib/dates";
 import { computePendingAppendices } from "@/lib/pending-appendix";
-import { AGREEMENT_STATUS_META, LIVE_STATUSES } from "@/lib/agreement-status";
+import {
+  AGREEMENT_STATUS_META,
+  APPROVAL_DECISION_META,
+  LIVE_STATUSES,
+  TONE_CLASSES,
+} from "@/lib/agreement-status";
 
 /**
  * Chips are generated from the shared vocabulary, never written here, so a
@@ -451,19 +457,26 @@ function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
 
 // Build O — compact Manager/Accounts gate-status badge for the "All" list.
 // null status (never sent for that role) renders a neutral dash.
+//
+// Wording and colour come from APPROVAL_DECISION_META. This used to keep its
+// own map, which called a declined gate "Revision" in rose while the approval
+// board rendered directly above it on the same page called the same gate
+// "Declined" in red.
 function ApprovalBadge({ status }: { status: string | null | undefined }) {
   if (!status) return <span className="text-[11px] text-gray-400">—</span>;
-  const map: Record<string, { label: string; cls: string }> = {
-    APPROVED: { label: "Approved", cls: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    PENDING: { label: "Pending", cls: "bg-amber-50 text-amber-700 border-amber-200" },
-    REVISION_REQUESTED: { label: "Revision", cls: "bg-rose-50 text-rose-700 border-rose-200" },
-  };
-  const m = map[status] ?? { label: status, cls: "bg-gray-50 text-gray-600 border-gray-200" };
+  const m = APPROVAL_DECISION_META[status as ApprovalDecision];
+  if (!m) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700">
+        {status}
+      </span>
+    );
+  }
   return (
     <span
       className={
-        "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold " +
-        m.cls
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold " +
+        TONE_CLASSES[m.tone]
       }
     >
       {m.label}

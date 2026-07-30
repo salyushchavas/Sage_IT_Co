@@ -1,4 +1,4 @@
-import type { ConsultantApplicationStatus } from "@/lib/api";
+import type { ApprovalDecision, ConsultantApplicationStatus } from "@/lib/api";
 
 /**
  * Single source of truth for what a consultant-agreement status MEANS and
@@ -358,6 +358,29 @@ export const STAGE_META: Record<
     tone: "danger",
     blurb: "Stalled in a state no one can move — needs an operator.",
   },
+};
+
+/**
+ * Per-approver gate decisions (Manager / Accounts), in the same vocabulary as
+ * the lifecycle statuses above.
+ *
+ * REVISION_REQUESTED is "Declined" for exactly the reason
+ * APPROVAL_REVISION_REQUESTED is "Declined by approver": the approver refused
+ * their gate. "Revision" implied the consultant had been sent something to fix,
+ * which is not what happens — the ball goes to the ERM.
+ *
+ * This lives here because four surfaces render the same gate — the ERM
+ * dashboard board, the consultants list directly beneath it, the approver queue
+ * and the admin console — and they had drifted into two different names and two
+ * different palettes for one fact.
+ */
+export const APPROVAL_DECISION_META: Record<
+  ApprovalDecision,
+  { label: string; tone: StatusTone }
+> = {
+  APPROVED: { label: "Approved", tone: "done" },
+  PENDING: { label: "Pending", tone: "waiting" },
+  REVISION_REQUESTED: { label: "Declined", tone: "danger" },
 };
 
 export interface StatusContext {

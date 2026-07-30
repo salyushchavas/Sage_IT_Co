@@ -20,6 +20,7 @@ import {
   type ConsultantApplication,
 } from "@/lib/api";
 import {
+  APPROVAL_DECISION_META,
   describeStatus,
   STAGE_META,
   TONE_ACCENT,
@@ -82,18 +83,9 @@ function isStage(value: string): value is AgreementStage {
   return (STAGE_ORDER as readonly string[]).includes(value);
 }
 
-/**
- * Gate decisions as they read in the console's post-rewrite vocabulary.
- * REVISION_REQUESTED is "Declined" here for the same reason
- * APPROVAL_REVISION_REQUESTED is "Declined by approver" in agreement-status:
- * the approver refused their gate, and calling that "Revision" implied the
- * consultant had been sent something to fix, which never happens.
- */
-const APPROVAL_META: Record<string, { label: string; tone: StatusTone }> = {
-  APPROVED: { label: "Approved", tone: "done" },
-  PENDING: { label: "Pending", tone: "waiting" },
-  REVISION_REQUESTED: { label: "Declined", tone: "danger" },
-};
+/** Gate decision wording + colour, shared with every other surface. */
+const APPROVAL_META: Record<string, { label: string; tone: StatusTone }> =
+  APPROVAL_DECISION_META;
 
 const CONFIRM_DELETE =
   "Delete this agreement?\n\n"

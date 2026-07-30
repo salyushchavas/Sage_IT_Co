@@ -2988,6 +2988,13 @@ public class ConsultantApplicationService {
                         : applicationRepository
                                 .findByOwnerErmIdAndStatusInAndDeletedFalseOrderByUpdatedAtDesc(
                                         ownerErmId, states);
+        // The board groups its rows under the owning ERM, and ownerName is a
+        // @Transient field nobody fills unless asked -- without this every row
+        // would serialize ownerName:null and the grouping would collapse into
+        // one "Unassigned" pile. One batched lookup, same as listAllForAdmin
+        // and approverApplications. Harmless on the ERM-scoped path (a single
+        // owner id resolves to a single row).
+        populateOwnerNames(apps);
         java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
         for (ConsultantApplication app : apps) {
             java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
