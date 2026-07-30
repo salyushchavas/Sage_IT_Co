@@ -34,6 +34,7 @@ import {
   type ConsultantApplicationStatus,
 } from "@/lib/api";
 import { computePendingAppendices } from "@/lib/pending-appendix";
+import { AGREEMENT_STATUS_META, STAGE_META } from "@/lib/agreement-status";
 import { formatUsDate } from "@/lib/dates";
 
 /**
@@ -239,22 +240,57 @@ export default function ApprovalsPage() {
 // agreement routed to them, filterable by status + searchable, mirroring the
 // ERM's ConsultantsListView (minus owner-only actions). Actions live on the
 // Pending tab; this view is informational.
+/** Caption straight from the shared vocabulary — never spelled out here. */
+const L = (s: ConsultantApplicationStatus) => AGREEMENT_STATUS_META[s].label;
+
+/**
+ * Tabs re-derived from src/lib/agreement-status.ts. Two faults are fixed here:
+ *
+ *  - the captions were this page's own invention, so a row whose pill read
+ *    "Signed by consultant" was filed under a tab called "In revision";
+ *  - that bucket merged VERIFIED (consultant signed, nothing wrong with it)
+ *    and UPDATED (a stalled legacy state) in with the two genuine revision
+ *    states, hiding exactly the distinction an approver is scanning for.
+ *
+ * Every single-status bucket takes its caption from AGREEMENT_STATUS_META, so
+ * a tab can no longer drift from the pill beneath it. The two multi-status
+ * buckets are named for what their members share: an approver declining a
+ * gate IS a request for changes, and CANCELLED/EXPIRED are both stage
+ * "closed" — that caption comes from STAGE_META rather than a literal.
+ *
+ * SIGNED and EXPIRED are retired values, but they still bucket: this table
+ * renders whatever the API returns and historical rows can carry them.
+ * UPDATED is deliberately unbucketed — it is a stuck state an approver has no
+ * action for, so it surfaces under "All" only.
+ */
 const APPROVER_STATUS_TABS: ReadonlyArray<{
   id: string;
   label: string;
   match: (status: string) => boolean;
 }> = [
   { id: "ALL", label: "All", match: () => true },
-  { id: "AWAITING", label: "Awaiting approval", match: (s) => s === "AWAITING_APPROVALS" },
+  {
+    id: "AWAITING",
+    label: L("AWAITING_APPROVALS"),
+    match: (s) => s === "AWAITING_APPROVALS",
+  },
+  { id: "VERIFIED", label: L("VERIFIED"), match: (s) => s === "VERIFIED" },
   {
     id: "REVISION",
-    label: "In revision",
-    match: (s) =>
-      ["APPROVAL_REVISION_REQUESTED", "REVISION_REQUESTED", "UPDATED", "VERIFIED"].includes(s),
+    label: L("REVISION_REQUESTED"),
+    match: (s) => ["REVISION_REQUESTED", "APPROVAL_REVISION_REQUESTED"].includes(s),
   },
-  { id: "READY", label: "Ready to sign", match: (s) => s === "READY_TO_SIGN" },
-  { id: "COMPLETED", label: "Completed", match: (s) => ["COMPLETED", "SIGNED"].includes(s) },
-  { id: "CANCELLED", label: "Cancelled", match: (s) => ["CANCELLED", "EXPIRED"].includes(s) },
+  { id: "READY", label: L("READY_TO_SIGN"), match: (s) => s === "READY_TO_SIGN" },
+  {
+    id: "COMPLETED",
+    label: L("COMPLETED"),
+    match: (s) => ["COMPLETED", "SIGNED"].includes(s),
+  },
+  {
+    id: "CLOSED",
+    label: STAGE_META.closed.label,
+    match: (s) => ["CANCELLED", "EXPIRED"].includes(s),
+  },
 ];
 
 function AllAgreementsTable({

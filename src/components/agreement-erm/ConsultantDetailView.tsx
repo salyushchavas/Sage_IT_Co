@@ -60,7 +60,27 @@ import {
 } from "@/lib/api";
 import { formatUsDate, formatUsDateTime } from "@/lib/dates";
 import { AGREEMENT_SECTIONS } from "@/lib/agreement-sections";
+import { describeStatus, type StatusContext } from "@/lib/agreement-status";
 import AgreementStatusPill from "./AgreementStatusPill";
+
+/**
+ * The header pill and the action-bar badge describe the same row on the same
+ * screen, so both resolve their wording from this one context object — they
+ * used to disagree outright (pill "Signed by consultant" over a bar badged
+ * "Ready for your review").
+ *
+ * linkExpired is only populated on list + consultant reads (the ERM detail
+ * read leaves it null, see ConsultantApplicationService#getForConsultant), so
+ * it is a no-op here today; it is passed anyway so this stays correct if the
+ * detail read ever starts deriving it.
+ */
+function statusContextFor(app: ConsultantApplication): StatusContext {
+  return {
+    consultantCopyReleased: app.consultantCopyReleased,
+    phase: app.phase,
+    linkExpired: app.linkExpired,
+  };
+}
 
 // Build Y — sections the ERM can pick in the revision picker (the final
 // sign step is always included for the consultant and is not pickable).
@@ -811,7 +831,7 @@ function HeaderRow({ app }: { app: ConsultantApplication }) {
         <h1 className="font-serif text-2xl text-gray-900">
           {app.consultantName || app.consultantEmail}
         </h1>
-        <AgreementStatusPill status={app.status} />
+        <AgreementStatusPill status={app.status} context={statusContextFor(app)} />
         <span
           className={
             "inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider "
@@ -938,9 +958,14 @@ function StateActionBar({
   isLocked: boolean;
   onAdvanceToPhase2: () => void;
 }) {
+  // One name per state, shared with the header pill. Only the badge comes from
+  // here — the body copy and CTAs below are this bar's own operational
+  // instructions and stay untouched.
+  const badge = describeStatus(status, statusContextFor(app)).label;
+
   if (status === "SUBMITTED") {
     return (
-      <BarShell badge="Awaiting consultant" tone="amber">
+      <BarShell badge={badge} tone="amber">
         <p className="text-xs text-gray-600 max-w-md">
           The consultant has the invite. We&apos;ll surface actions here once
           they submit a signed draft.
@@ -962,7 +987,8 @@ function StateActionBar({
   if (status === "REVISION_REQUESTED") {
     return (
       <BarShell
-        badge={`Awaiting consultant revision · #${app.revisionCount ?? 1}`}
+        // Round number kept — it is real information the pill has no room for.
+        badge={`${badge} · #${app.revisionCount ?? 1}`}
         tone="copper"
       >
         {app.currentRevisionRemarks && (
@@ -980,7 +1006,7 @@ function StateActionBar({
   if (status === "VERIFIED") {
     const released = Boolean(app.consultantCopyReleased);
     return (
-      <BarShell badge="Ready for your review" tone="navy">
+      <BarShell badge={badge} tone="navy">
         <p className="text-xs text-gray-600 max-w-md">
           The consultant signed. Release a consultant-version copy, then send
           the agreement for approval — Phase {app.phase ?? 1} requires{" "}
@@ -1039,7 +1065,7 @@ function StateActionBar({
 
   if (status === "AWAITING_APPROVALS") {
     return (
-      <BarShell badge="Awaiting approvals" tone="navy">
+      <BarShell badge={badge} tone="navy">
         <p className="text-xs text-gray-600 max-w-md">
           Sent to the Phase {app.phase ?? 1} approvers. You can countersign
           once every required approver has approved.
@@ -1061,7 +1087,7 @@ function StateActionBar({
 
   if (status === "APPROVAL_REVISION_REQUESTED") {
     return (
-      <BarShell badge="Approval revision requested" tone="copper">
+      <BarShell badge={badge} tone="copper">
         {app.currentRevisionRemarks && (
           <blockquote className="text-sm text-gray-700 italic border-l-4 border-sage-copper-deep pl-3 mt-1">
             {app.currentRevisionRemarks}
@@ -1098,7 +1124,7 @@ function StateActionBar({
 
   if (status === "READY_TO_SIGN") {
     return (
-      <BarShell badge="Ready to sign" tone="navy">
+      <BarShell badge={badge} tone="navy">
         <p className="text-xs text-gray-600 max-w-md">
           All required approvers have approved. Apply your signature to
           generate the final PDF and complete the agreement.
@@ -1137,7 +1163,7 @@ function StateActionBar({
 
   if (status === "CANCELLED" || status === "EXPIRED") {
     return (
-      <BarShell badge={status === "CANCELLED" ? "Cancelled" : "Expired"} tone="zinc">
+      <BarShell badge={badge} tone="zinc">
         <p className="text-xs text-gray-600 max-w-md">
           {status === "CANCELLED"
             ? "This application was cancelled and is locked."
@@ -1285,7 +1311,14 @@ function CompletedActions({
   };
 
   return (
-    <BarShell badge={`Completed${currentPhase === 2 ? " (Phase 2)" : ""}`} tone="emerald">
+    // This is StateActionBar's COMPLETED branch, just extracted — so its badge
+    // comes from the same place as every other one. Phase qualifier kept.
+    <BarShell
+      badge={`${describeStatus(app.status, statusContextFor(app)).label}${
+        currentPhase === 2 ? " (Phase 2)" : ""
+      }`}
+      tone="emerald"
+    >
       <p className="text-xs text-gray-600 max-w-md">
         {currentPhase === 2
           ? "Phase 2 PDF generated and emailed."

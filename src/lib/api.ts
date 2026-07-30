@@ -4060,6 +4060,39 @@ export async function listConsultantApplications(
   );
 }
 
+/**
+ * Every application the caller can see, walking the paged endpoint until it
+ * runs out. The server clamps a page at 100 rows, so a single call can never
+ * be a complete answer — the super-admin console needs one, because it groups
+ * by owning ERM and computes counts, and a capped page silently understates
+ * both.
+ *
+ * Returns the rows plus `complete`, which is false only if the walk hit the
+ * page ceiling below. Callers must surface that rather than presenting a
+ * partial count as a total.
+ */
+export async function listAllConsultantApplications(
+  params: { status?: string } = {},
+  // 50 pages x 100 rows. Far above any real volume, and it stops a server-side
+  // paging bug from spinning this into an infinite request loop.
+  maxPages = 50,
+): Promise<{ rows: ConsultantApplication[]; total: number; complete: boolean }> {
+  const rows: ConsultantApplication[] = [];
+  let page = 0;
+  let total = 0;
+
+  for (; page < maxPages; page++) {
+    const result = await listConsultantApplications({ ...params, page, size: 100 });
+    rows.push(...result.content);
+    total = result.totalElements;
+    if (!result.hasNext || result.content.length === 0) {
+      return { rows, total, complete: true };
+    }
+  }
+
+  return { rows, total, complete: false };
+}
+
 export async function getConsultantApplication(applicationId: string) {
   return agreementErmFetch<ConsultantApplicationDetailEnvelope>(
     `/api/agreement-erm/applications/${applicationId}`,

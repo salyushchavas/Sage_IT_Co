@@ -4,11 +4,23 @@ import { Clock } from "lucide-react";
 import { formatUsDateTime } from "@/lib/dates";
 import type { ConsultantApplicationEvent } from "@/lib/api";
 
+/**
+ * Every value of ConsultantApplicationEvent.EventType, worded as a past-tense
+ * fact. Anything missing here falls through to the raw SCREAMING_SNAKE enum,
+ * so keep this in step with the backend enum.
+ *
+ * Wording follows the shared operator vocabulary in src/lib/agreement-status.ts
+ * — APPROVAL_REVISION_REQUESTED is "Declined by approver" here for the same
+ * reason the pill says it: the approver bounced their gate back to the ERM,
+ * the consultant is not involved.
+ */
 const EVENT_LABELS: Record<string, string> = {
   CREATED: "Created",
   UPDATED: "Updated",
   ACCESSED: "Opened by consultant",
-  DETAILS_VERIFIED: "Details verified",
+  // NOT staff verification — this is the consultant ticking "these details are
+  // mine" on their own record. "Details verified" read as a Sage-side check.
+  DETAILS_VERIFIED: "Details confirmed by consultant",
   CONSULTANT_FILLED: "Consultant updated details",
   APPROVED_AND_SIGNED: "ERM approved and signed",
   REVISION_REQUESTED: "Revision requested",
@@ -18,9 +30,36 @@ const EVENT_LABELS: Record<string, string> = {
   EMAIL_SENT: "Email sent",
   CANCELLED: "Cancelled",
   EXPIRED: "Expired",
-  OTP_SENT: "OTP sent (legacy)",
-  OTP_VERIFIED: "OTP verified (legacy)",
-  OTP_FAILED: "OTP failed (legacy)",
+  // These three carried a "(legacy)" suffix, which was wrong and dangerous:
+  // the consultant portal OTP is LIVE (ConsultantApplicationController
+  // /auth/request-otp + /auth/verify-otp), so an operator investigating an
+  // account was writing off real failed-login events as historical noise.
+  // The enum's own comment in ConsultantApplicationEvent.java still claims the
+  // flow was removed — it wasn't; Build V reinstated it appId-bound.
+  OTP_SENT: "OTP sent",
+  OTP_VERIFIED: "OTP verified",
+  OTP_FAILED: "OTP failed",
+  // Phase C
+  CONSULTANT_CONTACT_UPDATED: "Consultant contact updated",
+  APPLICATION_ARCHIVED: "Agreement archived",
+  // Consultant uploads
+  CHEQUE_UPLOADED: "Security cheque uploaded",
+  WORK_AUTH_UPLOADED: "Work authorization document uploaded",
+  OFFER_LETTER_UPLOADED: "Offer letter uploaded",
+  DL_DOC_UPLOADED: "Driver's license uploaded",
+  STATE_ID_DOC_UPLOADED: "State ID uploaded",
+  SSN_DOC_UPLOADED: "SSN document uploaded",
+  // 3B — role-based approval workflow
+  SENT_FOR_APPROVAL: "Sent for approval",
+  APPROVAL_APPROVED: "Approved by approver",
+  APPROVAL_REVISION_REQUESTED: "Declined by approver",
+  // Build M / T / AC
+  ADVANCED_TO_PHASE_2: "Advanced to Phase 2",
+  CONSENT_GIVEN: "E-sign consent given",
+  CONSULTANT_VERSION_APPROVED: "Consultant version released",
+  DOWNLOAD_OTP_SENT: "Download OTP sent",
+  CONSULTANT_DOWNLOAD: "Consultant downloaded their copy",
+  ERM_SIGNATURE_REVOKED: "ERM signature revoked",
 };
 
 const ACTOR_LABELS: Record<string, string> = {

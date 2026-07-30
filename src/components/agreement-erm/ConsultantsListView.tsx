@@ -15,19 +15,25 @@ import {
 import AgreementStatusPill from "./AgreementStatusPill";
 import { formatUsDate } from "@/lib/dates";
 import { computePendingAppendices } from "@/lib/pending-appendix";
+import { AGREEMENT_STATUS_META, LIVE_STATUSES } from "@/lib/agreement-status";
 
+/**
+ * Chips are generated from the shared vocabulary, never written here, so a
+ * chip caption can't drift from the pill on the row it selects — the old
+ * hand-written list called VERIFIED "Verified" while the pill called the same
+ * row "Signed by consultant".
+ *
+ * LIVE_STATUSES drops the retired values (DRAFT / UPDATED / SIGNED /
+ * EXPIRED): no live code path can put a row in them, so those chips only ever
+ * returned an empty table. That also preserves the Build Q rule — there is no
+ * "Expired" chip because agreements never expire, only the consultant link
+ * does, surfaced per-row as "Link expired · Resend".
+ *
+ * Filtering itself is unchanged: the id is still the raw enum sent to the API.
+ */
 const FILTERS: ReadonlyArray<{ id: "ALL" | ConsultantApplicationStatus; label: string }> = [
-  { id: "ALL",                label: "All" },
-  { id: "DRAFT",              label: "Draft" },
-  { id: "SUBMITTED",          label: "Submitted" },
-  { id: "REVISION_REQUESTED", label: "Revision" },
-  { id: "UPDATED",            label: "Updated" },
-  { id: "VERIFIED",           label: "Verified" },
-  { id: "SIGNED",             label: "Signed" },
-  { id: "COMPLETED",          label: "Completed" },
-  { id: "CANCELLED",          label: "Cancelled" },
-  // Build Q — no "Expired" filter: agreements never expire (only the
-  // consultant link does, surfaced as a per-row "Link expired · Resend").
+  { id: "ALL", label: "All" },
+  ...LIVE_STATUSES.map((id) => ({ id, label: AGREEMENT_STATUS_META[id].label })),
 ];
 
 const PAGE_SIZE = 20;
@@ -252,7 +258,18 @@ export default function ConsultantsListView() {
                     </Link>
                   </td>
                   <td className="px-4 py-2">
-                    <AgreementStatusPill status={r.status} />
+                    {/* List rows carry the three refining fields, so the pill
+                        can resolve the sub-state (e.g. "Signed — ready to
+                        route" vs "Signed — awaiting ERM review") instead of
+                        the coarse enum label. */}
+                    <AgreementStatusPill
+                      status={r.status}
+                      context={{
+                        consultantCopyReleased: r.consultantCopyReleased,
+                        phase: r.phase,
+                        linkExpired: r.linkExpired,
+                      }}
+                    />
                     {/* Build Q — derived "Link expired — resend"; the
                         agreement is never hidden/expired by this. */}
                     {r.linkExpired && (

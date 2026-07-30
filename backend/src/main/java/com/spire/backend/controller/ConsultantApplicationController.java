@@ -1834,15 +1834,43 @@ public class ConsultantApplicationController {
                 r.statusLabel = r.consultantCopyReleased
                         ? "Verified" : "Sent for verification";
                 r.action = "NONE";
+            } else if (ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(s)
+                    || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(s)) {
+                // 3B — the internal approval gate is deliberately invisible to
+                // the consultant. Whether the agreement is sitting with the
+                // approvers or has bounced back to the ERM for a revision is an
+                // internal distinction; from his side both are the same "we have
+                // it, we're working on it" state and neither is his to act on.
+                // Naming the roles would leak our workflow to an external party,
+                // and "revision requested" would read as a request of HIM.
+                r.statusLabel = "In review at Sage IT";
+                r.action = "NONE";
+            } else if (ConsultantApplication.Status.READY_TO_SIGN.name().equals(s)) {
+                // Approvals cleared; only the ERM countersign is outstanding.
+                // Split from the branch above purely because it tells the
+                // consultant the wait is nearly over -- still nothing to do.
+                r.statusLabel = "Awaiting Sage IT signature";
+                r.action = "NONE";
             } else if (ConsultantApplication.Status.COMPLETED.name().equals(s)) {
                 r.statusLabel = "Accepted";
                 r.action = "NONE";
             } else if (ConsultantApplication.Status.EXPIRED.name().equals(s)) {
-                // Build L — invite went stale (15-day window).
+                // Build L — invite went stale (7-day window). Build Q retired
+                // the auto-flip into this status (link expiry is now derived and
+                // non-mutating, see linkExpired above), so it only reaches the
+                // dashboard on legacy rows.
                 r.statusLabel = "Invitation expired";
                 r.action = "NONE";
             } else {
-                r.statusLabel = s;
+                // No consultant-facing wording for this status — almost certainly
+                // a new Status constant added without extending this chain. Never
+                // echo the raw enum to an external party: degrade to a neutral
+                // in-flight label and shout in the log so the gap gets closed.
+                // (`log` is the outer controller's @Slf4j field, which is static
+                // and so is in scope from this nested class.)
+                log.warn("[portal] no consultant-facing label for status={} appId={}"
+                        + " — falling back to \"In progress\"", s, r.appId);
+                r.statusLabel = "In progress";
                 r.action = "NONE";
             }
             r.createdAt = app.getCreatedAt() == null ? null : app.getCreatedAt().toString();
