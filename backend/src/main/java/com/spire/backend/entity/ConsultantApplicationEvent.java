@@ -93,6 +93,10 @@ public class ConsultantApplicationEvent {
         APPLICATION_ARCHIVED,
         // Build G — consultant uploads their Appendix 5 security cheque.
         CHEQUE_UPLOADED,
+        // Build AQ — consultant edits a cheque's number/date (no file change).
+        // Its own type because it is a metadata-only write on a separate
+        // endpoint from the byte upload above.
+        CHEQUE_METADATA_UPDATED,
         // Build W — consultant uploads their Appendix 1 work-authorization
         // document (image/PDF).
         WORK_AUTH_UPLOADED,
@@ -131,7 +135,13 @@ public class ConsultantApplicationEvent {
         CONSULTANT_DOWNLOAD,
         // Build AC — super-admin revoked the ERM countersignature on a
         // COMPLETED agreement and reverted it for re-approval + re-signature.
-        ERM_SIGNATURE_REVOKED
+        ERM_SIGNATURE_REVOKED,
+        // Build AQ — ERM took back a change request sent by mistake. The row
+        // returns to the status it was revised from and every field the
+        // request cleared is restored. Metadata carries the restored status,
+        // the round number that was rolled back, and whether the consultant
+        // had already started working on it.
+        REVISION_REVOKED
     }
 
     public enum ActorType {

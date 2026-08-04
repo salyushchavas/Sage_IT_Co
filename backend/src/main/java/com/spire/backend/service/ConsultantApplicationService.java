@@ -850,6 +850,9 @@ public class ConsultantApplicationService {
         }
 
         app.setStatus(ConsultantApplication.Status.UPDATED.name());
+        // Build AQ — this legacy path can leave REVISION_REQUESTED, so any
+        // open undo record belongs to a round that is now over.
+        clearRevisionUndo(app);
         applicationRepository.save(app);
 
         appendEvent(app.getId(),
@@ -889,6 +892,9 @@ public class ConsultantApplicationService {
                     "Cannot cancel a signed or completed application.");
         }
         app.setStatus(ConsultantApplication.Status.CANCELLED.name());
+        // Build AQ — cancelling ends any open change request for good, so drop
+        // its undo record rather than leaving it stranded on a terminal row.
+        clearRevisionUndo(app);
         applicationRepository.save(app);
 
         appendEvent(app.getId(),
@@ -1081,6 +1087,9 @@ public class ConsultantApplicationService {
                             + "contact to resend it.");
         }
         app.setStatus(ConsultantApplication.Status.VERIFIED.name());
+        // Build AQ — legacy consultant path out of REVISION_REQUESTED. The
+        // round it belonged to is over, so the undo record goes with it.
+        clearRevisionUndo(app);
         applicationRepository.save(app);
 
         appendEvent(app.getId(),
@@ -1106,6 +1115,10 @@ public class ConsultantApplicationService {
         }
         app.setStatus(ConsultantApplication.Status.REVISION_REQUESTED.name());
         app.setRevisionNotes(reason);
+        // Build AQ — this legacy consultant-side path enters REVISION_REQUESTED
+        // WITHOUT capturing an undo record. Clearing here stops a snapshot from
+        // an earlier ERM round being mistaken for this one's and replayed.
+        clearRevisionUndo(app);
         applicationRepository.save(app);
 
         appendEvent(app.getId(),
@@ -1482,6 +1495,8 @@ public class ConsultantApplicationService {
         // fresh VERIFIED row is no longer restricted (the next
         // ermRequestRevision sets a new scope).
         app.setRevisionSections(null);
+        // Build AQ — the round is over, so there is nothing left to take back.
+        clearRevisionUndo(app);
         // Build AH — a (re)submission supersedes any previously released
         // consultant-version copy. Clear the release flag so the ERM must
         // re-approve the consultant version — which mints the NEXT numbered
@@ -1633,16 +1648,15 @@ public class ConsultantApplicationService {
         // to VERIFIED, after which the ERM re-releases + re-sends for
         // approval (a fresh round).
         String st = app.getStatus();
-        boolean revisable =
-                ConsultantApplication.Status.VERIFIED.name().equals(st)
-                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
-                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
-                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
-        if (!revisable) {
+        if (!isRevisionRequestable(st)) {
             throw new IllegalStateException(
                     "This application can't be sent back for revision "
                             + "(status=" + st + ").");
         }
+        // Build AQ — freeze the pre-request state BEFORE anything below
+        // re-arms an affirmation or overwrites an ERM correction, so an ERM
+        // who sent this by mistake can take it back.
+        captureRevisionUndo(app, "sections", java.util.List.of());
 
         // Build Y — SECTION PICKER. The ERM selects the section(s) to
         // revise (optional per-section note, never required). The
@@ -1794,15 +1808,12 @@ public class ConsultantApplicationService {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
         String st = app.getStatus();
-        boolean revisable =
-                ConsultantApplication.Status.VERIFIED.name().equals(st)
-                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
-                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
-                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
-        if (!revisable) {
+        if (!isRevisionRequestable(st)) {
             throw new IllegalStateException(
                     "A signature re-sign can't be requested from status " + st + ".");
         }
+        // Build AQ — freeze the signatures before they're wiped below.
+        captureRevisionUndo(app, "signature", java.util.List.of());
 
         // Clear BOTH consultant signatures so a fresh re-draw is required. The
         // primary MUST be cleared explicitly (else hasExistingPrimary lets the
@@ -1907,12 +1918,7 @@ public class ConsultantApplicationService {
         ConsultantApplication app = getByApplicationId(applicationId);
         assertErmCanAccess(app, request);
         String st = app.getStatus();
-        boolean revisable =
-                ConsultantApplication.Status.VERIFIED.name().equals(st)
-                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(st)
-                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(st)
-                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(st);
-        if (!revisable) {
+        if (!isRevisionRequestable(st)) {
             throw new IllegalStateException(
                     "A document re-upload can't be requested from status " + st + ".");
         }
@@ -1927,6 +1933,10 @@ public class ConsultantApplicationService {
         if (keys.isEmpty()) {
             throw new IllegalArgumentException("Select at least one document to re-upload.");
         }
+        // Build AQ — freeze the document pointers before they're cleared, and
+        // note which of them are legacy Cloudinary assets (destroyed below, so
+        // a revoke can't hand the ERM a dead pointer).
+        captureRevisionUndo(app, "documents", keys);
 
         // Clear each requested document so a fresh upload is required. The
         // submit-gate (collectMissingConsultantFields) then flags the cleared
@@ -1984,6 +1994,523 @@ public class ConsultantApplicationService {
         }
 
         return app;
+    }
+
+    // ── Build AQ — take back a change request sent by mistake ─────────
+    //
+    // The three ERM revision paths above are destructive. They re-arm
+    // affirmations, wipe the consultant's signatures, drop document pointers,
+    // and can overwrite the ERM's own ACH / rate / deliverable columns. The row
+    // itself remembers none of the old values, so an ERM who ticked the wrong
+    // sections — or hit the wrong agreement entirely — had no way back: the
+    // consultant was emailed, and the only exit was to make them redo work
+    // that had been correct all along.
+    //
+    // captureRevisionUndo freezes those fields (plus the desk the row came off)
+    // before the request mutates anything; ermRevokeRevision plays them back.
+    // The two are a matched pair — a NEW destructive write in any request path
+    // needs a line in BOTH, or the revoke silently leaves that field cleared.
+
+    /**
+     * The desks an ERM can send a change request from. Shared by all three
+     * request paths, and the set a revoke can restore a row to.
+     */
+    private static boolean isRevisionRequestable(String status) {
+        return ConsultantApplication.Status.VERIFIED.name().equals(status)
+                || ConsultantApplication.Status.AWAITING_APPROVALS.name().equals(status)
+                || ConsultantApplication.Status.APPROVAL_REVISION_REQUESTED.name().equals(status)
+                || ConsultantApplication.Status.READY_TO_SIGN.name().equals(status);
+    }
+
+    /**
+     * Freeze everything a change request is about to destroy. Call from a
+     * request path AFTER its status guard and BEFORE its first mutation.
+     *
+     * <p>{@code clearedDocKeys} is the document-revision key set (empty for the
+     * other two kinds): those docs' legacy Cloudinary objects are DESTROYED,
+     * not merely unlinked, so they're recorded as unrestorable and the revoke
+     * refuses rather than restoring a pointer to a deleted asset.
+     */
+    private void captureRevisionUndo(ConsultantApplication app, String kind,
+                                     java.util.Collection<String> clearedDocKeys) {
+        com.fasterxml.jackson.databind.node.ObjectNode s = objectMapper.createObjectNode();
+        s.put("kind", kind);
+        s.put("prevStatus", app.getStatus());
+        s.put("revisionCount", app.getRevisionCount() == null ? 0 : app.getRevisionCount());
+        putUndoText(s, "revisionSections", app.getRevisionSections());
+        putUndoText(s, "currentRevisionRemarks", app.getCurrentRevisionRemarks());
+
+        com.fasterxml.jackson.databind.node.ObjectNode f = s.putObject("fields");
+
+        // Build U / W — ERM corrections a section revision overwrites in place.
+        putUndoText(f, "achDebitDates", app.getAchDebitDates());
+        putUndoText(f, "achDebitAmounts", app.getAchDebitAmounts());
+        putUndoText(f, "ratePeriod1", app.getRatePeriod1());
+        putUndoText(f, "rateAmount1", app.getRateAmount1());
+        putUndoText(f, "ratePeriod2", app.getRatePeriod2());
+        putUndoText(f, "rateAmount2", app.getRateAmount2());
+        putUndoText(f, "phase2DeliverablePeriod", app.getPhase2DeliverablePeriod());
+
+        // Build Y — affirmations a section revision re-arms.
+        f.put("affirmedMainAgreement", Boolean.TRUE.equals(app.getAffirmedMainAgreement()));
+        f.put("affirmedExhibitA", Boolean.TRUE.equals(app.getAffirmedExhibitA()));
+        f.put("affirmedExhibitB", Boolean.TRUE.equals(app.getAffirmedExhibitB()));
+        f.put("affirmedAppendix1", Boolean.TRUE.equals(app.getAffirmedAppendix1()));
+        f.put("affirmedAppendix2", Boolean.TRUE.equals(app.getAffirmedAppendix2()));
+        f.put("affirmedAppendix3", Boolean.TRUE.equals(app.getAffirmedAppendix3()));
+        f.put("affirmedAppendix4", Boolean.TRUE.equals(app.getAffirmedAppendix4()));
+        f.put("affirmedAppendix5", Boolean.TRUE.equals(app.getAffirmedAppendix5()));
+
+        // Build AJ — consultant signatures a signature revision wipes.
+        putUndoText(f, "signatureS3Key", app.getSignatureS3Key());
+        putUndoText(f, "signatureImage", app.getSignatureImage());
+        putUndoText(f, "finalSignatureS3Key", app.getFinalSignatureS3Key());
+        putUndoText(f, "finalSignatureImage", app.getFinalSignatureImage());
+        putUndoText(f, "signingIp", app.getSigningIp());
+        putUndoText(f, "finalSigningIp", app.getFinalSigningIp());
+        putUndoText(f, "sectionSignatureDates", app.getSectionSignatureDates());
+        putUndoTime(f, "signingAt", app.getSigningAt());
+        putUndoTime(f, "finalSignedAt", app.getFinalSignedAt());
+        putUndoTime(f, "signatureDate", app.getSignatureDate());
+
+        // Build AK — document pointers a document revision clears.
+        putUndoText(f, "cheques", app.getCheques());
+        putUndoText(f, "chequeS3Key", app.getChequeS3Key());
+        putUndoText(f, "chequePublicId", app.getChequePublicId());
+        putUndoText(f, "chequeContentType", app.getChequeContentType());
+        putUndoTime(f, "chequeUploadedAt", app.getChequeUploadedAt());
+        putUndoText(f, "workAuthDocS3Key", app.getWorkAuthDocS3Key());
+        putUndoText(f, "workAuthDocPublicId", app.getWorkAuthDocPublicId());
+        putUndoText(f, "workAuthDocContentType", app.getWorkAuthDocContentType());
+        putUndoTime(f, "workAuthDocUploadedAt", app.getWorkAuthDocUploadedAt());
+        putUndoText(f, "offerLetterS3Key", app.getOfferLetterS3Key());
+        putUndoText(f, "offerLetterPublicId", app.getOfferLetterPublicId());
+        putUndoText(f, "offerLetterContentType", app.getOfferLetterContentType());
+        putUndoTime(f, "offerLetterUploadedAt", app.getOfferLetterUploadedAt());
+        putUndoText(f, "dlDocS3Key", app.getDlDocS3Key());
+        putUndoText(f, "dlDocPublicId", app.getDlDocPublicId());
+        putUndoText(f, "dlDocContentType", app.getDlDocContentType());
+        putUndoTime(f, "dlDocUploadedAt", app.getDlDocUploadedAt());
+        putUndoText(f, "stateIdDocS3Key", app.getStateIdDocS3Key());
+        putUndoText(f, "stateIdDocPublicId", app.getStateIdDocPublicId());
+        putUndoText(f, "stateIdDocContentType", app.getStateIdDocContentType());
+        putUndoTime(f, "stateIdDocUploadedAt", app.getStateIdDocUploadedAt());
+        putUndoText(f, "ssnDocS3Key", app.getSsnDocS3Key());
+        putUndoText(f, "ssnDocPublicId", app.getSsnDocPublicId());
+        putUndoText(f, "ssnDocContentType", app.getSsnDocContentType());
+        putUndoTime(f, "ssnDocUploadedAt", app.getSsnDocUploadedAt());
+
+        com.fasterxml.jackson.databind.node.ArrayNode gone = s.putArray("unrestorableDocs");
+        for (String k : clearedDocKeys) {
+            if (isCloudinaryOnlyDoc(app, k)) gone.add(k);
+        }
+
+        app.setRevisionPrevStatus(app.getStatus());
+        app.setRevisionRequestedAt(LocalDateTime.now());
+        app.setRevisionUndoSnapshot(s.toString());
+    }
+
+    /**
+     * True when this document is stored ONLY on legacy Cloudinary (no S3 key).
+     * {@code clearDocument} destroys the Cloudinary object, so restoring the
+     * pointer afterwards would resolve to a deleted asset.
+     */
+    private boolean isCloudinaryOnlyDoc(ConsultantApplication app, String docKey) {
+        return switch (docKey) {
+            case "doc:workauth" ->
+                    cloudinaryOnly(app.getWorkAuthDocS3Key(), app.getWorkAuthDocPublicId());
+            case "doc:offer-letter" ->
+                    cloudinaryOnly(app.getOfferLetterS3Key(), app.getOfferLetterPublicId());
+            case "doc:dl-doc" ->
+                    cloudinaryOnly(app.getDlDocS3Key(), app.getDlDocPublicId());
+            case "doc:state-id" ->
+                    cloudinaryOnly(app.getStateIdDocS3Key(), app.getStateIdDocPublicId());
+            case "doc:ssn-doc" ->
+                    cloudinaryOnly(app.getSsnDocS3Key(), app.getSsnDocPublicId());
+            case "doc:cheque" -> {
+                if (cloudinaryOnly(app.getChequeS3Key(), app.getChequePublicId())) yield true;
+                for (ChequeEntry e : parseCheques(app)) {
+                    if (cloudinaryOnly(e.s3Key(), e.publicId())) yield true;
+                }
+                yield false;
+            }
+            default -> false;
+        };
+    }
+
+    private static boolean cloudinaryOnly(String s3Key, String publicId) {
+        return nonBlank(publicId) && !nonBlank(s3Key);
+    }
+
+    private static void putUndoText(com.fasterxml.jackson.databind.node.ObjectNode n,
+                                    String key, String value) {
+        if (value == null) n.putNull(key); else n.put(key, value);
+    }
+
+    private static void putUndoTime(com.fasterxml.jackson.databind.node.ObjectNode n,
+                                    String key, LocalDateTime value) {
+        if (value == null) n.putNull(key); else n.put(key, value.toString());
+    }
+
+    /**
+     * Every consultant WRITE that a revision round can accept. The moment one
+     * of these lands, the round is no longer take-back-able — see
+     * {@link #consultantActedSinceRevision}. Stored as names: {@code
+     * event_type} is a String column, so {@code getEventType()} hands back a
+     * String.
+     *
+     * <p>This set is the guard's entire eyesight. A consultant write that
+     * emits NO event is invisible to it, so every write path the wizard can
+     * reach during a round has to appear here — that is why
+     * {@code setChequeMetadata} now emits {@code CHEQUE_METADATA_UPDATED}.
+     */
+    private static final java.util.Set<String> CONSULTANT_WORK_EVENTS = java.util.Set.of(
+            ConsultantApplicationEvent.EventType.CONSULTANT_FILLED.name(),
+            ConsultantApplicationEvent.EventType.CHEQUE_UPLOADED.name(),
+            ConsultantApplicationEvent.EventType.CHEQUE_METADATA_UPDATED.name(),
+            ConsultantApplicationEvent.EventType.WORK_AUTH_UPLOADED.name(),
+            ConsultantApplicationEvent.EventType.OFFER_LETTER_UPLOADED.name(),
+            ConsultantApplicationEvent.EventType.DL_DOC_UPLOADED.name(),
+            ConsultantApplicationEvent.EventType.STATE_ID_DOC_UPLOADED.name(),
+            ConsultantApplicationEvent.EventType.SSN_DOC_UPLOADED.name());
+
+    /** The one sentence both the guard and the console use when a round is under way. */
+    private static final String CONSULTANT_ACTED_REASON =
+            "The consultant has already started working on this request, so it "
+                    + "can't be taken back — their answers would be left standing "
+                    + "against the signature and approvals this would restore. "
+                    + "Let them submit, then review what comes back.";
+
+    /**
+     * Has the consultant filled or uploaded anything since the open request
+     * went out? Opening the link doesn't count — only writes do.
+     */
+    private boolean consultantActedSinceRevision(ConsultantApplication app) {
+        LocalDateTime since = app.getRevisionRequestedAt();
+        if (since == null) return false;
+        for (ConsultantApplicationEvent e
+                : eventRepository.findByApplicationIdOrderByCreatedAtDesc(app.getId())) {
+            if (e.getCreatedAt() == null || !e.getCreatedAt().isAfter(since)) continue;
+            if (CONSULTANT_WORK_EVENTS.contains(e.getEventType())) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Build AQ — resolve "can this open change request still be taken back?"
+     * onto the transient fields the ERM detail read carries. Returns the same
+     * app instance for call-site convenience. No-op (all three left null) for
+     * any row that isn't sitting in an open change request.
+     */
+    public ConsultantApplication decorateRevokeState(ConsultantApplication app) {
+        if (app == null) return null;
+        if (!ConsultantApplication.Status.REVISION_REQUESTED.name().equals(app.getStatus())) {
+            return app;
+        }
+        JsonNode snap = readUndoSnapshot(app);
+        if (snap == null) {
+            app.setRevisionRevocable(false);
+            app.setRevisionRevokeBlockedReason(
+                    "There's no record of what this change request altered, so it "
+                            + "can't be taken back. (Requests sent before take-back "
+                            + "existed, and ones the consultant raised themselves, "
+                            + "carry no undo record.)");
+            return app;
+        }
+        String lost = unrestorableDocLabels(snap);
+        if (lost != null) {
+            app.setRevisionRevocable(false);
+            app.setRevisionRevokeBlockedReason(
+                    "This request removed the consultant's " + lost
+                            + " from storage, so it can't be put back. "
+                            + "The consultant has to re-upload.");
+            return app;
+        }
+        // Once the consultant has written anything this round, the snapshot is
+        // no longer a complete picture of the row: it freezes affirmations,
+        // signatures and document pointers, but NOT the answers they type into
+        // the sections the round opened (those are theirs to change, and
+        // consultantFill autosaves them straight onto the row). Restoring the
+        // frozen half over changed answers would put the agreement back on the
+        // countersigning desk marked affirmed-and-signed for content nobody
+        // affirmed. So this is a hard stop, not a warning.
+        if (consultantActedSinceRevision(app)) {
+            app.setRevisionRevocable(false);
+            app.setRevisionConsultantActed(true);
+            app.setRevisionRevokeBlockedReason(CONSULTANT_ACTED_REASON);
+            return app;
+        }
+        app.setRevisionRevocable(true);
+        app.setRevisionConsultantActed(false);
+        app.setRevisionRevokeReverts(ermCorrectionsReverted(app, snap));
+        return app;
+    }
+
+    /**
+     * The snapshot for the round the row is in RIGHT NOW, or null.
+     *
+     * <p>The round check is the important part. Every capture is immediately
+     * followed by {@code revisionCount++}, so a snapshot belonging to the open
+     * round always satisfies {@code revisionCount == snapshot.revisionCount +
+     * 1}. Anything else is a leftover from an earlier round — replaying one
+     * would restore a superseded document pointer or signature over the live
+     * row. {@link #clearRevisionUndo} keeps that from arising in the first
+     * place; this is the second lock, because the paths that could strand a
+     * snapshot are the legacy consultant endpoints nobody calls on purpose.
+     */
+    private JsonNode readUndoSnapshot(ConsultantApplication app) {
+        String raw = app.getRevisionUndoSnapshot();
+        if (raw == null || raw.isBlank()) return null;
+        if (app.getRevisionPrevStatus() == null) return null;
+        try {
+            JsonNode node = objectMapper.readTree(raw);
+            if (node == null || !node.isObject()) return null;
+            int captured = node.path("revisionCount").asInt(-1);
+            int current = app.getRevisionCount() == null ? 0 : app.getRevisionCount();
+            if (captured < 0 || current != captured + 1) {
+                log.warn("Ignoring stale revision undo snapshot on {} "
+                                + "(captured at round {}, row is at {})",
+                        app.getApplicationId(), captured, current);
+                return null;
+            }
+            return node;
+        } catch (Exception e) {
+            log.warn("Unreadable revision undo snapshot on {}: {}",
+                    app.getApplicationId(), e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Build AQ — drop the undo record. Called from every path that ends a
+     * change request or starts one WITHOUT capturing, so a snapshot can never
+     * outlive the round it belongs to. Also frees the frozen signature copy it
+     * holds.
+     */
+    private void clearRevisionUndo(ConsultantApplication app) {
+        app.setRevisionPrevStatus(null);
+        app.setRevisionRequestedAt(null);
+        app.setRevisionUndoSnapshot(null);
+    }
+
+    /**
+     * The ERM's own corrections that a revoke would roll back, by display name.
+     *
+     * <p>A change request can carry an operator data fix with it — corrected
+     * ACH debit dates/amounts, a corrected rate card, a corrected Phase-2
+     * deliverables period — and {@code ermRequestRevision} persists it and
+     * auto-scopes the section so the consultant re-affirms the corrected
+     * figure. Taking the request back therefore has to undo the correction
+     * too: leaving it in place would put a changed rate card under the
+     * affirmation and signature this restores, which is the exact integrity
+     * hole the take-back exists to avoid.
+     *
+     * <p>But it is the operator's own work, and nothing else on the page would
+     * tell them it went. So the console names these fields before the ERM
+     * commits, and the audit event records them.
+     */
+    // Insertion-ordered on purpose: this drives a sentence the operator reads,
+    // and Map.of's iteration order is randomized per JVM run.
+    private static final java.util.Map<String, String> ERM_CORRECTION_LABELS =
+            java.util.Collections.unmodifiableMap(new java.util.LinkedHashMap<>() {{
+                put("achDebitDates", "ACH debit dates");
+                put("achDebitAmounts", "ACH debit amounts");
+                put("ratePeriod1", "Rate period 1");
+                put("rateAmount1", "Rate amount 1");
+                put("ratePeriod2", "Rate period 2");
+                put("rateAmount2", "Rate amount 2");
+                put("phase2DeliverablePeriod", "Phase 2 deliverables period");
+            }});
+
+    private java.util.List<String> ermCorrectionsReverted(
+            ConsultantApplication app, JsonNode snap) {
+        JsonNode f = snap.path("fields");
+        java.util.Map<String, String> live = new java.util.LinkedHashMap<>();
+        live.put("achDebitDates", app.getAchDebitDates());
+        live.put("achDebitAmounts", app.getAchDebitAmounts());
+        live.put("ratePeriod1", app.getRatePeriod1());
+        live.put("rateAmount1", app.getRateAmount1());
+        live.put("ratePeriod2", app.getRatePeriod2());
+        live.put("rateAmount2", app.getRateAmount2());
+        live.put("phase2DeliverablePeriod", app.getPhase2DeliverablePeriod());
+
+        java.util.List<String> changed = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, String> e : ERM_CORRECTION_LABELS.entrySet()) {
+            if (!java.util.Objects.equals(
+                    blankToNull(undoText(f, e.getKey())), blankToNull(live.get(e.getKey())))) {
+                changed.add(e.getValue());
+            }
+        }
+        return changed;
+    }
+
+    /** Human list of the destroyed documents in a snapshot, or null when none. */
+    private String unrestorableDocLabels(JsonNode snap) {
+        JsonNode gone = snap.path("unrestorableDocs");
+        if (!gone.isArray() || gone.isEmpty()) return null;
+        java.util.List<String> labels = new java.util.ArrayList<>();
+        for (JsonNode k : gone) {
+            labels.add(DOC_REVISION_LABELS.getOrDefault(k.asText(""), k.asText("")));
+        }
+        return String.join(", ", labels);
+    }
+
+    /**
+     * Build AQ — ERM takes back the open change request. Restores every field
+     * the request cleared or overwrote, returns the row to the status it was
+     * revised from, and rolls the round counter back so the history reads as
+     * if the request had never been sent (the audit timeline still records
+     * both the request and this revoke).
+     *
+     * <p>Only possible while the consultant hasn't touched the round. The
+     * snapshot covers what the REQUEST destroyed, not what the consultant may
+     * have since typed into the sections it opened, so once they've written
+     * anything a restore would leave their answers standing under a
+     * re-armed affirmation and the original signature. There is deliberately
+     * no override for that — see {@link #CONSULTANT_ACTED_REASON}.
+     */
+    @Transactional
+    public ConsultantApplication ermRevokeRevision(
+            String applicationId, HttpServletRequest request) {
+        ConsultantApplication app = getByApplicationId(applicationId);
+        assertErmCanAccess(app, request);
+
+        String st = app.getStatus();
+        if (!ConsultantApplication.Status.REVISION_REQUESTED.name().equals(st)) {
+            throw new IllegalStateException(
+                    "There's no open change request to take back (status=" + st + ").");
+        }
+        JsonNode snap = readUndoSnapshot(app);
+        if (snap == null) {
+            throw new IllegalStateException(
+                    "There's no record of what this change request altered, so it "
+                            + "can't be taken back. Let the consultant re-submit "
+                            + "instead.");
+        }
+        String lost = unrestorableDocLabels(snap);
+        if (lost != null) {
+            throw new IllegalStateException(
+                    "This request removed the consultant's " + lost + " from storage, "
+                            + "so it can't be taken back. The consultant has to re-upload.");
+        }
+        String prevStatus = snap.path("prevStatus").asText(null);
+        if (prevStatus == null || !isRevisionRequestable(prevStatus)) {
+            throw new IllegalStateException(
+                    "The state this agreement was revised from can't be restored.");
+        }
+        if (consultantActedSinceRevision(app)) {
+            throw new IllegalStateException(CONSULTANT_ACTED_REASON);
+        }
+
+        // Read the operator's own corrections BEFORE the restore wipes them,
+        // so the audit trail names what this take-back rolled back.
+        java.util.List<String> revertedCorrections = ermCorrectionsReverted(app, snap);
+
+        restoreRevisionUndo(app, snap);
+        int round = app.getRevisionCount() == null ? 0 : app.getRevisionCount();
+        app.setRevisionCount(Math.max(0, snap.path("revisionCount").asInt(Math.max(0, round - 1))));
+        app.setStatus(prevStatus);
+        clearRevisionUndo(app);
+        applicationRepository.save(app);
+
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.REVISION_REVOKED,
+                ConsultantApplicationEvent.ActorType.ERM,
+                AGREEMENT_ERM_USER_ID,
+                Map.of("kind", snap.path("kind").asText("sections"),
+                        "restoredTo", prevStatus,
+                        "rolledBackRound", round,
+                        "revertedErmCorrections", String.join(", ", revertedCorrections)),
+                request);
+
+        try {
+            emailTemplateService.sendConsultantRevisionWithdrawn(app);
+            appendEvent(app.getId(),
+                    ConsultantApplicationEvent.EventType.EMAIL_SENT,
+                    ConsultantApplicationEvent.ActorType.SYSTEM, null,
+                    Map.of("template", "consultant_revision_withdrawn"),
+                    null);
+        } catch (Exception e) {
+            log.warn("Failed to notify consultant of revoked revision for {}: {}",
+                    applicationId, e.getMessage());
+        }
+        return app;
+    }
+
+    /** Play {@link #captureRevisionUndo}'s snapshot back onto the row. */
+    private void restoreRevisionUndo(ConsultantApplication app, JsonNode snap) {
+        app.setRevisionSections(undoText(snap, "revisionSections"));
+        app.setCurrentRevisionRemarks(undoText(snap, "currentRevisionRemarks"));
+
+        JsonNode f = snap.path("fields");
+        app.setAchDebitDates(undoText(f, "achDebitDates"));
+        app.setAchDebitAmounts(undoText(f, "achDebitAmounts"));
+        app.setRatePeriod1(undoText(f, "ratePeriod1"));
+        app.setRateAmount1(undoText(f, "rateAmount1"));
+        app.setRatePeriod2(undoText(f, "ratePeriod2"));
+        app.setRateAmount2(undoText(f, "rateAmount2"));
+        app.setPhase2DeliverablePeriod(undoText(f, "phase2DeliverablePeriod"));
+
+        app.setAffirmedMainAgreement(f.path("affirmedMainAgreement").asBoolean(false));
+        app.setAffirmedExhibitA(f.path("affirmedExhibitA").asBoolean(false));
+        app.setAffirmedExhibitB(f.path("affirmedExhibitB").asBoolean(false));
+        app.setAffirmedAppendix1(f.path("affirmedAppendix1").asBoolean(false));
+        app.setAffirmedAppendix2(f.path("affirmedAppendix2").asBoolean(false));
+        app.setAffirmedAppendix3(f.path("affirmedAppendix3").asBoolean(false));
+        app.setAffirmedAppendix4(f.path("affirmedAppendix4").asBoolean(false));
+        app.setAffirmedAppendix5(f.path("affirmedAppendix5").asBoolean(false));
+
+        app.setSignatureS3Key(undoText(f, "signatureS3Key"));
+        app.setSignatureImage(undoText(f, "signatureImage"));
+        app.setFinalSignatureS3Key(undoText(f, "finalSignatureS3Key"));
+        app.setFinalSignatureImage(undoText(f, "finalSignatureImage"));
+        app.setSigningIp(undoText(f, "signingIp"));
+        app.setFinalSigningIp(undoText(f, "finalSigningIp"));
+        app.setSectionSignatureDates(undoText(f, "sectionSignatureDates"));
+        app.setSigningAt(undoTime(f, "signingAt"));
+        app.setFinalSignedAt(undoTime(f, "finalSignedAt"));
+        app.setSignatureDate(undoTime(f, "signatureDate"));
+
+        app.setCheques(undoText(f, "cheques"));
+        app.setChequeS3Key(undoText(f, "chequeS3Key"));
+        app.setChequePublicId(undoText(f, "chequePublicId"));
+        app.setChequeContentType(undoText(f, "chequeContentType"));
+        app.setChequeUploadedAt(undoTime(f, "chequeUploadedAt"));
+        app.setWorkAuthDocS3Key(undoText(f, "workAuthDocS3Key"));
+        app.setWorkAuthDocPublicId(undoText(f, "workAuthDocPublicId"));
+        app.setWorkAuthDocContentType(undoText(f, "workAuthDocContentType"));
+        app.setWorkAuthDocUploadedAt(undoTime(f, "workAuthDocUploadedAt"));
+        app.setOfferLetterS3Key(undoText(f, "offerLetterS3Key"));
+        app.setOfferLetterPublicId(undoText(f, "offerLetterPublicId"));
+        app.setOfferLetterContentType(undoText(f, "offerLetterContentType"));
+        app.setOfferLetterUploadedAt(undoTime(f, "offerLetterUploadedAt"));
+        app.setDlDocS3Key(undoText(f, "dlDocS3Key"));
+        app.setDlDocPublicId(undoText(f, "dlDocPublicId"));
+        app.setDlDocContentType(undoText(f, "dlDocContentType"));
+        app.setDlDocUploadedAt(undoTime(f, "dlDocUploadedAt"));
+        app.setStateIdDocS3Key(undoText(f, "stateIdDocS3Key"));
+        app.setStateIdDocPublicId(undoText(f, "stateIdDocPublicId"));
+        app.setStateIdDocContentType(undoText(f, "stateIdDocContentType"));
+        app.setStateIdDocUploadedAt(undoTime(f, "stateIdDocUploadedAt"));
+        app.setSsnDocS3Key(undoText(f, "ssnDocS3Key"));
+        app.setSsnDocPublicId(undoText(f, "ssnDocPublicId"));
+        app.setSsnDocContentType(undoText(f, "ssnDocContentType"));
+        app.setSsnDocUploadedAt(undoTime(f, "ssnDocUploadedAt"));
+    }
+
+    private static String undoText(JsonNode node, String key) {
+        JsonNode v = node.path(key);
+        return v.isNull() || v.isMissingNode() ? null : v.asText();
+    }
+
+    private static LocalDateTime undoTime(JsonNode node, String key) {
+        String raw = undoText(node, key);
+        if (raw == null || raw.isBlank()) return null;
+        try {
+            return LocalDateTime.parse(raw);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     /**
@@ -4496,6 +5023,17 @@ public class ConsultantApplicationService {
         upsertEntry(entries, replacement);
         app.setCheques(serialiseCheques(entries));
         applicationRepository.save(app);
+        // Build AQ — this is the ONLY consultant write that emitted no event,
+        // which made a cheque number/date edit invisible in the timeline and,
+        // worse, invisible to the take-back guard: the guard reads the event
+        // log to decide whether a round has been worked on, and a revoke
+        // restores the whole cheques column, so a silent edit could be undone
+        // with the console reporting nothing had been touched.
+        appendEvent(app.getId(),
+                ConsultantApplicationEvent.EventType.CHEQUE_METADATA_UPDATED,
+                ConsultantApplicationEvent.ActorType.CONSULTANT, null,
+                Map.of("index", index),
+                request);
         return app;
     }
 

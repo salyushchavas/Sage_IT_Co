@@ -196,7 +196,10 @@ public class ConsultantApplicationController {
                 consultantService.listRevisions(appId);
 
         Map<String, Object> view = new LinkedHashMap<>();
-        view.put("application", app);
+        // Build AQ — resolve whether the open change request can still be
+        // taken back (and whether doing so would discard consultant work), so
+        // the console shows the action, or says why it can't.
+        view.put("application", consultantService.decorateRevokeState(app));
         view.put("events", events);
         view.put("revisions", revisions);
         // 3B — per-approver gate history (Manager/Accounts decisions).
@@ -315,6 +318,23 @@ public class ConsultantApplicationController {
                         body == null ? null : body.docKeys,
                         body == null ? null : body.note,
                         request)));
+    }
+
+    /**
+     * Build AQ — ERM "Take back change request". Undoes the open revision
+     * round (whichever of the three kinds it was): every field the request
+     * cleared is restored and the agreement returns to the desk it was revised
+     * from. Refused once the consultant has started working on the round —
+     * there is no override, because the restore would then be partial.
+     */
+    @PostMapping("/api/agreement-erm/applications/{appId}/revoke-revision")
+    @PreAuthorize("hasRole('AGREEMENT_ERM')")
+    public ResponseEntity<ApiResponse<ConsultantApplication>> ermRevokeRevision(
+            @PathVariable String appId,
+            HttpServletRequest request) {
+        ConsultantApplication app = consultantService.ermRevokeRevision(appId, request);
+        return ResponseEntity.ok(ApiResponse.success(
+                "Change request withdrawn", consultantService.decorateRevokeState(app)));
     }
 
     /**

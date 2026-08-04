@@ -115,6 +115,32 @@ public class ConsultantApplication {
     private java.util.Map<String, Boolean> effectiveRequirements;
 
     /**
+     * Build AQ — can the ERM still take back the open change request?
+     * Resolved on the ERM detail read from {@link #revisionUndoSnapshot} (see
+     * {@code decorateRevokeState}); never persisted, null everywhere else.
+     * {@code revisionRevokeBlockedReason} carries the one-line why when it is
+     * false, so the console can say what happened instead of just hiding a
+     * button. {@code revisionConsultantActed} is true when the consultant has
+     * already filled or uploaded something this round — revoking is still
+     * allowed, but it rolls their work back, so the console confirms first.
+     */
+    @Transient
+    private Boolean revisionRevocable;
+    @Transient
+    private String revisionRevokeBlockedReason;
+    @Transient
+    private Boolean revisionConsultantActed;
+    /**
+     * Display names of the ERM's OWN corrections (ACH schedule, rate card,
+     * Phase-2 deliverables period) that a take-back would roll back, because
+     * they were sent WITH the change request. Empty when the request carried
+     * no data fix. The console names them before the operator commits — see
+     * {@code ermCorrectionsReverted}.
+     */
+    @Transient
+    private java.util.List<String> revisionRevokeReverts;
+
+    /**
      * Phase C — soft delete (archive). Only the super-admin archives,
      * and only CANCELLED applications. The row stays in the DB
      * (recoverable, audit history + Cloudinary PDF preserved); it's
@@ -455,6 +481,43 @@ public class ConsultantApplication {
      */
     @Column(name = "revision_sections", columnDefinition = "TEXT")
     private String revisionSections;
+
+    /**
+     * Build AQ — undo state for the OPEN change request, so an ERM who sent
+     * one by mistake can take it back. Written by all three ERM revision paths
+     * ({@code ermRequestRevision}, {@code ermRequestSignatureRevision},
+     * {@code ermRequestDocumentRevision}) at the moment they bounce the row to
+     * REVISION_REQUESTED; cleared when the round ends — the consultant
+     * re-submits, or the ERM revokes.
+     *
+     * <p>{@code revisionPrevStatus} is the desk the row came off. A revision
+     * can be requested from VERIFIED, AWAITING_APPROVALS,
+     * APPROVAL_REVISION_REQUESTED or READY_TO_SIGN, and a revoke has to put it
+     * back on the SAME desk — guessing VERIFIED would silently discard an
+     * approval round that was already in flight.
+     *
+     * <p>{@code revisionUndoSnapshot} is JSON of every field the request
+     * cleared or overwrote: affirmations it re-armed, signatures and document
+     * pointers it wiped, and the ERM's own ACH / rate / deliverable
+     * corrections it applied. Those writes are destructive and nothing else in
+     * the row remembers the old values.
+     *
+     * <p>All three are null on rows whose current round predates this feature.
+     * Those cannot be revoked — the pre-request state is unknowable — which
+     * the ERM console reflects by hiding the action.
+     *
+     * <p>LONGTEXT, not TEXT: a legacy Cloudinary-era row carries its consultant
+     * signatures as base64 in two TEXT columns, and a snapshot holding both
+     * would sit right on MySQL's 64 KB TEXT ceiling.
+     */
+    @Column(name = "revision_prev_status", length = 40)
+    private String revisionPrevStatus;
+
+    @Column(name = "revision_requested_at")
+    private LocalDateTime revisionRequestedAt;
+
+    @Column(name = "revision_undo_snapshot", columnDefinition = "LONGTEXT")
+    private String revisionUndoSnapshot;
 
     /**
      * Build P — Phase 2 reopened-section scope. JSON-in-TEXT array of

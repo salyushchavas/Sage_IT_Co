@@ -44,6 +44,7 @@ const EVENT_LABELS: Record<string, string> = {
   APPLICATION_ARCHIVED: "Agreement archived",
   // Consultant uploads
   CHEQUE_UPLOADED: "Security cheque uploaded",
+  CHEQUE_METADATA_UPDATED: "Cheque number/date edited",
   WORK_AUTH_UPLOADED: "Work authorization document uploaded",
   OFFER_LETTER_UPLOADED: "Offer letter uploaded",
   DL_DOC_UPLOADED: "Driver's license uploaded",
@@ -60,6 +61,9 @@ const EVENT_LABELS: Record<string, string> = {
   DOWNLOAD_OTP_SENT: "Download OTP sent",
   CONSULTANT_DOWNLOAD: "Consultant downloaded their copy",
   ERM_SIGNATURE_REVOKED: "ERM signature revoked",
+  // Build AQ — the ERM took a change request back; metadata carries the status
+  // it was restored to and the round number that was rolled back.
+  REVISION_REVOKED: "Change request withdrawn",
 };
 
 const ACTOR_LABELS: Record<string, string> = {

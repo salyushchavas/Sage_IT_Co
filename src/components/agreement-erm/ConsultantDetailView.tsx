@@ -24,6 +24,7 @@ import {
   PenLine,
   Pencil,
   ShieldAlert,
+  Undo2,
   Upload,
   X,
 } from "lucide-react";
@@ -37,6 +38,7 @@ import {
   ermRequestRevision,
   ermRequestSignatureRevision,
   ermRequestDocumentRevision,
+  ermRevokeRevision,
   ermSendForApproval,
   ermFetchEligibleApprovers,
   type EligibleApprovers,
@@ -60,7 +62,7 @@ import {
 } from "@/lib/api";
 import { formatUsDate, formatUsDateTime } from "@/lib/dates";
 import { AGREEMENT_SECTIONS } from "@/lib/agreement-sections";
-import { describeStatus, type StatusContext } from "@/lib/agreement-status";
+import { describeStatus, statusLabel, type StatusContext } from "@/lib/agreement-status";
 import AgreementStatusPill from "./AgreementStatusPill";
 
 /**
@@ -268,7 +270,7 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
     label: string;
   } | null>(null);
   const [busy, setBusy] = useState<
-    "resend" | "cancel" | "releaseConsultant" | "sendApproval" | null
+    "resend" | "cancel" | "releaseConsultant" | "sendApproval" | "revokeRevision" | null
   >(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
@@ -384,6 +386,50 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
   };
 
   /**
+   * Build AQ — take back a change request that went out by mistake. The
+   * agreement returns to the desk it was revised from and everything the
+   * request cleared (affirmations, signatures, documents) is restored.
+   *
+   * The confirm has to name two things the operator can't see from the bar:
+   * the desk it lands back on, and any correction of their OWN that went out
+   * with the request — a fixed ACH schedule or rate card is rolled back too,
+   * because leaving it would put changed figures under the affirmation and
+   * signature this restores.
+   */
+  const handleRevokeRevision = async () => {
+    const landsOn = statusLabel(app.revisionPrevStatus, statusContextFor(app));
+    const reverts = app.revisionRevokeReverts ?? [];
+    const alsoReverts = reverts.length
+      ? `\n\nThis also rolls back the correction you sent with it — `
+        + `${reverts.join(", ")} — to the value the consultant signed.`
+      : "";
+    if (
+      !confirm(
+        `Take back this change request?\n\nThe agreement returns to `
+        + `“${landsOn}” with the consultant's submission restored, and they'll `
+        + `be emailed that the request was withdrawn.${alsoReverts}`,
+      )
+    ) {
+      return;
+    }
+    setBusy("revokeRevision");
+    setError("");
+    try {
+      await ermRevokeRevision(app.applicationId);
+      setFeedback(
+        `Change request withdrawn. The agreement is back at “${landsOn}”`
+        + (reverts.length ? `, ${reverts.join(", ")} reverted,` : "")
+        + " and the consultant has been notified.",
+      );
+      await onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't take back the request");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /**
    * 3B — route the consultant-signed agreement to the phase's required
    * approvers (Phase 1 = Manager; Phase 2 = Manager + Accounts). Also the
    * re-send action from APPROVAL_REVISION_REQUESTED (resets the gates).
@@ -435,10 +481,12 @@ export default function ConsultantDetailView({ detail, onRefresh }: Props) {
         onSendEmail={() => setModal("send")}
         onResendInvite={handleResend}
         onCancel={handleCancel}
+        onRevokeRevision={handleRevokeRevision}
         resendBusy={busy === "resend"}
         cancelBusy={busy === "cancel"}
         releaseConsultantBusy={busy === "releaseConsultant"}
         sendApprovalBusy={busy === "sendApproval"}
+        revokeRevisionBusy={busy === "revokeRevision"}
         isLocked={isLocked}
         onAdvanceToPhase2={() => setModal("advancePhase2")}
       />
@@ -906,6 +954,71 @@ function ApproverBadges({ approvals }: { approvals: AgreementApproval[] }) {
   );
 }
 
+/**
+ * Build AQ — the way out of a change request sent by mistake. Undoes the whole
+ * round: the agreement returns to the desk it was revised from, the
+ * consultant's submission (affirmations, signatures, documents) is restored,
+ * and they're emailed that the request was withdrawn.
+ *
+ * The server decides whether it is still possible, and it says no in three
+ * cases: the consultant has already entered something this round (their
+ * answers would be left standing under the restored signature), the round
+ * predates this feature so nothing was recorded, or a document request
+ * destroyed a legacy Cloudinary file that can't be put back. In every one of
+ * them, say why — hiding the button leaves the ERM guessing at a moment they
+ * are already trying to fix a mistake.
+ */
+function RevokeRevisionAction({
+  app,
+  onRevoke,
+  busy,
+}: {
+  app: ConsultantApplication;
+  onRevoke: () => void;
+  busy: boolean;
+}) {
+  // Null on a list-sourced row (the flag is resolved on the detail read only);
+  // treat that as "not yet known" and render nothing rather than a dead button.
+  if (app.revisionRevocable == null) return null;
+
+  if (!app.revisionRevocable) {
+    return (
+      <p className="text-[11px] text-gray-500 inline-flex items-start gap-1.5 max-w-md">
+        <ShieldAlert size={12} className="mt-0.5 shrink-0" />
+        <span>
+          {app.revisionRevokeBlockedReason
+            ?? "This change request can no longer be taken back."}
+        </span>
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      <button
+        type="button"
+        onClick={onRevoke}
+        disabled={busy}
+        title="Undo this change request — the agreement goes back exactly as the consultant submitted it"
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-navy/30 bg-white text-sage-navy hover:bg-sage-navy/5 disabled:opacity-60 disabled:cursor-not-allowed cursor-pointer"
+      >
+        {busy ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />}
+        {busy ? "Taking back…" : "Take back this request"}
+      </button>
+      {(app.revisionRevokeReverts?.length ?? 0) > 0 && (
+        <p className="text-[11px] text-sage-copper-deep inline-flex items-start gap-1.5 max-w-md">
+          <AlertCircle size={12} className="mt-0.5 shrink-0" />
+          <span>
+            Also rolls back the correction you sent with this request (
+            {app.revisionRevokeReverts?.join(", ")}) to the value the consultant
+            signed.
+          </span>
+        </p>
+      )}
+    </div>
+  );
+}
+
 // Build AJ — asks the consultant to re-sign with a proper signature (content
 // unchanged). Shown alongside "Request revision" in the revisable states.
 function SignatureReSignButton({ onClick }: { onClick: () => void }) {
@@ -933,10 +1046,12 @@ function StateActionBar({
   onSendEmail,
   onResendInvite,
   onCancel,
+  onRevokeRevision,
   resendBusy,
   cancelBusy,
   releaseConsultantBusy,
   sendApprovalBusy,
+  revokeRevisionBusy,
   isLocked,
   onAdvanceToPhase2,
 }: {
@@ -951,10 +1066,12 @@ function StateActionBar({
   onSendEmail: () => void;
   onResendInvite: () => void;
   onCancel: () => void;
+  onRevokeRevision: () => void;
   resendBusy: boolean;
   cancelBusy: boolean;
   releaseConsultantBusy: boolean;
   sendApprovalBusy: boolean;
+  revokeRevisionBusy: boolean;
   isLocked: boolean;
   onAdvanceToPhase2: () => void;
 }) {
@@ -999,6 +1116,11 @@ function StateActionBar({
         <p className="text-[11px] text-gray-500">
           The consultant has been emailed your remarks and can re-submit.
         </p>
+        <RevokeRevisionAction
+          app={app}
+          onRevoke={onRevokeRevision}
+          busy={revokeRevisionBusy}
+        />
       </BarShell>
     );
   }

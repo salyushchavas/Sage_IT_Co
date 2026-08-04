@@ -3392,6 +3392,21 @@ export interface ConsultantApplication {
   // Build Y — ERM section-picker revision scope (JSON array of {key,note});
   // non-empty + REVISION_REQUESTED ⇒ the consultant is restricted to these.
   revisionSections: string | null;
+  // Build AQ — can the ERM still take back the open change request? Resolved
+  // server-side on the detail read (null on list reads and on any row that
+  // isn't in REVISION_REQUESTED). When false, revisionRevokeBlockedReason says
+  // why in one sentence — most often because revisionConsultantActed is true,
+  // which blocks the take-back outright rather than warning about it.
+  // revisionRevokeReverts names the ERM's own corrections (ACH schedule, rate
+  // card, deliverables period) that went out with the request and would be
+  // rolled back with it; empty when the request carried no data fix.
+  revisionRevocable?: boolean | null;
+  revisionRevokeBlockedReason?: string | null;
+  revisionConsultantActed?: boolean | null;
+  revisionRevokeReverts?: string[] | null;
+  revisionRequestedAt?: string | null;
+  // The status the row was revised FROM — where a revoke puts it back.
+  revisionPrevStatus?: ConsultantApplicationStatus | null;
   // Build P — Phase 2 reopened-section scope (JSON array of {key}); when
   // phase ≥ 2 and status = SUBMITTED, the consultant fills + signs ONLY
   // these reopened sections, and every completed Phase-1 section (incl.
@@ -4225,6 +4240,24 @@ export async function ermRequestDocumentRevision(
   return agreementErmFetch<ConsultantApplication>(
     `/api/agreement-erm/applications/${applicationId}/request-document-revision`,
     { method: "POST", body: JSON.stringify({ docKeys, note: note ?? "" }) },
+  );
+}
+
+/**
+ * Build AQ — ERM takes back a change request sent by mistake. Restores every
+ * field the request cleared (affirmations, signatures, documents) plus any ERM
+ * rate/ACH correction that was sent with it, and returns the agreement to the
+ * desk it was revised from.
+ *
+ * Refused by the server once the consultant has entered anything this round —
+ * there is no override, because the restore would then be partial. The console
+ * hides the action in that case (revisionRevocable false), so a refusal here
+ * means the consultant started between the page load and the click.
+ */
+export async function ermRevokeRevision(applicationId: string) {
+  return agreementErmFetch<ConsultantApplication>(
+    `/api/agreement-erm/applications/${applicationId}/revoke-revision`,
+    { method: "POST" },
   );
 }
 

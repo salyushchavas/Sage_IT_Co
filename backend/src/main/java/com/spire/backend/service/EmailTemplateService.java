@@ -1017,6 +1017,35 @@ public class EmailTemplateService {
     }
 
     /**
+     * Build AQ — sent to the consultant when the ERM takes back a change
+     * request that went out by mistake. The consultant already has the
+     * "Revision Requested" email in their inbox, so this one has to be
+     * unambiguous: nothing is needed from them, and the earlier email should
+     * be ignored. No portal link — there is nothing for them to do.
+     *
+     * <p>It can only say "exactly as you submitted it" because the take-back
+     * is refused outright once the consultant has entered anything this round
+     * ({@code CONSULTANT_ACTED_REASON}). If that guard is ever loosened, this
+     * wording stops being true and has to change with it.
+     */
+    public void sendConsultantRevisionWithdrawn(ConsultantApplication application) {
+        String body = p("Hi " + escape(firstName(application)) + ",")
+                + p("The change request we sent you for your " + brandName()
+                        + " agreement has been withdrawn — it was sent in error. "
+                        + "Please ignore that earlier email; nothing is needed "
+                        + "from you.")
+                + p("Your agreement is back with " + brandName()
+                        + " exactly as you submitted it. We'll be in touch if "
+                        + "anything genuinely needs changing.")
+                + receipt("Application ID: " + application.getApplicationId());
+        emailService.sendEmail(
+                application.getConsultantEmail(),
+                "Please ignore: change request withdrawn for your "
+                        + brandName() + " agreement",
+                wrap("Change request withdrawn", body));
+    }
+
+    /**
      * Build M — sent to the consultant the moment the ERM advances a
      * Phase-1 COMPLETED agreement to Phase 2 on the same document.
      * No PDF attachment (post-Build-K policy: the consultant never
