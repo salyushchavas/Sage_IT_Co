@@ -506,9 +506,14 @@ public class ConsultantApplication {
      * Those cannot be revoked — the pre-request state is unknowable — which
      * the ERM console reflects by hiding the action.
      *
-     * <p>LONGTEXT, not TEXT: a legacy Cloudinary-era row carries its consultant
-     * signatures as base64 in two TEXT columns, and a snapshot holding both
-     * would sit right on MySQL's 64 KB TEXT ceiling.
+     * <p>Plain TEXT. This database is Postgres — the MySQL defaults in
+     * application.properties are overridden by DB_URL/DB_DIALECT everywhere it
+     * actually runs — where TEXT is unbounded, so a legacy Cloudinary-era row
+     * whose consultant signatures are base64 in two TEXT columns still fits.
+     * Do NOT "fix" this to LONGTEXT: that is MySQL-only, its ADD COLUMN fails
+     * on Postgres, and the column then goes missing while the entity keeps
+     * selecting it — which 500s every read of this table, not just the
+     * take-back.
      */
     @Column(name = "revision_prev_status", length = 40)
     private String revisionPrevStatus;
@@ -516,7 +521,7 @@ public class ConsultantApplication {
     @Column(name = "revision_requested_at")
     private LocalDateTime revisionRequestedAt;
 
-    @Column(name = "revision_undo_snapshot", columnDefinition = "LONGTEXT")
+    @Column(name = "revision_undo_snapshot", columnDefinition = "TEXT")
     private String revisionUndoSnapshot;
 
     /**

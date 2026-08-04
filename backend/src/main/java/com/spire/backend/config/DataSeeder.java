@@ -1382,6 +1382,17 @@ public class DataSeeder implements CommandLineRunner {
                 {"signature_s3_key VARCHAR(512)", "signature_s3_key"},
                 {"final_signature_s3_key VARCHAR(512)", "final_signature_s3_key"},
                 {"erm_signature_s3_key VARCHAR(512)", "erm_signature_s3_key"},
+                // Build AQ — undo record for the open change request, so an ERM
+                // who sent one by mistake can take it back. All nullable and
+                // additive. TEXT, not LONGTEXT: this database is Postgres (the
+                // MySQL defaults in application.properties are overridden by
+                // DB_URL/DB_DIALECT in every deployed environment), and Postgres
+                // TEXT is unbounded — LONGTEXT is MySQL-only and its ADD COLUMN
+                // fails here, which leaves the column absent while the entity
+                // still selects it, 500-ing every read of this table.
+                {"revision_prev_status VARCHAR(40)", "revision_prev_status"},
+                {"revision_requested_at TIMESTAMP", "revision_requested_at"},
+                {"revision_undo_snapshot TEXT", "revision_undo_snapshot"},
         };
         // Build Q — agreements no longer expire (the 7-day TTL applies to
         // the consultant LINK only, as a derived indicator). Restore every
