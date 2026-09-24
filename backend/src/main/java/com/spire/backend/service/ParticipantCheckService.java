@@ -197,10 +197,12 @@ public class ParticipantCheckService {
     private User requireGatedUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
-        if (!workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.PROGRAM_SELECTED)) {
-            throw new UnauthorizedException(
-                    "Complete program selection before uploading check soft-copies.");
+        // The agreement must be signed first. Before, only program
+        // selection was checked, so opening /check-upload and choosing
+        // "not applicable" skipped signing entirely.
+        if (!Boolean.TRUE.equals(user.getAgreementComplete())) {
+            throw new IllegalStateException(
+                    "Sign your agreement before the check step.");
         }
         return user;
     }

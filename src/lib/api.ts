@@ -39,6 +39,7 @@ export interface UserDTO {
   availability?: string | null;
   // Gate flags populated by the backend so the routing guard can
   // tell which onboarding step the participant has completed.
+  basicInfoComplete?: boolean;
   acknowledgmentComplete?: boolean;
   documentsComplete?: boolean;
   programSelectionComplete?: boolean;
@@ -1201,6 +1202,8 @@ export interface ParticipantDashboard {
   currentStatus: string | null;
   roadmapTotal: number;
   roadmapStep: number;
+  /** Whether each roadmap step is really done (from the backend). */
+  roadmapDone?: boolean[];
   roadmapLabels: string[];
   nextAction: { label: string; href: string };
   program?: {

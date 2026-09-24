@@ -75,6 +75,15 @@ public class OnboardingService {
      */
     @Transactional
     public void completeOnboarding(User user) {
+        // Only once every profile step is done. Manual ERM / coach
+        // assignment and the /welcome refresh also call this; before the
+        // profile is complete they must not send the welcome emails or
+        // move the status (the assignment itself is kept, and the chain
+        // runs when the last step is finished).
+        if (!ProfileCompletionService.allStepsComplete(user)) {
+            log.info("Onboarding chain not started for user {}: profile not complete yet", user.getId());
+            return;
+        }
         log.info("OnboardingService chain starting for user {}", user.getId());
 
         // Step 1: Welcome email (only if we haven't already passed

@@ -79,10 +79,14 @@ public class ParticipantDashboardService {
         out.put("email", user.getEmail());
         out.put("currentStatus", user.getCurrentStatus());
 
-        // Roadmap progress
-        int currentStep = stepForStatus(user.getCurrentStatus());
+        // Roadmap progress: each step ticked from what really happened,
+        // and the current step is the first one not done (it used to be
+        // read off the status alone, which was jumped to step 15 at
+        // sign-up and ticked everything before it).
+        List<Boolean> done = roadmapDone(user);
         out.put("roadmapTotal", ROADMAP_STEPS.size());
-        out.put("roadmapStep", currentStep);
+        out.put("roadmapStep", currentStep(done));
+        out.put("roadmapDone", done);
         out.put("roadmapLabels", ROADMAP_STEPS);
         out.put("nextAction", nextActionFor(user));
 
@@ -175,6 +179,85 @@ public class ParticipantDashboardService {
         };
     }
 
+    /**
+     * Whether each of the 20 roadmap steps is done. Onboarding steps
+     * (1–9) come from the profile step flags, which only a real
+     * submission sets; the later steps from the status, which now only
+     * moves forward on real events.
+     */
+    static List<Boolean> roadmapDone(User u) {
+        WorkflowService.Status s = statusOf(u);
+        boolean ack = Boolean.TRUE.equals(u.getAcknowledgmentComplete());
+        boolean agreement = Boolean.TRUE.equals(u.getAgreementComplete());
+        return List.of(
+                Boolean.TRUE.equals(u.getBasicInfoComplete()),                  // 1 Enrollment (incl. About You)
+                Boolean.TRUE.equals(u.getEmailVerified()),                      // 2 Email verification
+                u.getParticipantId() != null && !u.getParticipantId().isBlank(), // 3 Participant ID
+                ack,                                                             // 4 Acknowledgment
+                Boolean.TRUE.equals(u.getDocumentsComplete()),                  // 5 Documents
+                Boolean.TRUE.equals(u.getProgramSelectionComplete()),           // 6 Program selection
+                agreement || atLeast(s, WorkflowService.Status.AGREEMENT_SENT), // 7 Agreement sent
+                Boolean.TRUE.equals(u.getCheckUploadComplete()),                // 8 Check upload
+                agreement,                                                       // 9 Agreement complete
+                atLeast(s, WorkflowService.Status.SIGNED_AGREEMENT_SENT_TO_ERM),
+                atLeast(s, WorkflowService.Status.WELCOME_SENT),
+                atLeast(s, WorkflowService.Status.DEEPTHI_INTRO_SENT),
+                atLeast(s, WorkflowService.Status.ERM_ASSIGNED),
+                atLeast(s, WorkflowService.Status.COACHES_ASSIGNED),
+                atLeast(s, WorkflowService.Status.DASHBOARD_ENABLED),
+                atLeast(s, WorkflowService.Status.WEEKLY_REPORTING_ACTIVE),
+                atLeast(s, WorkflowService.Status.EMPLOYMENT_ACCEPTED),
+                atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED),
+                atLeast(s, WorkflowService.Status.PAYMENT_PLAN_ACCEPTED),
+                atLeast(s, WorkflowService.Status.PAYMENTS_TRACKED));
+    }
+
+    /** 1-based number of the first step not done (20 when all are). */
+    static int currentStep(List<Boolean> done) {
+        for (int i = 0; i < done.size(); i++) {
+            if (!Boolean.TRUE.equals(done.get(i))) return i + 1;
+        }
+        return done.size();
+    }
+
+    private static WorkflowService.Status statusOf(User u) {
+        try {
+            return u.getCurrentStatus() == null ? WorkflowService.Status.DRAFT_STARTED
+                    : WorkflowService.Status.valueOf(u.getCurrentStatus());
+        } catch (IllegalArgumentException e) {
+            return WorkflowService.Status.DRAFT_STARTED;
+        }
+    }
+
+    private static boolean atLeast(WorkflowService.Status s, WorkflowService.Status target) {
+        return s.ordinal() >= target.ordinal();
+    }
+
+    /** The next profile step's page while onboarding isn't finished. */
+    private static Map<String, String> onboardingActionFor(User user) {
+        Map<String, String> action = new LinkedHashMap<>();
+        if (!Boolean.TRUE.equals(user.getBasicInfoComplete())) {
+            action.put("label", "Tell us about yourself");
+            action.put("href", "#complete-profile");
+        } else if (!Boolean.TRUE.equals(user.getAcknowledgmentComplete())) {
+            action.put("label", "Accept the program acknowledgment");
+            action.put("href", "/acknowledgment");
+        } else if (!Boolean.TRUE.equals(user.getDocumentsComplete())) {
+            action.put("label", "Upload your documents");
+            action.put("href", "/document-upload");
+        } else if (!Boolean.TRUE.equals(user.getProgramSelectionComplete())) {
+            action.put("label", "Choose your program");
+            action.put("href", "/program-selection");
+        } else if (!Boolean.TRUE.equals(user.getAgreementComplete())) {
+            action.put("label", "Sign your agreement");
+            action.put("href", "/agreement");
+        } else {
+            action.put("label", "Upload your check copies (or mark them not applicable)");
+            action.put("href", "/check-upload");
+        }
+        return action;
+    }
+
     private static Map<String, String> nextActionFor(User user) {
         Map<String, String> action = new LinkedHashMap<>();
         String status = user.getCurrentStatus();
@@ -182,6 +265,9 @@ public class ParticipantDashboardService {
             action.put("label", "Continue your onboarding");
             action.put("href", "/enroll");
             return action;
+        }
+        if (user.getParticipantId() != null && !ProfileCompletionService.allStepsComplete(user)) {
+            return onboardingActionFor(user);
         }
         switch (status) {
             case "DASHBOARD_ENABLED" -> {

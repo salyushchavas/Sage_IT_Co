@@ -30,9 +30,14 @@ function greeting(): string {
 
 export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
   const firstName = (data.fullName ?? userEmail ?? "there").split(" ")[0];
+  // Ticks come from what really happened (roadmapDone); older payloads
+  // without it fall back to "every step before the current one".
+  const isStepDone = (idx: number) =>
+    data.roadmapDone ? !!data.roadmapDone[idx] : idx + 1 < data.roadmapStep;
+  const doneCount = data.roadmapLabels.filter((_, idx) => isStepDone(idx)).length;
   const progressPct =
     data.roadmapTotal > 0
-      ? Math.round((data.roadmapStep / data.roadmapTotal) * 100)
+      ? Math.round((doneCount / data.roadmapTotal) * 100)
       : 0;
   const coaches = team?.coaches ?? {};
   const coachEntries = Object.entries(coaches);
@@ -88,7 +93,7 @@ export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
         <div className="mt-3 flex flex-wrap gap-1.5">
           {data.roadmapLabels.map((label, idx) => {
             const stepNum = idx + 1;
-            const isDone = stepNum < data.roadmapStep;
+            const isDone = isStepDone(idx);
             const isActive = stepNum === data.roadmapStep;
             return (
               <span

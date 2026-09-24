@@ -26,11 +26,10 @@ import java.util.Map;
  * 20-step sequence; {@link #ordinal(Status)} treats that ordering
  * as a monotonic ladder for {@link #isStatusAtLeast}.
  *
- * Soft validation: {@link #transition} accepts ANY status change
- * (no whitelist of allowed pairs). The workflow_states row records
- * the from/to pair so an out-of-order move is auditable. Adding a
- * strict whitelist is left for a follow-up once the on-paper flow
- * is locked in.
+ * Forward only: {@link #transition} never moves a participant back
+ * down the ladder (a later or equal status is kept, nothing is
+ * written). A deliberate correction goes through {@link #repair},
+ * which is audited like any other change.
  */
 @Service
 @RequiredArgsConstructor
@@ -99,6 +98,30 @@ public class WorkflowService {
         return currentStatus(user).ordinal() >= target.ordinal();
     }
 
+    /**
+     * The status a participant has really reached in onboarding, worked
+     * out from the six profile flags (each step only counts when every
+     * step before it is done). Used to repair statuses that were jumped
+     * ahead; the chain statuses after SIGNED_AGREEMENT_SENT_TO_ERM come
+     * from real events, not from here.
+     */
+    public static Status statusFromProfile(User u) {
+        Status s = u.getParticipantId() != null && !u.getParticipantId().isBlank()
+                ? Status.ID_EMAIL_SENT
+                : Boolean.TRUE.equals(u.getEmailVerified())
+                        ? Status.EMAIL_VERIFIED : Status.EMAIL_VERIFICATION_PENDING;
+        if (!Boolean.TRUE.equals(u.getAcknowledgmentComplete())) return s;
+        s = Status.ACKNOWLEDGMENT_ACCEPTED;
+        if (!Boolean.TRUE.equals(u.getDocumentsComplete())) return s;
+        s = Status.DOCUMENTS_SUBMITTED;
+        if (!Boolean.TRUE.equals(u.getProgramSelectionComplete())) return s;
+        s = Status.PROGRAM_SELECTED;
+        if (!Boolean.TRUE.equals(u.getAgreementComplete())) return s;
+        s = Status.AGREEMENT_COMPLETED;
+        if (!Boolean.TRUE.equals(u.getCheckUploadComplete())) return s;
+        return Status.SIGNED_AGREEMENT_SENT_TO_ERM;
+    }
+
     // ── 6 gates: the canonical "is this allowed yet?" answers ──────
 
     /** Email-verified — required before minting a participant ID. */
@@ -151,6 +174,30 @@ public class WorkflowService {
 
     @Transactional
     public void transition(User user, Status newStatus, String trigger, String notes) {
+        // Forward only: a status at or past the new one is kept. Before
+        // this rule, one late step (document completion) dragged people
+        // back down the ladder and an early jump pushed them past steps
+        // they hadn't done.
+        if (currentStatus(user).ordinal() >= newStatus.ordinal()
+                && user.getCurrentStatus() != null && !user.getCurrentStatus().isBlank()) {
+            log.debug("Workflow transition user={} to {} skipped: already at {}",
+                    user.getId(), newStatus, user.getCurrentStatus());
+            return;
+        }
+        write(user, newStatus, trigger, notes);
+    }
+
+    /**
+     * Deliberate correction, which may move a participant back (e.g. a
+     * status that was jumped ahead). Audited exactly like a transition.
+     */
+    @Transactional
+    public void repair(User user, Status newStatus, String trigger, String notes) {
+        if (newStatus.name().equals(user.getCurrentStatus())) return;
+        write(user, newStatus, trigger, notes);
+    }
+
+    private void write(User user, Status newStatus, String trigger, String notes) {
         String oldStatus = user.getCurrentStatus();
         user.setCurrentStatus(newStatus.name());
         userRepository.save(user);

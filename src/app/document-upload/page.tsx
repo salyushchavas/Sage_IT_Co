@@ -98,6 +98,11 @@ function DocumentUploadPageInner() {
       router.replace("/enroll");
       return;
     }
+    // The step before this one must be done first (the acknowledgment).
+    if (!user.acknowledgmentComplete) {
+      router.replace("/acknowledgment");
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {

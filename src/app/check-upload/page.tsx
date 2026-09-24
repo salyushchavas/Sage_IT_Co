@@ -84,6 +84,11 @@ function CheckUploadPageInner() {
       router.replace("/enroll");
       return;
     }
+    // The step before this one must be done first (the agreement).
+    if (!user.agreementComplete) {
+      router.replace("/agreement");
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {

@@ -50,29 +50,23 @@ public class ParticipantAgreementService {
     ) {
         User user = requireGatedUser(userId);
 
-        // Idempotent re-sign — if the user has already moved past
-        // AGREEMENT_COMPLETED (e.g. they're on the check-upload step
-        // already), route them forward without re-running anything.
-        // Still re-run markStepComplete to self-heal the per-step
-        // flag if it fell behind workflow status.
-        if (workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.CHECK_COPY_UPLOADED)) {
-            profileCompletionService.markStepComplete(user, "AGREEMENT");
+        // Idempotent re-sign — only when the agreement really was signed:
+        // the step flag, or (for an older row whose flag fell behind) a
+        // stored VERIFIED signature. The status alone used to be jumped
+        // ahead at sign-up, which marked AGREEMENT done with nothing signed.
+        boolean signedRecord = agreementRepository.findByUserId(userId)
+                .map(row -> AgreementService.STATUS_VERIFIED.equals(row.getStatus()))
+                .orElse(false);
+        if (Boolean.TRUE.equals(user.getAgreementComplete()) || signedRecord) {
+            if (!Boolean.TRUE.equals(user.getAgreementComplete())) {
+                profileCompletionService.markStepComplete(user, "AGREEMENT");
+            }
             return Map.of(
                     "success", true,
                     "alreadySigned", true,
                     "status", user.getCurrentStatus(),
-                    "nextStep", "/welcome"
-            );
-        }
-        if (workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.AGREEMENT_COMPLETED)) {
-            profileCompletionService.markStepComplete(user, "AGREEMENT");
-            return Map.of(
-                    "success", true,
-                    "alreadySigned", true,
-                    "status", user.getCurrentStatus(),
-                    "nextStep", "/check-upload"
+                    "nextStep", Boolean.TRUE.equals(user.getCheckUploadComplete())
+                            ? "/dashboard?tab=complete-profile" : "/check-upload"
             );
         }
 
@@ -120,10 +114,14 @@ public class ParticipantAgreementService {
     private User requireGatedUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
-        if (!workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.PROGRAM_SELECTED)) {
-            throw new UnauthorizedException(
-                    "Complete program selection before reaching the agreement step.");
+        // Every step before signing must really be done (roadmap §4.1: no
+        // signing until acknowledgment, required documents and program
+        // selection are complete).
+        if (!Boolean.TRUE.equals(user.getAcknowledgmentComplete())
+                || !Boolean.TRUE.equals(user.getDocumentsComplete())
+                || !Boolean.TRUE.equals(user.getProgramSelectionComplete())) {
+            throw new IllegalStateException(
+                    "Complete the acknowledgment, documents and program selection before signing.");
         }
         return user;
     }

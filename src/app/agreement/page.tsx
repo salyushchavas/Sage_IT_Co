@@ -82,6 +82,11 @@ function AgreementPageInner() {
       router.replace("/enroll");
       return;
     }
+    // The step before this one must be done first (program selection).
+    if (!user.programSelectionComplete) {
+      router.replace("/program-selection");
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {

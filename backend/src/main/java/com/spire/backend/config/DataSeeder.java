@@ -51,6 +51,9 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired
     private com.spire.backend.security.FieldEncryptor fieldEncryptor;
 
+    @Autowired
+    private com.spire.backend.service.WorkflowService workflowService;
+
     // Super-admin bootstrap for the consultant-agreement console. The
     // single SUPER_ADMIN is provisioned from these env vars, never
     // through the UI. Blank defaults => bootstrap is skipped (logged).
@@ -288,6 +291,11 @@ public class DataSeeder implements CommandLineRunner {
         // still in plain text. Both idempotent; never logs a value.
         widenConsultantBankColumnsToText();
         encryptSensitiveConsultantFields();
+
+        // Checklist 1.1: put participants whose status was jumped to
+        // DASHBOARD_ENABLED at sign-up, and who haven't finished their
+        // profile, back on their real onboarding step. Idempotent.
+        repairQuickSignupStatuses();
 
         // Portal phase: consultant_verification was keyed by
         // application_id; the portal keys it by email instead. Add the
@@ -1195,6 +1203,46 @@ public class DataSeeder implements CommandLineRunner {
      * (security check), ERM countersignature, revision tracking,
      * and the final post-ERM-signature PDF URL.
      */
+    /**
+     * Until 25 Sep 2026, verifying an email moved every new participant
+     * straight to DASHBOARD_ENABLED (trigger "dashboard_enabled_quick_signup"),
+     * so every later check passed and the roadmap showed step 15. Each such
+     * participant who hasn't finished their profile, and is still at
+     * DASHBOARD_ENABLED or later, is put back on the step their six profile
+     * flags show (WorkflowService.statusFromProfile). Participants who
+     * finished their profile went through the real chain and are left alone.
+     * Audited through WorkflowService.repair; idempotent (afterwards their
+     * status is below DASHBOARD_ENABLED, so they no longer match).
+     */
+    int repairQuickSignupStatuses() {
+        int repaired = 0;
+        try {
+            java.util.List<Long> ids = jdbcTemplate.queryForList(
+                    "SELECT DISTINCT w.user_id FROM workflow_states w JOIN users u ON u.id = w.user_id "
+                            + "WHERE w.trigger_event = 'dashboard_enabled_quick_signup' "
+                            + "AND (u.profile_complete IS NULL OR u.profile_complete = FALSE)",
+                    Long.class);
+            for (Long id : ids) {
+                User user = userRepository.findById(id).orElse(null);
+                if (user == null || !workflowService.isStatusAtLeast(user,
+                        com.spire.backend.service.WorkflowService.Status.DASHBOARD_ENABLED)) {
+                    continue;
+                }
+                com.spire.backend.service.WorkflowService.Status real =
+                        com.spire.backend.service.WorkflowService.statusFromProfile(user);
+                workflowService.repair(user, real, "status_repair_quick_signup",
+                        "Put back on the real onboarding step (checklist 1.1)");
+                repaired++;
+            }
+            if (repaired > 0) {
+                log.info("Put {} participant(s) back on their real onboarding step", repaired);
+            }
+        } catch (Exception e) {
+            log.warn("Couldn't repair quick-signup statuses: {}", e.getMessage());
+        }
+        return repaired;
+    }
+
     /** Sensitive consultant columns, encrypted at rest by SensitiveTextConverter. */
     static final String[] ENCRYPTED_CONSULTANT_COLUMNS = {
             "bg_full_ssn", "bg_driver_license", "bg_state_id", "ach_routing_number", "ach_account_number"};

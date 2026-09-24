@@ -90,6 +90,11 @@ function AcknowledgmentPageInner() {
       router.replace("/enroll");
       return;
     }
+    // The step before this one must be done first (About You).
+    if (!user.basicInfoComplete) {
+      router.replace("/dashboard?tab=complete-profile");
+      return;
+    }
     setGateChecked(true);
   }, [authLoading, isAuthenticated, user, router]);
 

@@ -135,11 +135,9 @@ function VerifyEmailInner() {
       const auth = await verifyCode(email, code);
       setSuccess(true);
       setSession(auth);
-      // Phase 1C: verify-code mints the participant ID AND walks
-      // the workflow straight to DASHBOARD_ENABLED. The participant
-      // lands on /dashboard immediately; the remaining lifecycle
-      // steps live inside the "Complete Your Profile" tab. No more
-      // bouncing through /participant-id, /acknowledgment, etc.
+      // verify-code mints the participant ID; the participant lands on
+      // /dashboard and continues with the "Complete Your Profile" steps
+      // (their status stays on the real step).
       setTimeout(() => { window.location.href = "/dashboard"; }, 800);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Verification failed";

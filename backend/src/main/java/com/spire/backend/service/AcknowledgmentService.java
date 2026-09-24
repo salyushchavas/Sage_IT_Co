@@ -57,25 +57,27 @@ public class AcknowledgmentService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
-        // ── Gate ────────────────────────────────────────────────────
-        if (!workflowService.isStatusAtLeast(user, WorkflowService.Status.ID_EMAIL_SENT)) {
-            throw new UnauthorizedException(
-                    "Complete email verification and receive your participant ID first.");
+        // ── Gate: the steps before this one must really be done ─────
+        if (!Boolean.TRUE.equals(user.getEmailVerified())
+                || user.getParticipantId() == null || user.getParticipantId().isBlank()) {
+            throw new IllegalStateException(
+                    "Verify your email and receive your Participant ID first.");
+        }
+        if (!Boolean.TRUE.equals(user.getBasicInfoComplete())) {
+            throw new IllegalStateException(
+                    "Tell us about yourself first (Complete Profile, step 1: About You).");
         }
 
         // ── Idempotent return if already accepted ───────────────────
-        if (workflowService.isStatusAtLeast(user, WorkflowService.Status.ACKNOWLEDGMENT_ACCEPTED)) {
-            Acknowledgment existing = acknowledgmentRepository
+        // Decided by the step flag plus a stored acceptance, never by the
+        // status alone (which used to be jumped ahead at sign-up, so an
+        // empty form was "accepted" without any checks).
+        if (Boolean.TRUE.equals(user.getAcknowledgmentComplete())) {
+            var existing = acknowledgmentRepository
                     .findByUserIdAndAcknowledgmentType(userId, TYPE_INTEREST_AND_ACCEPTANCE)
                     .stream()
-                    .findFirst()
-                    .orElseGet(() -> persist(user, req, httpRequest));
-            // Self-heal: if workflow already advanced (e.g. earlier
-            // submit set the status but the per-step flag fell
-            // behind), re-run markStepComplete here. It's a no-op when
-            // the flag is already true.
-            profileCompletionService.markStepComplete(user, "ACKNOWLEDGMENT");
-            return existing;
+                    .findFirst();
+            if (existing.isPresent()) return existing.get();
         }
 
         // ── Validate ────────────────────────────────────────────────

@@ -63,10 +63,11 @@ public class ProgramSelectionService {
     public ProgramSelection saveDraft(Long userId, ProgramSelectionRequest req) {
         User user = requireGatedUser(userId);
         // Past-the-finish-line guard: don't let a stray draft call
-        // mutate a finalised row once the workflow has moved on.
-        if (workflowService.isStatusAtLeast(user, WorkflowService.Status.AGREEMENT_SENT)) {
-            throw new UnauthorizedException(
-                    "Program selection has already been locked for agreement signing.");
+        // mutate a finalised row once the agreement has been signed.
+        if (Boolean.TRUE.equals(user.getAgreementComplete())
+                || workflowService.isStatusAtLeast(user, WorkflowService.Status.AGREEMENT_SENT)) {
+            throw new IllegalStateException(
+                    "Your program selection is locked because your agreement has been signed.");
         }
         ProgramSelection row = programSelectionRepository
                 .findFirstByUserIdOrderBySelectionDateDesc(userId)
@@ -86,15 +87,12 @@ public class ProgramSelectionService {
     public ProgramSelection submit(Long userId, ProgramSelectionRequest req) {
         User user = requireGatedUser(userId);
 
-        // Idempotent return if already past this step.
-        if (workflowService.isStatusAtLeast(user, WorkflowService.Status.PROGRAM_SELECTED)) {
-            ProgramSelection existing = programSelectionRepository
-                    .findFirstByUserIdOrderBySelectionDateDesc(userId)
-                    .orElseGet(() -> programSelectionRepository.save(
-                            buildRow(userId, req)));
-            // Self-heal the per-step flag if it fell behind status.
-            profileCompletionService.markStepComplete(user, "PROGRAM_SELECTION");
-            return existing;
+        // Idempotent return if this step is already done (its flag and a
+        // stored selection; the status alone used to be jumped ahead, so an
+        // unvalidated request was saved as a finished selection).
+        if (Boolean.TRUE.equals(user.getProgramSelectionComplete())) {
+            var existing = programSelectionRepository.findFirstByUserIdOrderBySelectionDateDesc(userId);
+            if (existing.isPresent()) return existing.get();
         }
 
         validate(req);
@@ -158,9 +156,8 @@ public class ProgramSelectionService {
     private User requireGatedUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
-        if (!workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.DOCUMENTS_SUBMITTED)) {
-            throw new UnauthorizedException(
+        if (!Boolean.TRUE.equals(user.getDocumentsComplete())) {
+            throw new IllegalStateException(
                     "Upload your required documents before selecting a program.");
         }
         return user;

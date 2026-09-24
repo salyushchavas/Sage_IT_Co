@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
 
 /**
@@ -38,6 +39,7 @@ class AuthServiceVerificationTest {
     private JwtService jwtService;
     private EmailTemplateService emailTemplateService;
     private ParticipantIdService participantIdService;
+    private WorkflowService workflowService;
     private AuthService authService;
 
     @BeforeEach
@@ -49,7 +51,7 @@ class AuthServiceVerificationTest {
         participantIdService = mock(ParticipantIdService.class);
         authService = new AuthService(userRepository, roleRepository, new BCryptPasswordEncoder(),
                 jwtService, mock(RecordService.class), emailTemplateService,
-                mock(WorkflowService.class), participantIdService);
+                workflowService = mock(WorkflowService.class), participantIdService);
         when(userRepository.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         when(jwtService.generateAccessToken(anyLong(), anyString())).thenReturn("access");
         when(jwtService.generateRefreshToken(anyLong())).thenReturn("refresh");
@@ -142,6 +144,8 @@ class AuthServiceVerificationTest {
 
         assertEquals("access", auth.getAccessToken());
         assertTrue(user.getEmailVerified());
+        // Checklist 1.1: verifying no longer jumps the participant to step 15.
+        verify(workflowService, never()).transition(any(User.class), eq(WorkflowService.Status.DASHBOARD_ENABLED), anyString());
         assertNull(user.getVerificationCodeHash());
         assertEquals(0, user.getVerificationFailedAttempts());
     }

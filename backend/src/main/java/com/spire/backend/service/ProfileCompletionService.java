@@ -99,6 +99,11 @@ public class ProfileCompletionService {
     }
 
     public boolean isFullyComplete(User user) {
+        return allStepsComplete(user);
+    }
+
+    /** All six profile steps done — the only point the onboarding chain may run. */
+    public static boolean allStepsComplete(User user) {
         return Boolean.TRUE.equals(user.getBasicInfoComplete())
                 && Boolean.TRUE.equals(user.getAcknowledgmentComplete())
                 && Boolean.TRUE.equals(user.getDocumentsComplete())

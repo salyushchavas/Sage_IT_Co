@@ -292,9 +292,10 @@ public class DocumentService {
     private User requireGatedUser(Long userId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
-        if (!workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.ACKNOWLEDGMENT_ACCEPTED)) {
-            throw new UnauthorizedException(
+        // The acknowledgment step must really be done (its flag), not just
+        // the status (which used to be jumped ahead at sign-up).
+        if (!Boolean.TRUE.equals(user.getAcknowledgmentComplete())) {
+            throw new IllegalStateException(
                     "Complete the acknowledgment step before uploading documents.");
         }
         return user;

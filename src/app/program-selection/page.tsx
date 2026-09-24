@@ -125,6 +125,11 @@ function ProgramSelectionPageInner() {
       router.replace("/enroll");
       return;
     }
+    // The step before this one must be done first (the documents).
+    if (!user.documentsComplete) {
+      router.replace("/document-upload");
+      return;
+    }
     let cancelled = false;
     (async () => {
       try {
