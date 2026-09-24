@@ -44,7 +44,11 @@ function VerifyEmailInner() {
   const [submitting, setSubmitting] = useState(false);
   const [success, setSuccess] = useState(false);
   const [shake, setShake] = useState(0);
-  const [resendCooldown, setResendCooldown] = useState(RESEND_COOLDOWN_SECONDS);
+  // Coming from sign-in, the last code may be long expired: let them resend right away.
+  const [resendCooldown, setResendCooldown] = useState(
+    searchParams.get("from") === "login" ? 0 : RESEND_COOLDOWN_SECONDS,
+  );
+  const [alreadyVerified, setAlreadyVerified] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendInfo, setResendInfo] = useState("");
 
@@ -126,6 +130,7 @@ function VerifyEmailInner() {
     if (!email || !ready || submitting) return;
     setSubmitting(true);
     setError("");
+    setAlreadyVerified(false);
     try {
       const auth = await verifyCode(email, code);
       setSuccess(true);
@@ -137,7 +142,9 @@ function VerifyEmailInner() {
       // bouncing through /participant-id, /acknowledgment, etc.
       setTimeout(() => { window.location.href = "/dashboard"; }, 800);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Verification failed");
+      const message = err instanceof Error ? err.message : "Verification failed";
+      setError(message);
+      setAlreadyVerified(/already verified/i.test(message));
       setShake((n) => n + 1);
       setDigits(Array(CODE_LENGTH).fill(""));
       inputRefs.current[0]?.focus();
@@ -237,6 +244,14 @@ function VerifyEmailInner() {
             </motion.div>
           )}
         </AnimatePresence>
+
+        {alreadyVerified && (
+          <p className="mt-2 text-sm">
+            <Link href="/login" className="text-sage-copper font-semibold hover:underline">
+              Go to sign in
+            </Link>
+          </p>
+        )}
 
         {success && (
           <motion.div

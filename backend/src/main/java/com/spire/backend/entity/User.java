@@ -100,9 +100,13 @@ public class User {
     @Column(name = "verification_expires_at")
     private LocalDateTime verificationExpiresAt;
 
-    /** 6-digit numeric OTP. Stored as a string to preserve leading zeros. */
-    @Column(name = "verification_code", length = 6)
-    private String verificationCode;
+    /**
+     * SHA-256 (hex) of the 6-digit OTP. The code itself is never stored;
+     * the legacy plain-text {@code verification_code} column is no longer
+     * mapped or read (drop it in a later cleanup).
+     */
+    @Column(name = "verification_code_hash", length = 64)
+    private String verificationCodeHash;
 
     @Column(name = "verification_code_expires_at")
     private LocalDateTime verificationCodeExpiresAt;

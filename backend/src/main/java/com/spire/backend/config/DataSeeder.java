@@ -852,6 +852,7 @@ public class DataSeeder implements CommandLineRunner {
                 {"verification_token VARCHAR(64)", "verification_token"},
                 {"verification_expires_at TIMESTAMP", "verification_expires_at"},
                 {"verification_code VARCHAR(6)", "verification_code"},
+                {"verification_code_hash VARCHAR(64)", "verification_code_hash"},
                 {"verification_code_expires_at TIMESTAMP", "verification_code_expires_at"},
                 {"verification_failed_attempts INT NOT NULL DEFAULT 0", "verification_failed_attempts"},
                 {"verification_locked_until TIMESTAMP", "verification_locked_until"},
@@ -880,14 +881,17 @@ public class DataSeeder implements CommandLineRunner {
         }
 
         // Grandfather pre-OTP accounts. Any existing user that was
-        // unverified under the old token-based flow (no verification_code
-        // populated) is marked verified so the OTP gate doesn't lock
-        // them out on the day this ships. New post-OTP signups always
-        // have a verification_code set, so they're not touched.
+        // unverified under the old token-based flow (no code of either
+        // kind) is marked verified so the OTP gate doesn't lock them out.
+        // New signups always have a code HASH set (verification_code_hash;
+        // the plain verification_code column is no longer written), so the
+        // hash must be part of this check — otherwise every restart would
+        // mark every pending signup verified without its code.
         try {
             int updated = jdbcTemplate.update(
                     "UPDATE users SET email_verified = TRUE " +
-                    "WHERE email_verified = FALSE AND verification_code IS NULL");
+                    "WHERE email_verified = FALSE AND verification_code IS NULL " +
+                    "AND verification_code_hash IS NULL");
             if (updated > 0) {
                 log.info("Grandfathered {} pre-OTP users to email_verified=true", updated);
             }

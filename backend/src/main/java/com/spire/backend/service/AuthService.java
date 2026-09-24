@@ -14,9 +14,16 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.HexFormat;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -36,6 +43,58 @@ public class AuthService {
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
+    /**
+     * Canonical form of an email address: trimmed and lowercased with a
+     * locale-independent rule. Applied at every entry point that takes an
+     * email, because new rows are stored lowercased and Postgres compares
+     * case-sensitively ("Jane@X.com" must find "jane@x.com").
+     */
+    public static String normalizeEmail(String email) {
+        return email == null ? null : email.trim().toLowerCase(Locale.ROOT);
+    }
+
+    /** SHA-256 hex of a one-time code. Only the hash is stored. */
+    static String hashOtp(String code) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(code.getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
+    /** Constant-time comparison of a submitted code against the stored hash. */
+    static boolean codeMatches(String storedHash, String submitted) {
+        if (storedHash == null || submitted == null) return false;
+        return MessageDigest.isEqual(
+                storedHash.getBytes(StandardCharsets.UTF_8),
+                hashOtp(submitted.trim()).getBytes(StandardCharsets.UTF_8));
+    }
+
+    /** True while a verification lock is in force. */
+    private static boolean isLocked(User user) {
+        return user.getVerificationLockedUntil() != null
+                && user.getVerificationLockedUntil().isAfter(LocalDateTime.now());
+    }
+
+    /** Minutes left on the lock, rounded up (at least 1). */
+    private static long lockMinutesLeft(User user) {
+        return java.time.Duration.between(LocalDateTime.now(), user.getVerificationLockedUntil()).toMinutes() + 1;
+    }
+
+    /**
+     * Failed attempts reset only on a successful verification or once the
+     * lock has expired — never on resend, which would hand out five fresh
+     * guesses with every new code.
+     */
+    private static void clearExpiredLock(User user) {
+        if (user.getVerificationLockedUntil() != null && !isLocked(user)) {
+            user.setVerificationLockedUntil(null);
+            user.setVerificationFailedAttempts(0);
+        }
+    }
+
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
@@ -47,9 +106,14 @@ public class AuthService {
 
     @Transactional
     public RegistrationResponse register(RegisterRequest request) {
-        // 1. Check duplicate email
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("Email already registered");
+        String email = normalizeEmail(request.getEmail());
+
+        // 1. Check duplicate email (case-insensitive)
+        if (email == null || email.isBlank()) {
+            throw new IllegalArgumentException("Email is required");
+        }
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new IllegalArgumentException("An account with this email already exists.");
         }
 
         // 2. Fetch STUDENT role from roles table
@@ -61,13 +125,13 @@ public class AuthService {
         //    emailVerified=false locks login until the OTP is consumed.
         String code = generateCode();
         User user = User.builder()
-                .email(request.getEmail())
+                .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName())
                 .role(studentRole)
                 .isActive(true)
                 .emailVerified(false)
-                .verificationCode(code)
+                .verificationCodeHash(hashOtp(code))
                 .verificationCodeExpiresAt(LocalDateTime.now().plusMinutes(CODE_TTL_MINUTES))
                 .verificationFailedAttempts(0)
                 .lastVerificationResendAt(LocalDateTime.now())
@@ -115,7 +179,8 @@ public class AuthService {
      */
     @Transactional
     public RegistrationResponse enrollParticipant(ParticipantEnrollRequest request) {
-        if (request.getEmail() == null || request.getEmail().isBlank()) {
+        String email = normalizeEmail(request.getEmail());
+        if (email == null || email.isBlank()) {
             throw new IllegalArgumentException("Email is required");
         }
         if (request.getPassword() == null || request.getPassword().length() < 8) {
@@ -125,8 +190,8 @@ public class AuthService {
                 || request.getFullName().trim().split("\\s+").length < 2) {
             throw new IllegalArgumentException("Enter your full legal name (first and last)");
         }
-        if (userRepository.existsByEmail(request.getEmail())) {
-            throw new IllegalArgumentException("Email already registered");
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new IllegalArgumentException("An account with this email already exists.");
         }
 
         Role participantRole = roleRepository.findByName("PARTICIPANT")
@@ -138,7 +203,7 @@ public class AuthService {
         LocalDateTime now = LocalDateTime.now();
 
         User user = User.builder()
-                .email(request.getEmail().trim().toLowerCase())
+                .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
                 .fullName(request.getFullName().trim())
                 .role(participantRole)
@@ -146,7 +211,7 @@ public class AuthService {
                 .isActive(true)
                 .emailVerified(false)
                 .currentStatus("DRAFT_STARTED")
-                .verificationCode(code)
+                .verificationCodeHash(hashOtp(code))
                 .verificationCodeExpiresAt(now.plusMinutes(CODE_TTL_MINUTES))
                 .verificationFailedAttempts(0)
                 .lastVerificationResendAt(now)
@@ -185,28 +250,32 @@ public class AuthService {
      * and triggers a 15-minute lockout after LOCKOUT_THRESHOLD wrong
      * tries to defeat brute force on a 6-digit code (1M space).
      */
-    @Transactional
-    public AuthResponse verifyCode(String email, String code) {
-        User user = userRepository.findByEmail(email)
-                .orElseThrow(() -> new ResourceNotFoundException("User", "email", email));
+    // noRollbackFor: a wrong code is reported with an IllegalArgumentException
+    // AFTER the failed-attempt counter (and the lock) were saved. Under a plain
+    // @Transactional that exception rolled the save back, so the counter never
+    // moved and the 5-try lockout never engaged.
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
+    public AuthResponse verifyCode(String rawEmail, String code) {
+        User user = findUserByEmail(rawEmail)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "email", normalizeEmail(rawEmail)));
 
         if (Boolean.TRUE.equals(user.getEmailVerified())) {
-            // Idempotent — user is already in. Hand them a fresh token.
-            return buildAuthResponse(user);
+            // Never hand out a session here once the email is verified: there's
+            // no code left to check, so that would let anyone sign in to any
+            // verified account (staff included) knowing only its email.
+            throw new IllegalStateException("This email is already verified. Sign in with your password.");
         }
 
         // Lockout window in effect?
-        if (user.getVerificationLockedUntil() != null
-                && user.getVerificationLockedUntil().isAfter(LocalDateTime.now())) {
-            long minutes = java.time.Duration
-                    .between(LocalDateTime.now(), user.getVerificationLockedUntil())
-                    .toMinutes() + 1;
+        if (isLocked(user)) {
+            long minutes = lockMinutesLeft(user);
             throw new IllegalArgumentException(
                     "Too many wrong attempts. Try again in about " + minutes + " minute"
                             + (minutes == 1 ? "" : "s") + ".");
         }
+        clearExpiredLock(user);
 
-        if (user.getVerificationCode() == null) {
+        if (user.getVerificationCodeHash() == null) {
             throw new IllegalArgumentException("No verification code on file. Click \"Resend code\" to get a new one.");
         }
 
@@ -215,7 +284,7 @@ public class AuthService {
             throw new IllegalArgumentException("Code expired. Please request a new one.");
         }
 
-        if (!user.getVerificationCode().equals(code == null ? "" : code.trim())) {
+        if (!codeMatches(user.getVerificationCodeHash(), code)) {
             int attempts = (user.getVerificationFailedAttempts() == null ? 0 : user.getVerificationFailedAttempts()) + 1;
             user.setVerificationFailedAttempts(attempts);
             if (attempts >= LOCKOUT_THRESHOLD) {
@@ -236,9 +305,14 @@ public class AuthService {
                             + " remaining before lockout.");
         }
 
+        // Right code, but a deactivated account doesn't get a session (login refuses it too).
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new IllegalStateException("This account is deactivated. Contact support if you think this is a mistake.");
+        }
+
         // Success — promote.
         user.setEmailVerified(true);
-        user.setVerificationCode(null);
+        user.setVerificationCodeHash(null);
         user.setVerificationCodeExpiresAt(null);
         user.setVerificationFailedAttempts(0);
         user.setVerificationLockedUntil(null);
@@ -318,12 +392,21 @@ public class AuthService {
      * can't enumerate verification status. Never throws on missing
      * email — same reason.
      */
-    @Transactional
-    public void resendVerificationCode(String email) {
-        var found = userRepository.findByEmail(email);
+    @Transactional(noRollbackFor = IllegalArgumentException.class)
+    public void resendVerificationCode(String rawEmail) {
+        var found = findUserByEmail(rawEmail);
         if (found.isEmpty()) return;
         User user = found.get();
         if (Boolean.TRUE.equals(user.getEmailVerified())) return;
+
+        // A resend must never lift an active lock — otherwise every
+        // resend would hand out five fresh guesses.
+        if (isLocked(user)) {
+            long minutes = lockMinutesLeft(user);
+            throw new IllegalArgumentException(
+                    "Too many attempts. Try again in " + minutes + " minute" + (minutes == 1 ? "" : "s") + ".");
+        }
+        clearExpiredLock(user);
 
         if (user.getLastVerificationResendAt() != null) {
             long secondsSince = java.time.Duration
@@ -337,12 +420,10 @@ public class AuthService {
         }
 
         String code = generateCode();
-        user.setVerificationCode(code);
+        user.setVerificationCodeHash(hashOtp(code));
         user.setVerificationCodeExpiresAt(LocalDateTime.now().plusMinutes(CODE_TTL_MINUTES));
-        // Resend resets the failed-attempt counter — they're starting
-        // a fresh attempt with a brand-new code.
-        user.setVerificationFailedAttempts(0);
-        user.setVerificationLockedUntil(null);
+        // Failed attempts carry over: they reset only on success or
+        // after an expired lock (see clearExpiredLock).
         user.setLastVerificationResendAt(LocalDateTime.now());
         userRepository.save(user);
 
@@ -352,6 +433,26 @@ public class AuthService {
     /** Six-digit OTP (always padded), backed by SecureRandom. */
     private static String generateCode() {
         return String.format("%06d", RANDOM.nextInt(1_000_000));
+    }
+
+    /**
+     * Finds a user by email: the lowercased form first, then the address
+     * exactly as typed, then a case-insensitive match when exactly one row
+     * fits. Older rows may predate lowercasing, and Postgres compares
+     * case-sensitively, so "Jane@X.com" and "jane@x.com" must both work.
+     */
+    Optional<User> findUserByEmail(String rawEmail) {
+        String email = normalizeEmail(rawEmail);
+        if (email == null || email.isBlank()) return Optional.empty();
+        Optional<User> found = userRepository.findByEmail(email);
+        if (found.isPresent()) return found;
+        String typed = rawEmail.trim();
+        if (!typed.equals(email)) {
+            found = userRepository.findByEmail(typed);
+            if (found.isPresent()) return found;
+        }
+        List<User> matches = userRepository.findAllByEmailIgnoreCase(email);
+        return matches.size() == 1 ? Optional.of(matches.get(0)) : Optional.empty();
     }
 
     // ─── Password reset ─────────────────────────────────────────────
@@ -364,7 +465,7 @@ public class AuthService {
      */
     @Transactional
     public void requestPasswordReset(String email) {
-        userRepository.findByEmail(email).ifPresent(user -> {
+        findUserByEmail(email).ifPresent(user -> {
             String token = UUID.randomUUID().toString();
             user.setResetToken(token);
             user.setResetTokenExpiresAt(LocalDateTime.now().plusHours(1));
@@ -406,10 +507,10 @@ public class AuthService {
     }
 
     public AuthResponse login(LoginRequest request) {
-        // 1. Find user by email
-        User user = userRepository.findByEmail(request.getEmail())
+        // 1. Find user by email (any capitalisation)
+        User user = findUserByEmail(request.getEmail())
                 .orElseThrow(() -> {
-                    recordLoginFailed(null, request.getEmail(), "user_not_found");
+                    recordLoginFailed(null, normalizeEmail(request.getEmail()), "user_not_found");
                     return new UnauthorizedException("Invalid email or password");
                 });
 

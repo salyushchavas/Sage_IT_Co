@@ -18,6 +18,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     boolean existsByEmail(String email);
 
+    /**
+     * Case-insensitive duplicate check for signup. New rows are stored
+     * lowercased, but older rows may not be, and Postgres compares
+     * case-sensitively.
+     */
+    boolean existsByEmailIgnoreCase(String email);
+
+    /** Case-insensitive lookup; used only as a fallback for older mixed-case rows. */
+    List<User> findAllByEmailIgnoreCase(String email);
+
     Optional<User> findByVerificationToken(String token);
 
     Optional<User> findByResetToken(String token);

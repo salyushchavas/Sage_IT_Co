@@ -42,7 +42,13 @@ function LoginForm() {
       await login(data.email, data.password);
       router.push(redirect);
     } catch (err) {
-      setApiError(err instanceof Error ? err.message : "Login failed");
+      const message = err instanceof Error ? err.message : "Login failed";
+      if (message === "EMAIL_NOT_VERIFIED") {
+        // Send them to finish verifying instead of showing the raw code.
+        router.push(`/verify-email?email=${encodeURIComponent(data.email.trim())}&from=login`);
+        return;
+      }
+      setApiError(message);
     } finally {
       setLoading(false);
     }

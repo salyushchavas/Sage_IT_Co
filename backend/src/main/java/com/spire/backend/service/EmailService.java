@@ -80,10 +80,18 @@ public class EmailService {
         sendFrom(from, to, subject, htmlBody, List.of());
     }
 
+    /**
+     * Subjects are logged, and a verification email's subject carries the
+     * one-time code, which must never land in logs. Mask any 6-digit run.
+     */
+    static String safeSubject(String subject) {
+        return subject == null ? null : subject.replaceAll("\\b\\d{6}\\b", "******");
+    }
+
     private void sendFrom(String fromAddress, String to, String subject,
                           String htmlBody, List<Attachment> attachments) {
         if (!isConfigured()) {
-            log.warn("SMTP not configured -- skipping send: subject='{}' to='{}'", subject, to);
+            log.warn("SMTP not configured -- skipping send: subject='{}' to='{}'", safeSubject(subject), to);
             return;
         }
         try {
@@ -113,7 +121,7 @@ public class EmailService {
             mailSender.send(message);
 
             log.info("Email sent via SMTP: subject='{}' to='{}' attachments={}",
-                    subject, to, attachments == null ? 0 : attachments.size());
+                    safeSubject(subject), to, attachments == null ? 0 : attachments.size());
         } catch (MessagingException | UnsupportedEncodingException e) {
             log.error("Failed to build email message for {}: {}", to, e.getMessage());
         } catch (Exception e) {
@@ -122,7 +130,7 @@ public class EmailService {
             // egress block / Gmail throttle doesn't crash the calling
             // request.
             log.error("SMTP send failed: subject='{}' to='{}': {}",
-                    subject, to, e.getMessage());
+                    safeSubject(subject), to, e.getMessage());
         }
     }
 
