@@ -1,5 +1,6 @@
 package com.spire.backend.entity;
 
+import com.spire.backend.security.SensitiveTextConverter;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
@@ -347,8 +348,11 @@ public class ConsultantApplication {
     @Column(name = "ach_account_type") private String achAccountType;
     @Column(name = "ach_bank_name") private String achBankName;
     @Column(name = "ach_account_holder_name") private String achAccountHolderName;
-    @Column(name = "ach_routing_number") private String achRoutingNumber;
-    @Column(name = "ach_account_number") private String achAccountNumber;
+    // Encrypted at rest (FieldEncryptor); TEXT because the stored form is longer.
+    @Convert(converter = SensitiveTextConverter.class)
+    @Column(name = "ach_routing_number", columnDefinition = "TEXT") private String achRoutingNumber;
+    @Convert(converter = SensitiveTextConverter.class)
+    @Column(name = "ach_account_number", columnDefinition = "TEXT") private String achAccountNumber;
     @Column(name = "ach_notice_email") private String achNoticeEmail;
     /**
      * Build Y — the debit schedule is now ERM-filled at create as a
@@ -382,10 +386,14 @@ public class ConsultantApplication {
     // Build J — "Same as residence address" toggle (UI re-lock on reload).
     @Column(name = "bg_current_same_as_residence") private Boolean bgCurrentSameAsResidence;
     @Column(name = "bg_date_of_birth") private LocalDate bgDateOfBirth;
+    // SSN, driver's licence and State-ID numbers are encrypted at rest (FieldEncryptor).
+    @Convert(converter = SensitiveTextConverter.class)
     @Column(name = "bg_full_ssn", columnDefinition = "TEXT") private String bgFullSsn;
+    @Convert(converter = SensitiveTextConverter.class)
     @Column(name = "bg_driver_license", columnDefinition = "TEXT") private String bgDriverLicense;
     // Build AK — Appendix 3 now accepts a Driver's License AND/OR a State ID.
     // bgDriverLicense is the DL number; bgStateId is the State-ID number.
+    @Convert(converter = SensitiveTextConverter.class)
     @Column(name = "bg_state_id", columnDefinition = "TEXT") private String bgStateId;
 
     // ── Build J: Background Check document uploads ────────────────────

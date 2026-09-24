@@ -48,6 +48,9 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired
     private AgreementUserRepository agreementUserRepository;
 
+    @Autowired
+    private com.spire.backend.security.FieldEncryptor fieldEncryptor;
+
     // Super-admin bootstrap for the consultant-agreement console. The
     // single SUPER_ADMIN is provisioned from these env vars, never
     // through the UI. Blank defaults => bootstrap is skipped (logged).
@@ -278,6 +281,13 @@ public class DataSeeder implements CommandLineRunner {
         // Hibernate's ddl-auto=update so existing rows have the new
         // columns when JPA boots; idempotent on reruns.
         addConsultantApplicationColumnsIfMissing();
+
+        // Checklist 0.6: the consultant console's SSN, licence / State-ID and
+        // bank numbers are encrypted at rest (FieldEncryptor). Widen the two
+        // bank columns (the stored form is longer), then encrypt any value
+        // still in plain text. Both idempotent; never logs a value.
+        widenConsultantBankColumnsToText();
+        encryptSensitiveConsultantFields();
 
         // Portal phase: consultant_verification was keyed by
         // application_id; the portal keys it by email instead. Add the
@@ -1185,6 +1195,60 @@ public class DataSeeder implements CommandLineRunner {
      * (security check), ERM countersignature, revision tracking,
      * and the final post-ERM-signature PDF URL.
      */
+    /** Sensitive consultant columns, encrypted at rest by SensitiveTextConverter. */
+    static final String[] ENCRYPTED_CONSULTANT_COLUMNS = {
+            "bg_full_ssn", "bg_driver_license", "bg_state_id", "ach_routing_number", "ach_account_number"};
+
+    /**
+     * ach_routing_number / ach_account_number were VARCHAR(255); their
+     * encrypted form is longer, so make them TEXT like the other three.
+     * Postgres first (production), then MySQL syntax; both are no-ops once done.
+     */
+    private void widenConsultantBankColumnsToText() {
+        for (String col : new String[]{"ach_routing_number", "ach_account_number"}) {
+            try {
+                jdbcTemplate.execute("ALTER TABLE consultant_applications ALTER COLUMN " + col + " TYPE TEXT");
+                continue;
+            } catch (Exception postgresSyntaxFailed) {
+                // not Postgres (or the table is missing) -- try MySQL syntax
+            }
+            try {
+                jdbcTemplate.execute("ALTER TABLE consultant_applications MODIFY COLUMN " + col + " TEXT");
+            } catch (Exception e) {
+                log.debug("Couldn't widen consultant_applications.{}: {}", col, e.getMessage());
+            }
+        }
+    }
+
+    /**
+     * Encrypts every sensitive consultant value still stored in plain text
+     * (rows written before encryption existed). Idempotent: already-encrypted
+     * values carry the enc:v1: prefix and are skipped, and each update only
+     * applies if the value hasn't changed since it was read.
+     */
+    int encryptSensitiveConsultantFields() {
+        int total = 0;
+        for (String col : ENCRYPTED_CONSULTANT_COLUMNS) {
+            try {
+                java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                        "SELECT id, " + col + " AS v FROM consultant_applications WHERE " + col
+                                + " IS NOT NULL AND " + col + " <> '' AND " + col + " NOT LIKE 'enc:v1:%'");
+                int done = 0;
+                for (java.util.Map<String, Object> row : rows) {
+                    String plain = String.valueOf(row.get("v"));
+                    done += jdbcTemplate.update(
+                            "UPDATE consultant_applications SET " + col + " = ? WHERE id = ? AND " + col + " = ?",
+                            fieldEncryptor.encrypt(plain), row.get("id"), plain);
+                }
+                if (done > 0) log.info("Encrypted {} consultant_applications.{} value(s)", done, col);
+                total += done;
+            } catch (Exception e) {
+                log.warn("Couldn't encrypt consultant_applications.{}: {}", col, e.getMessage());
+            }
+        }
+        return total;
+    }
+
     private void addConsultantApplicationColumnsIfMissing() {
         String[][] columns = {
                 // ERM-filled rate card.
@@ -1211,8 +1275,8 @@ public class DataSeeder implements CommandLineRunner {
                 {"ach_account_type VARCHAR(255)", "ach_account_type"},
                 {"ach_bank_name VARCHAR(255)", "ach_bank_name"},
                 {"ach_account_holder_name VARCHAR(255)", "ach_account_holder_name"},
-                {"ach_routing_number VARCHAR(255)", "ach_routing_number"},
-                {"ach_account_number VARCHAR(255)", "ach_account_number"},
+                {"ach_routing_number TEXT", "ach_routing_number"},
+                {"ach_account_number TEXT", "ach_account_number"},
                 {"ach_notice_email VARCHAR(255)", "ach_notice_email"},
                 {"ach_debit_dates VARCHAR(255)", "ach_debit_dates"},
                 {"ach_debit_amounts VARCHAR(255)", "ach_debit_amounts"},
