@@ -11,6 +11,7 @@ import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.*;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -20,6 +21,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
@@ -36,6 +38,38 @@ public class AdminService {
     private final SessionRequestRepository sessionRequestRepository;
     private final MentorAssignmentRepository mentorAssignmentRepository;
     private final RecordService recordService;
+
+    /** Roles that may change other people's roles: System Admin, plus the legacy LMS admin. */
+    private static final Set<String> ROLE_MANAGERS = Set.of("SYSTEM_ADMIN", "ADMIN");
+    /** Top-level admin roles: only a System Admin may grant, remove or deactivate them. */
+    private static final Set<String> TOP_ADMIN_ROLES = Set.of("SYSTEM_ADMIN", "ADMIN");
+    /** Accounts an Operations admin may deactivate, reactivate or delete. */
+    private static final Set<String> PARTICIPANT_ROLES = Set.of("PARTICIPANT", "STUDENT");
+
+    private static String roleNameOf(User user) {
+        return user == null || user.getRole() == null || user.getRole().getName() == null
+                ? "" : user.getRole().getName().toUpperCase();
+    }
+
+    private User requireCaller(Long callerId) {
+        if (callerId == null) throw new AccessDeniedException("Not signed in");
+        return userRepository.findById(callerId)
+                .orElseThrow(() -> new AccessDeniedException("Not signed in"));
+    }
+
+    /**
+     * Who may deactivate, reactivate or delete whom (roadmap §13): a System
+     * Admin may manage anyone; the legacy LMS admin anyone but a top-level
+     * admin; an Operations admin only participant and student accounts.
+     */
+    private static void assertCanManageAccount(User caller, User target) {
+        String callerRole = roleNameOf(caller);
+        String targetRole = roleNameOf(target);
+        if ("SYSTEM_ADMIN".equals(callerRole)) return;
+        if ("ADMIN".equals(callerRole) && !TOP_ADMIN_ROLES.contains(targetRole)) return;
+        if (PARTICIPANT_ROLES.contains(targetRole)) return;
+        throw new AccessDeniedException("Only a System Admin can change staff accounts.");
+    }
 
     /**
      * Platform-wide statistics powering the admin Overview tab.
@@ -241,12 +275,31 @@ public class AdminService {
                 .build();
     }
 
+    /**
+     * Changes a user's role. Only a System Admin (or the legacy LMS admin)
+     * may do this — an Operations admin could otherwise promote itself —
+     * nobody may change their own role, and only a System Admin may grant
+     * or remove a top-level admin role.
+     */
     @Transactional
-    public UserDTO updateUserRole(Long userId, String roleName) {
+    public UserDTO updateUserRole(Long userId, String roleName, Long callerId) {
+        User caller = requireCaller(callerId);
+        String callerRole = roleNameOf(caller);
+        if (!ROLE_MANAGERS.contains(callerRole)) {
+            throw new AccessDeniedException("Only a System Admin can change roles.");
+        }
+        if (userId.equals(callerId)) {
+            throw new IllegalArgumentException("You can't change your own role.");
+        }
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         String normalizedRole = roleName.toUpperCase();
+        if ((TOP_ADMIN_ROLES.contains(normalizedRole) || TOP_ADMIN_ROLES.contains(roleNameOf(user)))
+                && !"SYSTEM_ADMIN".equals(callerRole)) {
+            throw new AccessDeniedException("Only a System Admin can give or remove admin roles.");
+        }
 
         // SECURITY: Cannot directly assign INSTRUCTOR via this endpoint.
         // Use the Instructor Approval System instead (approve-instructor).
@@ -268,8 +321,9 @@ public class AdminService {
 
         recordService.record(userId, "ACCOUNT_ROLE_CHANGED", RecordService.Category.ACCOUNT,
                 "Role changed by admin",
-                "Role changed from " + oldRole + " to " + normalizedRole,
-                java.util.Map.of("oldRole", oldRole, "newRole", normalizedRole));
+                "Role changed from " + oldRole + " to " + normalizedRole + " by " + callerRole + " user #" + callerId,
+                java.util.Map.of("oldRole", oldRole, "newRole", normalizedRole,
+                        "changedBy", callerId, "changedByRole", callerRole));
 
         return saved;
     }
@@ -295,9 +349,10 @@ public class AdminService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
-        if (user.getRole() != null && "ADMIN".equalsIgnoreCase(user.getRole().getName())) {
+        if (TOP_ADMIN_ROLES.contains(roleNameOf(user))) {
             throw new IllegalArgumentException("Admin accounts cannot be deactivated this way. Change their role first.");
         }
+        assertCanManageAccount(requireCaller(currentAdminId), user);
 
         // Capture identifiers before scrubbing so the audit record
         // can name the original account, not the placeholder.
@@ -344,6 +399,7 @@ public class AdminService {
         }
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        assertCanManageAccount(requireCaller(currentAdminId), user);
         user.setIsActive(active);
         // Stamp / clear the deactivation timestamp in lockstep with
         // the boolean so the admin UI's "Deactivated on …" column has

@@ -14,6 +14,15 @@ import java.util.Optional;
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
 
+    /**
+     * The account's CURRENT role name, only while the account is active.
+     * Used by JwtAuthFilter on every request, so a deactivated user's
+     * still-valid token stops working at once and a role change takes
+     * effect on the next request instead of when the token expires.
+     */
+    @Query("SELECT r.name FROM User u JOIN u.role r WHERE u.id = :id AND u.isActive = true")
+    Optional<String> findActiveRoleName(@Param("id") Long id);
+
     Optional<User> findByEmail(String email);
 
     boolean existsByEmail(String email);

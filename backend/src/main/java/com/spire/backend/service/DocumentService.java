@@ -8,6 +8,7 @@ import com.spire.backend.repository.ParticipantDocumentRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
@@ -70,6 +71,7 @@ public class DocumentService {
     private final WorkflowService workflowService;
     private final RecordService recordService;
     private final ProfileCompletionService profileCompletionService;
+    private final PermissionService permissionService;
 
     // ── Upload ───────────────────────────────────────────────────
 
@@ -136,12 +138,35 @@ public class DocumentService {
         return documentRepository.findByUserIdOrderByUploadedAtDesc(userId);
     }
 
-    @Transactional(readOnly = true)
-    public ParticipantDocument get(Long documentId, Long callerId, boolean isAdmin) {
+    /**
+     * Resolve a document for viewing. Who may see it is decided by
+     * {@link PermissionService#canViewDocumentsOf}: the owner, the owner's
+     * currently assigned ERM, or an Operations/System admin. Anyone else
+     * (other participants, unassigned ERMs, coaches, finance) gets 403.
+     * Every view by someone other than the owner is recorded on the
+     * participant's audit trail — so this is NOT a read-only transaction:
+     * the record is written in it, and a read-only connection refuses the
+     * insert. If the record can't be written, the view fails (no silent
+     * unlogged access to identity documents).
+     */
+    @Transactional
+    public ParticipantDocument get(Long documentId, Long callerId) {
         ParticipantDocument doc = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document", "id", documentId));
-        if (!isAdmin && !doc.getUserId().equals(callerId)) {
-            throw new UnauthorizedException("Not allowed to view this document");
+        User viewer = callerId == null ? null : userRepository.findById(callerId).orElse(null);
+        if (!permissionService.canViewDocumentsOf(viewer, doc.getUserId())) {
+            throw new AccessDeniedException("Not allowed to view this document");
+        }
+        if (!doc.getUserId().equals(callerId)) {
+            String viewerRole = permissionService.roleOf(viewer);
+            recordService.record(doc.getUserId(), "DOCUMENT_VIEWED", RecordService.Category.DOCUMENT,
+                    "Document viewed by staff",
+                    viewerRole + " user #" + callerId + " viewed the "
+                            + (doc.getDocumentType() == null ? "document" : doc.getDocumentType()) + " document",
+                    Map.of("documentId", documentId,
+                            "documentType", doc.getDocumentType() == null ? "" : doc.getDocumentType(),
+                            "viewerId", callerId,
+                            "viewerRole", viewerRole));
         }
         return doc;
     }

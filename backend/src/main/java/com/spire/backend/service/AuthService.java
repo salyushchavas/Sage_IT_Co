@@ -561,7 +561,13 @@ public class AuthService {
 
         Long userId = jwtService.extractUserId(refreshToken);
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new UnauthorizedException("User not found"));
+                .orElseThrow(() -> new UnauthorizedException("Invalid or expired refresh token"));
+        // A deactivated account must not mint new access tokens for the rest
+        // of the refresh token's 7-day life. Same generic message as a bad
+        // token, so the account state isn't confirmed to whoever holds it.
+        if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new UnauthorizedException("Invalid or expired refresh token");
+        }
 
         return buildAuthResponse(user);
     }

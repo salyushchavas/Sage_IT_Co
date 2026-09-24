@@ -1,5 +1,6 @@
 package com.spire.backend.security;
 
+import com.spire.backend.repository.UserRepository;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -23,6 +24,7 @@ import java.util.List;
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final UserRepository userRepository;
 
     @Override
     protected void doFilterInternal(
@@ -74,11 +76,23 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 filterChain.doFilter(request, response);
                 return;
             }
-            String role = jwtService.extractRole(token);
+            String tokenRole = jwtService.extractRole(token);
 
             // Guard: refresh tokens have no role claim → reject as auth token
-            if (role == null || role.isBlank()) {
+            if (tokenRole == null || tokenRole.isBlank()) {
                 log.warn("JWT has no role claim — possibly a refresh token used as access token. UserId: {}", userId);
+                filterChain.doFilter(request, response);
+                return;
+            }
+
+            // The account must still exist and be active, and its CURRENT
+            // role is what counts: a deactivated user's token (valid for up
+            // to 15 more minutes) stops working at once, and a demoted user
+            // loses the old role on the next request. One indexed lookup.
+            // Leaving the context unauthenticated makes the entry point 401.
+            String role = userRepository.findActiveRoleName(userId).orElse(null);
+            if (role == null || role.isBlank()) {
+                log.warn("Rejected JWT for inactive or unknown user {}", userId);
                 filterChain.doFilter(request, response);
                 return;
             }

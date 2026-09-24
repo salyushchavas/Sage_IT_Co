@@ -194,11 +194,12 @@ public class ParticipantController {
     }
 
     /**
-     * Auth-gated view. Owner or admin only. For Cloudinary-backed
-     * URLs we issue a 5-minute signed link (PRD §13.1); for
-     * local-disk paths we stream the file inline. The local stream
-     * stays behind JWT so it provides equivalent gating without
-     * a public-URL ever existing.
+     * Auth-gated view. Owner, their assigned ERM, or an Operations/System
+     * admin only (decided in DocumentService; 403 otherwise, and staff views
+     * are recorded). For Cloudinary-backed URLs we issue a signed link
+     * (PRD §13.1); for local-disk paths we stream the file inline. The local
+     * stream stays behind JWT so it provides equivalent gating without a
+     * public URL ever existing.
      */
     @GetMapping("/documents/{documentId}/view")
     @PreAuthorize("isAuthenticated()")
@@ -206,13 +207,7 @@ public class ParticipantController {
             @PathVariable Long documentId,
             Authentication auth) {
         Long callerId = Long.parseLong(auth.getPrincipal().toString());
-        boolean isAdmin = auth.getAuthorities().stream()
-                .anyMatch(a -> {
-                    String r = a.getAuthority();
-                    return "ROLE_ADMIN".equals(r) || "ROLE_OPERATIONS_ADMIN".equals(r)
-                            || "ROLE_SYSTEM_ADMIN".equals(r) || "ROLE_ERM".equals(r);
-                });
-        ParticipantDocument doc = documentService.get(documentId, callerId, isAdmin);
+        ParticipantDocument doc = documentService.get(documentId, callerId);
 
         // N/A markers carry no file.
         if (Boolean.TRUE.equals(doc.getNotApplicable())

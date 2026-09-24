@@ -117,12 +117,14 @@ public class AdminController {
 
     @PutMapping("/users/{id}/role")
     public ResponseEntity<ApiResponse<UserDTO>> updateUserRole(
-            @PathVariable Long id, @RequestBody Map<String, String> body) {
+            @PathVariable Long id, @RequestBody Map<String, String> body,
+            Authentication authentication) {
         String role = body.get("role");
         if (role == null || role.isBlank()) {
             throw new IllegalArgumentException("Role is required");
         }
-        UserDTO user = adminService.updateUserRole(id, role);
+        Long callerId = Long.parseLong(authentication.getPrincipal().toString());
+        UserDTO user = adminService.updateUserRole(id, role, callerId);
         return ResponseEntity.ok(ApiResponse.success("Role updated", user));
     }
 

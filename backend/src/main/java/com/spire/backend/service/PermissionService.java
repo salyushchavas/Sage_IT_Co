@@ -61,14 +61,26 @@ public class PermissionService {
     }
 
     /** True when the viewer is the user's currently-assigned ERM. */
-    public boolean isAssignedErmFor(User viewer, User target) {
-        if (viewer == null || target == null) return false;
+    public boolean isErm(User viewer) {
+        return "ERM".equals(roleOf(viewer));
+    }
+
+    /**
+     * True when the viewer holds the ERM role AND is the target's
+     * currently assigned ERM (the newest erm_assignments row).
+     */
+    public boolean isAssignedErmFor(User viewer, Long targetUserId) {
+        if (viewer == null || targetUserId == null || !isErm(viewer)) return false;
         ErmAssignment assignment = ermAssignmentRepository
-                .findFirstByUserIdOrderByAssignedDateDesc(target.getId())
+                .findFirstByUserIdOrderByAssignedDateDesc(targetUserId)
                 .orElse(null);
         return assignment != null
                 && assignment.getErmUserId() != null
                 && assignment.getErmUserId().equals(viewer.getId());
+    }
+
+    public boolean isAssignedErmFor(User viewer, User target) {
+        return target != null && isAssignedErmFor(viewer, target.getId());
     }
 
     /** True when the viewer is one of the user's active coaches. */
@@ -88,11 +100,20 @@ public class PermissionService {
      * ERM, or any Operations Admin / System Admin. Coaches do NOT
      * see ID documents by default.
      */
-    public boolean canViewDocuments(User viewer, User target) {
-        if (viewer == null || target == null) return false;
-        if (viewer.getId().equals(target.getId())) return true;
+    /**
+     * Identity documents (ID, SSN card, passport, work permit…): the owner,
+     * the owner's currently assigned ERM, or an Operations/System admin.
+     * Every other role, and any other ERM, is refused.
+     */
+    public boolean canViewDocumentsOf(User viewer, Long targetUserId) {
+        if (viewer == null || viewer.getId() == null || targetUserId == null) return false;
+        if (targetUserId.equals(viewer.getId())) return true;
         if (isAdmin(viewer)) return true;
-        return isAssignedErmFor(viewer, target);
+        return isAssignedErmFor(viewer, targetUserId);
+    }
+
+    public boolean canViewDocuments(User viewer, User target) {
+        return target != null && canViewDocumentsOf(viewer, target.getId());
     }
 
     /**
