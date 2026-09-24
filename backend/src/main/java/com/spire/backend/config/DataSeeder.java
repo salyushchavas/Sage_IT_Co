@@ -62,6 +62,57 @@ public class DataSeeder implements CommandLineRunner {
 
     private final BCryptPasswordEncoder passwordEncoder = new BCryptPasswordEncoder();
 
+    /**
+     * Create the demo / starter staff accounts (and the demo trainer) only
+     * when asked (SEED_DEMO_ACCOUNTS=true; local or brand-new test databases).
+     * Off by default so a deleted staff account never comes back on the next
+     * restart.
+     */
+    @Value("${app.seed.demo-accounts:false}")
+    private boolean seedDemoAccounts;
+
+    /**
+     * Seeded accounts whose passwords used to be written in this public
+     * repository, each with the bcrypt hash of its private replacement (the
+     * replacements were generated randomly and handed to the owner; only
+     * their hashes are here). See {@link #replacePublicSeedPasswords()}.
+     * Columns: email, old public password, bcrypt hash of the new password.
+     */
+    private static final String[][] PUBLIC_SEED_PASSWORD_REPLACEMENTS = {
+            {"superadmin@sageitco.com", "SageSuper@2026",
+                    "$2a$10$GGZqVYeXetTsWGhviGmB5.mf1vviJ4B/.fodB3D9vAJWUHXo8grD6"},
+            {"admin.ops@sageitco.com", "SageAdmin@2026",
+                    "$2a$10$hVLneVIWUjz.Bjv9HFzTe.4.FspQIZ58kUmac2rijAbUKGEv6ELcO"},
+            {"finance@sageitco.com", "SageFinance@2026",
+                    "$2a$10$VQz0npTSKGHFsmkXe0D1ueGKLexVP0420gfZK9sA49hm2xp1XtG0y"},
+            {"erm@sageitco.com", "SageERM@2026",
+                    "$2a$10$p8JFk92vUx2yBxNliBxr2O86EsnSqPaMi7e1TppXWbx37U6F1NCCq"},
+            {"coach@sageitco.com", "SageCoach@2026",
+                    "$2a$10$q0A18.Np87rviCqbFuhgx.Woa2iclpD82.z9pNE18Yg8rNlIOX2iO"},
+            {"advisor@sageitco.com", "SageAdvisor@2026",
+                    "$2a$10$YLfBcyoxW0UQRePQvTaST.6NZ9woLFk9FieXc4a50vE8ewHfjUEGW"},
+            {"deepthi.erm@sageitco.com", "sage-team-2026",
+                    "$2a$10$LGfQhWe6zfdND62FGWhGyeNxJzvhW58eFnCrQt3x07pQOrCxcvK6e"},
+            {"arjun.coach@sageitco.com", "sage-team-2026",
+                    "$2a$10$CEqdbmHueTbbXlNuGrR9T.u02cN.1PnbPDPxTYLCOEtkDYKr7uzQy"},
+            {"priya.tech@sageitco.com", "sage-team-2026",
+                    "$2a$10$ZrDYFzl3czppQfKMgHSIDuxJEbhbUZBF3QBUMDeVwQP9UK5Iohi1y"},
+            {"rahul.interview@sageitco.com", "sage-team-2026",
+                    "$2a$10$d.vbFMgTsVnWmN/r9WPxSeb6fPGlNEb8tkUszDi9VLSrTXuU6F3Uy"},
+            {"admin@sageitco.com", "admin123",
+                    "$2a$10$mLO2hVtYbEI9yvpbJoTilu/TKEje3F5OwtBw3c.LipT3e.SF94CSm"},
+            {"arjun@sageitco.com", "password123",
+                    "$2a$10$aPTMmgttiSY7RrH.EOW/yu15VelUd7jKFqwxdZmShIhEixPU60RGS"},
+            {"priya@sageitco.com", "password123",
+                    "$2a$10$SeH3AVi1RnWgVHqjfdqQueSUgPWZJG4SJ2bn/0RFXeLO0bBhfqk4O"},
+            {"rahul@sageitco.com", "password123",
+                    "$2a$10$MLqB/81r6ZbkU8dcRlIpSOLCTEAwi.RdWw7eV//VAAnYJAU1npuAy"},
+            {"meera@sageitco.com", "password123",
+                    "$2a$10$wgEfc75DO9XPrf1YR/edS.bl6qXcsFLOlYtjcrfnve8E3yfwJz7Du"},
+            {"student@sageitco.com", "student123",
+                    "$2a$10$N/ijlJc72pcFaPJilKlZ8.yulVMgf0gWKFfQQ6TShAeiQlPDvS3wy"},
+    };
+
     @Override
     @Transactional
     public void run(String... args) {
@@ -268,6 +319,7 @@ public class DataSeeder implements CommandLineRunner {
             // theatre. Real enrollment counts get rebuilt from the
             // enrollments table by EnrollmentService on next save.
             backfillFakeStats();
+            replacePublicSeedPasswords();
             return;
         }
 
@@ -600,6 +652,7 @@ public class DataSeeder implements CommandLineRunner {
         // Services + trainer (idempotent: also called from the early-return
         // branch above so both fresh and previously-seeded DBs get them).
         seedServicesAndTrainer(trainerRole);
+        replacePublicSeedPasswords();
 
         log.info("Database seeding complete!");
     }
@@ -623,6 +676,10 @@ public class DataSeeder implements CommandLineRunner {
      * deploy via the admin panel.
      */
     private void seedPhase4Team() {
+        if (!seedDemoAccounts) {
+            log.info("Starter staff accounts not created (SEED_DEMO_ACCOUNTS is off)");
+            return;
+        }
         Role ermRole = roleRepository.findByName("ERM").orElse(null);
         Role coachRole = roleRepository.findByName("COACH").orElse(null);
         Role techAdvisorRole = roleRepository.findByName("TECHNICAL_ADVISOR").orElse(null);
@@ -683,6 +740,28 @@ public class DataSeeder implements CommandLineRunner {
         }
     }
 
+    /**
+     * Every boot: a seeded account still on its old public password gets its
+     * private replacement. An account whose password was already changed no
+     * longer matches the old one and is left alone, so after the first run
+     * this does nothing (16 bcrypt checks). Never logs a password.
+     */
+    private void replacePublicSeedPasswords() {
+        int replaced = 0;
+        for (String[] row : PUBLIC_SEED_PASSWORD_REPLACEMENTS) {
+            User user = userRepository.findByEmail(row[0]).orElse(null);
+            if (user == null || user.getPasswordHash() == null) continue;
+            if (!passwordEncoder.matches(row[1], user.getPasswordHash())) continue;
+            user.setPasswordHash(row[2]);
+            userRepository.save(user);
+            replaced++;
+            log.info("Replaced the public seed password of {}", row[0]);
+        }
+        if (replaced > 0) {
+            log.info("Replaced {} public seed password(s) with private ones", replaced);
+        }
+    }
+
     private void seedTeamUser(String email, String fullName, Role role,
                               String passwordHash, String bio) {
         if (userRepository.existsByEmail(email)) return;
@@ -701,7 +780,12 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     private void seedServicesAndTrainer(Role trainerRole) {
-        User meera = userRepository.findByEmail("meera@sageitco.com")
+        User existingTrainer = userRepository.findByEmail("meera@sageitco.com").orElse(null);
+        if (existingTrainer == null && !seedDemoAccounts) {
+            log.info("Demo trainer and services not seeded (SEED_DEMO_ACCOUNTS is off)");
+            return;
+        }
+        User meera = java.util.Optional.ofNullable(existingTrainer)
                 .orElseGet(() -> {
                     log.info("Seeding trainer user: meera@sageitco.com");
                     return userRepository.save(User.builder()
