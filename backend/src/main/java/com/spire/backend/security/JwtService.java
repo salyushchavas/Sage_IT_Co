@@ -16,8 +16,37 @@ import java.util.function.Function;
 @Service
 public class JwtService {
 
-    @Value("${jwt.secret}")
+    // No default: JWT_SECRET must be set (see validateSigningSecret).
+    @Value("${jwt.secret:}")
     private String secretKey;
+
+    /**
+     * Refuse to start with a missing, short or published signing key: anyone
+     * who knows it can sign a login for any account, including an admin.
+     */
+    @jakarta.annotation.PostConstruct
+    void validateSigningSecret() {
+        SigningSecrets.check("JWT_SECRET", secretKey, SigningSecrets.PUBLISHED_SHA256);
+    }
+
+    /**
+     * True only for a refresh token (see generateRefreshToken): valid and
+     * carrying no role, purpose or type claim. An access, agreement-console or
+     * consultant token is refused, so a short-lived access token can't be
+     * swapped for a new pair indefinitely.
+     */
+    public boolean isRefreshToken(String token) {
+        try {
+            Claims claims = Jwts.parser().verifyWith(getSigningKey()).build()
+                    .parseSignedClaims(token).getPayload();
+            return claims.getExpiration() != null && claims.getExpiration().after(new Date())
+                    && claims.get("role") == null
+                    && claims.get("purpose") == null
+                    && claims.get("type") == null;
+        } catch (Exception e) {
+            return false;
+        }
+    }
 
     @Value("${jwt.access-token-expiration}")
     private long accessTokenExpiration;

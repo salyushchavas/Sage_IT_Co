@@ -555,7 +555,9 @@ public class AuthService {
     }
 
     public AuthResponse refreshToken(String refreshToken) {
-        if (!jwtService.isTokenValid(refreshToken)) {
+        // Only a genuine refresh token: an access (or console / consultant)
+        // token must not be exchangeable for a fresh pair.
+        if (!jwtService.isRefreshToken(refreshToken)) {
             throw new UnauthorizedException("Invalid or expired refresh token");
         }
 

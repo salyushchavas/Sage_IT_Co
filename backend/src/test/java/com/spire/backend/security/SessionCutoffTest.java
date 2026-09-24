@@ -75,7 +75,7 @@ class SessionCutoffTest {
         AuthService authService = new AuthService(userRepository, mock(RoleRepository.class), new BCryptPasswordEncoder(),
                 jwtService, mock(RecordService.class), mock(EmailTemplateService.class), mock(WorkflowService.class),
                 mock(ParticipantIdService.class));
-        when(jwtService.isTokenValid("refresh")).thenReturn(true);
+        when(jwtService.isRefreshToken("refresh")).thenReturn(true);
         when(jwtService.extractUserId("refresh")).thenReturn(10L);
         when(userRepository.findById(10L)).thenReturn(Optional.of(User.builder().id(10L)
                 .role(Role.builder().name("ERM").build()).isActive(false).build()));
