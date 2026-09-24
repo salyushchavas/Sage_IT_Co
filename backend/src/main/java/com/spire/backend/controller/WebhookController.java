@@ -11,6 +11,8 @@ import org.springframework.web.bind.annotation.*;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.HexFormat;
 import java.util.Map;
 
@@ -22,17 +24,33 @@ public class WebhookController {
 
     private final PaymentRepository paymentRepository;
 
-    @Value("${razorpay.webhook-secret:${razorpay.key-secret}}")
+    @Value("${razorpay.webhook-secret:}")
     private String webhookSecret;
+
+    @Value("${razorpay.key-secret:}")
+    private String keySecret;
+
+    /** The secret webhooks are signed with: the webhook secret, else the key secret, else none. */
+    String signingSecret() {
+        if (webhookSecret != null && !webhookSecret.isBlank()) return webhookSecret;
+        if (keySecret != null && !keySecret.isBlank()) return keySecret;
+        return null;
+    }
 
     @PostMapping("/razorpay")
     public ResponseEntity<ApiResponse<Void>> handleRazorpayWebhook(
             @RequestBody String rawBody,
             @RequestHeader(value = "X-Razorpay-Signature", required = false) String signature) {
 
-        // 1. Verify webhook signature
-        if (signature != null && !verifyWebhookSignature(rawBody, signature)) {
-            log.warn("Invalid Razorpay webhook signature");
+        // 1. Every event must be signed with our secret. Without a secret we
+        //    can't tell a real event from a forged one, so nothing is processed.
+        String secret = signingSecret();
+        if (secret == null) {
+            log.warn("Razorpay webhook received but no webhook secret is configured; ignoring it");
+            return ResponseEntity.status(503).body(ApiResponse.error("Webhook not configured"));
+        }
+        if (signature == null || signature.isBlank() || !verifyWebhookSignature(rawBody, signature, secret)) {
+            log.warn("Rejected Razorpay webhook with a missing or invalid signature");
             return ResponseEntity.badRequest().body(ApiResponse.error("Invalid signature"));
         }
 
@@ -107,13 +125,15 @@ public class WebhookController {
         return (Map<String, Object>) payment.get("entity");
     }
 
-    private boolean verifyWebhookSignature(String body, String signature) {
+    static boolean verifyWebhookSignature(String body, String signature, String secret) {
         try {
             Mac mac = Mac.getInstance("HmacSHA256");
-            mac.init(new SecretKeySpec(webhookSecret.getBytes(), "HmacSHA256"));
-            byte[] hash = mac.doFinal(body.getBytes());
+            mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+            byte[] hash = mac.doFinal(body.getBytes(StandardCharsets.UTF_8));
             String generated = HexFormat.of().formatHex(hash);
-            return generated.equals(signature);
+            // Constant-time comparison, so the signature can't be guessed byte by byte.
+            return MessageDigest.isEqual(generated.getBytes(StandardCharsets.UTF_8),
+                    signature.trim().getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             log.error("Webhook signature verification error: {}", e.getMessage());
             return false;
