@@ -1134,6 +1134,16 @@ public class DataSeeder implements CommandLineRunner {
             log.debug("Couldn't add acknowledgments.signature_method: {}", e.getMessage());
         }
 
+        // Checklist 1.2: fingerprint of the exact acknowledgment text accepted.
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE acknowledgments ADD COLUMN IF NOT EXISTS "
+                            + "text_sha256 VARCHAR(64)");
+            log.info("Ensured acknowledgments.text_sha256 exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add acknowledgments.text_sha256: {}", e.getMessage());
+        }
+
         // Phase 2B: not_applicable flag on the documents vault row.
         // Lets the participant mark a document type (e.g. Work
         // Authorization for a domestic candidate) as N/A so the

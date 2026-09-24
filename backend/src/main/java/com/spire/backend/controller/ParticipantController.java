@@ -111,6 +111,24 @@ public class ParticipantController {
      * acknowledgments row with the full audit trail, then walks
      * the workflow to ACKNOWLEDGMENT_ACCEPTED.
      */
+    /**
+     * Checklist 1.2: the exact acknowledgment text and version the page
+     * shows, served by the server so what is displayed is what is recorded.
+     */
+    @GetMapping("/acknowledgment-text")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> acknowledgmentText() {
+        Map<String, Object> text = new java.util.LinkedHashMap<>();
+        text.put("version", com.spire.backend.service.AcknowledgmentText.VERSION);
+        text.put("title", com.spire.backend.service.AcknowledgmentText.TITLE);
+        text.put("intro", com.spire.backend.service.AcknowledgmentText.INTRO);
+        text.put("clauses", com.spire.backend.service.AcknowledgmentText.CLAUSES);
+        text.put("documentationConsent", com.spire.backend.service.AcknowledgmentText.CONSENT_DOCUMENTATION);
+        text.put("communicationConsent", com.spire.backend.service.AcknowledgmentText.CONSENT_COMMUNICATION);
+        text.put("fingerprint", com.spire.backend.service.AcknowledgmentText.fingerprint());
+        return ResponseEntity.ok(ApiResponse.success(text));
+    }
+
     @PostMapping("/acknowledgments")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Map<String, Object>>> submitAcknowledgment(

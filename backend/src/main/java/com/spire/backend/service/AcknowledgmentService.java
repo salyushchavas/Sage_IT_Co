@@ -103,6 +103,12 @@ public class AcknowledgmentService {
             throw new IllegalArgumentException(
                     "All three consents are required to proceed.");
         }
+        // Only the current text can be accepted: the version the page
+        // showed must be the one the server holds (roadmap §4.1).
+        if (!AcknowledgmentText.VERSION.equals(req.getAcknowledgmentVersion())) {
+            throw new IllegalStateException(
+                    "The acknowledgment text has been updated. Please reload the page and review the current version.");
+        }
 
         Acknowledgment saved = persist(user, req, httpRequest);
 
@@ -151,7 +157,8 @@ public class AcknowledgmentService {
                 .userId(user.getId())
                 .acknowledgmentType(TYPE_INTEREST_AND_ACCEPTANCE)
                 .legalName(req.getLegalName().trim())
-                .acceptedTextVersion(req.getAcknowledgmentVersion())
+                .acceptedTextVersion(AcknowledgmentText.VERSION)
+                .textSha256(AcknowledgmentText.fingerprint())
                 .consentFlags(consentsJson)
                 .ipAddress(ip)
                 .userAgent(ua)
@@ -175,16 +182,21 @@ public class AcknowledgmentService {
     }
 
     /**
-     * Pulls the client IP from {@code X-Forwarded-For} (first hop)
-     * or falls back to the socket remote. Mirrors the agreement
-     * controller's helper so the audit trail is consistent.
+     * The client IP for the acceptance record: the LAST X-Forwarded-For
+     * entry, which is the address our hosting proxy (Railway) saw and
+     * appended. Earlier entries come from the request itself, so the
+     * first hop (used before) could be set to anything by the browser.
+     * Falls back to the socket address.
      */
-    private static String clientIp(HttpServletRequest request) {
+    static String clientIp(HttpServletRequest request) {
         if (request == null) return null;
         String xff = request.getHeader("X-Forwarded-For");
         if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
+            String[] hops = xff.split(",");
+            for (int i = hops.length - 1; i >= 0; i--) {
+                String hop = hops[i].trim();
+                if (!hop.isEmpty()) return hop.length() > 45 ? hop.substring(0, 45) : hop;
+            }
         }
         return request.getRemoteAddr();
     }

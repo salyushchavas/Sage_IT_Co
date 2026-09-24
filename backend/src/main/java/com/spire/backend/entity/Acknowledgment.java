@@ -46,6 +46,10 @@ public class Acknowledgment {
     @Column(name = "accepted_text_version", nullable = false, length = 20)
     private String acceptedTextVersion;
 
+    /** SHA-256 of the exact text accepted (AcknowledgmentText.canonical()); null on older rows. */
+    @Column(name = "text_sha256", length = 64)
+    private String textSha256;
+
     @Column(name = "consent_flags", columnDefinition = "TEXT")
     private String consentFlags;
 

@@ -12,7 +12,7 @@ import SignatureCanvas from "react-signature-canvas";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
-import { submitAcknowledgment } from "@/lib/api";
+import { getAcknowledgmentText, submitAcknowledgment, type AcknowledgmentText } from "@/lib/api";
 
 /**
  * Step 4 — Acknowledgment of Interest and Program Acceptance.
@@ -24,10 +24,19 @@ import { submitAcknowledgment } from "@/lib/api";
  * those gates client-side so the experience is consistent.
  */
 
-const ACK_VERSION = "ACK-v1.0";
+// Shown until the server's copy loads; identical to the server's current
+// version. The server owns the text and records exactly what it serves.
+const DEFAULT_ACK_TEXT: AcknowledgmentText = {
+  version: "ACK-v1.0",
+  title: "Acknowledgment of Interest and Program Acceptance",
+  intro: "By accepting this acknowledgment, I confirm:",
+  clauses: [],
+  documentationConsent: "I consent to providing required identification and documentation through the secure portal.",
+  communicationConsent: "I consent to receiving program-related communications from Sage IT Co.",
+};
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
 
-const ACKNOWLEDGMENT_CLAUSES: ReadonlyArray<string> = [
+const DEFAULT_ACK_CLAUSES: ReadonlyArray<string> = [
   "I am expressing genuine interest in the career development and professional services offered by Sage IT Co.",
   "I understand that Sage IT Co provides career coaching, resume administration, interview preparation, technical development, and job-navigation support.",
   "I consent to providing required identification and documentation for program enrollment and verification.",
@@ -45,6 +54,19 @@ function AcknowledgmentPageInner() {
   // ── Gate state ────────────────────────────────────────────────
   const [gateChecked, setGateChecked] = useState(false);
   const [gateError, setGateError] = useState("");
+
+  // ── The exact text, from the server (what is shown is what is recorded) ──
+  const [ackText, setAckText] = useState<AcknowledgmentText>({
+    ...DEFAULT_ACK_TEXT,
+    clauses: [...DEFAULT_ACK_CLAUSES],
+  });
+  useEffect(() => {
+    let cancelled = false;
+    getAcknowledgmentText()
+      .then((text) => { if (!cancelled && text?.version) setAckText(text); })
+      .catch(() => { /* keep the identical built-in copy */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // ── Form state ────────────────────────────────────────────────
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
@@ -178,7 +200,7 @@ function AcknowledgmentPageInner() {
         interestAccepted,
         documentationConsent,
         communicationConsent,
-        acknowledgmentVersion: ACK_VERSION,
+        acknowledgmentVersion: ackText.version,
       });
       void result;
       // Refresh the auth context so the next page sees the freshly
@@ -242,8 +264,8 @@ function AcknowledgmentPageInner() {
         {/* Versioned, scrollable acknowledgment text. */}
         <div className="mt-5">
           <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
-            Acknowledgment of Interest and Program Acceptance
-            <span className="ml-2 font-mono normal-case text-gray-400">{ACK_VERSION}</span>
+            {ackText.title}
+            <span className="ml-2 font-mono normal-case text-gray-400">{ackText.version}</span>
           </p>
           <div
             onScroll={handleTermsScroll}
@@ -251,10 +273,10 @@ function AcknowledgmentPageInner() {
             style={{ height: "min(40vh, 260px)" }}
           >
             <p className="text-sm font-semibold text-gray-900 mb-3">
-              By accepting this acknowledgment, I confirm:
+              {ackText.intro}
             </p>
             <ol className="space-y-3">
-              {ACKNOWLEDGMENT_CLAUSES.map((clause, idx) => (
+              {ackText.clauses.map((clause, idx) => (
                 <li key={idx} className="flex gap-2.5">
                   <span className="text-sage-navy font-bold shrink-0">{idx + 1}.</span>
                   <span className="text-sm text-gray-700">{clause}</span>
@@ -431,8 +453,8 @@ function AcknowledgmentPageInner() {
             />
             <span>
               I have read and accept the{" "}
-              <span className="font-bold">Acknowledgment of Interest and Program Acceptance</span>{" "}
-              ({ACK_VERSION}).
+              <span className="font-bold">{ackText.title}</span>{" "}
+              ({ackText.version}).
             </span>
           </label>
           <label className="flex items-start gap-2.5 text-sm text-gray-700 cursor-pointer">
@@ -443,7 +465,7 @@ function AcknowledgmentPageInner() {
               disabled={!hasScrolledToBottom}
               className="mt-0.5 w-4 h-4 rounded border-gray-300 text-sage-navy focus:ring-sage-copper disabled:opacity-50"
             />
-            <span>I consent to providing required identification and documentation through the secure portal.</span>
+            <span>{ackText.documentationConsent}</span>
           </label>
           <label className="flex items-start gap-2.5 text-sm text-gray-700 cursor-pointer">
             <input
@@ -453,7 +475,7 @@ function AcknowledgmentPageInner() {
               disabled={!hasScrolledToBottom}
               className="mt-0.5 w-4 h-4 rounded border-gray-300 text-sage-navy focus:ring-sage-copper disabled:opacity-50"
             />
-            <span>I consent to receiving program-related communications from Sage IT Co.</span>
+            <span>{ackText.communicationConsent}</span>
           </label>
         </div>
 

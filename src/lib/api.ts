@@ -1434,6 +1434,22 @@ export async function completeOnboarding(): Promise<UserDTO> {
 
 // ─── Email verification (OTP) ───────────────────────────────────────
 
+/** The exact acknowledgment text the server records against (checklist 1.2). */
+export interface AcknowledgmentText {
+  version: string;
+  title: string;
+  intro: string;
+  clauses: string[];
+  documentationConsent: string;
+  communicationConsent: string;
+  fingerprint?: string;
+}
+
+export async function getAcknowledgmentText(): Promise<AcknowledgmentText> {
+  const wrapper = await apiFetch<ApiResponse<AcknowledgmentText>>("/api/participants/acknowledgment-text");
+  return wrapper.data;
+}
+
 export async function verifyCode(email: string, code: string): Promise<AuthResponse> {
   const wrapper = await apiFetch<ApiResponse<AuthResponse>>("/api/auth/verify-code", {
     method: "POST",
