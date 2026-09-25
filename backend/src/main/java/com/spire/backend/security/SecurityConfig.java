@@ -30,6 +30,7 @@ public class SecurityConfig {
     private final AgreementErmAuthFilter agreementErmAuthFilter;
     private final AgreementGateFilter agreementGateFilter;
     private final com.spire.backend.security.PasswordChangeGateFilter passwordChangeGateFilter;
+    private final AuthRateLimitFilter authRateLimitFilter;
 
     private final CorsConfigurationSource corsConfigurationSource;
 
@@ -96,6 +97,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/consultant/**").permitAll()
                         .anyRequest().authenticated()
                 )
+                // Limits on the public sign-in endpoints run first.
+                .addFilterBefore(authRateLimitFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(agreementErmAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
                 // Agreement gate runs after JWT auth so it can read the

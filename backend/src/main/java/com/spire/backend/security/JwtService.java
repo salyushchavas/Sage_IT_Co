@@ -158,6 +158,12 @@ public class JwtService {
         return Long.parseLong(extractClaim(token, Claims::getSubject));
     }
 
+    /** When the token was issued, in epoch seconds (null if it has no iat). */
+    public Long extractIssuedAtSeconds(String token) {
+        Date iat = extractClaim(token, Claims::getIssuedAt);
+        return iat == null ? null : iat.getTime() / 1000L;
+    }
+
     public String extractRole(String token) {
         return extractClaim(token, claims -> claims.get("role", String.class));
     }

@@ -90,6 +90,8 @@ public class EmailLogService {
     public String deliveryAddress(String to) {
         if (to == null || to.isBlank()) return to;
         return userRepository.findByEmail(to.trim())
+                // A deactivated account's mail is not forwarded to a personal inbox.
+                .filter(u -> !Boolean.FALSE.equals(u.getIsActive()))
                 .map(User::getPersonalEmail)
                 .filter(p -> p != null && !p.isBlank())
                 .orElse(to);

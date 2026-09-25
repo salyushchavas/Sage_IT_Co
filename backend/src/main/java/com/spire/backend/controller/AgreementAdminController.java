@@ -206,6 +206,7 @@ public class AgreementAdminController {
         }
 
         user.setActive(active);
+        if (!active) user.endEarlierSessions();
         user = agreementUserRepository.save(user);
         return ResponseEntity.ok(ApiResponse.success(AgreementUserDto.from(user)));
     }
@@ -234,6 +235,7 @@ public class AgreementAdminController {
         }
 
         user.setPasswordHash(passwordEncoder.encode(newPassword));
+        user.endEarlierSessions();
         user = agreementUserRepository.save(user);
         return ResponseEntity.ok(ApiResponse.success(AgreementUserDto.from(user)));
     }
@@ -355,6 +357,7 @@ public class AgreementAdminController {
         // The old role's assignment links + routed gates no longer apply.
         assignmentService.purgeUserLinks(id);
         user.setRole(newRole);
+        user.endEarlierSessions();
         user = agreementUserRepository.save(user);
         return ResponseEntity.ok(ApiResponse.success("Role updated", AgreementUserDto.from(user)));
     }

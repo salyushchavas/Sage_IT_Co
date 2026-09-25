@@ -33,6 +33,7 @@ import static org.mockito.Mockito.*;
 class AuthServiceVerificationTest {
 
     private static final String CODE = "123456";
+    private static final String PASSWORD = "password1";
 
     private UserRepository userRepository;
     private RoleRepository roleRepository;
@@ -68,6 +69,7 @@ class AuthServiceVerificationTest {
                 .verificationCodeHash(AuthService.hashOtp(CODE))
                 .verificationCodeExpiresAt(LocalDateTime.now().plusMinutes(10))
                 .verificationFailedAttempts(0)
+                .passwordHash(new BCryptPasswordEncoder().encode(PASSWORD))
                 .build();
     }
 
@@ -78,7 +80,7 @@ class AuthServiceVerificationTest {
         when(userRepository.findByEmail("jane@x.com")).thenReturn(Optional.of(staff));
 
         IllegalStateException ex = assertThrows(IllegalStateException.class,
-                () -> authService.verifyCode("jane@x.com", "000000"));
+                () -> authService.verifyCode("jane@x.com", "000000", PASSWORD));
         assertTrue(ex.getMessage().contains("already verified"));
         verify(jwtService, never()).generateAccessToken(anyLong(), anyString());
         verify(jwtService, never()).generateRefreshToken(anyLong());
@@ -91,17 +93,17 @@ class AuthServiceVerificationTest {
 
         for (int i = 1; i <= 4; i++) {
             IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
-                    () -> authService.verifyCode("jane@x.com", "000000"));
+                    () -> authService.verifyCode("jane@x.com", "000000", PASSWORD));
             assertTrue(ex.getMessage().contains((5 - i) + " attempt"), ex.getMessage());
         }
         IllegalArgumentException locked = assertThrows(IllegalArgumentException.class,
-                () -> authService.verifyCode("jane@x.com", "000000"));
+                () -> authService.verifyCode("jane@x.com", "000000", PASSWORD));
         assertTrue(locked.getMessage().startsWith("Too many wrong attempts"));
         assertEquals(5, user.getVerificationFailedAttempts());
         assertNotNull(user.getVerificationLockedUntil());
 
         // While locked, even the right code is refused.
-        assertThrows(IllegalArgumentException.class, () -> authService.verifyCode("jane@x.com", CODE));
+        assertThrows(IllegalArgumentException.class, () -> authService.verifyCode("jane@x.com", CODE, PASSWORD));
         assertFalse(user.getEmailVerified());
     }
 
@@ -140,7 +142,7 @@ class AuthServiceVerificationTest {
         when(userRepository.findByEmail("jane@x.com")).thenReturn(Optional.of(user));
         when(participantIdService.issue(any(User.class))).thenReturn("SIT-2026-00001");
 
-        AuthResponse auth = authService.verifyCode("  Jane@X.com ", CODE);
+        AuthResponse auth = authService.verifyCode("  Jane@X.com ", CODE, PASSWORD);
 
         assertEquals("access", auth.getAccessToken());
         assertTrue(user.getEmailVerified());
@@ -156,7 +158,7 @@ class AuthServiceVerificationTest {
         user.setIsActive(false);
         when(userRepository.findByEmail("jane@x.com")).thenReturn(Optional.of(user));
 
-        assertThrows(IllegalStateException.class, () -> authService.verifyCode("jane@x.com", CODE));
+        assertThrows(IllegalStateException.class, () -> authService.verifyCode("jane@x.com", CODE, PASSWORD));
         assertFalse(user.getEmailVerified());
         verify(jwtService, never()).generateAccessToken(anyLong(), anyString());
     }
@@ -218,5 +220,54 @@ class AuthServiceVerificationTest {
     void codesNeverReachTheLogs() {
         assertEquals("Your verification code: ******", EmailService.safeSubject("Your verification code: 123456"));
         assertEquals("Welcome to Sage IT Co", EmailService.safeSubject("Welcome to Sage IT Co"));
+    }
+
+    // ── Someone registering another person's email first ──────────
+
+    @Test
+    void aNewSignUpReplacesAnUnverifiedOne() {
+        User first = pendingUser();   // e.g. registered by someone else, with their password
+        first.setLastVerificationResendAt(LocalDateTime.now().minusMinutes(5));
+        when(userRepository.findByEmail("jane@x.com")).thenReturn(Optional.of(first));
+        when(roleRepository.findByName("PARTICIPANT"))
+                .thenReturn(Optional.of(Role.builder().name("PARTICIPANT").build()));
+
+        authService.enrollParticipant(ParticipantEnrollRequest.builder()
+                .fullName("Jane Real").email("jane@x.com").phone("(555) 555-0101").password("my-own-password")
+                .build());
+
+        BCryptPasswordEncoder enc = new BCryptPasswordEncoder();
+        assertTrue(enc.matches("my-own-password", first.getPasswordHash()), "the latest sign-up's password counts");
+        assertFalse(enc.matches(PASSWORD, first.getPasswordHash()), "the earlier password is gone");
+        assertEquals("Jane Real", first.getFullName());
+        verify(emailTemplateService).sendVerificationCodeEmail(eq(first), anyString());
+    }
+
+    @Test
+    void aVerifiedAccountIsNeverReplaced() {
+        User verified = pendingUser();
+        verified.setEmailVerified(true);
+        when(userRepository.findByEmail("jane@x.com")).thenReturn(Optional.of(verified));
+        when(userRepository.existsByEmailIgnoreCase("jane@x.com")).thenReturn(true);
+        String before = verified.getPasswordHash();
+        assertThrows(IllegalArgumentException.class, () -> authService.enrollParticipant(ParticipantEnrollRequest.builder()
+                .fullName("Jane Real").email("jane@x.com").phone("5550102").password("my-own-password").build()));
+        assertEquals(before, verified.getPasswordHash());
+    }
+
+    @Test
+    void verifyingNeedsTheSignUpsPassword() {
+        User user = pendingUser();
+        when(userRepository.findByEmail("jane@x.com")).thenReturn(Optional.of(user));
+
+        IllegalArgumentException ex = assertThrows(IllegalArgumentException.class,
+                () -> authService.verifyCode("jane@x.com", CODE, "someone-elses-password"));
+        assertTrue(ex.getMessage().contains("password"));
+        assertFalse(user.getEmailVerified(), "not verified with the wrong password");
+        assertThrows(IllegalArgumentException.class, () -> authService.verifyCode("jane@x.com", CODE, null));
+
+        AuthResponse auth = authService.verifyCode("jane@x.com", CODE, PASSWORD);
+        assertNotNull(auth);
+        assertTrue(user.getEmailVerified());
     }
 }

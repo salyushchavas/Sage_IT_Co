@@ -500,8 +500,14 @@ public class EmploymentService {
         if (url == null || url.contains("..") || url.contains("\\")) return false;
         if (url.startsWith("participant-documents/" + userId + "/offer-")) return true;
         if (url.startsWith(DocumentStorageService.S3_PREFIX + "participant-documents/" + userId + "/offer-")) return true;
-        return url.startsWith("https://res.cloudinary.com/")
-                && url.contains("/spire/documents/" + userId + "/offer-");
+        // Cloudinary: the public id (the path after /upload/ and an optional
+        // version) must itself be spire/documents/<userId>/offer-…, so a
+        // URL can't carry another participant's file further along its path.
+        if (!url.startsWith("https://res.cloudinary.com/")) return false;
+        String publicId = DocumentStorageService.extractPublicId(url);
+        return publicId != null
+                && publicId.startsWith("spire/documents/" + userId + "/offer-")
+                && !publicId.contains("/upload/") && !publicId.contains("/authenticated/");
     }
 
     private Optional<EmploymentAcceptance> latest(Long userId) {
@@ -512,10 +518,12 @@ public class EmploymentService {
         return e.getReturnedAt() != null;
     }
 
+    /** The current ERM; a deactivated one counts as none (see ErmAssignmentService). */
     private Optional<User> currentErm(Long participantId) {
         return ermAssignmentRepository.findFirstByUserIdOrderByAssignedDateDesc(participantId)
                 .map(ErmAssignment::getErmUserId)
-                .flatMap(userRepository::findById);
+                .flatMap(userRepository::findById)
+                .filter(u -> !Boolean.FALSE.equals(u.getIsActive()));
     }
 
     private boolean isCurrentErm(Long ermUserId, Long participantId) {

@@ -74,12 +74,17 @@ public class ErmAssignmentService {
         });
     }
 
-    /** Lookup helper for the OnboardingService email step. */
+    /**
+     * The participant's current ERM. A deactivated ERM counts as none: the
+     * participant needs a new one, and no participant data should reach a
+     * former employee (their mail may go to a personal inbox).
+     */
     @Transactional(readOnly = true)
     public Optional<User> getAssignedErm(Long participantId) {
         return ermAssignmentRepository.findFirstByUserIdOrderByAssignedDateDesc(participantId)
                 .map(ErmAssignment::getErmUserId)
-                .flatMap(userRepository::findById);
+                .flatMap(userRepository::findById)
+                .filter(u -> !Boolean.FALSE.equals(u.getIsActive()));
     }
 
     // ── Internals ────────────────────────────────────────────────

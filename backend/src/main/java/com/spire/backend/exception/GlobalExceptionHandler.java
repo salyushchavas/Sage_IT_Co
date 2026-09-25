@@ -183,11 +183,67 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error("Endpoint not found: " + ex.getMessage()));
     }
 
-    // 500 — Catch-all (LOGS THE REAL ERROR — critical for debugging)
+    // 503 — the document store didn't answer (try again), not a missing file
+    @ExceptionHandler(StorageUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleStorage(StorageUnavailableException ex) {
+        log.error("Document store unavailable: {}", ex.getMessage(), ex.getCause());
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(ApiResponse.error(ex.getMessage()));
+    }
+
+    // 429 — too many attempts (sign-in, reset emails)
+    @ExceptionHandler(TooManyRequestsException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTooMany(TooManyRequestsException ex) {
+        log.warn("Too many requests: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ApiResponse.error(ex.getMessage()));
+    }
+
+    // 400 — the request itself couldn't be read: bad JSON, a value of the
+    // wrong type, a missing parameter or file, an unparsable date.
+    @ExceptionHandler({org.springframework.http.converter.HttpMessageNotReadableException.class,
+            org.springframework.web.method.annotation.MethodArgumentTypeMismatchException.class,
+            org.springframework.web.bind.MissingServletRequestParameterException.class,
+            org.springframework.web.multipart.support.MissingServletRequestPartException.class,
+            java.time.format.DateTimeParseException.class,
+            ClassCastException.class})
+    public ResponseEntity<ApiResponse<Void>> handleUnreadable(Exception ex) {
+        log.warn("Unreadable request: {} — {}", ex.getClass().getSimpleName(), ex.getMessage());
+        String message;
+        if (ex instanceof org.springframework.web.bind.MissingServletRequestParameterException m) {
+            message = "\"" + m.getParameterName() + "\" is required.";
+        } else if (ex instanceof org.springframework.web.multipart.support.MissingServletRequestPartException m) {
+            message = "Attach the file (\"" + m.getRequestPartName() + "\").";
+        } else if (ex instanceof org.springframework.web.method.annotation.MethodArgumentTypeMismatchException m) {
+            message = "\"" + m.getName() + "\" has the wrong format.";
+        } else if (ex instanceof java.time.format.DateTimeParseException) {
+            message = "Enter dates as YYYY-MM-DD.";
+        } else {
+            message = "Some of the values sent couldn't be read. Check them and try again.";
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.error(message));
+    }
+
+    @ExceptionHandler(org.springframework.web.multipart.MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleTooLarge(Exception ex) {
+        log.warn("Upload too large: {}", ex.getMessage());
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
+                .body(ApiResponse.error("That file is too large. Upload a smaller one."));
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethod(Exception ex) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED).body(ApiResponse.error(ex.getMessage()));
+    }
+
+    @ExceptionHandler(org.springframework.web.HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMediaType(Exception ex) {
+        return ResponseEntity.status(HttpStatus.UNSUPPORTED_MEDIA_TYPE).body(ApiResponse.error(ex.getMessage()));
+    }
+
+    // 500 — Catch-all. The real error is logged; the caller gets no internals.
     @ExceptionHandler(Exception.class)
     public ResponseEntity<ApiResponse<Void>> handleGeneral(Exception ex) {
         log.error("Unhandled exception on request: {} — {}", ex.getClass().getSimpleName(), ex.getMessage(), ex);
         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                .body(ApiResponse.error("Internal server error: " + ex.getMessage()));
+                .body(ApiResponse.error("Something went wrong on our side. Please try again in a moment."));
     }
 }

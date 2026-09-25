@@ -42,6 +42,14 @@ import java.util.Map;
 @PreAuthorize("hasAnyRole('FINANCE','SYSTEM_ADMIN','OPERATIONS_ADMIN')")
 public class FinanceController {
 
+    /**
+     * Operations admins may look (to follow up with participants), but only
+     * Finance and the System Admin change money: plans, invoices, payments,
+     * waivers, reversals and check tracking (roadmap §9.1 / §13).
+     */
+    static final String MONEY_WRITERS = "hasAnyRole('FINANCE','SYSTEM_ADMIN')";
+
+
     private final CheckDocumentRepository checkRepository;
     private final UserRepository userRepository;
     private final RecordService recordService;
@@ -240,6 +248,7 @@ public class FinanceController {
     }
 
     @PostMapping("/plans")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<PaymentPlan>> createPlan(
             @RequestBody Map<String, Object> body,
             Authentication auth) {
@@ -252,6 +261,7 @@ public class FinanceController {
     }
 
     @PutMapping("/plans/{planId}")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<PaymentPlan>> updatePlan(
             @PathVariable Long planId,
             @RequestBody Map<String, Object> body,
@@ -309,6 +319,7 @@ public class FinanceController {
     }
 
     @PostMapping("/invoices/generate")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<Invoice>> generateInvoice(
             @RequestBody Map<String, Object> body) {
         Long planId = numberLong(body.get("paymentPlanId"));
@@ -318,6 +329,7 @@ public class FinanceController {
     }
 
     @PostMapping("/invoices/bulk-generate")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<Map<String, Object>>> bulkGenerate() {
         List<Invoice> issued = paymentService.generateAllDue(clock.today());
         return ResponseEntity.ok(ApiResponse.success(Map.of(
@@ -327,6 +339,7 @@ public class FinanceController {
     }
 
     @PostMapping("/invoices/mark-overdue")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<Map<String, Object>>> markOverdue() {
         int marked = paymentService.markOverdueInvoices(clock.today());
         return ResponseEntity.ok(ApiResponse.success(Map.of("marked", marked)));
@@ -375,6 +388,7 @@ public class FinanceController {
      * FAILED, WAIVER or REVERSAL with reversesLedgerId.
      */
     @PutMapping("/payments/receive")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<PaymentLedger>> receivePayment(
             @RequestBody Map<String, Object> body,
             Authentication auth) {
@@ -411,6 +425,7 @@ public class FinanceController {
     }
 
     @PutMapping("/check-tracking/{trackingId}/update")
+    @PreAuthorize(MONEY_WRITERS)
     public ResponseEntity<ApiResponse<com.spire.backend.entity.CheckTracking>> updateTracking(
             @PathVariable Long trackingId,
             @RequestBody Map<String, Object> body,

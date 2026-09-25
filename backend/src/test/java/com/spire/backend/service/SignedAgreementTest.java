@@ -156,12 +156,27 @@ class SignedAgreementTest {
     }
 
     @Test
-    void aCloudCopyIsServedAsAShortLivedLink() {
+    void aCloudCopyIsSentAsBytesNeverAsALink() {
         Kit k = kit(pat, true);
         AgreementAcceptance row = k.agreements().findByUserId(10L).orElseThrow();
         row.setSignedAgreementPdfUrl("https://res.cloudinary.com/x/raw/upload/v1/agreements/10/a.pdf");
+        byte[] pdf = "%PDF-1.4 kept".getBytes();
         when(k.storage().retrieve(anyString())).thenReturn(
-                new DocumentStorageService.Retrieval("https://signed.example/a.pdf?exp=300", null, null));
-        assertEquals("https://signed.example/a.pdf?exp=300", k.service().forDownload(10L, 10L).url());
+                new DocumentStorageService.Retrieval(null, pdf, "application/pdf"));
+        SignedAgreementService.SignedPdf out = k.service().forDownload(10L, 10L);
+        assertNull(out.url(), "no link that could be passed on");
+        assertArrayEquals(pdf, out.bytes());
+    }
+
+    @Test
+    void aStoreThatDoesntAnswerIsAnErrorNotAReason() {
+        Kit k = kit(pat, true);
+        AgreementAcceptance row = k.agreements().findByUserId(10L).orElseThrow();
+        row.setSignedAgreementPdfUrl("s3:participant-documents/10/signed-agreement.pdf");
+        row.setPdfSha256("original-hash");
+        when(k.storage().retrieve(anyString())).thenThrow(new com.spire.backend.exception.StorageUnavailableException("down", null));
+        assertThrows(com.spire.backend.exception.StorageUnavailableException.class, () -> k.service().forDownload(10L, 10L));
+        assertEquals("s3:participant-documents/10/signed-agreement.pdf", row.getSignedAgreementPdfUrl(), "not re-created");
+        assertEquals("original-hash", row.getPdfSha256(), "the as-signed fingerprint stays");
     }
 }

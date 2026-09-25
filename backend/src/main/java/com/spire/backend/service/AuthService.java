@@ -5,10 +5,12 @@ import com.spire.backend.entity.Role;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.EmailNotVerifiedException;
 import com.spire.backend.exception.ResourceNotFoundException;
+import com.spire.backend.exception.TooManyRequestsException;
 import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.RoleRepository;
 import com.spire.backend.repository.UserRepository;
 import com.spire.backend.security.JwtService;
+import com.spire.backend.security.RateLimiter;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -18,6 +20,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.HexFormat;
 import java.util.List;
@@ -104,6 +107,13 @@ public class AuthService {
     private final WorkflowService workflowService;
     private final ParticipantIdService participantIdService;
 
+    /** Per-account attempt limits (per-address limits: AuthRateLimitFilter). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RateLimiter rateLimiter = new RateLimiter();
+
+    private static final int LOGIN_FAILURES_ALLOWED = 10;
+    private static final Duration LOGIN_FAILURE_WINDOW = Duration.ofMinutes(15);
+
     @Transactional
     public RegistrationResponse register(RegisterRequest request) {
         String email = normalizeEmail(request.getEmail());
@@ -111,6 +121,10 @@ public class AuthService {
         // 1. Check duplicate email (case-insensitive)
         if (email == null || email.isBlank()) {
             throw new IllegalArgumentException("Email is required");
+        }
+        User pending = pendingSignUp(email);
+        if (pending != null) {
+            return replacePendingSignUp(pending, request.getFullName(), request.getPassword(), null, null, null);
         }
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw new IllegalArgumentException("An account with this email already exists.");
@@ -190,17 +204,23 @@ public class AuthService {
                 || request.getFullName().trim().split("\\s+").length < 2) {
             throw new IllegalArgumentException("Enter your full legal name (first and last)");
         }
-        if (userRepository.existsByEmailIgnoreCase(email)) {
+        User pending = pendingSignUp(email);
+        if (pending == null && userRepository.existsByEmailIgnoreCase(email)) {
             throw new IllegalArgumentException("An account with this email already exists.");
         }
         // Duplicate check on the phone too (checklist 1.5), compared in
         // one form so "(555) 123-4567" and "+1 555-123-4567" match.
-        String phoneNormalized = PhoneNumbers.requireAvailable(userRepository, request.getPhone(), null);
+        String phoneNormalized = PhoneNumbers.requireAvailable(userRepository, request.getPhone(),
+                pending == null ? null : pending.getId());
 
         Role participantRole = roleRepository.findByName("PARTICIPANT")
                 .orElseGet(() -> roleRepository.findByName("STUDENT")
                         .orElseThrow(() -> new IllegalStateException(
                                 "Neither PARTICIPANT nor STUDENT role exists")));
+        if (pending != null) {
+            return replacePendingSignUp(pending, request.getFullName(), request.getPassword(),
+                    request.getPhone() == null ? null : request.getPhone().trim(), phoneNormalized, participantRole);
+        }
 
         String code = generateCode();
         LocalDateTime now = LocalDateTime.now();
@@ -244,6 +264,66 @@ public class AuthService {
                 .build();
     }
 
+    /**
+     * An account for this email that was never verified, if there is one.
+     * A new sign-up replaces it (the latest sign-up counts): otherwise
+     * anyone could register someone else's email first, with a password
+     * of their own, and wait for the owner to verify it.
+     */
+    private User pendingSignUp(String email) {
+        return findUserByEmail(email)
+                .filter(u -> !Boolean.TRUE.equals(u.getEmailVerified()))
+                .orElse(null);
+    }
+
+    /** Replaces an unverified sign-up's name, password (and phone) and emails a new code. */
+    private RegistrationResponse replacePendingSignUp(User pending, String fullName, String rawPassword,
+                                                      String phone, String phoneNormalized, Role role) {
+        if (rawPassword == null || rawPassword.length() < 8) {
+            throw new IllegalArgumentException("Password must be at least 8 characters");
+        }
+        // The same limits as "Resend code": a lock stays, and one code a minute.
+        if (isLocked(pending)) {
+            long minutes = lockMinutesLeft(pending);
+            throw new IllegalArgumentException(
+                    "Too many attempts. Try again in " + minutes + " minute" + (minutes == 1 ? "" : "s") + ".");
+        }
+        clearExpiredLock(pending);
+        if (pending.getLastVerificationResendAt() != null) {
+            long secondsSince = java.time.Duration
+                    .between(pending.getLastVerificationResendAt(), LocalDateTime.now()).getSeconds();
+            if (secondsSince < RESEND_COOLDOWN_SECONDS) {
+                long wait = RESEND_COOLDOWN_SECONDS - secondsSince;
+                throw new IllegalArgumentException(
+                        "Please wait " + wait + " more second" + (wait == 1 ? "" : "s") + " before signing up again.");
+            }
+        }
+        String code = generateCode();
+        LocalDateTime now = LocalDateTime.now();
+        pending.setFullName(PersonNames.clean(fullName));
+        pending.setPasswordHash(passwordEncoder.encode(rawPassword));
+        if (role != null) pending.setRole(role);
+        if (phone != null) {
+            pending.setPhone(phone);
+            pending.setPhoneNormalized(phoneNormalized);
+        }
+        pending.setVerificationCodeHash(hashOtp(code));
+        pending.setVerificationCodeExpiresAt(now.plusMinutes(CODE_TTL_MINUTES));
+        pending.setLastVerificationResendAt(now);
+        pending.endEarlierSessions();
+        User saved = userRepository.save(pending);
+        recordService.record(saved.getId(), "ACCOUNT_SIGNUP_REPLACED", RecordService.Category.SECURITY,
+                "Sign-up replaced",
+                "An unverified sign-up for this email was replaced by a new one (the latest counts)",
+                Map.of("email", saved.getEmail()));
+        try { emailTemplateService.sendVerificationCodeEmail(saved, code); } catch (Exception ignored) {}
+        return RegistrationResponse.builder()
+                .userId(saved.getId())
+                .email(saved.getEmail())
+                .requiresVerification(true)
+                .build();
+    }
+
     // ─── 6-digit OTP verification ───────────────────────────────────
 
     /**
@@ -259,7 +339,7 @@ public class AuthService {
     // @Transactional that exception rolled the save back, so the counter never
     // moved and the 5-try lockout never engaged.
     @Transactional(noRollbackFor = IllegalArgumentException.class)
-    public AuthResponse verifyCode(String rawEmail, String code) {
+    public AuthResponse verifyCode(String rawEmail, String code, String password) {
         User user = findUserByEmail(rawEmail)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "email", normalizeEmail(rawEmail)));
 
@@ -288,7 +368,25 @@ public class AuthService {
             throw new IllegalArgumentException("Code expired. Please request a new one.");
         }
 
-        if (!codeMatches(user.getVerificationCodeHash(), code)) {
+        // The code proves the email; the password proves this is the sign-up
+        // that chose it. Without it, whoever registered the email first, with
+        // a password of their own, would get in once the owner verified.
+        boolean rightPassword = password != null && !password.isEmpty()
+                && user.getPasswordHash() != null && passwordEncoder.matches(password, user.getPasswordHash());
+        boolean rightCode = codeMatches(user.getVerificationCodeHash(), code);
+        if (rightCode && !rightPassword) {
+            int attempts = (user.getVerificationFailedAttempts() == null ? 0 : user.getVerificationFailedAttempts()) + 1;
+            user.setVerificationFailedAttempts(attempts);
+            if (attempts >= LOCKOUT_THRESHOLD) {
+                user.setVerificationLockedUntil(LocalDateTime.now().plusMinutes(LOCKOUT_MINUTES));
+            }
+            userRepository.save(user);
+            throw new IllegalArgumentException(
+                    "That password doesn't match this sign-up. Use the password you chose when you enrolled, "
+                            + "or enroll again with a new one (the latest sign-up counts).");
+        }
+
+        if (!rightCode) {
             int attempts = (user.getVerificationFailedAttempts() == null ? 0 : user.getVerificationFailedAttempts()) + 1;
             user.setVerificationFailedAttempts(attempts);
             if (attempts >= LOCKOUT_THRESHOLD) {
@@ -462,6 +560,14 @@ public class AuthService {
      */
     @Transactional
     public void requestPasswordReset(String email) {
+        // One reset email a minute and five an hour per address, so the form
+        // can't be used to flood someone's inbox (or use up our sending
+        // limit). Quietly: the answer is the same for unknown addresses.
+        String key = "reset:" + normalizeEmail(email);
+        if (!rateLimiter.tryAcquire(key + ":minute", 1, Duration.ofMinutes(1))
+                || !rateLimiter.tryAcquire(key + ":hour", 5, Duration.ofHours(1))) {
+            return;
+        }
         findUserByEmail(email).ifPresent(user -> {
             String token = UUID.randomUUID().toString();
             user.setResetToken(token);
@@ -497,6 +603,8 @@ public class AuthService {
         user.setResetTokenExpiresAt(null);
         // They chose their own password: a temporary one no longer applies.
         user.setMustChangePassword(false);
+        // Whoever else was signed in (the reason for many resets) is out.
+        user.endEarlierSessions();
         userRepository.save(user);
         recordService.record(user.getId(), "ACCOUNT_PASSWORD_RESET",
                 RecordService.Category.SECURITY,
@@ -512,7 +620,7 @@ public class AuthService {
      * the session).
      */
     @org.springframework.transaction.annotation.Transactional
-    public void changePassword(Long userId, String currentPassword, String newPassword) {
+    public AuthResponse changePassword(Long userId, String currentPassword, String newPassword) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new UnauthorizedException("Not signed in"));
         if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
@@ -527,26 +635,40 @@ public class AuthService {
         boolean wasTemporary = Boolean.TRUE.equals(user.getMustChangePassword());
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setMustChangePassword(false);
-        userRepository.save(user);
+        // Other sign-ins end; this one continues with the new tokens returned.
+        user.endEarlierSessions();
+        User saved = userRepository.save(user);
         recordService.record(userId, "ACCOUNT_PASSWORD_CHANGED", RecordService.Category.SECURITY,
                 "Password changed",
                 wasTemporary ? "Chose their own password (replacing the temporary one)" : "Changed their password",
                 Map.of("replacedTemporary", wasTemporary));
+        return buildAuthResponse(saved);
     }
 
     public AuthResponse login(LoginRequest request) {
+        // 0. Too many wrong passwords for this email lately: pause it, so
+        //    passwords can't be guessed (unknown emails count the same way).
+        String failKey = "login-fail:" + normalizeEmail(request.getEmail());
+        if (rateLimiter.isOverLimit(failKey, LOGIN_FAILURES_ALLOWED, LOGIN_FAILURE_WINDOW)) {
+            throw new TooManyRequestsException(
+                    "Too many sign-in attempts for this account. Wait 15 minutes, or reset your password.");
+        }
+
         // 1. Find user by email (any capitalisation)
         User user = findUserByEmail(request.getEmail())
                 .orElseThrow(() -> {
                     recordLoginFailed(null, normalizeEmail(request.getEmail()), "user_not_found");
+                    rateLimiter.record(failKey);
                     return new UnauthorizedException("Invalid email or password");
                 });
 
         // 2. Verify password
         if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
             recordLoginFailed(user.getId(), user.getEmail(), "wrong_password");
+            rateLimiter.record(failKey);
             throw new UnauthorizedException("Invalid email or password");
         }
+        rateLimiter.clear(failKey);
 
         // 3. Check if active
         if (!user.getIsActive()) {
@@ -596,6 +718,10 @@ public class AuthService {
         // of the refresh token's 7-day life. Same generic message as a bad
         // token, so the account state isn't confirmed to whoever holds it.
         if (!Boolean.TRUE.equals(user.getIsActive())) {
+            throw new UnauthorizedException("Invalid or expired refresh token");
+        }
+        // Issued before a password change, reset or deactivation: ended.
+        if (!user.sessionStillValid(jwtService.extractIssuedAtSeconds(refreshToken))) {
             throw new UnauthorizedException("Invalid or expired refresh token");
         }
 

@@ -23,6 +23,16 @@ public interface UserRepository extends JpaRepository<User, Long> {
     @Query("SELECT r.name FROM User u JOIN u.role r WHERE u.id = :id AND u.isActive = true")
     Optional<String> findActiveRoleName(@Param("id") Long id);
 
+    /** What JwtAuthFilter needs about an active account, in one lookup. */
+    interface ActiveSignIn {
+        String getRole();
+        Long getSessionsValidAfter();
+    }
+
+    @Query("SELECT r.name AS role, u.sessionsValidAfter AS sessionsValidAfter "
+            + "FROM User u JOIN u.role r WHERE u.id = :id AND u.isActive = true")
+    Optional<ActiveSignIn> findActiveSignIn(@Param("id") Long id);
+
     Optional<User> findByEmail(String email);
 
     /** Staff onboarding: who a personal (delivery) email belongs to. */

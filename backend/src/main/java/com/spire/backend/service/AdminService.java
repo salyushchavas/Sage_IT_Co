@@ -368,8 +368,10 @@ public class AdminService {
 
         user.setIsActive(false);
         user.setDeactivatedAt(java.time.LocalDateTime.now());
+        user.endEarlierSessions();
         user.setEmail("deleted_" + user.getId() + "@removed.com");
         user.setFullName("Deleted User");
+        user.setPersonalEmail(null);
         user.setPhone(null);
         user.setPhoneNormalized(null);
         user.setLocation(null);
@@ -409,6 +411,8 @@ public class AdminService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
         assertCanManageAccount(requireCaller(currentAdminId), user);
         user.setIsActive(active);
+        // Reactivating mustn't bring back sign-ins from before the deactivation.
+        if (!active) user.endEarlierSessions();
         // Stamp / clear the deactivation timestamp in lockstep with
         // the boolean so the admin UI's "Deactivated on …" column has
         // an accurate value for every inactive row, and reactivated

@@ -28,8 +28,10 @@ import java.util.Map;
  * primary flow (enrollment, payment, etc.) still completes if the
  * audit save fails.
  *
- * Records are written in REQUIRES_NEW so a rollback of the calling
- * transaction doesn't erase the audit row.
+ * Only the 7-argument {@code record} runs in its own transaction
+ * (REQUIRES_NEW) when called from another bean. The shorter overloads and
+ * {@code logAction} call it from inside this class, which skips Spring's
+ * proxy, so their rows join the caller's transaction and roll back with it.
  */
 @Slf4j
 @Service
@@ -112,7 +114,8 @@ public class RecordService {
                     .build();
 
             if (request != null) {
-                rec.setIpAddress(safeTrim(getClientIp(request), 45));
+                // The address our hosting proxy saw (the first hop is whatever the browser sends).
+                rec.setIpAddress(safeTrim(AcknowledgmentService.clientIp(request), 45));
                 String ua = request.getHeader("User-Agent");
                 rec.setBrowser(safeTrim(parseBrowser(ua), 100));
                 rec.setOs(safeTrim(parseOs(ua), 50));
@@ -133,26 +136,6 @@ public class RecordService {
         } catch (Exception e) {
             return null;
         }
-    }
-
-    /**
-     * Walks X-Forwarded-For first (Railway / typical proxy chain) then
-     * falls back to the direct remote addr. Returns the first non-empty
-     * value because the leftmost forwarded entry is the original client.
-     */
-    private String getClientIp(HttpServletRequest req) {
-        String[] headers = {
-            "X-Forwarded-For", "X-Real-IP", "Proxy-Client-IP",
-            "WL-Proxy-Client-IP", "HTTP_CLIENT_IP", "HTTP_X_FORWARDED_FOR"
-        };
-        for (String h : headers) {
-            String value = req.getHeader(h);
-            if (value != null && !value.isBlank() && !"unknown".equalsIgnoreCase(value)) {
-                int comma = value.indexOf(',');
-                return comma > 0 ? value.substring(0, comma).trim() : value.trim();
-            }
-        }
-        return req.getRemoteAddr();
     }
 
     private String parseBrowser(String ua) {

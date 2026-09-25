@@ -90,11 +90,22 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             // to 15 more minutes) stops working at once, and a demoted user
             // loses the old role on the next request. One indexed lookup.
             // Leaving the context unauthenticated makes the entry point 401.
-            String role = userRepository.findActiveRoleName(userId).orElse(null);
+            var signIn = userRepository.findActiveSignIn(userId).orElse(null);
+            String role = signIn == null ? null : signIn.getRole();
             if (role == null || role.isBlank()) {
                 log.warn("Rejected JWT for inactive or unknown user {}", userId);
                 filterChain.doFilter(request, response);
                 return;
+            }
+            // Issued before a password change, reset or deactivation: ended.
+            Long validAfter = signIn.getSessionsValidAfter();
+            if (validAfter != null) {
+                Long issuedAt = jwtService.extractIssuedAtSeconds(token);
+                if (issuedAt == null || issuedAt < validAfter) {
+                    log.info("Rejected an ended sign-in for user {}", userId);
+                    filterChain.doFilter(request, response);
+                    return;
+                }
             }
 
             List<SimpleGrantedAuthority> authorities = authoritiesFor(role);

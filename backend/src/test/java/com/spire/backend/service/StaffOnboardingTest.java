@@ -135,6 +135,8 @@ class StaffOnboardingTest {
         User u = User.builder().id(7L).email("erm1@sageitco.com").passwordHash(encoder.encode("Temp-1234-abcd-EFGH"))
                 .mustChangePassword(true).build();
         when(repo.findById(7L)).thenReturn(Optional.of(u));
+        when(repo.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
+        u.setRole(com.spire.backend.entity.Role.builder().name("ERM").build());
         AuthService auth = new AuthService(repo, mock(RoleRepository.class), encoder, mock(JwtService.class),
                 mock(RecordService.class), mock(EmailTemplateService.class), mock(WorkflowService.class),
                 mock(ParticipantIdService.class));
@@ -143,6 +145,7 @@ class StaffOnboardingTest {
         assertThrows(IllegalArgumentException.class, () -> auth.changePassword(7L, "Temp-1234-abcd-EFGH", "Temp-1234-abcd-EFGH"));
         auth.changePassword(7L, "Temp-1234-abcd-EFGH", "MyOwnPassword9");
         assertFalse(u.getMustChangePassword());
+        assertNotNull(u.getSessionsValidAfter(), "other sign-ins end");
         assertTrue(encoder.matches("MyOwnPassword9", u.getPasswordHash()));
     }
 }

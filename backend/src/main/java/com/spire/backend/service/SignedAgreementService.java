@@ -51,7 +51,9 @@ public class SignedAgreementService {
     @Transactional
     public byte[] keep(AgreementAcceptance row) {
         byte[] bytes = agreementPdfService.renderSignedBytes(row);
-        row.setPdfSha256(sha256(bytes));
+        // The fingerprint of the PDF as signed is evidence: set once, never
+        // replaced by a later re-render (which would differ).
+        if (row.getPdfSha256() == null || row.getPdfSha256().isBlank()) row.setPdfSha256(sha256(bytes));
         try {
             DocumentStorageService.StoredFile stored = storageService.upload(
                     row.getUser().getId(), "signed-agreement.pdf", bytes, "application/pdf");
@@ -86,15 +88,9 @@ public class SignedAgreementService {
                 + (row.getParticipantIdSnapshot() != null ? row.getParticipantIdSnapshot() : participantUserId)
                 + ".pdf";
         String stored = row.getSignedAgreementPdfUrl();
-        DocumentStorageService.Retrieval kept = null;
-        try {
-            kept = storageService.retrieve(stored);
-        } catch (Exception e) {
-            log.warn("Couldn't read the kept agreement PDF for user {}: {}", participantUserId, e.getMessage());
-        }
-        if (kept != null && kept.url() != null) {
-            return new SignedPdf(kept.url(), null, fileName);
-        }
+        // A store that doesn't answer is an error for the caller (try again):
+        // only a file that is really gone is re-created from the signed record.
+        DocumentStorageService.Retrieval kept = storageService.retrieve(stored);
         byte[] bytes = kept != null ? kept.bytes() : readLocal(stored);
         if (bytes == null) {
             bytes = keep(row);

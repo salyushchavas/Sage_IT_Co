@@ -72,6 +72,18 @@ public class AgreementUser {
     @Column(name = "last_login_at")
     private LocalDateTime lastLoginAt;
 
+    /**
+     * Console sign-ins issued before this moment (epoch seconds) no longer
+     * work: set when the account is disabled, its password is reset or its
+     * role changes. Null: no cut-off.
+     */
+    @Column(name = "sessions_valid_after")
+    private Long sessionsValidAfter;
+
+    public void endEarlierSessions() {
+        this.sessionsValidAfter = java.time.Instant.now().getEpochSecond();
+    }
+
     @PrePersist
     void assignId() {
         if (id == null) {

@@ -55,15 +55,45 @@ class SessionCutoffTest {
         return SecurityContextHolder.getContext().getAuthentication();
     }
 
+    private static UserRepository.ActiveSignIn signIn(String role, Long validAfter) {
+        return new UserRepository.ActiveSignIn() {
+            public String getRole() { return role; }
+            public Long getSessionsValidAfter() { return validAfter; }
+        };
+    }
+
     @Test
     void deactivatedAccountIsNotSignedInEvenWithAValidToken() throws Exception {
-        when(userRepository.findActiveRoleName(10L)).thenReturn(Optional.empty());
+        when(userRepository.findActiveSignIn(10L)).thenReturn(Optional.empty());
         assertNull(runFilter());
     }
 
     @Test
+    void aTokenFromBeforeAPasswordChangeNoLongerWorks() throws Exception {
+        when(userRepository.findActiveSignIn(10L)).thenReturn(Optional.of(signIn("PARTICIPANT", 2_000L)));
+        when(jwtService.extractIssuedAtSeconds("token")).thenReturn(1_999L);
+        assertNull(runFilter(), "issued a second before the change");
+        SecurityContextHolder.clearContext();
+        when(jwtService.extractIssuedAtSeconds("token")).thenReturn(2_000L);
+        assertNotNull(runFilter(), "issued at (or after) the change");
+    }
+
+    @Test
+    void aRefreshTokenFromBeforeAPasswordChangeIsRefused() {
+        AuthService authService = new AuthService(userRepository, mock(RoleRepository.class), new BCryptPasswordEncoder(),
+                jwtService, mock(RecordService.class), mock(EmailTemplateService.class), mock(WorkflowService.class),
+                mock(ParticipantIdService.class));
+        when(jwtService.isRefreshToken("refresh")).thenReturn(true);
+        when(jwtService.extractUserId("refresh")).thenReturn(10L);
+        when(jwtService.extractIssuedAtSeconds("refresh")).thenReturn(1_000L);
+        when(userRepository.findById(10L)).thenReturn(Optional.of(User.builder().id(10L)
+                .role(Role.builder().name("ERM").build()).isActive(true).sessionsValidAfter(2_000L).build()));
+        assertThrows(UnauthorizedException.class, () -> authService.refreshToken("refresh"));
+    }
+
+    @Test
     void theRoleInTheDatabaseWinsOverTheRoleInTheToken() throws Exception {
-        when(userRepository.findActiveRoleName(10L)).thenReturn(Optional.of("PARTICIPANT"));
+        when(userRepository.findActiveSignIn(10L)).thenReturn(Optional.of(signIn("PARTICIPANT", null)));
         Authentication auth = runFilter();
         assertNotNull(auth);
         assertEquals(10L, auth.getPrincipal());

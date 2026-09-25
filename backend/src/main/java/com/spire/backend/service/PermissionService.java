@@ -108,9 +108,28 @@ public class PermissionService {
     public boolean canViewDocumentsOf(User viewer, Long targetUserId) {
         if (viewer == null || viewer.getId() == null || targetUserId == null) return false;
         if (targetUserId.equals(viewer.getId())) return true;
-        if (isAdmin(viewer)) return true;
+        // Operations and System admins; the old LMS "ADMIN" role never sees
+        // participants' identity documents.
+        if (DOCUMENT_ADMIN_ROLES.contains(roleOf(viewer))) return true;
         return isAssignedErmFor(viewer, targetUserId);
     }
+
+    /**
+     * One document: as {@link #canViewDocumentsOf}, except that an ERM never
+     * sees the SSN document (roadmap §13: ERMs don't see SSNs unless
+     * specifically authorized).
+     */
+    public boolean canViewDocument(User viewer, Long ownerUserId, String documentType) {
+        if (!canViewDocumentsOf(viewer, ownerUserId)) return false;
+        if (viewer.getId().equals(ownerUserId)) return true;
+        return !("ERM".equals(roleOf(viewer)) && ERM_HIDDEN_DOCUMENT_TYPES.contains(documentType));
+    }
+
+    /** Staff who may open any participant's documents. */
+    private static final Set<String> DOCUMENT_ADMIN_ROLES = Set.of("OPERATIONS_ADMIN", "SYSTEM_ADMIN");
+
+    /** Document types an ERM can't open. */
+    public static final Set<String> ERM_HIDDEN_DOCUMENT_TYPES = Set.of("SSN_DOCUMENT");
 
     public boolean canViewDocuments(User viewer, User target) {
         return target != null && canViewDocumentsOf(viewer, target.getId());

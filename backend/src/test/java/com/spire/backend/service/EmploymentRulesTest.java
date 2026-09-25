@@ -121,6 +121,9 @@ class EmploymentRulesTest {
         assertEquals(1, rows.size());
         assertTrue(EmploymentService.isOfferFileOf(10L,
                 "https://res.cloudinary.com/demo/raw/authenticated/v1/spire/documents/10/offer-letter-1"));
+        assertFalse(EmploymentService.isOfferFileOf(10L,
+                "https://res.cloudinary.com/x/spire/documents/10/offer-/upload/v1/spire/documents/11/offer-letter-9"),
+                "my offer- folder named in a URL that really points at participant 11's file");
     }
 
     @Test

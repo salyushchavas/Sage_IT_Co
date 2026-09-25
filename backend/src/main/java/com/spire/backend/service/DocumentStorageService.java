@@ -108,11 +108,27 @@ public class DocumentStorageService {
     public Retrieval retrieve(String stored) {
         if (stored == null || stored.isBlank()) return null;
         if (stored.startsWith(S3_PREFIX)) {
-            byte[] bytes = s3.get(stored.substring(S3_PREFIX.length()));
+            byte[] bytes;
+            try {
+                bytes = s3.get(stored.substring(S3_PREFIX.length()));
+            } catch (software.amazon.awssdk.services.s3.model.NoSuchKeyException e) {
+                return null;                                    // really missing
+            } catch (software.amazon.awssdk.services.s3.model.S3Exception e) {
+                if (e.statusCode() == 404) return null;
+                throw new com.spire.backend.exception.StorageUnavailableException(
+                        "The document store didn't answer. Try again in a moment.", e);
+            } catch (Exception e) {
+                // A passing problem: say so, rather than treat the file as gone.
+                throw new com.spire.backend.exception.StorageUnavailableException(
+                        "The document store didn't answer. Try again in a moment.", e);
+            }
             return bytes == null ? null : new Retrieval(null, bytes, contentTypeOf(bytes, stored));
         }
         if (stored.startsWith("http")) {
-            return new Retrieval(signedUrl(stored), null, null);
+            // Fetched here and sent as bytes: a Cloudinary signed link never
+            // expires, so it must not be handed to the browser.
+            byte[] bytes = download(signedUrl(stored));
+            return bytes == null ? null : new Retrieval(null, bytes, contentTypeOf(bytes, stored));
         }
         File file = localFile(stored);
         if (file == null || !file.isFile()) return null;
@@ -128,16 +144,30 @@ public class DocumentStorageService {
     /** The file's bytes, wherever it's stored (e.g. to email or merge it). Null when missing. */
     public byte[] readBytes(String stored) {
         Retrieval r = retrieve(stored);
-        if (r == null) return null;
-        if (r.bytes() != null) return r.bytes();
+        return r == null ? null : r.bytes();
+    }
+
+    /** A Cloudinary file's bytes: null when it's gone (404), 503 when Cloudinary didn't answer. */
+    private byte[] download(String url) {
+        if (url == null) return null;
+        HttpResponse<byte[]> res;
         try {
-            HttpResponse<byte[]> res = http.send(HttpRequest.newBuilder(URI.create(r.url()))
+            res = http.send(HttpRequest.newBuilder(URI.create(url))
                     .timeout(Duration.ofSeconds(30)).GET().build(), HttpResponse.BodyHandlers.ofByteArray());
-            return res.statusCode() / 100 == 2 ? res.body() : null;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new com.spire.backend.exception.StorageUnavailableException(
+                    "The document store didn't answer. Try again in a moment.", e);
         } catch (Exception e) {
-            log.warn("Couldn't download stored file: {}", e.getMessage());
-            return null;
+            throw new com.spire.backend.exception.StorageUnavailableException(
+                    "The document store didn't answer. Try again in a moment.", e);
         }
+        if (res.statusCode() == 404 || res.statusCode() == 410) return null;
+        if (res.statusCode() / 100 != 2) {
+            throw new com.spire.backend.exception.StorageUnavailableException(
+                    "The document store answered " + res.statusCode() + ". Try again in a moment.", null);
+        }
+        return res.body();
     }
 
     /**
@@ -274,7 +304,8 @@ public class DocumentStorageService {
     }
 
     /** Strips a Cloudinary URL down to its public id (no extension). */
-    private static String extractPublicId(String url) {
+    /** The Cloudinary public id in a delivery URL (after /upload/ or /authenticated/ and a version). */
+    static String extractPublicId(String url) {
         int upload = url.indexOf("/upload/");
         if (upload < 0) {
             int auth = url.indexOf("/authenticated/");

@@ -88,6 +88,26 @@ public class User {
     @Column(name = "must_change_password")
     private Boolean mustChangePassword;
 
+    /**
+     * Sign-ins (access and refresh tokens) issued before this moment, in
+     * epoch seconds, no longer work. Set when the password changes or is
+     * reset, new login details are sent, or the account is deactivated, so
+     * a stolen or forgotten session ends there. Null: no cut-off.
+     */
+    @Column(name = "sessions_valid_after")
+    private Long sessionsValidAfter;
+
+    /** Ends every sign-in issued before now (see {@link #sessionsValidAfter}). */
+    public void endEarlierSessions() {
+        this.sessionsValidAfter = java.time.Instant.now().getEpochSecond();
+    }
+
+    /** Whether a token issued at this moment (epoch seconds) still counts. */
+    public boolean sessionStillValid(Long issuedAtEpochSeconds) {
+        return sessionsValidAfter == null
+                || (issuedAtEpochSeconds != null && issuedAtEpochSeconds >= sessionsValidAfter);
+    }
+
     @Column(name = "location", length = 255)
     private String location;
 

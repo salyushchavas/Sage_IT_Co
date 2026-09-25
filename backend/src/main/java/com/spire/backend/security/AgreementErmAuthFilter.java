@@ -43,6 +43,7 @@ import java.util.List;
 public class AgreementErmAuthFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
+    private final com.spire.backend.repository.AgreementUserRepository agreementUserRepository;
 
     @Override
     protected void doFilterInternal(
@@ -81,7 +82,31 @@ public class AgreementErmAuthFilter extends OncePerRequestFilter {
 
         try {
             String email = jwtService.extractSubject(token);
-            String role = jwtService.extractAgreementRole(token);
+            // The account as it is NOW: a disabled or deleted user's token
+            // (valid for 8 hours) stops working at once, a role change takes
+            // effect on the next request, and a password reset ends older
+            // sessions. Legacy tokens without a user id are matched by email.
+            String tokenUserId = jwtService.extractAgreementUserId(token);
+            var current = (tokenUserId != null && !tokenUserId.isBlank()
+                    ? agreementUserRepository.findById(tokenUserId)
+                    : agreementUserRepository.findByEmailIgnoreCase(email))
+                    .filter(com.spire.backend.entity.AgreementUser::isActive)
+                    .orElse(null);
+            if (current == null) {
+                log.info("Rejected a console token for a disabled or deleted user");
+                filterChain.doFilter(request, response);
+                return;
+            }
+            Long validAfter = current.getSessionsValidAfter();
+            if (validAfter != null) {
+                Long issuedAt = jwtService.extractIssuedAtSeconds(token);
+                if (issuedAt == null || issuedAt < validAfter) {
+                    log.info("Rejected an ended console session for user {}", current.getId());
+                    filterChain.doFilter(request, response);
+                    return;
+                }
+            }
+            String role = current.getRole() == null ? null : current.getRole().name();
 
             // 3A — role-derived authorities. Every console user gets the
             // base ROLE_AGREEMENT_USER (identity endpoint). ERM +
@@ -112,11 +137,11 @@ public class AgreementErmAuthFilter extends OncePerRequestFilter {
             // controllers (admin guard, owner stamping, /me). Claims may
             // be null on legacy tokens issued before the multi-user
             // phase -- downstream code treats a null role as non-admin.
-            request.setAttribute(AgreementAuthz.ATTR_USER_ID, jwtService.extractAgreementUserId(token));
-            request.setAttribute(AgreementAuthz.ATTR_ROLE, jwtService.extractAgreementRole(token));
-            request.setAttribute(AgreementAuthz.ATTR_EMAIL, email);
-            request.setAttribute(AgreementAuthz.ATTR_FULL_NAME, jwtService.extractAgreementFullName(token));
-            request.setAttribute(AgreementAuthz.ATTR_TITLE, jwtService.extractAgreementTitle(token));
+            request.setAttribute(AgreementAuthz.ATTR_USER_ID, current.getId());
+            request.setAttribute(AgreementAuthz.ATTR_ROLE, role);
+            request.setAttribute(AgreementAuthz.ATTR_EMAIL, current.getEmail() == null ? email : current.getEmail().toLowerCase());
+            request.setAttribute(AgreementAuthz.ATTR_FULL_NAME, current.getFullName());
+            request.setAttribute(AgreementAuthz.ATTR_TITLE, current.getTitle());
         } catch (Exception e) {
             log.warn("Agreement-ERM JWT validation failed: {}", e.getMessage());
         }

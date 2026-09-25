@@ -193,7 +193,7 @@ public class DocumentService {
         ParticipantDocument doc = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document", "id", documentId));
         User viewer = callerId == null ? null : userRepository.findById(callerId).orElse(null);
-        if (!permissionService.canViewDocumentsOf(viewer, doc.getUserId())) {
+        if (!permissionService.canViewDocument(viewer, doc.getUserId(), doc.getDocumentType())) {
             throw new AccessDeniedException("Not allowed to view this document");
         }
         if (!doc.getUserId().equals(callerId)) {

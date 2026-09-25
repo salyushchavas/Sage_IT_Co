@@ -133,6 +133,7 @@ public class StaffOnboardingService {
         String temporary = temporaryPassword();
         user.setPasswordHash(passwordEncoder.encode(temporary));
         user.setMustChangePassword(true);
+        user.endEarlierSessions();
         User saved = userRepository.save(user);
         recordService.record(userId, "ACCOUNT_LOGIN_DETAILS_SENT", RecordService.Category.SECURITY,
                 "New login details sent",

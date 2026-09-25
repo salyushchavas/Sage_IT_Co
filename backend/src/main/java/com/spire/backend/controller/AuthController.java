@@ -58,7 +58,8 @@ public class AuthController {
         if (email == null || email.isBlank() || code == null || code.isBlank()) {
             throw new IllegalArgumentException("Email and code are required");
         }
-        AuthResponse response = authService.verifyCode(email, code);
+        // The password chosen at sign-up (see AuthService.verifyCode).
+        AuthResponse response = authService.verifyCode(email, code, body.get("password"));
         return ResponseEntity.ok(ApiResponse.success("Email verified", response));
     }
 
@@ -105,7 +106,7 @@ public class AuthController {
      * at first sign-in with a temporary password).
      */
     @PostMapping("/change-password")
-    public ResponseEntity<ApiResponse<Map<String, String>>> changePassword(
+    public ResponseEntity<ApiResponse<AuthResponse>> changePassword(
             @RequestBody Map<String, String> body,
             org.springframework.security.core.Authentication auth) {
         Long userId;
@@ -115,8 +116,9 @@ public class AuthController {
             userId = null;
         }
         if (userId == null) throw new com.spire.backend.exception.UnauthorizedException("Sign in first");
-        authService.changePassword(userId, body.get("currentPassword"), body.get("newPassword"));
-        return ResponseEntity.ok(ApiResponse.success(Map.of("message", "Password changed")));
+        // New tokens: the password change ended every earlier sign-in, this one too.
+        AuthResponse fresh = authService.changePassword(userId, body.get("currentPassword"), body.get("newPassword"));
+        return ResponseEntity.ok(ApiResponse.success("Password changed", fresh));
     }
 
     @PostMapping("/reset-password")

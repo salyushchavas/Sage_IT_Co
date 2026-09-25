@@ -359,6 +359,11 @@ public class AdminController {
                         .toLocalDateTime()
                         .format(CSV_TS)
                 : value.toString();
+        // A cell starting with = + - @ (or tab / return) runs as a formula when
+        // the export is opened in Excel: a name like =HYPERLINK(...) would.
+        if (!s.isEmpty() && "=+-@\t\r".indexOf(s.charAt(0)) >= 0 && !(value instanceof Number)) {
+            s = "'" + s;
+        }
         boolean needsQuote = s.contains(",") || s.contains("\"") || s.contains("\n") || s.contains("\r");
         if (needsQuote) {
             s = "\"" + s.replace("\"", "\"\"") + "\"";
