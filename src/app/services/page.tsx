@@ -33,6 +33,7 @@ export default function ServicesPage() {
       </section>
 
       <section className="py-16 sm:py-20 px-4 sm:px-6">
+        <h2 className="sr-only">What we offer</h2>
         <div className="max-w-7xl mx-auto">
           <motion.div
             className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5 sm:gap-6 lg:gap-8"

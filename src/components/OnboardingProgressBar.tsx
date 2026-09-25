@@ -128,7 +128,7 @@ export default function OnboardingProgressBar({
           if (isCompleted) circleClass = "bg-emerald-600 border-emerald-600 text-white";
           else if (isActive) circleClass = "bg-[#1B2A5C] border-[#1B2A5C] text-white ring-4 ring-[#1B2A5C]/20 animate-pulse";
 
-          let labelClass = "text-gray-400";
+          let labelClass = "text-gray-500";
           if (isCompleted) labelClass = "text-emerald-700 font-semibold";
           else if (isActive) labelClass = "text-[#1B2A5C] font-bold";
 

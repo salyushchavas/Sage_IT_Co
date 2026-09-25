@@ -73,6 +73,7 @@ export default function Navbar() {
               src="/sage_logo.png"
               alt="Sage IT Co"
               fill
+              sizes="48px"
               priority
               className="object-contain drop-shadow-[0_0_15px_rgba(27,42,92,0.3)] group-hover:drop-shadow-[0_0_20px_rgba(200,125,92,0.4)]"
             />

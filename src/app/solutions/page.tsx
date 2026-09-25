@@ -37,6 +37,7 @@ export default function SolutionsPage() {
       </section>
 
       <section className="py-20 px-6">
+        <h2 className="sr-only">All solutions</h2>
         <div className="max-w-7xl mx-auto">
           {/* Filter tabs */}
           <div className="flex flex-wrap justify-center gap-3 mb-12">

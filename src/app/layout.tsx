@@ -62,9 +62,9 @@ export const metadata: Metadata = {
     icon: "/icon.png",
     apple: "/apple-icon.png",
   },
-  alternates: {
-    canonical: "/",
-  },
+  // No site-wide canonical here: it made every page without its own
+  // (login, enroll, support…) tell search engines it was the homepage.
+  // Pages set theirs with pageMeta(); the home page sets "/".
   openGraph: {
     type: "website",
     locale: "en_US",

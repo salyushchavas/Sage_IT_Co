@@ -50,7 +50,7 @@ export default function SplitAuthLayout({
         >
           <Image
             src="/sage_logo.png"
-            alt="Sage IT Co"
+            alt=""
             width={48}
             height={48}
             priority

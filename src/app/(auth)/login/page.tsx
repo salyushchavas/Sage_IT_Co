@@ -115,7 +115,7 @@ function LoginForm() {
               </label>
               <Link
                 href="/forgot-password"
-                className="text-xs text-sage-copper font-semibold hover:underline"
+                className="text-xs text-sage-copper-deep font-semibold hover:underline"
               >
                 Forgot password?
               </Link>
@@ -135,7 +135,7 @@ function LoginForm() {
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600"
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -157,7 +157,7 @@ function LoginForm() {
 
         <p className="text-center text-sm text-gray-600 mt-6">
           Don&apos;t have an account?{" "}
-          <Link href="/enroll" className="text-sage-copper font-semibold hover:underline">
+          <Link href="/enroll" className="text-sage-copper-deep font-semibold hover:underline">
             Create one
           </Link>
         </p>

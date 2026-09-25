@@ -83,7 +83,7 @@ export default function ContactPage() {
                 {submitted ? (
                   <div className="text-center py-10 sm:py-12">
                     <div className="text-4xl sm:text-5xl mb-3 sm:mb-4">🚀</div>
-                    <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-2 sm:mb-3">Message Sent!</h3>
+                    <h2 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-2 sm:mb-3">Message Sent!</h2>
                     <p className="text-zinc-600 mb-5 sm:mb-6 text-sm sm:text-base">
                       Thank you for reaching out. Our team will get back to you within 24 hours.
                     </p>
@@ -91,7 +91,7 @@ export default function ContactPage() {
                   </div>
                 ) : (
                   <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
-                    <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-4 sm:mb-6">Send Us a Message</h3>
+                    <h2 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-4 sm:mb-6">Send Us a Message</h2>
                     <div className="grid sm:grid-cols-2 gap-3 sm:gap-4">
                       <input
                         name="firstName"
@@ -121,7 +121,7 @@ export default function ContactPage() {
                       placeholder="Company (optional)"
                       className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                     />
-                    <select name="service" className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 focus:outline-none focus:border-neon-blue/50 transition-colors">
+                    <select name="service" aria-label="Service you're interested in" className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 focus:outline-none focus:border-neon-blue/50 transition-colors">
                       <option value="">Select a Service</option>
                       <option value="Cloud Solutions">Cloud Solutions</option>
                       <option value="Cybersecurity">Cybersecurity</option>
@@ -151,7 +151,7 @@ export default function ContactPage() {
             {/* Contact info */}
             <motion.div variants={slideInRight} className="space-y-6 sm:space-y-8">
               <GlassCard className="p-6 sm:p-8">
-                <h3 className="text-lg sm:text-xl font-bold text-zinc-900 mb-4 sm:mb-6">Contact Information</h3>
+                <h2 className="text-lg sm:text-xl font-bold text-zinc-900 mb-4 sm:mb-6">Contact Information</h2>
                 <div className="space-y-5">
                   <a
                     href="mailto:info@sageitco.com"
@@ -218,7 +218,7 @@ export default function ContactPage() {
 
               {/* Social links */}
               <GlassCard className="p-6 sm:p-8">
-                <h3 className="text-base sm:text-lg font-bold text-zinc-900 mb-3 sm:mb-4">Follow Us</h3>
+                <h2 className="text-base sm:text-lg font-bold text-zinc-900 mb-3 sm:mb-4">Follow Us</h2>
                 <div className="flex gap-3">
                   {socialLinks.map((s) => (
                     <a

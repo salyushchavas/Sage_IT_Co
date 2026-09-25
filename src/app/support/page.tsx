@@ -83,6 +83,7 @@ export default function SupportPage() {
         </motion.div>
 
         {/* Support options */}
+        <h2 className="sr-only">Ways to reach us</h2>
         <motion.div variants={staggerContainer} initial="hidden" animate="visible" className="grid gap-4 sm:grid-cols-3 mb-16">
           {supportOptions.map((opt) => {
             const Icon = opt.icon;

@@ -96,7 +96,7 @@ export default function EnrollPage() {
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.4 }}
       >
-        <p className="text-xs uppercase tracking-widest font-bold text-sage-copper text-center">
+        <p className="text-xs uppercase tracking-widest font-bold text-sage-copper-deep text-center">
           Step 1 of 2 · Sign Up
         </p>
         <h2 className="text-3xl font-bold text-sage-navy text-center mt-2 mb-2">
@@ -175,7 +175,7 @@ export default function EnrollPage() {
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
                 aria-label={showPassword ? "Hide password" : "Show password"}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600"
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
               </button>
@@ -198,7 +198,7 @@ export default function EnrollPage() {
         </p>
         <p className="text-sm text-gray-600 mt-3 text-center">
           Already have an account?{" "}
-          <Link href="/login" className="text-sage-copper font-semibold hover:underline">
+          <Link href="/login" className="text-sage-copper-deep font-semibold hover:underline">
             Sign in
           </Link>
         </p>

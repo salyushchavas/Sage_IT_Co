@@ -276,7 +276,7 @@ function VerifyEmailInner() {
 
         {alreadyVerified && (
           <p className="mt-2 text-sm">
-            <Link href="/login" className="text-sage-copper font-semibold hover:underline">
+            <Link href="/login" className="text-sage-copper-deep font-semibold hover:underline">
               Go to sign in
             </Link>
           </p>
@@ -321,7 +321,7 @@ function VerifyEmailInner() {
               type="button"
               onClick={handleResend}
               disabled={resending}
-              className="mt-1 text-sage-copper hover:text-sage-copper-deep font-semibold disabled:text-gray-400 disabled:cursor-not-allowed"
+              className="mt-1 text-sage-copper-deep hover:underline font-semibold disabled:text-gray-400 disabled:cursor-not-allowed"
             >
               {resending ? "Sending…" : "Resend code"}
             </button>
@@ -331,7 +331,7 @@ function VerifyEmailInner() {
 
         <p className="mt-6 text-xs text-gray-500">
           Wrong email?{" "}
-          <Link href="/enroll" className="text-sage-copper font-semibold hover:underline">
+          <Link href="/enroll" className="text-sage-copper-deep font-semibold hover:underline">
             Go back to enrollment
           </Link>
         </p>

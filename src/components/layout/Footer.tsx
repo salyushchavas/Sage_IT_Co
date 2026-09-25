@@ -29,6 +29,7 @@ export default function Footer() {
                   src="/sage_logo.png"
                   alt="Sage IT Co"
                   fill
+                  sizes="128px"
                   className="object-contain drop-shadow-[0_0_20px_rgba(27,42,92,0.25)]"
                 />
               </div>
@@ -40,10 +41,10 @@ export default function Footer() {
 
           {/* Quick Links */}
           <motion.div variants={fadeUp}>
-            <h4 className="text-zinc-900 font-semibold mb-4 relative inline-block">
+            <h2 className="text-zinc-900 font-semibold mb-4 relative inline-block">
               Quick Links
               <span className="absolute -bottom-1 left-0 w-8 h-0.5 bg-gradient-to-r from-neon-blue to-neon-violet rounded-full" />
-            </h4>
+            </h2>
             <ul className="space-y-2">
               {navLinks.map((link) => (
                 <li key={link.href}>
@@ -61,10 +62,10 @@ export default function Footer() {
 
           {/* Services */}
           <motion.div variants={fadeUp}>
-            <h4 className="text-zinc-900 font-semibold mb-4 relative inline-block">
+            <h2 className="text-zinc-900 font-semibold mb-4 relative inline-block">
               Services
               <span className="absolute -bottom-1 left-0 w-8 h-0.5 bg-gradient-to-r from-neon-blue to-neon-violet rounded-full" />
-            </h4>
+            </h2>
             <ul className="space-y-2 text-sm text-zinc-600">
               <li>Cloud Solutions</li>
               <li>Cybersecurity</li>
@@ -77,10 +78,10 @@ export default function Footer() {
 
           {/* Contact */}
           <motion.div variants={fadeUp}>
-            <h4 className="text-zinc-900 font-semibold mb-4 relative inline-block">
+            <h2 className="text-zinc-900 font-semibold mb-4 relative inline-block">
               Contact
               <span className="absolute -bottom-1 left-0 w-8 h-0.5 bg-gradient-to-r from-neon-blue to-neon-violet rounded-full" />
-            </h4>
+            </h2>
             <ul className="space-y-2 text-sm text-zinc-600">
               <li>info@sageitco.com</li>
               <li>+1 (469) 666-3661</li>

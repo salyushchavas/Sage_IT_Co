@@ -125,7 +125,7 @@ function ResetForm() {
               <button
                 type="button"
                 onClick={() => setShowPassword((v) => !v)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
+                className="absolute right-1 top-1/2 -translate-y-1/2 p-2 text-gray-400 hover:text-gray-600"
                 aria-label={showPassword ? "Hide password" : "Show password"}
               >
                 {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
@@ -173,7 +173,7 @@ function ResetForm() {
           Remembered after all?{" "}
           <Link
             href="/login"
-            className="text-sage-copper font-semibold hover:underline"
+            className="text-sage-copper-deep font-semibold hover:underline"
           >
             Sign in
           </Link>

@@ -71,7 +71,7 @@ export default function ForgotPasswordPage() {
             </p>
             <Link
               href="/login"
-              className="mt-4 inline-block text-xs text-sage-copper font-semibold hover:underline"
+              className="mt-4 inline-block text-xs text-sage-copper-deep font-semibold hover:underline"
             >
               Back to sign in
             </Link>
@@ -120,7 +120,7 @@ export default function ForgotPasswordPage() {
               Remembered it?{" "}
               <Link
                 href="/login"
-                className="text-sage-copper font-semibold hover:underline"
+                className="text-sage-copper-deep font-semibold hover:underline"
               >
                 Sign in
               </Link>

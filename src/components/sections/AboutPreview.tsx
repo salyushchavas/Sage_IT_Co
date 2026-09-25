@@ -36,7 +36,7 @@ export default function AboutPreview() {
               technology partner serving Fortune 500 companies across 3 continents.
             </motion.p>
             <motion.div variants={fadeUp}>
-              <GlowButton href="/about">Learn More</GlowButton>
+              <GlowButton href="/about">Learn More About Us</GlowButton>
             </motion.div>
           </motion.div>
 

@@ -55,14 +55,14 @@ export default function AboutPage() {
             viewport={{ once: true }}
           >
             <motion.div variants={fadeUp} className="glass p-6 sm:p-8 md:p-10">
-              <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-3 sm:mb-4">Our Vision</h3>
+              <h2 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-3 sm:mb-4">Our Vision</h2>
               <p className="text-zinc-600 leading-relaxed text-sm sm:text-base">
                 To be the most trusted technology partner for enterprises navigating the AI revolution — enabling them
                 to innovate fearlessly, scale confidently, and lead their industries.
               </p>
             </motion.div>
             <motion.div variants={fadeUp} className="glass p-6 sm:p-8 md:p-10">
-              <h3 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-3 sm:mb-4">Our Mission</h3>
+              <h2 className="text-xl sm:text-2xl font-bold text-zinc-900 mb-3 sm:mb-4">Our Mission</h2>
               <p className="text-zinc-600 leading-relaxed text-sm sm:text-base">
                 To deliver intelligent, scalable, and secure technology solutions that empower businesses to achieve
                 measurable outcomes. We combine deep engineering expertise with AI-first thinking to solve complex
