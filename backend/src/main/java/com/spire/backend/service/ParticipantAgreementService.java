@@ -1,5 +1,6 @@
 package com.spire.backend.service;
 
+import com.spire.backend.entity.AgreementAcceptance;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.exception.UnauthorizedException;
@@ -38,6 +39,8 @@ public class ParticipantAgreementService {
     private final WorkflowService workflowService;
     private final RecordService recordService;
     private final ProfileCompletionService profileCompletionService;
+    private final TermsContentService termsContentService;
+    private final com.spire.backend.repository.ProgramSelectionRepository programSelectionRepository;
 
     @Transactional
     public Map<String, Object> sign(
@@ -46,7 +49,9 @@ public class ParticipantAgreementService {
             String signatureImage,
             String signatureMethod,
             String ipAddress,
-            String userAgent
+            String userAgent,
+            String agreementVersion,
+            String textFingerprint
     ) {
         User user = requireGatedUser(userId);
 
@@ -70,8 +75,19 @@ public class ParticipantAgreementService {
             );
         }
 
+        // Only the current text can be signed: the version and fingerprint
+        // the page showed must be the ones the server holds (checklist 2.2,
+        // as for the acknowledgment in 1.2).
+        String current = AgreementService.CURRENT_VERSION;
+        String currentFingerprint = termsContentService.fingerprint(current);
+        if (!current.equals(agreementVersion) || !currentFingerprint.equals(textFingerprint)) {
+            throw new IllegalStateException(
+                    "The agreement text has been updated. Please reload the page and review the current version.");
+        }
         agreementService.signImmediate(userId, legalName,
-                signatureImage, signatureMethod, ipAddress, userAgent);
+                signatureImage, signatureMethod, ipAddress, userAgent,
+                new AgreementService.SigningDetails(currentFingerprint, user.getParticipantId(),
+                        programSummary(userId)));
 
         user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
@@ -109,6 +125,51 @@ public class ParticipantAgreementService {
                 "status", user.getCurrentStatus(),
                 "nextStep", "/check-upload"
         );
+    }
+
+    /**
+     * Checklist 2.5 (roadmap: Operations reviews "declined" agreements):
+     * the participant declines to sign, with a reason. Operations sees it
+     * in the agreement queue; the participant can still sign later.
+     */
+    @Transactional
+    public AgreementAcceptance decline(Long userId, String reason) {
+        User user = requireGatedUser(userId);
+        String why = reason == null ? "" : reason.trim();
+        if (why.length() < 5) {
+            throw new IllegalArgumentException("Please tell us why you're declining, so Operations can help.");
+        }
+        if (why.length() > 1000) {
+            throw new IllegalArgumentException("Please keep the reason under 1,000 characters.");
+        }
+        AgreementAcceptance row = agreementRepository.findByUserId(userId).orElseGet(() -> AgreementAcceptance.builder()
+                .user(user)
+                .legalName(user.getFullName() == null ? "—" : user.getFullName())
+                .agreementVersion(AgreementService.CURRENT_VERSION)
+                .codeVerified(false)
+                .build());
+        if (Boolean.TRUE.equals(user.getAgreementComplete())
+                || AgreementService.STATUS_VERIFIED.equals(row.getStatus())) {
+            throw new IllegalStateException("The agreement is already signed.");
+        }
+        row.setStatus(AgreementService.STATUS_DECLINED);
+        row.setDeclinedAt(java.time.LocalDateTime.now());
+        row.setDeclineReason(why);
+        AgreementAcceptance saved = agreementRepository.save(row);
+        recordService.record(userId, "AGREEMENT_DECLINED", RecordService.Category.ACCOUNT,
+                "Agreement declined", "The participant declined to sign: " + why,
+                Map.of("reason", why));
+        return saved;
+    }
+
+    /** "Program · Phase · Skillset · Target role" as chosen, for the record and the PDF. */
+    String programSummary(Long userId) {
+        return programSelectionRepository.findFirstByUserIdOrderBySelectionDateDesc(userId)
+                .map(p -> java.util.stream.Stream.of(p.getProgram(), p.getPhase(), p.getSkillset(), p.getTargetJobTitle())
+                        .filter(v -> v != null && !v.isBlank())
+                        .collect(java.util.stream.Collectors.joining(" · ")))
+                .filter(s -> !s.isBlank())
+                .orElse(null);
     }
 
     private User requireGatedUser(Long userId) {

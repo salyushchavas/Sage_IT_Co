@@ -54,6 +54,15 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired
     private com.spire.backend.service.WorkflowService workflowService;
 
+    @Autowired
+    private com.spire.backend.service.DocumentService documentService;
+
+    @Autowired
+    private com.spire.backend.service.EmploymentService employmentService;
+
+    @Autowired
+    private com.spire.backend.repository.PhaseCompletionRepository phaseCompletionRepository;
+
     // Super-admin bootstrap for the consultant-agreement console. The
     // single SUPER_ADMIN is provisioned from these env vars, never
     // through the UI. Blank defaults => bootstrap is skipped (logged).
@@ -296,6 +305,25 @@ public class DataSeeder implements CommandLineRunner {
         // DASHBOARD_ENABLED at sign-up, and who haven't finished their
         // profile, back on their real onboarding step. Idempotent.
         repairQuickSignupStatuses();
+
+        // Checklist 1.3: "not applicable" on a required document is now an
+        // exception request Operations decides. Convert old markers and
+        // re-check who really has their required documents. Idempotent.
+        requireApprovalForRequiredNotApplicable();
+
+        // Checklist 1.5: phone numbers compared in one form for the
+        // duplicate check. Fill in old accounts; report duplicates.
+        backfillNormalizedPhones();
+
+        // Checklist 3.2: coaches get their coach types and skills (read
+        // from their bio) so matching fills each slot with the right
+        // kind of coach. Only coaches with none recorded. Idempotent.
+        fillCoachProfilesFromBios();
+
+        // Checklist 4.5: Phase 2 (post-offer support) is recorded when the
+        // ERM approves Phase 1. Participants approved before that get their
+        // Phase 2 record now. Idempotent.
+        backfillPhase2();
 
         // Portal phase: consultant_verification was keyed by
         // application_id; the portal keys it by email instead. Add the
@@ -1001,22 +1029,34 @@ public class DataSeeder implements CommandLineRunner {
             log.debug("Couldn't grandfather pre-OTP users: {}", e.getMessage());
         }
 
-        // Grandfather pre-agreement accounts. Email-verified users
-        // who existed before the agreement gate shipped have no
-        // acceptance row to satisfy the new requirement; rather
-        // than retroactively kick them to /agreement on next login,
-        // mark them accepted. New signups always start with
-        // agreement_accepted=false and have to walk through the
-        // /agreement flow.
+        // Checklist 2.1: a rule here used to mark EVERY verified account as
+        // having accepted the agreement on each restart. That fabricated
+        // consent, and whether the agreement gate blocked someone depended
+        // on when the server last restarted. It is gone: the gate now only
+        // applies to course-only student accounts (AgreementGateFilter),
+        // and a participant's signing is their agreement step. Put right the
+        // participants it marked without a signed record (idempotent), and
+        // report anyone whose agreement step is done with no signature on
+        // file (from before checklist 1.1) so Operations can follow up.
         try {
-            int updated = jdbcTemplate.update(
-                    "UPDATE users SET agreement_accepted = TRUE " +
-                    "WHERE agreement_accepted = FALSE AND email_verified = TRUE");
-            if (updated > 0) {
-                log.info("Grandfathered {} pre-agreement users to agreement_accepted=true", updated);
+            int corrected = jdbcTemplate.update(
+                    "UPDATE users SET agreement_accepted = FALSE "
+                            + "WHERE participant_id IS NOT NULL AND agreement_accepted = TRUE "
+                            + "AND NOT EXISTS (SELECT 1 FROM agreement_records a "
+                            + "WHERE a.user_id = users.id AND a.status = 'VERIFIED')");
+            if (corrected > 0) {
+                log.info("Cleared 'agreement accepted' for {} participant(s) with no signed agreement", corrected);
+            }
+            Integer unsigned = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM users u WHERE u.agreement_complete = TRUE "
+                            + "AND NOT EXISTS (SELECT 1 FROM agreement_records a "
+                            + "WHERE a.user_id = u.id AND a.status = 'VERIFIED')",
+                    Integer.class);
+            if (unsigned != null && unsigned > 0) {
+                log.warn("{} participant(s) have the agreement step done but no signed agreement on file", unsigned);
             }
         } catch (Exception e) {
-            log.debug("Couldn't grandfather pre-agreement users: {}", e.getMessage());
+            log.debug("Couldn't check agreement acceptance: {}", e.getMessage());
         }
 
         // Backfill the signed-PDF URL column on agreement_records.
@@ -1158,6 +1198,17 @@ public class DataSeeder implements CommandLineRunner {
             log.debug("Couldn't add documents.not_applicable: {}", e.getMessage());
         }
 
+        // Checklist 1.3: the participant's reason when asking for a
+        // required document to be waived (an exception request).
+        try {
+            jdbcTemplate.execute(
+                    "ALTER TABLE documents ADD COLUMN IF NOT EXISTS "
+                            + "exception_reason TEXT");
+            log.info("Ensured documents.exception_reason exists");
+        } catch (Exception e) {
+            log.debug("Couldn't add documents.exception_reason: {}", e.getMessage());
+        }
+
         // Phase 3B: agreement_records gets erm_notified flag
         // so the operations dashboard can filter pending-routing
         // rows. Default false; flipped true once the post-OTP
@@ -1251,6 +1302,145 @@ public class DataSeeder implements CommandLineRunner {
             log.warn("Couldn't repair quick-signup statuses: {}", e.getMessage());
         }
         return repaired;
+    }
+
+    /**
+     * Until checklist 1.3, a participant could mark any document "not
+     * applicable" and it counted, required ones included. Now a required
+     * document needs an upload or an exception Operations approves:
+     * <ol>
+     *   <li>old unreviewed "N/A" markers on required documents become
+     *       exception requests, so they show in the Operations review
+     *       screen (no reason was collected back then);</li>
+     *   <li>anyone marked "documents done" whose required documents no
+     *       longer add up, and who hasn't signed the agreement, gets the
+     *       documents step reopened (DocumentService.reopenIfIncomplete,
+     *       audited). Signed agreements are left alone.</li>
+     * </ol>
+     * Idempotent: converted rows no longer match, and reopened participants
+     * no longer have documents_complete set.
+     */
+    int requireApprovalForRequiredNotApplicable() {
+        int reopened = 0;
+        try {
+            int converted = jdbcTemplate.update(
+                    "UPDATE documents SET review_status = 'EXCEPTION_REQUESTED' "
+                            + "WHERE review_status = 'NOT_APPLICABLE' AND not_applicable = TRUE "
+                            + "AND document_type IN ('GOVERNMENT_ID', 'WORK_AUTHORIZATION', 'RESUME')");
+            if (converted > 0) {
+                log.info("Turned {} 'not applicable' marker(s) on required documents into exception requests",
+                        converted);
+            }
+            java.util.List<Long> ids = jdbcTemplate.queryForList(
+                    "SELECT id FROM users WHERE documents_complete = TRUE "
+                            + "AND (agreement_complete IS NULL OR agreement_complete = FALSE)",
+                    Long.class);
+            for (Long id : ids) {
+                User user = userRepository.findById(id).orElse(null);
+                if (user == null) continue;
+                boolean wasDone = Boolean.TRUE.equals(user.getDocumentsComplete());
+                documentService.reopenIfIncomplete(user, "documents_reopened_rules",
+                        "Required documents re-checked: an upload, or an exception Operations approves (checklist 1.3)");
+                if (wasDone && !Boolean.TRUE.equals(user.getDocumentsComplete())) reopened++;
+            }
+            if (reopened > 0) {
+                log.info("Reopened the documents step for {} participant(s)", reopened);
+            }
+        } catch (Exception e) {
+            log.warn("Couldn't apply the required-document rules: {}", e.getMessage());
+        }
+        return reopened;
+    }
+
+    /**
+     * Checklist 1.5: accounts created before phone numbers were compared
+     * get their comparable form (PhoneNumbers.normalize) filled in, and an
+     * index for the duplicate check. Existing duplicates are only
+     * reported: they stay until Operations deals with them (they also
+     * show under Operations → Exceptions). Idempotent: only rows without
+     * a value are touched.
+     */
+    int backfillNormalizedPhones() {
+        try {
+            // Postgres (production); MySQL has no IF NOT EXISTS here and
+            // just logs the error, which is harmless.
+            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_users_phone_normalized ON users (phone_normalized)");
+        } catch (Exception e) {
+            log.debug("Couldn't create idx_users_phone_normalized: {}", e.getMessage());
+        }
+        int filled = 0;
+        try {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, phone FROM users WHERE phone IS NOT NULL AND phone_normalized IS NULL");
+            for (java.util.Map<String, Object> row : rows) {
+                String normalized = com.spire.backend.service.PhoneNumbers.normalizeOrNull((String) row.get("phone"));
+                if (normalized == null) continue;
+                filled += jdbcTemplate.update(
+                        "UPDATE users SET phone_normalized = ? WHERE id = ? AND phone_normalized IS NULL",
+                        normalized, ((Number) row.get("id")).longValue());
+            }
+            if (filled > 0) log.info("Filled in the comparable phone number for {} account(s)", filled);
+            Integer shared = jdbcTemplate.queryForObject(
+                    "SELECT COUNT(*) FROM (SELECT phone_normalized FROM users "
+                            + "WHERE phone_normalized IS NOT NULL AND is_active = TRUE "
+                            + "GROUP BY phone_normalized HAVING COUNT(*) > 1) dup",
+                    Integer.class);
+            if (shared != null && shared > 0) {
+                log.warn("{} phone number(s) are shared by more than one active account", shared);
+            }
+        } catch (Exception e) {
+            log.warn("Couldn't fill in comparable phone numbers: {}", e.getMessage());
+        }
+        return filled;
+    }
+
+    /**
+     * Checklist 3.2: every coach account without coach types recorded gets
+     * them, and their skills, from their bio (CoachProfiles.fromBio): e.g.
+     * "Interview coach — mock interviews" is an Interview Coach, and a
+     * technical advisor whose bio names Java, Python and Cloud & DevOps
+     * covers those. Operations can change them in the Assignments tab.
+     * Idempotent: only rows where coach_types is still empty.
+     */
+    int fillCoachProfilesFromBios() {
+        int filled = 0;
+        try {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT u.id, u.bio, r.name AS role_name FROM users u JOIN roles r ON r.id = u.role_id "
+                            + "WHERE r.name IN ('COACH', 'TECHNICAL_ADVISOR') "
+                            + "AND (u.coach_types IS NULL OR u.coach_types = '')");
+            for (java.util.Map<String, Object> row : rows) {
+                String[] profile = com.spire.backend.service.CoachProfiles.fromBio(
+                        (String) row.get("role_name"), (String) row.get("bio"));
+                filled += jdbcTemplate.update(
+                        "UPDATE users SET coach_types = ?, coach_skills = ? WHERE id = ? "
+                                + "AND (coach_types IS NULL OR coach_types = '')",
+                        profile[0], profile[1], ((Number) row.get("id")).longValue());
+            }
+            if (filled > 0) log.info("Set coach types and skills for {} coach(es) from their bios", filled);
+        } catch (Exception e) {
+            log.warn("Couldn't fill in coach profiles: {}", e.getMessage());
+        }
+        return filled;
+    }
+
+    /**
+     * Checklist 4.5: every participant whose Phase 1 the ERM approved has a
+     * Phase 2 record, starting on their verified employment start date.
+     * Only adds the missing ones.
+     */
+    int backfillPhase2() {
+        int started = 0;
+        try {
+            for (com.spire.backend.entity.PhaseCompletion ph : phaseCompletionRepository
+                    .findByPhaseAndErmApprovedTrue(com.spire.backend.service.EmploymentService.PHASE_1)) {
+                if (employmentService.startPhase2(ph.getUserId()) != null) started++;
+            }
+            if (started > 0) log.info("Recorded Phase 2 for {} participant(s) whose Phase 1 was already approved", started);
+        } catch (Exception e) {
+            log.warn("Couldn't backfill Phase 2 records: {}", e.getMessage());
+        }
+        return started;
     }
 
     /** Sensitive consultant columns, encrypted at rest by SensitiveTextConverter. */
@@ -2148,7 +2338,7 @@ public class DataSeeder implements CommandLineRunner {
                 if (m.wasFree()) c.setIsFree(false);
                 courseRepository.save(c);
                 updated++;
-                log.info("Backfilled price for {}: ₹{} → ₹{}", m.slug(), current, m.newPrice());
+                log.info("Backfilled price for {}: {} → {}", m.slug(), current, m.newPrice());
             }
         }
         if (updated > 0) log.info("Course price backfill complete — {} row(s) updated.", updated);

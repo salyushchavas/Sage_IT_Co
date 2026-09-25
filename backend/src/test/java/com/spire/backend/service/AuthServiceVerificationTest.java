@@ -173,7 +173,7 @@ class AuthServiceVerificationTest {
         });
 
         authService.enrollParticipant(ParticipantEnrollRequest.builder()
-                .fullName("New Person").email(" New.Person@X.com ").phone("5550100").password("password1")
+                .fullName("New Person").email(" New.Person@X.com ").phone("(555) 555-0100").password("password1")
                 .build());
 
         ArgumentCaptor<User> saved = ArgumentCaptor.forClass(User.class);

@@ -37,13 +37,6 @@ import java.util.Locale;
 @Slf4j
 public class EmailTemplateService {
 
-    private static final DateTimeFormatter DATE_FMT =
-            DateTimeFormatter.ofPattern("d MMM yyyy, h:mm a", Locale.ENGLISH);
-    private static final DateTimeFormatter DATE_ONLY_FMT =
-            DateTimeFormatter.ofPattern("d MMM yyyy", Locale.ENGLISH);
-    private static final DateTimeFormatter TIME_ONLY_FMT =
-            DateTimeFormatter.ofPattern("h:mm a", Locale.ENGLISH);
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
 
     private final EmailService emailService;
     private final BrandConfig brandConfig;
@@ -102,7 +95,7 @@ public class EmailTemplateService {
      * participant for the team-assembly step that runs immediately
      * after; the legacy copy points them at the course catalog.
      */
-    public void sendWelcomeEmail(User user) {
+    public boolean sendWelcomeEmail(User user) {
         String body;
         String subject;
         String title;
@@ -141,7 +134,7 @@ public class EmailTemplateService {
             subject = "Welcome to " + brandName() + ", " + firstName(user) + "!";
             title = "You're all set, " + firstName(user) + "!";
         }
-        emailService.sendEmail(user.getEmail(), subject, wrap(title, body));
+        return emailService.sendEmail(user.getEmail(), subject, wrap(title, body));
     }
 
     // ── Phase 1C: profile reminder (cron) ────────────────────────────
@@ -151,7 +144,7 @@ public class EmailTemplateService {
      * banner copy. Sent at most 3 times per user (controlled by the
      * cron caller, not here).
      */
-    public void sendProfileReminderEmail(User user, int completionPct,
+    public boolean sendProfileReminderEmail(User user, int completionPct,
                                          java.util.List<String> remainingSteps) {
         String first = firstName(user);
         StringBuilder steps = new StringBuilder();
@@ -167,7 +160,7 @@ public class EmailTemplateService {
                 + muted("— " + brandName() + "");
         String subject = "You're " + completionPct
                 + "% there — finish your profile in 10 minutes";
-        emailService.sendEmail(user.getEmail(), subject,
+        return emailService.sendEmail(user.getEmail(), subject,
                 wrap("Finish your " + brandConfig.getShortName() + " profile", body));
     }
 
@@ -232,7 +225,7 @@ public class EmailTemplateService {
      * haven't submitted the current week's report yet. Best-effort —
      * the job logs and continues on any per-user failure.
      */
-    public void sendWeeklyReminderEmail(User user, java.time.LocalDate weekStart, java.time.LocalDate weekEnd) {
+    public boolean sendWeeklyReminderEmail(User user, java.time.LocalDate weekStart, java.time.LocalDate weekEnd) {
         String first = firstName(user);
         String body = p("Hi " + escape(first) + ",")
                 + p("A quick reminder that your weekly submission report for "
@@ -241,36 +234,228 @@ public class EmailTemplateService {
                         + "interview prep keeps your ERM in the loop and your roadmap on track.")
                 + button("Submit Weekly Report", appUrl + "/dashboard")
                 + muted("If you've already submitted, you can ignore this reminder.");
-        emailService.sendEmail(user.getEmail(),
+        return emailService.sendEmail(user.getEmail(),
                 "Weekly report due — " + brandName() + "",
                 wrap("Your weekly report is due", body));
     }
 
+    // ── 16b. Weekly report overdue (checklist 4.2) ──────────────────
+    /** The participant's report for a finished week wasn't submitted by its due date. */
+    public boolean sendWeeklyOverdueEmail(User user, java.time.LocalDate weekStart, java.time.LocalDate weekEnd) {
+        String first = firstName(user);
+        String body = p("Hi " + escape(first) + ",")
+                + p("Your weekly report for <strong>" + escape(weekStart.toString()) + " – "
+                        + escape(weekEnd.toString()) + "</strong> was due on "
+                        + escape(weekEnd.plusDays(1).toString()) + " and hasn't been submitted yet. "
+                        + "You can still file it from your dashboard; it will show as late.")
+                + button("Submit last week's report", appUrl + "/dashboard?tab=weekly")
+                + muted("Your ERM can see which weeks are overdue.");
+        return emailService.sendEmail(user.getEmail(),
+                "Weekly report overdue — " + brandName(),
+                wrap("Your weekly report is overdue", body));
+    }
+
+    // ── 16c. "I need help" in a weekly report (checklist 4.2) ───────
+    /** The participant ticked "I need help": their ERM is told straight away. */
+    public boolean sendWeeklyEscalationEmail(User erm, User participant, java.time.LocalDate weekStart, String detail) {
+        if (erm == null || erm.getEmail() == null) return false;
+        String url = appUrl + "/erm-dashboard?participant=" + participant.getId();
+        String body = p("Hi " + escape(firstName(erm)) + ",")
+                + p("<strong>" + escape(safe(participant.getFullName())) + "</strong> ("
+                        + escape(safe(participant.getParticipantId())) + ") asked for help in their weekly report "
+                        + "for the week of " + escape(weekStart.toString()) + ".")
+                + (detail == null || detail.isBlank() ? "" : quote(escape(detail)))
+                + button("Open their weekly report", url)
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(erm.getEmail(),
+                "Help requested: " + safe(participant.getFullName()) + " (" + safe(participant.getParticipantId()) + ")",
+                wrap("A participant asked for help", body));
+    }
+
+    // ── 19. Staff onboarding ────────────────────────────────────────
+    /**
+     * Login details for a staff account an admin created (or new ones): the
+     * sign-in email and a temporary password, sent to the person's own
+     * email. They choose their own password at first sign-in. The email log
+     * keeps only the subject, never the password.
+     */
+    public boolean sendStaffLoginEmail(User user, String roleLabel, String temporaryPassword, boolean newDetails) {
+        String body = p("Hi " + escape(firstName(user)) + ",")
+                + p(newDetails
+                        ? "Here are new login details for your " + brandName() + " account."
+                        : "An account has been created for you on the " + brandName() + " portal as <strong>"
+                                + escape(roleLabel) + "</strong>.")
+                + receipt("Sign-in email: " + user.getEmail(),
+                        "Temporary password: " + temporaryPassword)
+                + button("Sign in", appUrl + "/login")
+                + p("When you sign in you'll be asked to choose your own password; the temporary one stops "
+                        + "working after that.")
+                + muted("If you weren't expecting this email, reply and let us know.")
+                + p("Regards,<br/>" + brandName() + "");
+        String to = user.getPersonalEmail() != null && !user.getPersonalEmail().isBlank()
+                ? user.getPersonalEmail() : user.getEmail();
+        return emailService.sendEmail(to,
+                (newDetails ? "New login details" : "Your staff account") + " — " + brandName(),
+                wrap(newDetails ? "New login details" : "Welcome to " + escape(brandName()), body));
+    }
+
+    /** An invitation to enroll in the program, with the enrollment link. */
+    public boolean sendParticipantInviteEmail(String email, String fullName, String link) {
+        String first = fullName == null || fullName.isBlank() ? "there" : fullName.trim().split("\\s+")[0];
+        String body = p("Hi " + escape(first) + ",")
+                + p("You're invited to join the " + brandName() + " program. Enrolling takes a few minutes: "
+                        + "you'll confirm your email, get your Participant ID, and then complete your profile.")
+                + button("Start your enrollment", link)
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(email, "You're invited to enroll — " + brandName(),
+                wrap("You're invited", body));
+    }
+
+    // ── 18. Online course purchase (checklist 5.4) ──────────────────
+    /** The participant paid for courses online; they're enrolled. */
+    public boolean sendCoursePurchaseEmail(User user, java.util.List<com.spire.backend.entity.Course> courses,
+                                           java.math.BigDecimal total, String reference) {
+        StringBuilder list = new StringBuilder();
+        for (com.spire.backend.entity.Course c : courses) list.append(bullet(c.getTitle()));
+        String body = p("Dear " + escape(firstName(user)) + ",")
+                + p("Thank you, your payment went through and you're enrolled in:")
+                + list
+                + receipt("Amount paid: " + Money.usd(total),
+                        "Date: " + usDateTime(java.time.LocalDateTime.now()),
+                        "Reference: " + (reference == null ? "—" : reference))
+                + button("Go to My Courses", appUrl + "/dashboard?tab=courses")
+                + muted("This email is your receipt. Save it for your records.");
+        return emailService.sendEmail(user.getEmail(),
+                "Payment received — you're enrolled — " + brandName(),
+                wrap("Payment received", body));
+    }
+
+    // ── 17. Employment (checklist 4.5) ──────────────────────────────
+    /** The participant submitted (or corrected) their employment details: their ERM verifies them. */
+    public boolean sendEmploymentToVerifyEmail(User erm, User participant,
+                                               com.spire.backend.entity.EmploymentAcceptance row, boolean corrected) {
+        if (erm == null || erm.getEmail() == null) return false;
+        String body = p("Hi " + escape(firstName(erm)) + ",")
+                + p("<strong>" + escape(safe(participant.getFullName())) + "</strong> ("
+                        + escape(safe(participant.getParticipantId())) + ") "
+                        + (corrected ? "sent corrected employment details" : "accepted a job offer")
+                        + ". Please verify the details, or send them back with what needs correcting.")
+                + receipt("Employer: " + safe(row.getEmployerClient()),
+                        "Job title: " + safe(row.getJobTitle()),
+                        "Start date: " + (row.getStartDate() == null ? "—" : row.getStartDate().toString()))
+                + button("Review employment", appUrl + "/erm-dashboard?tab=employment")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(erm.getEmail(),
+                "Employment to verify: " + safe(participant.getFullName()) + " (" + safe(participant.getParticipantId()) + ")",
+                wrap("Employment to verify", body));
+    }
+
+    /** The ERM sent the participant's employment details back for correction. */
+    public boolean sendEmploymentReturnedEmail(User user, String reason) {
+        String body = p("Dear " + escape(firstName(user)) + ",")
+                + p("Your relationship manager reviewed your employment details and needs a correction before "
+                        + "they can verify them.")
+                + p("<strong>What needs correcting:</strong>")
+                + quote(escape(reason))
+                + button("Correct your employment details", appUrl + "/dashboard?tab=employment")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(user.getEmail(),
+                "Action needed: please correct your employment details — " + brandName(),
+                wrap("Employment details need a correction", body));
+    }
+
+    /** Phase 1 is approved: Phase 2 (post-offer support) begins on the employment start date. */
+    public boolean sendPhase2StartedEmail(User user, java.time.LocalDate startDate) {
+        String when = startDate == null ? "now" : startDate.format(
+                java.time.format.DateTimeFormatter.ofPattern("MMMM d, yyyy", java.util.Locale.US));
+        String body = p("Dear " + escape(firstName(user)) + ",")
+                + p("Your relationship manager has approved your Phase 1 completion. Congratulations again on "
+                        + "your new role!")
+                + p("Your Phase 2 post-offer support begins on <strong>" + escape(when) + "</strong>: "
+                        + "transition and onboarding support, role-aligned coaching, documentation support and "
+                        + "technical guidance, as set out in your agreement.")
+                + button("Open your dashboard", appUrl + "/dashboard?tab=employment")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(user.getEmail(),
+                "Phase 1 approved — your Phase 2 support begins — " + brandName(),
+                wrap("Your Phase 2 support begins", body));
+    }
+
     // ── 3. Document upload reminder (cron-driven) ────────────────────
     /**
-     * Email #3 — nudge for participants stuck at ID_EMAIL_SENT or
-     * ACKNOWLEDGMENT_ACCEPTED without uploading documents. Fired by
-     * the daily document-reminder cron; safe to call repeatedly (the
-     * cron itself rate-limits per user).
+     * Email #3, roadmap "Acknowledgment / Document Upload Reminder"
+     * (checklist 1.5): says what is still to do — the acknowledgment, or
+     * the named required documents — and links straight to that page.
+     * Fired by the daily document-reminder job, which rate-limits.
      */
-    public void sendDocumentReminderEmail(User user) {
+    public boolean sendDocumentReminderEmail(User user, boolean acknowledgmentPending,
+                                             List<String> missingDocuments) {
         String firstName = firstName(user);
+        StringBuilder todo = new StringBuilder();
+        if (acknowledgmentPending) {
+            todo.append(bullet("Accept the program acknowledgment"))
+                .append(bullet("Upload your required documents"));
+        } else {
+            for (String doc : missingDocuments) todo.append(bullet(doc));
+        }
         String body = p("Dear " + escape(firstName) + ",")
                 + p("Your Participant ID (<strong>"
                         + safe(user.getParticipantId())
-                        + "</strong>) has been created. To continue with your "
-                        + "enrollment, please upload your required documents:")
-                + bullet("Government-issued ID")
-                + bullet("Work Authorization / Visa (if applicable)")
-                + bullet("Resume / CV")
-                + button("Upload Documents", appUrl + "/document-upload")
-                + p("If you've already uploaded everything, you can ignore "
-                        + "this reminder — we'll send another only if anything "
-                        + "still looks outstanding.")
+                        + "</strong>) is ready. To continue your enrollment, please "
+                        + (acknowledgmentPending ? "complete these steps:" : "upload these required documents:"))
+                + todo
+                + button(acknowledgmentPending ? "Continue enrollment" : "Upload Documents",
+                        appUrl + (acknowledgmentPending ? "/acknowledgment" : "/document-upload"))
+                + p("If you've already done this, you can ignore this reminder.")
                 + p("Regards,<br/>" + brandName() + "");
-        emailService.sendEmail(user.getEmail(),
+        return emailService.sendEmail(user.getEmail(),
                 "Action needed: Complete your documents — " + brandName() + "",
                 wrap("Document upload reminder", body));
+    }
+
+    // ── 5b. Document review outcome (roadmap step 5) ────────────────
+    /**
+     * Operations sent a document back: an upload was rejected, or a
+     * request to mark a required document "not applicable" was
+     * declined. Says which document and why, and links to the upload
+     * page. The document itself is never attached (sensitive documents
+     * stay in the portal).
+     */
+    public void sendDocumentResubmitEmail(User user, String documentLabel,
+                                          String reason, boolean requestDeclined) {
+        String firstName = firstName(user);
+        String what = requestDeclined
+                ? "Operations reviewed your request to mark your <strong>"
+                        + escape(documentLabel) + "</strong> as not applicable, "
+                        + "and needs you to upload it after all."
+                : "Operations reviewed your <strong>" + escape(documentLabel)
+                        + "</strong> and needs you to upload it again.";
+        String body = p("Dear " + escape(firstName) + ",")
+                + p(what)
+                + p("<strong>Reason:</strong>")
+                + quote(escape(reason))
+                + button("Upload again", appUrl + "/document-upload")
+                + p("Your other documents are not affected.")
+                + p("Regards,<br/>" + brandName() + "");
+        emailService.sendEmail(user.getEmail(),
+                "Action needed: please upload your " + documentLabel + " again — " + brandName(),
+                wrap("Document needs attention", body));
+    }
+
+    /** Operations approved a request to mark a required document "not applicable". */
+    public void sendDocumentExceptionApprovedEmail(User user, String documentLabel) {
+        String firstName = firstName(user);
+        String body = p("Dear " + escape(firstName) + ",")
+                + p("Operations approved your request: your <strong>"
+                        + escape(documentLabel) + "</strong> is marked as not "
+                        + "applicable, so you don't need to upload it.")
+                + p("Once your other required documents are in, you can continue "
+                        + "your enrollment.")
+                + button("Continue enrollment", appUrl + "/document-upload")
+                + p("Regards,<br/>" + brandName() + "");
+        emailService.sendEmail(user.getEmail(),
+                "Your document request was approved — " + brandName(),
+                wrap("Request approved", body));
     }
 
     // ── 6. Check upload confirmation (Phase 3B) ─────────────────────
@@ -294,6 +479,27 @@ public class EmailTemplateService {
                 wrap("Check upload received", body));
     }
 
+    // ── 6b. Check copy rejected by Finance (checklist 2.4) ─────────
+    /**
+     * Finance couldn't accept a check copy: says why and links to a
+     * re-upload. The image is never attached (roadmap §13.1).
+     */
+    public boolean sendCheckRejectedEmail(User user, String maskedNumber, String reason, Long checkId) {
+        String firstName = firstName(user);
+        String body = p("Dear " + escape(firstName) + ",")
+                + p("Our finance team reviewed your check copy"
+                        + (maskedNumber == null ? "" : " (check " + escape(maskedNumber) + ")")
+                        + " and needs you to upload it again.")
+                + p("<strong>Reason:</strong>")
+                + quote(escape(reason))
+                + button("Upload a new copy", appUrl + "/check-upload?replace=" + checkId)
+                + muted("Check images are only ever handled through the secure portal, never by email.")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(user.getEmail(),
+                "Action needed: please upload your check copy again — " + brandName(),
+                wrap("Check copy needs attention", body));
+    }
+
     // ── 11. Coordinator intro (Phase 4 Step 12) ─────────────────────
     /**
      * "Meet your program coordinator" — fired right after the
@@ -301,7 +507,7 @@ public class EmailTemplateService {
      * (program.coordinator.name / program.coordinator.email),
      * defaulting to the values shipped in the PRD spec.
      */
-    public void sendCoordinatorIntroEmail(User user) {
+    public boolean sendCoordinatorIntroEmail(User user) {
         String coordName = coordinatorName == null || coordinatorName.isBlank()
                 ? "Deepthi" : coordinatorName;
         String body = p("Dear " + escape(user.getFullName() == null ? "there" : user.getFullName()) + ",")
@@ -315,14 +521,14 @@ public class EmailTemplateService {
                 + p("Best regards,<br/>"
                         + escape(coordName) + "<br/>"
                         + "<span style=\"color:#6b7280;\">Program Coordinator, " + brandName() + "</span>");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 user.getEmail(),
                 "Meet your program coordinator — " + brandName() + "",
                 wrap("Meet " + escape(coordName), body));
     }
 
     // ── 12. ERM intro — participant copy (Phase 4 Step 13) ─────────
-    public void sendErmIntroEmail(User user, com.spire.backend.entity.User erm) {
+    public boolean sendErmIntroEmail(User user, com.spire.backend.entity.User erm) {
         String ermName = erm == null || erm.getFullName() == null
                 ? "Your ERM" : erm.getFullName();
         String ermEmail = erm == null ? "" : safe(erm.getEmail());
@@ -338,17 +544,74 @@ public class EmailTemplateService {
                 + p("You can reach " + escape(ermName) + " via email or through your dashboard "
                         + "once it's ready.")
                 + p("Regards,<br/>" + brandName() + "");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 user.getEmail(),
                 "Your relationship manager — " + brandName() + "",
                 wrap("Meet your ERM", body));
     }
 
+    // ── 10. Signed agreement to the ERM (roadmap step 10) ───────────
+    /**
+     * Checklist 2.3: tells the ERM a participant's agreement is signed and
+     * waiting for their review. A secure link only: the agreement opens in
+     * the ERM dashboard after sign-in, never as an email attachment.
+     */
+    public boolean sendSignedAgreementToErmEmail(User erm, User participant,
+                                                 String programSummary, String signedOn) {
+        if (erm == null || erm.getEmail() == null) return false;
+        String url = appUrl + "/erm-dashboard?participant=" + participant.getId();
+        String body = p("Hi " + escape(firstName(erm)) + ",")
+                + p("<strong>" + escape(safe(participant.getFullName())) + "</strong> has signed their "
+                        + brandName() + " agreement. Please review it and confirm the participant is "
+                        + "ready for onboarding.")
+                + receipt(
+                        "Participant: " + safe(participant.getFullName()),
+                        "Participant ID: " + safe(participant.getParticipantId()),
+                        "Program: " + safe(programSummary),
+                        "Signed: " + safe(signedOn))
+                + button("Review the signed agreement", url)
+                + ctaFallback(url)
+                + muted("The agreement opens in your ERM dashboard after you sign in; it is never sent as an attachment.")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(erm.getEmail(),
+                "Signed agreement ready for review: " + safe(participant.getFullName())
+                        + " (" + safe(participant.getParticipantId()) + ")",
+                wrap("Signed agreement ready for review", body));
+    }
+
+    // ── 14b. Coach — new participant (checklist 3.2) ─────────────────
+    /**
+     * Tells a coach about their new participant: the slot they fill and
+     * the program facts they need (roadmap §13: no identity documents, SSN
+     * or finance data for coaches).
+     */
+    public boolean sendCoachNewParticipantEmail(User coach, User participant, String slotLabel,
+                                                com.spire.backend.entity.ProgramSelection program) {
+        if (coach == null || coach.getEmail() == null) return false;
+        String url = appUrl + "/coach-dashboard";
+        String body = p("Hi " + escape(firstName(coach)) + ",")
+                + p("You're the <strong>" + escape(safe(slotLabel)) + "</strong> for a new participant.")
+                + receipt(
+                        "Participant: " + safe(participant.getFullName()),
+                        "Participant ID: " + safe(participant.getParticipantId()),
+                        "Program: " + safe(program == null ? null : program.getProgram())
+                                + (program != null && program.getPhase() != null ? " · " + program.getPhase() : ""),
+                        "Skillset: " + safe(program == null ? participant.getSelectedTechnology() : program.getSkillset()),
+                        "Target role: " + safe(program == null ? null : program.getTargetJobTitle()),
+                        "Availability: " + safe(program == null ? participant.getAvailability() : program.getAvailability()))
+                + button("Open your coach dashboard", url)
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(coach.getEmail(),
+                "New participant: " + safe(participant.getFullName()) + " (" + safe(participant.getParticipantId())
+                        + ") — " + safe(slotLabel),
+                wrap("New participant assigned", body));
+    }
+
     // ── 12b. ERM intro — ERM-side notification ──────────────────────
-    public void sendErmAssignmentNotification(com.spire.backend.entity.User erm,
+    public boolean sendErmAssignmentNotification(com.spire.backend.entity.User erm,
                                               User participant,
                                               com.spire.backend.entity.ProgramSelection program) {
-        if (erm == null || erm.getEmail() == null) return;
+        if (erm == null || erm.getEmail() == null) return false;
         String programStr = program == null ? "—" : safe(program.getProgram());
         String phaseStr = program == null ? "—" : safe(program.getPhase());
         String tech = program != null && program.getSkillset() != null
@@ -368,7 +631,7 @@ public class EmailTemplateService {
                 )
                 + p("Please review their profile and prepare for onboarding.")
                 + muted("— " + brandName() + " operations");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 erm.getEmail(),
                 "New participant assigned: " + safe(participant.getFullName())
                         + " (" + safe(participant.getParticipantId()) + ")",
@@ -382,7 +645,7 @@ public class EmailTemplateService {
      * Advisor", …) → coach display name. Roles with no available
      * assignee can pass through with value "Awaiting assignment".
      */
-    public void sendCoachAssignmentEmail(User user, java.util.Map<String, String> coachesByRole) {
+    public boolean sendCoachAssignmentEmail(User user, java.util.Map<String, String> coachesByRole) {
         StringBuilder rows = new StringBuilder();
         if (coachesByRole != null) {
             for (java.util.Map.Entry<String, String> e : coachesByRole.entrySet()) {
@@ -397,7 +660,7 @@ public class EmailTemplateService {
                         + "team contacts in your dashboard.")
                 + button("Enter Your Dashboard", appUrl + "/dashboard")
                 + p("Regards,<br/>" + brandName() + "");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 user.getEmail(),
                 "Your coaching team — " + brandName() + "",
                 wrap("Your coaching team", body));
@@ -475,7 +738,7 @@ public class EmailTemplateService {
      * minted a SIT-2026-XXXXX participant ID. Confirms the ID to the
      * user and routes them to the next onboarding step.
      */
-    public void sendParticipantIdEmail(User user, String participantId) {
+    public boolean sendParticipantIdEmail(User user, String participantId) {
         String greeting = user.getFullName() == null || user.getFullName().isBlank()
                 ? "there" : user.getFullName();
         String idBlock =
@@ -495,7 +758,7 @@ public class EmailTemplateService {
                 + p("Your next step: Complete the acknowledgment and upload your required documents.")
                 + button("Continue to Next Step", appUrl + "/participant-id")
                 + p("Regards,<br/>" + brandName() + "");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 user.getEmail(),
                 "Your " + brandName() + " Participant ID: " + participantId,
                 wrap("Welcome to " + brandName() + "", body));
@@ -718,7 +981,7 @@ public class EmailTemplateService {
      * password is supplied by the caller because it is only known at create /
      * reset time — it is hashed in storage and can never be re-derived.
      */
-    public void sendAgreementUserCredentials(
+    public boolean sendAgreementUserCredentials(
             String email, String fullName, String tempPassword) {
         String loginUrl = appUrl + "/agreements/login";
         String name = (fullName == null || fullName.isBlank()) ? "there" : fullName.trim();
@@ -732,7 +995,7 @@ public class EmailTemplateService {
                 + muted("This is a temporary password — please contact your "
                         + "administrator if you need it changed. If you weren't "
                         + "expecting this email, you can safely ignore it.");
-        emailService.sendEmailFrom(
+        return emailService.sendEmailFrom(
                 brandConfig.getNoreplyEmail(),
                 email,
                 "Your " + brandName() + " console sign-in details",
@@ -775,8 +1038,8 @@ public class EmailTemplateService {
      * the application, so this email points them at the detail page
      * with the consultant's reason highlighted.
      */
-    public void sendConsultantRevisionRequested(ConsultantApplication application) {
-        if (!ermEmail(application).isPresent()) return;
+    public boolean sendConsultantRevisionRequested(ConsultantApplication application) {
+        if (!ermEmail(application).isPresent()) return false;
         String url = appUrl + "/agreement-erm/" + application.getApplicationId();
         String reason = application.getRevisionNotes() == null
                 || application.getRevisionNotes().isBlank()
@@ -794,7 +1057,7 @@ public class EmailTemplateService {
                         "Email: " + application.getConsultantEmail())
                 + muted("Edit the details from the link above and the consultant "
                         + "will be re-notified automatically.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 ermEmail(application).get(),
                 "Consultant requested revisions — Application " + application.getApplicationId(),
                 wrap("Revision requested", body));
@@ -805,7 +1068,7 @@ public class EmailTemplateService {
      * following a {@code REVISION_REQUESTED} off-ramp. Tells them to
      * re-review and decide whether to verify or push back again.
      */
-    public void sendConsultantApplicationUpdated(ConsultantApplication application) {
+    public boolean sendConsultantApplicationUpdated(ConsultantApplication application) {
         String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has updated your engagement details based on "
@@ -816,7 +1079,7 @@ public class EmailTemplateService {
                         "Application ID: " + application.getApplicationId(),
                         "Link expires: 7 days from issue")
                 + muted("If you didn't expect this, please ignore.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Updated for your review — " + brandName() + " engagement",
                 wrap("Details updated", body));
@@ -827,8 +1090,8 @@ public class EmailTemplateService {
      * Cloudinary-hosted signed PDF link. No attachment -- the URL
      * already gates by Cloudinary's authenticated delivery.
      */
-    public void sendConsultantApplicationSigned(ConsultantApplication application) {
-        if (!ermEmail(application).isPresent()) return;
+    public boolean sendConsultantApplicationSigned(ConsultantApplication application) {
+        if (!ermEmail(application).isPresent()) return false;
         String pdf = application.getSignedPdfUrl();
         String dashboard = appUrl + "/agreement-erm/"
                 + application.getApplicationId();
@@ -848,7 +1111,7 @@ public class EmailTemplateService {
                         : button("Download signed PDF", pdf) + ctaFallback(pdf))
                 + secondaryButton("Open application", dashboard)
                 + ctaFallback(dashboard);
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 ermEmail(application).get(),
                 "Signed agreement received from "
                         + safeName(application),
@@ -859,7 +1122,7 @@ public class EmailTemplateService {
      * Sent to the consultant. Triggered automatically right after
      * signing and again on request (the /done page exposes a button).
      */
-    public void sendConsultantApplicationCopy(ConsultantApplication application) {
+    public boolean sendConsultantApplicationCopy(ConsultantApplication application) {
         // Build O — no download link. The signed PDF is held in Sage IT's
         // records and is not sent over email (mirrors the completed-agreement
         // policy); the consultant is simply confirmed.
@@ -873,7 +1136,7 @@ public class EmailTemplateService {
                                 ? "--"
                                 : application.getSignedAt().toString()))
                 + muted("Keep this email for your records.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Your signed " + brandName() + " engagement agreement",
                 wrap("Your signed agreement", body));
@@ -891,7 +1154,7 @@ public class EmailTemplateService {
      * on the new workflow -- the consultant lands on /fill (the new
      * appendix-driven form) instead of /review.
      */
-    public void sendConsultantInitialFill(ConsultantApplication application) {
+    public boolean sendConsultantInitialFill(ConsultantApplication application) {
         String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         // Build O — ERM-authored pre-text becomes the intro; blank → the
         // default copy. Escaped (HTML-safe) with newlines kept as breaks.
@@ -910,7 +1173,7 @@ public class EmailTemplateService {
                         "Link expires: 7 days from issue")
                 + muted("Your responses are saved as you go -- you can "
                         + "close the tab and pick up where you left off.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Action Required: Complete Your " + brandName() + " Agreement",
                 wrap("Complete your agreement", body));
@@ -976,12 +1239,12 @@ public class EmailTemplateService {
      * confirms the agreement is verified and that we'll reach out if a
      * revision is needed.
      */
-    public void sendConsultantVersionReleased(ConsultantApplication application) {
+    public boolean sendConsultantVersionReleased(ConsultantApplication application) {
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p("Your " + brandName() + " consultant agreement is verified — "
                         + "you'll be notified if any revision is needed.")
                 + receipt("Application ID: " + application.getApplicationId());
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Your " + brandName() + " consultant agreement is verified",
                 wrap("Your agreement is verified", body));
@@ -993,7 +1256,7 @@ public class EmailTemplateService {
      * ERM's remarks in a styled blockquote so the consultant knows
      * exactly what to fix.
      */
-    public void sendConsultantRevisionRequest(
+    public boolean sendConsultantRevisionRequest(
             ConsultantApplication application, String remarks) {
         String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String safeRemarks = remarks == null || remarks.isBlank()
@@ -1010,7 +1273,7 @@ public class EmailTemplateService {
                         "Your saved fields remain in place")
                 + muted("Re-open the link, update the highlighted sections, "
                         + "and submit again.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Revision Requested for Your " + brandName() + " Agreement",
                 wrap("Revision requested", body));
@@ -1028,7 +1291,7 @@ public class EmailTemplateService {
      * ({@code CONSULTANT_ACTED_REASON}). If that guard is ever loosened, this
      * wording stops being true and has to change with it.
      */
-    public void sendConsultantRevisionWithdrawn(ConsultantApplication application) {
+    public boolean sendConsultantRevisionWithdrawn(ConsultantApplication application) {
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p("The change request we sent you for your " + brandName()
                         + " agreement has been withdrawn — it was sent in error. "
@@ -1038,7 +1301,7 @@ public class EmailTemplateService {
                         + " exactly as you submitted it. We'll be in touch if "
                         + "anything genuinely needs changing.")
                 + receipt("Application ID: " + application.getApplicationId());
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Please ignore: change request withdrawn for your "
                         + brandName() + " agreement",
@@ -1053,7 +1316,7 @@ public class EmailTemplateService {
      * has been reopened for Phase 2, points back to the portal, and
      * notes that everything they previously filled is still in place.
      */
-    public void sendConsultantPhase2Notification(ConsultantApplication application) {
+    public boolean sendConsultantPhase2Notification(ConsultantApplication application) {
         String url = appUrl + "/consultant/" + application.getApplicationId() + "/login";
         String body = p("Hi " + escape(firstName(application)) + ",")
                 + p(brandName() + " has advanced your engagement agreement "
@@ -1070,7 +1333,7 @@ public class EmailTemplateService {
                 + muted("Re-open the link, complete the remaining sections, "
                         + "and submit again. There is no PDF attached -- "
                         + "Sage IT's records carry the agreement.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Phase 2 -- please complete the remaining sections of your "
                         + brandName() + " agreement",
@@ -1082,7 +1345,7 @@ public class EmailTemplateService {
      * submits. Links to the agreement-erm detail page so the operator
      * can approve-and-sign or send-back-for-revision in one click.
      */
-    public void sendErmReviewNotification(ConsultantApplication application) {
+    public boolean sendErmReviewNotification(ConsultantApplication application) {
         String url = appUrl + "/agreement-erm/" + application.getApplicationId();
         String body = p("Hi,")
                 + p(escape(safeName(application)) + " has signed and submitted "
@@ -1100,7 +1363,7 @@ public class EmailTemplateService {
         String recipient = resolveErmNotificationRecipient(application);
         log.info("ERM review notification for {} routed to {}",
                 application.getApplicationId(), recipient);
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 recipient,
                 "Consultant Agreement Ready for Review: " + safeName(application),
                 wrap("Ready for your review", body));
@@ -1141,11 +1404,11 @@ public class EmailTemplateService {
      * attachments=0. {@link ConsultantApplicationService#ermApproveAndSign}
      * always takes this path.
      */
-    public void sendCompletedAgreementToParties(
+    public boolean sendCompletedAgreementToParties(
             ConsultantApplication application, byte[] pdfBytes) {
         List<EmailService.Attachment> attachments =
                 buildPdfAttachmentFromBytes(pdfBytes, application);
-        sendCompletedAgreementBody(application, attachments);
+        return sendCompletedAgreementBody(application, attachments);
     }
 
     /**
@@ -1154,14 +1417,14 @@ public class EmailTemplateService {
      * Cloudinary via a freshly-signed URL -- avoid where possible
      * since signed URL fetches have been observed to 401 in prod.
      */
-    public void sendCompletedAgreementToParties(ConsultantApplication application) {
+    public boolean sendCompletedAgreementToParties(ConsultantApplication application) {
         String pdfUrl = resolveFinalPdfFetchUrl(application);
         List<EmailService.Attachment> attachments = buildPdfAttachment(
                 pdfUrl, application);
-        sendCompletedAgreementBody(application, attachments);
+        return sendCompletedAgreementBody(application, attachments);
     }
 
-    private void sendCompletedAgreementBody(
+    private boolean sendCompletedAgreementBody(
             ConsultantApplication application,
             List<EmailService.Attachment> attachments) {
         // Build K — separate sends. The ERM gets the PDF attachment as
@@ -1185,7 +1448,7 @@ public class EmailTemplateService {
                         + "without an attachment per policy.");
         String ermSubject = "Signed " + brandName() + " Agreement -- "
                 + safeName(application);
-        emailService.sendEmail(
+        boolean ermSent = emailService.sendEmail(
                 agreementErmEmail, ermSubject,
                 wrap("Signed agreement (internal)", ermBody),
                 attachments);
@@ -1200,10 +1463,11 @@ public class EmailTemplateService {
                 + ctaFallback(url)
                 + muted("For your security, the signed PDF is held in Sage IT's "
                         + "records and is not sent over email.");
-        emailService.sendEmail(
+        boolean consultantSent = emailService.sendEmail(
                 application.getConsultantEmail(),
                 "Your " + brandName() + " Agreement has been accepted",
                 wrap("Agreement accepted", consultantBody));
+        return ermSent && consultantSent;
     }
 
     /**
@@ -1211,7 +1475,7 @@ public class EmailTemplateService {
      * an optional operator note. Used for forwarding to legal,
      * payroll, the end client, etc.
      */
-    public void sendAgreementToCustomRecipient(
+    public boolean sendAgreementToCustomRecipient(
             ConsultantApplication application,
             String recipientEmail,
             String note) {
@@ -1228,7 +1492,7 @@ public class EmailTemplateService {
                         "Application ID: " + application.getApplicationId())
                 + muted("Forwarded from the " + brandName()
                         + " agreement console.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 recipientEmail,
                 brandName() + " Agreement: " + safeName(application),
                 wrap("Signed agreement", body),
@@ -1314,10 +1578,7 @@ public class EmailTemplateService {
     }
 
     private static String firstName(ConsultantApplication application) {
-        String name = application.getConsultantName();
-        if (name == null || name.isBlank()) return "there";
-        String[] parts = name.trim().split("\\s+");
-        return parts.length == 0 ? "there" : parts[0];
+        return PersonNames.firstWordForEmail(application.getConsultantName());
     }
 
     private java.util.Optional<String> ermEmail(ConsultantApplication application) {
@@ -1329,21 +1590,21 @@ public class EmailTemplateService {
     public void sendPaymentReceiptEmail(
             User user, Course course, BigDecimal amount, String paymentId
     ) {
-        String date = java.time.LocalDateTime.now(IST).format(DATE_FMT);
+        String date = usDateTime(java.time.LocalDateTime.now());
         String courseUrl = appUrl + "/courses/" + course.getId();
         String body = p("Hi " + firstName(user) + ",")
                 + p("Your payment has been processed successfully.")
                 + receipt(
                         "Course: " + course.getTitle(),
-                        "Amount: ₹" + (amount == null ? "—" : amount.toPlainString()),
-                        "Date: " + date + " IST",
+                        "Amount: " + Money.usd(amount),
+                        "Date: " + date,
                         "Payment ID: " + (paymentId == null ? "—" : paymentId)
                 )
                 + button("Go to Course", courseUrl)
                 + muted("This email is your receipt. Save it for your records.");
         emailService.sendEmail(
                 user.getEmail(),
-                "Payment confirmed — ₹" + (amount == null ? "0" : amount.toPlainString()),
+                "Payment confirmed — " + Money.usd(amount == null ? java.math.BigDecimal.ZERO : amount),
                 wrap("Payment confirmed", body)
         );
     }
@@ -1355,7 +1616,7 @@ public class EmailTemplateService {
         String courseUrl = appUrl + "/courses/" + course.getId();
         String mentorLine = mentorName == null || mentorName.isBlank()
                 ? "Your mentor will be assigned shortly"
-                : "Your mentor: " + mentorName;
+                : "Your mentor: " + escape(mentorName);
         String body = p("Hi " + firstName(user) + ",")
                 + p("You've been enrolled in <strong>" + escape(course.getTitle()) + "</strong>.")
                 + p("Here's what's waiting for you:")
@@ -1419,8 +1680,10 @@ public class EmailTemplateService {
     // ── 8. Session scheduled ────────────────────────────────────────
     public void sendSessionScheduledEmail(User student, SessionRequest session) {
         if (session.getScheduledAt() == null) return;
-        String date = session.getScheduledAt().format(DATE_ONLY_FMT);
-        String time = session.getScheduledAt().format(TIME_ONLY_FMT);
+        // Checklist 5.3: in business time (US Central), with its zone.
+        java.time.ZonedDateTime at = BusinessTime.of(session.getScheduledAt(), businessZoneId);
+        String date = at.format(US_DATE);
+        String time = at.format(java.time.format.DateTimeFormatter.ofPattern("h:mm a z", Locale.US));
         // SessionRequest -> MentorAssignment -> {Enrollment, mentor User}
         // Pull through both legs; mentor can be null while a pool slot
         // is still pending, but at the point we're emailing a scheduled
@@ -1435,7 +1698,7 @@ public class EmailTemplateService {
                 + p("Your session has been scheduled:")
                 + receipt(
                         "Date: " + date,
-                        "Time: " + time + " IST",
+                        "Time: " + time,
                         "Mentor: " + mentorName,
                         "Course: " + courseTitle,
                         "Topic: " + topic
@@ -1444,18 +1707,18 @@ public class EmailTemplateService {
                 + muted("Add this to your calendar. Your mentor will be waiting.");
         emailService.sendEmail(
                 student.getEmail(),
-                "Session scheduled — " + date + " at " + time + " IST",
+                "Session scheduled — " + date + " at " + time,
                 wrap("Session confirmed", body)
         );
     }
 
     // ── 9. Inactive nudge (7-day) ───────────────────────────────────
-    public void sendInactiveNudgeEmail(
+    public boolean sendInactiveNudgeEmail(
             User user, String courseTitle, int progressPercent, String mentorName, String lessonUrl
     ) {
         String mentorLine = mentorName == null || mentorName.isBlank()
                 ? "Your mentor is still here to help."
-                : "Your mentor " + mentorName + " is still here to help.";
+                : "Your mentor " + escape(mentorName) + " is still here to help.";
         String body = p("Hi " + firstName(user) + ",")
                 + p("It's been a while since you visited " + brandName() + ".")
                 + p("You were making great progress on <strong>" + escape(courseTitle)
@@ -1463,7 +1726,7 @@ public class EmailTemplateService {
                 + p(mentorLine)
                 + button("Continue Learning", lessonUrl)
                 + muted("Small steps count. Even 15 minutes today can make a difference.");
-        emailService.sendEmail(
+        return emailService.sendEmail(
                 user.getEmail(),
                 "We miss you, " + firstName(user) + "!",
                 wrap("Pick up where you left off", body)
@@ -1516,11 +1779,11 @@ public class EmailTemplateService {
         String startDate = emp == null || emp.getStartDate() == null
                 ? "—" : emp.getStartDate().toString();
         String completionDate = acceptedAt == null
-                ? "" : acceptedAt.atZone(IST).format(DATE_FMT) + " IST";
+                ? "" : usDateTime(acceptedAt);
 
         // ── Participant ─────────────────────────────────────────
         try {
-            String body = p("Dear " + fullName + ",")
+            String body = p("Dear " + escape(fullName) + ",")
                     + p("Congratulations! Your Phase 1 pre-employment readiness "
                             + "program is now complete.")
                     + receipt(
@@ -1540,8 +1803,8 @@ public class EmailTemplateService {
         // ── ERM ─────────────────────────────────────────────────
         if (erm != null && erm.getEmail() != null && !erm.getEmail().isBlank()) {
             try {
-                String body = p("Phase 1 completed for " + fullName
-                                + " (" + participantId + ").")
+                String body = p("Phase 1 completed for " + escape(fullName)
+                                + " (" + escape(participantId) + ").")
                         + receipt(
                                 "Employer: " + employer,
                                 "Job title: " + jobTitle,
@@ -1560,8 +1823,8 @@ public class EmailTemplateService {
         // ── Finance ─────────────────────────────────────────────
         if (financeEmail != null && !financeEmail.isBlank()) {
             try {
-                String body = p("Phase 1 completed for " + fullName
-                                + " (" + participantId + ").")
+                String body = p("Phase 1 completed for " + escape(fullName)
+                                + " (" + escape(participantId) + ").")
                         + receipt(
                                 "Employer: " + employer,
                                 "Job title: " + jobTitle,
@@ -1579,6 +1842,45 @@ public class EmailTemplateService {
     }
 
     // ── 14. Payment plan + invoice notices (Phase 7) ────────────────
+    // Checklist 5.3: amounts in US dollars, dates and times in US Central.
+
+    /** One schedule line per instalment: "Installment 1 of 3 — Oct 1, 2026 — $1,000.00". */
+    private static String scheduleLines(java.util.List<PaymentService.ScheduleItem> schedule) {
+        StringBuilder rows = new StringBuilder();
+        int idx = 1;
+        for (PaymentService.ScheduleItem item : schedule) {
+            rows.append("Installment ").append(idx++).append(": ")
+                .append(usDate(item.dueDate())).append(" — ").append(Money.usd(item.amount())).append("\n");
+        }
+        return "<pre style=\"background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:12px;line-height:1.7;\">"
+                + escape(rows.toString()) + "</pre>";
+    }
+
+    /**
+     * Checklist 5.1: Finance created (or changed) the participant's payment
+     * plan; they review and accept it on their dashboard.
+     */
+    public boolean sendPaymentPlanReadyEmail(
+            com.spire.backend.entity.User user,
+            com.spire.backend.entity.PaymentPlan plan,
+            java.util.List<PaymentService.ScheduleItem> schedule,
+            boolean changed) {
+        String body = p("Dear " + escape(firstName(user)) + ",")
+                + p(changed
+                        ? "Your payment plan has been updated. Please review the new schedule and accept it."
+                        : "Your payment plan is ready. Please review the schedule and accept it.")
+                + receipt(
+                        "Plan ID: " + safe(plan.getPlanId()),
+                        "Total amount: " + Money.usd(plan.getTotalAmount()),
+                        "Installments: " + plan.getInstallments())
+                + p("<strong>Schedule</strong>")
+                + scheduleLines(schedule)
+                + button("Review and accept your plan", appUrl + "/dashboard?tab=payments")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(user.getEmail(),
+                (changed ? "Your payment plan was updated" : "Your payment plan is ready") + " — " + brandName(),
+                wrap(changed ? "Payment plan updated" : "Payment plan ready", body));
+    }
 
     /**
      * Email #14a — payment plan accepted confirmation.
@@ -1589,29 +1891,19 @@ public class EmailTemplateService {
             com.spire.backend.entity.PaymentPlan plan,
             java.util.List<PaymentService.ScheduleItem> schedule) {
         String firstName = firstName(user);
-        StringBuilder rows = new StringBuilder();
-        int idx = 1;
-        for (PaymentService.ScheduleItem item : schedule) {
-            rows.append("Installment ").append(idx++)
-                .append(": ").append(item.dueDate() == null ? "—" : item.dueDate().toString())
-                .append(" — ").append(item.amount() == null ? "0" : item.amount().toPlainString())
-                .append("\n");
-        }
         String body = p("Dear " + escape(firstName) + ",")
                 + p("Your payment plan has been confirmed. Here's a summary "
                         + "of what to expect.")
                 + receipt(
                         "Plan ID: " + safe(plan.getPlanId()),
-                        "Total amount: " + (plan.getTotalAmount() == null ? "—" : plan.getTotalAmount().toPlainString()),
+                        "Total amount: " + Money.usd(plan.getTotalAmount()),
                         "Installments: " + plan.getInstallments(),
-                        "Accepted: " + (plan.getAcceptedAt() == null ? "—"
-                                : plan.getAcceptedAt().atZone(IST).format(DATE_FMT) + " IST"))
+                        "Accepted: " + usDateTime(plan.getAcceptedAt()))
                 + p("<strong>Schedule</strong>")
-                + "<pre style=\"background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:10px;font-size:12px;line-height:1.7;\">"
-                + escape(rows.toString()) + "</pre>"
+                + scheduleLines(schedule)
                 + p("Invoices will be issued per the schedule above. You can view "
                         + "your payment status from your dashboard at any time.")
-                + button("Open your dashboard", appUrl + "/dashboard")
+                + button("Open your dashboard", appUrl + "/dashboard?tab=payments")
                 + p("Regards,<br/>" + brandName() + "");
         try {
             emailService.sendEmail(user.getEmail(),
@@ -1636,17 +1928,17 @@ public class EmailTemplateService {
             com.spire.backend.entity.User user,
             com.spire.backend.entity.Invoice invoice) {
         String firstName = firstName(user);
-        String amount = invoice.getAmount() == null ? "—" : invoice.getAmount().toPlainString();
-        String dueDate = invoice.getDueDate() == null ? "—" : invoice.getDueDate().toString();
+        String amount = Money.usd(invoice.getAmount());
+        String dueDate = usDate(invoice.getDueDate());
         String body = p("Dear " + escape(firstName) + ",")
                 + p("A new invoice has been issued on your account.")
                 + receipt(
                         "Invoice: " + safe(invoice.getInvoiceNumber()),
                         "Amount: " + amount,
-                        "Issued: " + (invoice.getIssueDate() == null ? "—" : invoice.getIssueDate().toString()),
+                        "Issued: " + usDate(invoice.getIssueDate()),
                         "Due: " + dueDate)
-                + p("You can view and download the invoice from your dashboard.")
-                + button("Open your dashboard", appUrl + "/dashboard")
+                + p("You can view and download the invoice (PDF) from your dashboard.")
+                + button("Open your invoices", appUrl + "/dashboard?tab=payments")
                 + p("If you've already made this payment, no action is required — "
                         + "your record will update once finance confirms receipt.")
                 + p("Regards,<br/>" + brandName() + "");
@@ -1664,18 +1956,17 @@ public class EmailTemplateService {
             com.spire.backend.entity.Invoice invoice,
             com.spire.backend.entity.PaymentLedger ledger) {
         String firstName = firstName(user);
-        String received = ledger.getAmountReceived() == null ? "—" : ledger.getAmountReceived().toPlainString();
-        String balance = invoice.getBalance() == null ? "0" : invoice.getBalance().toPlainString();
         String body = p("Dear " + escape(firstName) + ",")
                 + p("We've received your payment. Thank you.")
                 + receipt(
                         "Invoice: " + safe(invoice.getInvoiceNumber()),
-                        "Amount received: " + received,
-                        "Method: " + safe(ledger.getMethod()),
-                        "Receipt date: " + (ledger.getReceiptDate() == null ? "—" : ledger.getReceiptDate().toString()),
-                        "Remaining balance: " + balance)
+                        "Amount received: " + Money.usd(ledger.getAmountReceived()),
+                        "Method: " + methodLabel(ledger.getMethod()),
+                        "Receipt date: " + usDate(ledger.getReceiptDate()),
+                        "Remaining balance: " + Money.usd(invoice.getBalance() == null
+                                ? java.math.BigDecimal.ZERO : invoice.getBalance()))
                 + p("Your dashboard reflects the updated status.")
-                + button("Open your dashboard", appUrl + "/dashboard")
+                + button("Open your dashboard", appUrl + "/dashboard?tab=payments")
                 + p("Regards,<br/>" + brandName() + "");
         try {
             emailService.sendEmail(user.getEmail(),
@@ -1684,29 +1975,94 @@ public class EmailTemplateService {
         } catch (Exception ignored) {}
     }
 
+    /**
+     * Checklist 5.2: a payment didn't go through, or one we'd recorded was
+     * reversed (e.g. a bounced check). The invoice balance is shown.
+     */
+    public boolean sendPaymentProblemEmail(
+            com.spire.backend.entity.User user,
+            com.spire.backend.entity.Invoice invoice,
+            java.math.BigDecimal amount,
+            String reason,
+            boolean reversed) {
+        String body = p("Dear " + escape(firstName(user)) + ",")
+                + p(reversed
+                        ? "A payment we had recorded on your invoice was reversed, so it's back on your balance."
+                        : "A payment on your invoice didn't go through.")
+                + receipt(
+                        "Invoice: " + safe(invoice.getInvoiceNumber()),
+                        "Amount: " + Money.usd(amount),
+                        "Balance now: " + Money.usd(invoice.getBalance()),
+                        "Due: " + usDate(invoice.getDueDate()))
+                + (reason == null || reason.isBlank() ? "" : p("<strong>Reason:</strong>") + quote(escape(reason)))
+                + p("Please arrange the payment again, or reply to this email if you think this is a mistake.")
+                + button("Open your invoices", appUrl + "/dashboard?tab=payments")
+                + p("Regards,<br/>" + brandName() + "");
+        return emailService.sendEmail(user.getEmail(),
+                (reversed ? "A payment was reversed" : "A payment didn't go through")
+                        + " — Invoice " + safe(invoice.getInvoiceNumber()),
+                wrap(reversed ? "Payment reversed" : "Payment not completed", body));
+    }
+
     /** Email #14d — overdue payment reminder. */
     public void sendInvoiceOverdueEmail(
             com.spire.backend.entity.User user,
             com.spire.backend.entity.Invoice invoice) {
         String firstName = firstName(user);
-        String amount = invoice.getAmount() == null ? "—" : invoice.getAmount().toPlainString();
-        String dueDate = invoice.getDueDate() == null ? "—" : invoice.getDueDate().toString();
+        java.math.BigDecimal balance = invoice.getBalance() == null ? invoice.getAmount() : invoice.getBalance();
+        boolean partPaid = invoice.getAmount() != null && balance != null && balance.compareTo(invoice.getAmount()) < 0;
         String body = p("Dear " + escape(firstName) + ",")
                 + p("This is a reminder that the following invoice is past due.")
                 + receipt(
                         "Invoice: " + safe(invoice.getInvoiceNumber()),
-                        "Amount: " + amount,
-                        "Original due date: " + dueDate)
+                        "Amount: " + Money.usd(invoice.getAmount()),
+                        (partPaid ? "Still to pay: " : "Balance: ") + Money.usd(balance),
+                        "Original due date: " + usDate(invoice.getDueDate()))
                 + p("Please reach out to finance if there's anything we should know "
                         + "about your payment. If you've already paid, your record "
                         + "will update once we confirm receipt.")
-                + button("Open your dashboard", appUrl + "/dashboard")
+                + button("Open your invoices", appUrl + "/dashboard?tab=payments")
                 + p("Regards,<br/>" + brandName() + "");
         try {
             emailService.sendEmail(user.getEmail(),
                     "Payment reminder — Invoice " + safe(invoice.getInvoiceNumber()) + " overdue",
                     wrap("Invoice overdue", body));
         } catch (Exception ignored) {}
+    }
+
+    private static final DateTimeFormatter US_DATE =
+            DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.US);
+    private static final DateTimeFormatter US_DATE_TIME =
+            DateTimeFormatter.ofPattern("MMM d, yyyy, h:mm a z", Locale.US);
+
+    @Value("${app.business-zone:America/Chicago}")
+    private String businessZoneId;
+
+    /** Checklist 5.3: "Oct 1, 2026". */
+    static String usDate(java.time.LocalDate date) {
+        return date == null ? "—" : date.format(US_DATE);
+    }
+
+    /**
+     * Checklist 5.3: a stored time (the server's clock, UTC in production)
+     * shown in US Central time: "Sep 25, 2026, 9:12 AM CDT".
+     */
+    private String usDateTime(java.time.LocalDateTime time) {
+        if (time == null) return "—";
+        ZoneId zone = ZoneId.of(businessZoneId == null || businessZoneId.isBlank() ? "America/Chicago" : businessZoneId);
+        return time.atZone(ZoneId.systemDefault()).withZoneSameInstant(zone).format(US_DATE_TIME);
+    }
+
+    private static String methodLabel(String method) {
+        if (method == null) return "—";
+        return switch (method) {
+            case "CHEQUE" -> "Check";
+            case "BANK_TRANSFER" -> "Bank transfer";
+            case "CARD" -> "Card";
+            case "CASH" -> "Cash";
+            case "ONLINE" -> "Online payment";
+            default -> method;
+        };
     }
 
     // ───────────────────────────────────────────────────────────────
@@ -1847,12 +2203,9 @@ public class EmailTemplateService {
                 + text + "</p></div>";
     }
 
+    /** Name characters only (no markup or links), so it is safe in HTML and subjects. */
     private static String firstName(User user) {
-        if (user == null || user.getFullName() == null) return "there";
-        String name = user.getFullName().trim();
-        if (name.isEmpty()) return "there";
-        int sp = name.indexOf(' ');
-        return sp > 0 ? name.substring(0, sp) : name;
+        return user == null ? "there" : PersonNames.firstWordForEmail(user.getFullName());
     }
 
     /**

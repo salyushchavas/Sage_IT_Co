@@ -46,7 +46,8 @@ public class CorsConfig {
         // It must be listed here: this CorsConfiguration SETS the
         // Access-Control-Expose-Headers response header, so a controller that
         // adds its own copy is overridden and the browser hides the header.
-        config.setExposedHeaders(List.of("Authorization", "Content-Type", "X-Preview-Error"));
+        // Content-Disposition carries a download's file name (invoice, agreement).
+        config.setExposedHeaders(List.of("Authorization", "Content-Type", "Content-Disposition", "X-Preview-Error"));
         config.setAllowCredentials(true);
         config.setMaxAge(3600L);
 

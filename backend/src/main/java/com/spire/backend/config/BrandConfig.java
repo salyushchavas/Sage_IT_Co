@@ -54,7 +54,7 @@ public class BrandConfig {
     @Value("${brand.postal-code:}")
     private String postalCode;
 
-    @Value("${brand.country:India}")
+    @Value("${brand.country:United States}")
     private String country;
 
     @Value("${brand.website:https://sageitco.com}")

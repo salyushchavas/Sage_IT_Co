@@ -57,10 +57,21 @@ public class ErmAssignmentService {
                 .introEmailStatus("PENDING")
                 .build());
         row.setErmUserId(erm.getId());
-        row.setIntroEmailStatus("SENT");
+        // SENT / FAILED once the intro email has really been tried
+        // (recordIntroEmail), never before (checklist 1.4).
+        row.setIntroEmailStatus("PENDING");
         ErmAssignment saved = ermAssignmentRepository.save(row);
         log.info("Assigned ERM {} to participant {}", erm.getId(), participant.getId());
         return Optional.of(saved);
+    }
+
+    /** Records whether the participant's ERM intro email went out. */
+    @Transactional
+    public void recordIntroEmail(Long participantId, boolean sent) {
+        ermAssignmentRepository.findFirstByUserIdOrderByAssignedDateDesc(participantId).ifPresent(row -> {
+            row.setIntroEmailStatus(sent ? "SENT" : "FAILED");
+            ermAssignmentRepository.save(row);
+        });
     }
 
     /** Lookup helper for the OnboardingService email step. */

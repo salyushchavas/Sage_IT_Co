@@ -57,6 +57,19 @@ public class PaymentLedger {
     @Column(name = "finance_reviewer", length = 255)
     private String financeReviewer;
 
+    /**
+     * Checklist 5.2: PAYMENT (money received), FAILED (an attempt that
+     * didn't go through; the balance is unchanged), WAIVER (part of the
+     * balance written off) or REVERSAL (an earlier payment undone, e.g. a
+     * bounced check). Rows from before this column are payments.
+     */
+    @Column(name = "entry_type", length = 20)
+    private String entryType;
+
+    /** For a REVERSAL: the payment it undoes. */
+    @Column(name = "reverses_ledger_id")
+    private Long reversesLedgerId;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;

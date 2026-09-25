@@ -50,8 +50,9 @@ public class ConsultantPdfService {
     private static final Color BRAND_FALLBACK = new Color(27, 42, 92);   // #1B2A5C
     private static final Color INK = new Color(31, 41, 55);
     private static final Color MUTED = new Color(107, 114, 128);
-    private static final DateTimeFormatter STAMP_FMT =
-            DateTimeFormatter.ofPattern("d MMMM yyyy, h:mm a 'IST'");
+    /** Checklist 5.3: times in business time (US Central). */
+    @org.springframework.beans.factory.annotation.Value("${app.business-zone:America/Chicago}")
+    private String businessZone;
 
     private final Cloudinary cloudinary;
     private final BrandConfig brandConfig;
@@ -118,8 +119,7 @@ public class ConsultantPdfService {
             String legal = safe(application.getSignedLegalName());
             String signedAt = application.getSignedAt() == null
                     ? "--"
-                    : STAMP_FMT.format(application.getSignedAt().atZone(
-                            java.time.ZoneId.of("Asia/Kolkata")).toLocalDateTime());
+                    : BusinessTime.stamp(application.getSignedAt(), businessZone);
             Paragraph acceptBody = new Paragraph(
                     "I, " + legal + ", confirm that the engagement details above are "
                             + "accurate and that I accept the terms therein. Signed on "
@@ -156,8 +156,7 @@ public class ConsultantPdfService {
 
             Paragraph placeholder = new Paragraph(
                     "PLACEHOLDER -- final template pending. Generated on "
-                            + STAMP_FMT.format(LocalDateTime.now().atZone(
-                                    java.time.ZoneId.of("Asia/Kolkata")).toLocalDateTime()) + ".",
+                            + BusinessTime.stamp(LocalDateTime.now(), businessZone) + ".",
                     new Font(Font.HELVETICA, 7, Font.ITALIC, MUTED));
             placeholder.setAlignment(Element.ALIGN_CENTER);
             doc.add(placeholder);

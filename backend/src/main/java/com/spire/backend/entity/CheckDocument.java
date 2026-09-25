@@ -54,6 +54,22 @@ public class CheckDocument {
     private String reviewStatus = "PENDING";
 
     /** MASKED, UNMASKED. Defaults to MASKED so an accidental read returns a redacted image. */
+    // ── Checklist 2.4: Finance's review, and a re-upload after a rejection ──
+
+    /** Finance's reason when it rejected the copy (emailed to the participant). */
+    @Column(name = "review_notes", columnDefinition = "TEXT")
+    private String reviewNotes;
+
+    @Column(name = "reviewed_by")
+    private Long reviewedBy;
+
+    @Column(name = "reviewed_at")
+    private LocalDateTime reviewedAt;
+
+    /** The rejected copy this upload replaces. */
+    @Column(name = "replaces_check_id")
+    private Long replacesCheckId;
+
     @Column(name = "masking_status", length = 20)
     @Builder.Default
     private String maskingStatus = "MASKED";

@@ -26,7 +26,9 @@ import java.util.Map;
 public class ErmController {
 
     private final ErmService ermService;
+    private final com.spire.backend.service.SignedAgreementService signedAgreementService;
     private final EmploymentService employmentService;
+    private final com.spire.backend.service.DocumentStorageService storageService;
 
     @GetMapping("/participants")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> roster(Authentication auth) {
@@ -43,8 +45,23 @@ public class ErmController {
                 ermService.participantDetail(me, participantId)));
     }
 
+    /**
+     * Checklist 2.3: the assigned ERM confirms they reviewed the
+     * participant's signed agreement (roadmap step 10: "ERM receives
+     * signed agreement and verifies readiness for onboarding").
+     */
+    @PutMapping("/participants/{participantId}/agreement/reviewed")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> markAgreementReviewed(
+            @PathVariable Long participantId,
+            Authentication auth) {
+        Long me = Long.parseLong(auth.getPrincipal().toString());
+        var row = signedAgreementService.markReviewedByErm(participantId, me);
+        return ResponseEntity.ok(ApiResponse.success("Agreement marked reviewed", Map.of(
+                "reviewedAt", row.getErmReviewedAt() == null ? "" : row.getErmReviewedAt().toString())));
+    }
+
     @GetMapping("/reports")
-    public ResponseEntity<ApiResponse<List<WeeklyReport>>> myReports(Authentication auth) {
+    public ResponseEntity<ApiResponse<List<ErmService.ReportRow>>> myReports(Authentication auth) {
         Long me = Long.parseLong(auth.getPrincipal().toString());
         return ResponseEntity.ok(ApiResponse.success(
                 ermService.reportsForMyParticipants(me)));
@@ -101,6 +118,29 @@ public class ErmController {
                         "employmentId", saved.getId(),
                         "ermVerifiedDate", saved.getErmVerifiedDate()
                 )));
+    }
+
+    /** Checklist 4.5: send the participant's employment details back for correction, with a reason. */
+    @PutMapping("/employment/{participantId}/return")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> returnEmployment(
+            @PathVariable Long participantId,
+            @RequestBody Map<String, Object> body,
+            Authentication auth) {
+        Long me = Long.parseLong(auth.getPrincipal().toString());
+        Object reason = body.get("reason");
+        var saved = employmentService.returnForCorrection(me, participantId, reason == null ? "" : reason.toString());
+        return ResponseEntity.ok(ApiResponse.success(
+                "Sent back to the participant",
+                Map.of("employmentId", saved.getId(), "returnedAt", saved.getReturnedAt())));
+    }
+
+    /** Checklist 4.5: the participant's offer letter (their current ERM only; each view is recorded). */
+    @GetMapping("/employment/{participantId}/offer")
+    public ResponseEntity<?> employmentOffer(@PathVariable Long participantId, Authentication auth) {
+        Long me = Long.parseLong(auth.getPrincipal().toString());
+        return employmentService.offerFileForErm(me, participantId)
+                .<ResponseEntity<?>>map(f -> StoredFileResponse.of(storageService, f, "offer-letter"))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/phases/pending")

@@ -37,7 +37,6 @@ import java.io.PrintWriter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Map;
@@ -62,12 +61,17 @@ public class AdminController {
     private final CoachAssignmentRepository coachAssignmentRepository;
     private final com.spire.backend.repository.UserRecordRepository userRecordRepository;
     private final com.spire.backend.repository.AgreementAcceptanceRepository agreementAcceptanceRepository;
+    private final com.spire.backend.service.EmailLogService emailLogService;
+    private final com.spire.backend.service.AgreementQueueService agreementQueueService;
+    private final com.spire.backend.service.OperationsExceptionService operationsExceptionService;
+    private final com.spire.backend.service.StaffOnboardingService staffOnboardingService;
 
-    // CSV timestamps render in IST. The DB stores LocalDateTime
-    // (timezone-naive, server-local = UTC on Railway) so we rebase
-    // UTC→IST before formatting. Headers carry an "(IST)" suffix so
-    // a recipient downloading the file knows what the column is in.
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    // CSV timestamps render in business time (checklist 5.3: US Central).
+    // The DB stores LocalDateTime (timezone-naive, server-local = UTC on
+    // Railway) so we rebase before formatting. Headers carry a "(CT)"
+    // suffix so a recipient downloading the file knows the zone.
+    @org.springframework.beans.factory.annotation.Value("${app.business-zone:America/Chicago}")
+    private String businessZone;
     private static final DateTimeFormatter CSV_TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     @GetMapping("/analytics")
@@ -86,6 +90,48 @@ public class AdminController {
      * on the admin Users tab pills (Active users (15) / Deactivated
      * users (3)).
      */
+    // ─── Staff onboarding ────────────────────────────────────────────
+
+    /**
+     * Adds a staff member (System Admin only): company login email, role and
+     * personal email. A temporary password is emailed to the personal email;
+     * they choose their own at first sign-in.
+     */
+    @PostMapping("/users")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> createStaffUser(
+            @RequestBody Map<String, String> body, Authentication authentication) {
+        Long callerId = Long.parseLong(authentication.getPrincipal().toString());
+        var result = staffOnboardingService.createStaff(callerId, body.get("fullName"), body.get("email"),
+                body.get("personalEmail"), body.get("role"));
+        return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(ApiResponse.success(
+                result.emailSent() ? "Account created; login details emailed to " + result.sentTo()
+                        : "Account created, but the login email couldn't be sent. Use \"Send new login details\" once email works.",
+                Map.of("user", result.user(), "emailSent", result.emailSent(), "sentTo", result.sentTo())));
+    }
+
+    /** A new temporary password for a staff member, emailed to them (System Admin only). */
+    @PostMapping("/users/{id}/send-login")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> sendNewLoginDetails(
+            @PathVariable Long id, Authentication authentication) {
+        Long callerId = Long.parseLong(authentication.getPrincipal().toString());
+        var result = staffOnboardingService.sendNewLoginDetails(callerId, id);
+        return ResponseEntity.ok(ApiResponse.success(
+                result.emailSent() ? "New login details emailed to " + result.sentTo()
+                        : "The new login details couldn't be emailed. Check the email log.",
+                Map.of("emailSent", result.emailSent(), "sentTo", result.sentTo())));
+    }
+
+    /** Emails someone an invitation to enroll as a participant (System Admin or Operations). */
+    @PostMapping("/users/invite-participant")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> inviteParticipant(
+            @RequestBody Map<String, String> body, Authentication authentication) {
+        Long callerId = Long.parseLong(authentication.getPrincipal().toString());
+        boolean sent = staffOnboardingService.inviteParticipant(callerId, body.get("fullName"), body.get("email"));
+        return ResponseEntity.ok(ApiResponse.success(
+                sent ? "Invitation emailed" : "The invitation couldn't be sent. Check the email log.",
+                Map.of("emailSent", sent)));
+    }
+
     @GetMapping("/users/counts")
     public ResponseEntity<ApiResponse<Map<String, Long>>> getUserCounts() {
         return ResponseEntity.ok(ApiResponse.success(adminService.getUserCounts()));
@@ -220,7 +266,7 @@ public class AdminController {
     public void exportUsers(HttpServletResponse response) throws IOException {
         prepareCsv(response, "users");
         PrintWriter w = response.getWriter();
-        w.println("ID,FullName,Email,Role,Active,InstructorApproved,CreatedAt (IST)");
+        w.println("ID,FullName,Email,Role,Active,InstructorApproved,CreatedAt (" + com.spire.backend.service.BusinessTime.label(businessZone) + ")");
         for (UserDTO u : adminService.getAllUsers()) {
             w.println(String.join(",",
                     csv(u.getId()),
@@ -238,7 +284,7 @@ public class AdminController {
     public void exportEnrollments(HttpServletResponse response) throws IOException {
         prepareCsv(response, "enrollments");
         PrintWriter w = response.getWriter();
-        w.println("EnrollmentID,StudentName,StudentEmail,CourseTitle,Type,EnrolledAt (IST),Progress%,Completed,Mentor,MentorStatus");
+        w.println("EnrollmentID,StudentName,StudentEmail,CourseTitle,Type,EnrolledAt (" + com.spire.backend.service.BusinessTime.label(businessZone) + "),Progress%,Completed,Mentor,MentorStatus");
         for (AdminEnrollmentRow r : adminService.getAllEnrollments()) {
             w.println(String.join(",",
                     csv(r.getEnrollmentId()),
@@ -259,7 +305,7 @@ public class AdminController {
     public void exportSessions(HttpServletResponse response) throws IOException {
         prepareCsv(response, "sessions");
         PrintWriter w = response.getWriter();
-        w.println("SessionID,StudentName,StudentEmail,Mentor,CourseTitle,Status,Topic,RequestedAt (IST),ScheduledAt (IST),CompletedAt (IST),MeetingURL");
+        w.println("SessionID,StudentName,StudentEmail,Mentor,CourseTitle,Status,Topic,RequestedAt (" + com.spire.backend.service.BusinessTime.label(businessZone) + "),ScheduledAt (" + com.spire.backend.service.BusinessTime.label(businessZone) + "),CompletedAt (" + com.spire.backend.service.BusinessTime.label(businessZone) + "),MeetingURL");
         for (AdminSessionRow r : adminService.getAllSessions()) {
             w.println(String.join(",",
                     csv(r.getSessionId()),
@@ -281,17 +327,18 @@ public class AdminController {
     public void exportRevenue(HttpServletResponse response) throws IOException {
         prepareCsv(response, "revenue");
         PrintWriter w = response.getWriter();
-        w.println("PaymentID,StudentName,StudentEmail,Amount,Currency,Status,RazorpayPaymentID,RazorpayOrderID,CreatedAt (IST)");
+        w.println("PaymentID,StudentName,StudentEmail,Amount,Currency,Status,Provider,PaymentRef,OrderOrSessionRef,CreatedAt (" + com.spire.backend.service.BusinessTime.label(businessZone) + ")");
         for (Payment p : adminRevenueService.getAllPaymentsRaw()) {
             w.println(String.join(",",
                     csv(p.getId()),
                     csv(p.getUser() != null ? p.getUser().getFullName() : null),
                     csv(p.getUser() != null ? p.getUser().getEmail() : null),
                     csv(p.getAmount()),
-                    csv("INR"),
+                    csv("USD"),
                     csv(p.getStatus()),
-                    csv(p.getRazorpayPaymentId()),
-                    csv(p.getRazorpayOrderId()),
+                    csv(p.getProvider() == null ? "RAZORPAY" : p.getProvider()),
+                    csv(p.getRazorpayPaymentId() != null ? p.getRazorpayPaymentId() : p.getStripePaymentIntentId()),
+                    csv(p.getRazorpayOrderId() != null ? p.getRazorpayOrderId() : p.getStripeSessionId()),
                     csv(p.getCreatedAt())));
         }
         w.flush();
@@ -307,8 +354,8 @@ public class AdminController {
         if (value == null) return "";
         String s = value instanceof LocalDateTime
                 ? ((LocalDateTime) value)
-                        .atOffset(ZoneOffset.UTC)
-                        .atZoneSameInstant(IST)
+                        .atZone(ZoneId.systemDefault())
+                        .withZoneSameInstant(com.spire.backend.service.BusinessTime.zone(businessZone))
                         .toLocalDateTime()
                         .format(CSV_TS)
                 : value.toString();
@@ -322,26 +369,23 @@ public class AdminController {
     // ─── Phase 2B: document review queue ────────────────────────────
 
     /**
-     * Returns all documents currently in PENDING review, oldest
-     * first. Drives the Operations Admin "Documents" tab. Filter
-     * by reviewStatus query param to view APPROVED / REJECTED /
-     * NOT_APPLICABLE buckets.
+     * Operations document review screen. {@code status}: NEEDS_REVIEW
+     * (default: uploads waiting for a decision plus "not applicable"
+     * exception requests, oldest first), ALL, or one review status.
+     * Rows carry the participant's name, email and Participant ID; the
+     * file itself is opened through the logged view endpoint.
      */
     @GetMapping("/documents")
-    public ResponseEntity<ApiResponse<List<ParticipantDocumentDTO>>> listDocumentsForReview(
-            @RequestParam(value = "status", required = false, defaultValue = "PENDING") String status) {
-        List<ParticipantDocumentDTO> rows = adminService.getAllUsers(null).stream()
-                .flatMap(u -> documentService.listForUser(u.getId()).stream())
-                .filter(d -> status.equalsIgnoreCase(d.getReviewStatus()))
-                .map(ParticipantDocumentDTO::from)
-                .toList();
-        return ResponseEntity.ok(ApiResponse.success(rows));
+    public ResponseEntity<ApiResponse<List<DocumentService.ReviewRow>>> listDocumentsForReview(
+            @RequestParam(value = "status", required = false, defaultValue = "NEEDS_REVIEW") String status) {
+        return ResponseEntity.ok(ApiResponse.success(documentService.reviewQueue(status)));
     }
 
     /**
-     * Approve / reject a participant document. Body: { status:
-     * "APPROVED"|"REJECTED", notes: "..." }. The participant sees
-     * the notes on the rejected row so they know what to resubmit.
+     * Approve / reject a participant document, or approve / decline a
+     * "not applicable" exception request. Body: { status:
+     * "APPROVED"|"REJECTED", notes: "..." }. Rejecting needs a reason:
+     * the participant is emailed it and sees it on the upload page.
      */
     @PutMapping("/documents/{documentId}/review")
     public ResponseEntity<ApiResponse<ParticipantDocumentDTO>> reviewDocument(
@@ -352,9 +396,13 @@ public class AdminController {
         String newStatus = body.get("status");
         String notes = body.get("notes");
         ParticipantDocument saved = documentService.review(documentId, reviewerId, newStatus, notes);
-        return ResponseEntity.ok(ApiResponse.success(
-                "APPROVED".equals(newStatus) ? "Document approved" : "Document rejected",
-                ParticipantDocumentDTO.from(saved)));
+        String message = switch (saved.getReviewStatus()) {
+            case DocumentService.APPROVED -> "Document approved";
+            case DocumentService.EXCEPTION_APPROVED -> "Exception approved";
+            case DocumentService.EXCEPTION_DECLINED -> "Exception declined";
+            default -> "Document rejected";
+        };
+        return ResponseEntity.ok(ApiResponse.success(message, ParticipantDocumentDTO.from(saved)));
     }
 
     // ─── Phase 4: assignment queue (manual ERM / coach assignment) ──
@@ -419,13 +467,15 @@ public class AdminController {
                 .findFirstByUserIdOrderByAssignedDateDesc(participantId)
                 .orElseGet(() -> ErmAssignment.builder().userId(participantId).build());
         row.setErmUserId(erm.getId());
-        row.setIntroEmailStatus("SENT");
+        // Marked SENT / FAILED when the intro email is really tried.
+        row.setIntroEmailStatus("PENDING");
         ermAssignmentRepository.save(row);
 
-        // Push the chain forward — this also fires the intro
-        // emails and (if a coach was also assigned) opens the
-        // dashboard.
-        onboardingService.completeOnboarding(participant);
+        // Bring a new ERM up to date (the signed agreement and the
+        // participant introduction, if those steps already happened),
+        // then push the chain forward — which opens the dashboard once
+        // a coach is in place too.
+        onboardingService.ermAssignedByOperations(participant);
         com.spire.backend.entity.User refreshed = userRepository.findById(participantId).orElse(participant);
         return ResponseEntity.ok(ApiResponse.success(
                 "ERM assigned",
@@ -444,7 +494,8 @@ public class AdminController {
     @PutMapping("/assignments/coach/{participantId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> assignCoach(
             @PathVariable Long participantId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            Authentication auth) {
         Object coachIdRaw = body.get("coachUserId");
         String coachRole = (String) body.get("coachRole");
         if (coachIdRaw == null || coachRole == null || coachRole.isBlank()) {
@@ -454,23 +505,14 @@ public class AdminController {
         com.spire.backend.entity.User participant = userRepository.findById(participantId)
                 .orElseThrow(() -> new com.spire.backend.exception.ResourceNotFoundException(
                         "User", "id", participantId));
-        userRepository.findById(coachUserId)
+        com.spire.backend.entity.User coach = userRepository.findById(coachUserId)
                 .orElseThrow(() -> new com.spire.backend.exception.ResourceNotFoundException(
                         "User", "id", coachUserId));
 
-        // Replace any existing assignment for that role.
-        coachAssignmentRepository
-                .findByUserIdAndStatus(participantId, "ACTIVE")
-                .stream()
-                .filter(a -> coachRole.equals(a.getCoachRole()))
-                .forEach(coachAssignmentRepository::delete);
-        CoachAssignment row = CoachAssignment.builder()
-                .userId(participantId)
-                .coachUserId(coachUserId)
-                .coachRole(coachRole)
-                .status("ACTIVE")
-                .build();
-        coachAssignmentRepository.save(row);
+        // Checklist 3.2: a real coach in a real slot; the previous coach in
+        // that slot is ended (kept for history), the new one is emailed.
+        coachAssignmentService.assignManually(participant, coach, coachRole,
+                Long.parseLong(auth.getPrincipal().toString()));
 
         onboardingService.completeOnboarding(participant);
         com.spire.backend.entity.User refreshed = userRepository.findById(participantId).orElse(participant);
@@ -481,6 +523,30 @@ public class AdminController {
                         "coachRole", coachRole,
                         "workflowStatus", refreshed.getCurrentStatus()
                 )));
+    }
+
+    /**
+     * Checklist 3.2: which coach slots a coach fills and which skills they
+     * cover, so automatic matching puts the right coach in each slot.
+     * Body: { coachTypes: ["CAREER_COACH", ...], coachSkills: ["Java Full Stack", ...] }.
+     */
+    @PutMapping("/coaches/{coachUserId}/profile")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> updateCoachProfile(
+            @PathVariable Long coachUserId,
+            @RequestBody Map<String, List<String>> body) {
+        com.spire.backend.entity.User coach = userRepository.findById(coachUserId)
+                .orElseThrow(() -> new com.spire.backend.exception.ResourceNotFoundException(
+                        "User", "id", coachUserId));
+        if (!coachAssignmentService.isActiveCoach(coach)) {
+            throw new IllegalArgumentException("That person isn't an active coach.");
+        }
+        String types = com.spire.backend.service.CoachProfiles.types(body.get("coachTypes"));
+        if (types.isEmpty()) throw new IllegalArgumentException("Pick at least one coach type.");
+        coach.setCoachTypes(types);
+        coach.setCoachSkills(com.spire.backend.service.CoachProfiles.skills(body.get("coachSkills")));
+        userRepository.save(coach);
+        return ResponseEntity.ok(ApiResponse.success("Coach profile saved", Map.of(
+                "coachTypes", coach.getCoachTypes(), "coachSkills", coach.getCoachSkills())));
     }
 
     // ─── Phase 5B Operations tabs ───────────────────────────────────
@@ -510,31 +576,13 @@ public class AdminController {
     }
 
     /**
-     * All participants who reached the agreement step but haven't
-     * completed it — Operations Admin's "Agreement Queue" tab.
+     * Operations' agreement queue (checklist 2.5): declined, expired and
+     * waiting agreements, signed ones still missing the check step or an
+     * ERM, and ones with the ERM for review (AgreementQueueService).
      */
     @GetMapping("/operations/agreement-queue")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> agreementQueue() {
-        List<Map<String, Object>> rows = new java.util.ArrayList<>();
-        for (com.spire.backend.entity.User u : userRepository.findAll()) {
-            String status = u.getCurrentStatus();
-            if (status == null) continue;
-            boolean inFlight = "AGREEMENT_SENT".equals(status)
-                    || "CHECK_COPY_UPLOADED".equals(status);
-            if (!inFlight) continue;
-            com.spire.backend.entity.AgreementAcceptance a =
-                    agreementAcceptanceRepository.findByUserId(u.getId()).orElse(null);
-            Map<String, Object> r = new java.util.LinkedHashMap<>();
-            r.put("userId", u.getId());
-            r.put("participantId", u.getParticipantId());
-            r.put("fullName", u.getFullName());
-            r.put("email", u.getEmail());
-            r.put("currentStatus", status);
-            r.put("agreementStatus", a == null ? "NOT_STARTED" : a.getStatus());
-            r.put("agreementSentAt", a == null ? null : a.getAgreementEmailSentAt());
-            rows.add(r);
-        }
-        return ResponseEntity.ok(ApiResponse.success(rows));
+    public ResponseEntity<ApiResponse<List<com.spire.backend.service.AgreementQueueService.Row>>> agreementQueue() {
+        return ResponseEntity.ok(ApiResponse.success(agreementQueueService.queue()));
     }
 
     /**
@@ -574,45 +622,26 @@ public class AdminController {
     }
 
     /**
-     * Exceptions surface — derived view across the lifecycle (missing
-     * docs, stalled agreements, overdue weekly reports, etc.).
-     * Lightweight pass; expand as the data model grows.
+     * Email log (checklist 1.4): every email the platform tried to send,
+     * newest first, with SENT / FAILED / SKIPPED and the reason when it
+     * failed. Filter by status, a user id, or an email address.
+     */
+    @GetMapping("/operations/emails")
+    public ResponseEntity<ApiResponse<List<com.spire.backend.service.EmailLogService.Row>>> emailLog(
+            @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "userId", required = false) Long userId,
+            @RequestParam(value = "email", required = false) String email) {
+        return ResponseEntity.ok(ApiResponse.success(emailLogService.list(status, userId, email)));
+    }
+
+    /**
+     * Checklist 6.2: every exception case in the roadmap (§14) plus emails
+     * that couldn't be delivered, each with the participant's name and ID,
+     * what's wrong, since when and where to fix it.
      */
     @GetMapping("/operations/exceptions")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> exceptions() {
-        List<Map<String, Object>> rows = new java.util.ArrayList<>();
-        java.time.LocalDateTime cutoff = java.time.LocalDateTime.now().minusDays(7);
-        for (com.spire.backend.entity.User u : userRepository.findAll()) {
-            String status = u.getCurrentStatus();
-            if (status == null) continue;
-            // Stalled past document submission.
-            if (("DOCUMENTS_SUBMITTED".equals(status) || "DOC_REVIEW_PENDING".equals(status))
-                    && u.getCreatedAt() != null && u.getCreatedAt().isBefore(cutoff)) {
-                Map<String, Object> r = new java.util.LinkedHashMap<>();
-                r.put("type", "DOC_REVIEW_STALLED");
-                r.put("userId", u.getId());
-                r.put("fullName", u.getFullName());
-                r.put("currentStatus", status);
-                r.put("openSince", u.getCreatedAt());
-                rows.add(r);
-            }
-            // Agreement window past 48h with no completion.
-            if ("AGREEMENT_SENT".equals(status)) {
-                com.spire.backend.entity.AgreementAcceptance a =
-                        agreementAcceptanceRepository.findByUserId(u.getId()).orElse(null);
-                if (a != null && a.getAgreementEmailSentAt() != null
-                        && a.getAgreementEmailSentAt().isBefore(java.time.LocalDateTime.now().minusHours(48))) {
-                    Map<String, Object> r = new java.util.LinkedHashMap<>();
-                    r.put("type", "AGREEMENT_STALLED");
-                    r.put("userId", u.getId());
-                    r.put("fullName", u.getFullName());
-                    r.put("currentStatus", status);
-                    r.put("openSince", a.getAgreementEmailSentAt());
-                    rows.add(r);
-                }
-            }
-        }
-        return ResponseEntity.ok(ApiResponse.success(rows));
+    public ResponseEntity<ApiResponse<List<com.spire.backend.service.OperationsExceptionService.Row>>> exceptions() {
+        return ResponseEntity.ok(ApiResponse.success(operationsExceptionService.all()));
     }
 
     /**
@@ -624,7 +653,11 @@ public class AdminController {
         Map<String, List<Map<String, Object>>> out = new java.util.LinkedHashMap<>();
         java.util.function.Function<com.spire.backend.entity.User, Map<String, Object>> toRow = u ->
                 Map.of("id", u.getId(), "fullName", u.getFullName() == null ? "" : u.getFullName(),
-                        "email", u.getEmail() == null ? "" : u.getEmail());
+                        "email", u.getEmail() == null ? "" : u.getEmail(),
+                        // Checklist 3.2: coach slots and skills (defaults when none are set).
+                        "coachTypes", List.copyOf(com.spire.backend.service.CoachProfiles.typesOf(u)),
+                        "coachSkills", u.getCoachSkills() == null || u.getCoachSkills().isBlank()
+                                ? List.of() : List.of(u.getCoachSkills().split(",")));
         var byRole = userRepository.findAll().stream()
                 .filter(u -> Boolean.TRUE.equals(u.getIsActive()))
                 .filter(u -> u.getRole() != null && u.getRole().getName() != null)

@@ -11,6 +11,7 @@ import java.util.Optional;
 public interface InvoiceRepository extends JpaRepository<Invoice, Long> {
     List<Invoice> findByUserIdOrderByIssueDateDesc(Long userId);
     Optional<Invoice> findByInvoiceNumber(String invoiceNumber);
+    boolean existsByInvoiceNumber(String invoiceNumber);
     List<Invoice> findByPaymentPlanId(Long paymentPlanId);
     List<Invoice> findByStatusOrderByDueDateAsc(String status);
 }

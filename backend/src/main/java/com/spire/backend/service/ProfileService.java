@@ -170,7 +170,7 @@ public class ProfileService {
 
         // fullName: required, never overwritten with blank
         if (dto.getFullName() != null && !dto.getFullName().isBlank()) {
-            String fresh = dto.getFullName().trim();
+            String fresh = PersonNames.clean(dto.getFullName());
             if (!java.util.Objects.equals(user.getFullName(), fresh)) {
                 oldValues.put("fullName", user.getFullName());
                 newValues.put("fullName", fresh);
@@ -200,10 +200,12 @@ public class ProfileService {
         if (dto.getPhone() != null) {
             String fresh = emptyToNull(dto.getPhone().trim());
             if (!java.util.Objects.equals(user.getPhone(), fresh)) {
+                String normalized = PhoneNumbers.requireAvailable(userRepository, fresh, user.getId());
                 oldValues.put("phone", user.getPhone());
                 newValues.put("phone", fresh);
                 changed.add("phone");
                 user.setPhone(fresh);
+                user.setPhoneNormalized(normalized);
             }
         }
         if (dto.getLocation() != null) {

@@ -7,7 +7,9 @@ import org.hibernate.annotations.CreationTimestamp;
 import java.time.LocalDateTime;
 
 /**
- * Append-only log of transactional emails the platform has sent.
+ * Append-only log of every transactional email the platform tried to
+ * send, with the outcome (checklist 1.4). Written by EmailService for
+ * each attempt; the body is never stored (it can hold codes).
  * Used for audit + debugging — distinct from {@code user_records}
  * because email-send metadata (recipient, subject, status, trigger)
  * is structured and useful enough to keep in its own table rather
@@ -42,13 +44,21 @@ public class EmailLog {
     @Column(name = "subject", length = 500)
     private String subject;
 
-    /** SENT, FAILED, DEFERRED, BOUNCED. */
+    /**
+     * SENT (the mail server accepted it), FAILED (it refused or couldn't
+     * be reached) or SKIPPED (email isn't set up on this server).
+     */
     @Column(name = "status", length = 20)
     @Builder.Default
     private String status = "SENT";
 
+    /** Where the email was sent from in the code (Class.method). */
     @Column(name = "trigger_event", length = 100)
     private String triggerEvent;
+
+    /** Why it failed (the mail server's message), when it did. */
+    @Column(name = "error_message", length = 500)
+    private String errorMessage;
 
     @CreationTimestamp
     @Column(name = "sent_at", updatable = false)

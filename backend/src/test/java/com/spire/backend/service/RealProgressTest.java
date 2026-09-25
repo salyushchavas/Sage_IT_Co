@@ -24,6 +24,10 @@ import static org.mockito.Mockito.*;
  */
 class RealProgressTest {
 
+    /** Nothing after onboarding has happened yet. */
+    private static final ParticipantDashboardService.RoadmapFacts NO_FACTS =
+            new ParticipantDashboardService.RoadmapFacts(false, false, false, false, 0, false, false, false);
+
     private UserRepository userRepository;
     private WorkflowStateRepository workflowStateRepository;
     private WorkflowService workflow;
@@ -96,8 +100,9 @@ class RealProgressTest {
         user.setCurrentStatus("DASHBOARD_ENABLED");   // the old jump no longer opens anything
         DocumentService docs = new DocumentService(mock(ParticipantDocumentRepository.class), userRepository,
                 mock(DocumentStorageService.class), workflow, mock(RecordService.class),
-                mock(ProfileCompletionService.class), mock(PermissionService.class));
-        IllegalStateException ex = assertThrows(IllegalStateException.class, () -> docs.markNotApplicable(10L, "OTHER"));
+                mock(ProfileCompletionService.class), mock(PermissionService.class), mock(EmailTemplateService.class));
+        IllegalStateException ex = assertThrows(IllegalStateException.class,
+                () -> docs.markNotApplicable(10L, "WORK_AUTHORIZATION", "US citizen"));
         assertTrue(ex.getMessage().contains("acknowledgment"));
     }
 
@@ -116,25 +121,29 @@ class RealProgressTest {
         AgreementAcceptanceRepository agreements = mock(AgreementAcceptanceRepository.class);
         ProfileCompletionService profile = mock(ProfileCompletionService.class);
         AgreementService agreementService = mock(AgreementService.class);
+        TermsContentService terms = new TermsContentService();
         ParticipantAgreementService signing = new ParticipantAgreementService(agreementService, agreements,
-                userRepository, workflow, mock(RecordService.class), profile);
+                userRepository, workflow, mock(RecordService.class), profile, terms,
+                mock(ProgramSelectionRepository.class));
+        String v = AgreementService.CURRENT_VERSION;
+        String fp = terms.fingerprint(v);
         user.setAcknowledgmentComplete(true);
         user.setDocumentsComplete(true);
-        assertThrows(IllegalStateException.class, () -> signing.sign(10L, "Pat Doe", null, null, null, null));
+        assertThrows(IllegalStateException.class, () -> signing.sign(10L, "Pat Doe", null, null, null, null, v, fp));
 
         // A status jumped past signing used to return "already signed" and tick the step.
         user.setProgramSelectionComplete(true);
         user.setCurrentStatus("DASHBOARD_ENABLED");
         when(agreements.findByUserId(10L)).thenReturn(Optional.empty());
-        signing.sign(10L, "Pat Doe", "data:image/png;base64,AA", "draw", "1.2.3.4", "ua");
-        verify(agreementService).signImmediate(eq(10L), any(), any(), any(), any(), any());
+        signing.sign(10L, "Pat Doe", "data:image/png;base64,AA", "draw", "1.2.3.4", "ua", v, fp);
+        verify(agreementService).signImmediate(eq(10L), any(), any(), any(), any(), any(), any());
 
         // A real stored signature is recognised.
         reset(agreementService);
         when(agreements.findByUserId(10L)).thenReturn(Optional.of(AgreementAcceptance.builder()
                 .user(user).status(AgreementService.STATUS_VERIFIED).build()));
-        assertEquals(true, signing.sign(10L, "Pat Doe", null, null, null, null).get("alreadySigned"));
-        verify(agreementService, never()).signImmediate(any(), any(), any(), any(), any(), any());
+        assertEquals(true, signing.sign(10L, "Pat Doe", null, null, null, null, v, fp).get("alreadySigned"));
+        verify(agreementService, never()).signImmediate(any(), any(), any(), any(), any(), any(), any());
     }
 
     @Test
@@ -158,7 +167,8 @@ class RealProgressTest {
         EmailTemplateService emails = mock(EmailTemplateService.class);
         ErmAssignmentService erms = mock(ErmAssignmentService.class);
         OnboardingService onboarding = new OnboardingService(workflow, emails, erms,
-                mock(CoachAssignmentService.class), mock(ProgramSelectionRepository.class), mock(RecordService.class));
+                mock(CoachAssignmentService.class), mock(ProgramSelectionRepository.class), mock(RecordService.class),
+                mock(SignedAgreementService.class));
 
         onboarding.completeOnboarding(user);   // e.g. Operations assigned an ERM mid-onboarding
 
@@ -170,7 +180,7 @@ class RealProgressTest {
 
     @Test
     void theRoadmapTicksWhatReallyHappened() {
-        List<Boolean> fresh = ParticipantDashboardService.roadmapDone(user);
+        List<Boolean> fresh = ParticipantDashboardService.roadmapDone(user, NO_FACTS);
         assertEquals(List.of(false, true, true), fresh.subList(0, 3));
         assertEquals(2, fresh.stream().filter(b -> b).count(), "a new participant has 2 ticks, not 14");
         assertEquals(1, ParticipantDashboardService.currentStep(fresh), "About You comes first");
@@ -180,7 +190,7 @@ class RealProgressTest {
         user.setDocumentsComplete(true);
         user.setProgramSelectionComplete(true);
         user.setAgreementComplete(true);
-        List<Boolean> signed = ParticipantDashboardService.roadmapDone(user);
+        List<Boolean> signed = ParticipantDashboardService.roadmapDone(user, NO_FACTS);
         assertTrue(signed.get(6) && signed.get(8), "agreement sent and complete");
         assertEquals(8, ParticipantDashboardService.currentStep(signed), "then the check step");
     }

@@ -52,6 +52,11 @@ public class PaymentPlan {
     @Column(name = "ip_address", length = 45)
     private String ipAddress;
 
+    /** Checklist 6.2: when Finance created the plan (for "not accepted after 7 days"). */
+    @org.hibernate.annotations.CreationTimestamp
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
+
     /** PENDING, ACTIVE, COMPLETED, DEFAULTED, CANCELLED. */
     @Column(name = "status", length = 20)
     @Builder.Default

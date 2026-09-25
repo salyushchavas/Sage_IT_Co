@@ -11,4 +11,5 @@ import java.util.Optional;
 public interface PhaseCompletionRepository extends JpaRepository<PhaseCompletion, Long> {
     List<PhaseCompletion> findByUserId(Long userId);
     Optional<PhaseCompletion> findByUserIdAndPhase(Long userId, String phase);
+    List<PhaseCompletion> findByPhaseAndErmApprovedTrue(String phase);
 }

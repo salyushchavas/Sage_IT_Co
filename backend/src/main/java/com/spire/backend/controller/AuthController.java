@@ -100,6 +100,25 @@ public class AuthController {
         )));
     }
 
+    /**
+     * Staff onboarding: the signed-in user changes their password (required
+     * at first sign-in with a temporary password).
+     */
+    @PostMapping("/change-password")
+    public ResponseEntity<ApiResponse<Map<String, String>>> changePassword(
+            @RequestBody Map<String, String> body,
+            org.springframework.security.core.Authentication auth) {
+        Long userId;
+        try {
+            userId = auth == null ? null : Long.parseLong(auth.getPrincipal().toString());
+        } catch (NumberFormatException e) {
+            userId = null;
+        }
+        if (userId == null) throw new com.spire.backend.exception.UnauthorizedException("Sign in first");
+        authService.changePassword(userId, body.get("currentPassword"), body.get("newPassword"));
+        return ResponseEntity.ok(ApiResponse.success(Map.of("message", "Password changed")));
+    }
+
     @PostMapping("/reset-password")
     public ResponseEntity<ApiResponse<Map<String, String>>> resetPassword(
             @RequestBody Map<String, String> body) {

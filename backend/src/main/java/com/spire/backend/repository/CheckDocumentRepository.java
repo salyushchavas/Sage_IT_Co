@@ -9,4 +9,5 @@ import java.util.List;
 @Repository
 public interface CheckDocumentRepository extends JpaRepository<CheckDocument, Long> {
     List<CheckDocument> findByUserIdOrderByUploadedAtDesc(Long userId);
+    List<CheckDocument> findByReviewStatus(String reviewStatus);
 }

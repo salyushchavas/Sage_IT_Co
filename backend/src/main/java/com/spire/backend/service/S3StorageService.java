@@ -63,6 +63,15 @@ public class S3StorageService implements DocumentStorage {
     }
 
     @Override
+    public void delete(String key) {
+        s3Provider.getObject().deleteObject(
+                software.amazon.awssdk.services.s3.model.DeleteObjectRequest.builder()
+                        .bucket(bucket)
+                        .key(key)
+                        .build());
+    }
+
+    @Override
     public String presignedGetUrl(String key, Duration ttl, String filename, boolean inline) {
         String disposition = inline
                 ? "inline"

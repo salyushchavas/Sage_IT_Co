@@ -51,7 +51,15 @@ public class WeeklyReport {
     @Column(name = "report_data", columnDefinition = "TEXT")
     private String reportData;
 
-    /** PENDING, SUBMITTED, REVIEWED, OVERDUE. */
+    /** When the participant asked for help ("I need help") and the ERM was emailed (checklist 4.2). */
+    @Column(name = "escalated_at")
+    private LocalDateTime escalatedAt;
+
+    /** When the week was marked overdue (kept after a late submission, so it shows as late). */
+    @Column(name = "overdue_flagged_at")
+    private LocalDateTime overdueFlaggedAt;
+
+    /** PENDING (a draft), SUBMITTED, REVIEWED, OVERDUE (due and not submitted). */
     @Column(name = "status", length = 20)
     @Builder.Default
     private String status = "PENDING";

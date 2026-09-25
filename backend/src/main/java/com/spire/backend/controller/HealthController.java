@@ -25,11 +25,19 @@ public class HealthController {
         return s.length() > 7 ? s.substring(0, 7) : s;
     }
 
+    /** Where new participant files go ("s3", "cloudinary" or "local-disk"), checkable without signing in. */
+    private final com.spire.backend.service.DocumentStorageService storage;
+
+    public HealthController(com.spire.backend.service.DocumentStorageService storage) {
+        this.storage = storage;
+    }
+
     @GetMapping("/health")
     public ResponseEntity<Map<String, Object>> health() {
         return ResponseEntity.ok(Map.of(
                 "status", "ok",
                 "commit", COMMIT,
+                "storage", storage.mode(),
                 "timestamp", Instant.now().toString()
         ));
     }

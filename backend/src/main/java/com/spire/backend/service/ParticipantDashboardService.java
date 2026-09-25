@@ -12,7 +12,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -54,9 +53,9 @@ public class ParticipantDashboardService {
             "Coaches assigned",
             "Dashboard active",
             "Weekly reporting",
-            "Employment accepted",
-            "Phase 1 complete",
-            "Payment plan",
+            "Employment & Phase 1",
+            "Payment plan & checks",
+            "Invoices",
             "Payments tracked"
     );
 
@@ -67,6 +66,12 @@ public class ParticipantDashboardService {
     private final ErmAssignmentService ermAssignmentService;
     private final CoachAssignmentService coachAssignmentService;
     private final WorkflowService workflowService;
+    private final com.spire.backend.repository.EmailLogRepository emailLogRepository;
+    private final com.spire.backend.repository.InvoiceRepository invoiceRepository;
+    private final com.spire.backend.repository.PaymentPlanRepository paymentPlanRepository;
+    private final BusinessClock clock;
+    private final WeeklyReportService weeklyReportService;
+    private final com.spire.backend.repository.EmploymentAcceptanceRepository employmentRepository;
 
     @Transactional(readOnly = true)
     public Map<String, Object> snapshot(Long userId) {
@@ -83,12 +88,16 @@ public class ParticipantDashboardService {
         // and the current step is the first one not done (it used to be
         // read off the status alone, which was jumped to step 15 at
         // sign-up and ticked everything before it).
-        List<Boolean> done = roadmapDone(user);
+        RoadmapFacts facts = factsFor(user);
+        List<Boolean> done = roadmapDone(user, facts);
         out.put("roadmapTotal", ROADMAP_STEPS.size());
         out.put("roadmapStep", currentStep(done));
         out.put("roadmapDone", done);
         out.put("roadmapLabels", ROADMAP_STEPS);
-        out.put("nextAction", nextActionFor(user));
+        out.put("nextAction", nextActionFor(user, facts));
+        // Checklist 3.5: Weekly, Employment and Payments open once the team
+        // is ready (ERM + coaches, the dashboard enabled), not before.
+        out.put("teamReady", facts.teamReady());
 
         // Program selection
         ProgramSelection program = programSelectionRepository
@@ -137,55 +146,97 @@ public class ParticipantDashboardService {
         stats.put("reportsSubmitted", reportsSubmitted);
         out.put("stats", stats);
 
-        // Current-week report shortcut
-        LocalDate weekStart = startOfWeek(LocalDate.now());
+        // Current-week report shortcut, in business time (checklist 4.3):
+        // a week's report is due the Monday after it ends.
+        LocalDate weekStart = clock.startOfWeek();
         out.put("currentWeekStart", weekStart);
         out.put("currentWeekEnd", weekStart.plusDays(6));
+        out.put("currentWeekDue", weekStart.plusDays(7));
         weeklyReportRepository.findByUserIdAndWeekStart(userId, weekStart).ifPresent(r -> {
             out.put("currentWeekReportStatus", r.getStatus());
             out.put("currentWeekReportId", r.getId());
         });
+        // Last week can still be filed (and is what the Monday reminder asks for).
+        LocalDate previous = weekStart.minusWeeks(1);
+        out.put("previousWeekStart", previous);
+        out.put("previousWeekEnd", previous.plusDays(6));
+        out.put("previousWeekDue", weekStart);
+        out.put("previousWeekOwed", facts.lastWeekOwed());
+        weeklyReportRepository.findByUserIdAndWeekStart(userId, previous)
+                .ifPresent(r -> out.put("previousWeekReportStatus", r.getStatus()));
+        LocalDate opened = weeklyReportService.dashboardOpenedOn(user);
+        out.put("earliestReportWeek", opened == null ? null : BusinessClock.startOfWeek(opened));
 
         return out;
     }
 
     // ── Helpers ────────────────────────────────────────────────
 
-    /** Maps backend workflow status → 1-20 step number. */
-    public static int stepForStatus(String status) {
-        if (status == null) return 1;
-        return switch (status) {
-            case "DRAFT_STARTED", "BASIC_INFO_SUBMITTED" -> 1;
-            case "EMAIL_VERIFICATION_PENDING", "EMAIL_VERIFIED" -> 2;
-            case "PARTICIPANT_ID_CREATED", "ID_EMAIL_SENT" -> 3;
-            case "ACKNOWLEDGMENT_ACCEPTED" -> 4;
-            case "DOCUMENTS_SUBMITTED", "DOC_REVIEW_PENDING" -> 5;
-            case "PROGRAM_SELECTED" -> 6;
-            case "AGREEMENT_SENT" -> 7;
-            case "AGREEMENT_COMPLETED" -> 8;
-            case "CHECK_COPY_UPLOADED" -> 9;
-            case "SIGNED_AGREEMENT_SENT_TO_ERM" -> 10;
-            case "WELCOME_SENT" -> 11;
-            case "DEEPTHI_INTRO_SENT" -> 12;
-            case "ERM_ASSIGNED" -> 13;
-            case "COACHES_ASSIGNED" -> 14;
-            case "DASHBOARD_ENABLED" -> 15;
-            case "WEEKLY_REPORTING_ACTIVE" -> 16;
-            case "EMPLOYMENT_ACCEPTED" -> 17;
-            case "PHASE_1_COMPLETED" -> 18;
-            case "PAYMENT_PLAN_ACCEPTED" -> 19;
-            case "CHECK_TRACKING_ADDED", "INVOICING_ACTIVE", "PAYMENTS_TRACKED" -> 20;
-            default -> 1;
-        };
+    /**
+     * What really happened for the later roadmap steps (checklist 3.4),
+     * gathered once per snapshot.
+     */
+    record RoadmapFacts(boolean welcomeEmailed, boolean coordinatorEmailed, boolean hasErm, boolean hasCoach,
+                        long reportsSubmitted, boolean hasInvoice, boolean hasPlan, boolean teamReady,
+                        boolean lastWeekOwed, boolean employmentReturned, boolean planAwaitingAcceptance) {
+        RoadmapFacts(boolean welcomeEmailed, boolean coordinatorEmailed, boolean hasErm, boolean hasCoach,
+                     long reportsSubmitted, boolean hasInvoice, boolean hasPlan, boolean teamReady) {
+            this(welcomeEmailed, coordinatorEmailed, hasErm, hasCoach, reportsSubmitted, hasInvoice, hasPlan,
+                    teamReady, false, false, false);
+        }
+    }
+
+    RoadmapFacts factsFor(User u) {
+        // Emails are proven by the email log (1.4). An account with no
+        // log rows at all dates from before the log existed: its status
+        // stands in for the email.
+        boolean logged = emailLogRepository.existsByUserId(u.getId());
+        WorkflowService.Status s = statusOf(u);
+        boolean welcome = logged
+                ? emailLogRepository.existsByEmailTypeAndUserIdAndStatus("WELCOME", u.getId(), EmailLogService.SENT)
+                : atLeast(s, WorkflowService.Status.WELCOME_SENT);
+        boolean coordinator = logged
+                ? emailLogRepository.existsByEmailTypeAndUserIdAndStatus("COORDINATOR_INTRO", u.getId(), EmailLogService.SENT)
+                : atLeast(s, WorkflowService.Status.DEEPTHI_INTRO_SENT);
+        long reports = weeklyReportRepository.findByUserIdOrderByWeekStartDesc(u.getId()).stream()
+                .filter(r -> "SUBMITTED".equals(r.getStatus()) || "REVIEWED".equals(r.getStatus()))
+                .count();
+        // Last week's report is owed and not in yet (checklist 4.3).
+        LocalDate lastWeek = clock.startOfWeek().minusWeeks(1);
+        LocalDate firstOwed = weeklyReportService.owesReports(u) ? weeklyReportService.firstOwedWeek(u) : null;
+        boolean lastWeekOwed = firstOwed != null && !lastWeek.isBefore(firstOwed)
+                && weeklyReportRepository.findByUserIdAndWeekStart(u.getId(), lastWeek)
+                        .map(r -> !"SUBMITTED".equals(r.getStatus()) && !"REVIEWED".equals(r.getStatus()))
+                        .orElse(true);
+        var plan = paymentPlanRepository.findLatestByUserId(u.getId());
+        return new RoadmapFacts(welcome, coordinator,
+                ermAssignmentService.getAssignedErm(u.getId()).isPresent(),
+                coachAssignmentService.hasAnyCoach(u.getId()),
+                reports,
+                !invoiceRepository.findByUserIdOrderByIssueDateDesc(u.getId()).isEmpty(),
+                plan.isPresent(),
+                atLeast(s, WorkflowService.Status.DASHBOARD_ENABLED),
+                lastWeekOwed,
+                // The ERM sent the employment details back (checklist 4.5).
+                employmentRepository.findByUserIdOrderByAcceptanceDateDesc(u.getId()).stream().findFirst()
+                        .map(e -> e.getReturnedAt() != null).orElse(false),
+                // A plan waiting for their acceptance, new or changed by Finance (checklist 5.1).
+                plan.map(p -> p.getAcceptedAt() == null && "PENDING".equals(p.getStatus())).orElse(false));
     }
 
     /**
-     * Whether each of the 20 roadmap steps is done. Onboarding steps
-     * (1–9) come from the profile step flags, which only a real
-     * submission sets; the later steps from the status, which now only
-     * moves forward on real events.
+     * Whether each of the 20 roadmap steps is done, from what really
+     * happened (checklist 3.4): onboarding steps (1–9) from the profile
+     * step flags; the agreement reaching the ERM (10) and the dashboard
+     * (15) from the status, which only moves on real events now; the
+     * welcome and coordinator emails (11–12) from the email log; the ERM
+     * (13) and coaches (14) from real assignments; weekly reporting (16)
+     * from a submitted report; employment and Phase 1 (17) from the
+     * Phase 1 acknowledgment, which needs the ERM-verified employment;
+     * the payment plan (18) from its acceptance;
+     * invoices (19) from an issued invoice; payments (20) from the status.
      */
-    static List<Boolean> roadmapDone(User u) {
+    static List<Boolean> roadmapDone(User u, RoadmapFacts f) {
         WorkflowService.Status s = statusOf(u);
         boolean ack = Boolean.TRUE.equals(u.getAcknowledgmentComplete());
         boolean agreement = Boolean.TRUE.equals(u.getAgreementComplete());
@@ -199,17 +250,17 @@ public class ParticipantDashboardService {
                 agreement || atLeast(s, WorkflowService.Status.AGREEMENT_SENT), // 7 Agreement sent
                 Boolean.TRUE.equals(u.getCheckUploadComplete()),                // 8 Check upload
                 agreement,                                                       // 9 Agreement complete
-                atLeast(s, WorkflowService.Status.SIGNED_AGREEMENT_SENT_TO_ERM),
-                atLeast(s, WorkflowService.Status.WELCOME_SENT),
-                atLeast(s, WorkflowService.Status.DEEPTHI_INTRO_SENT),
-                atLeast(s, WorkflowService.Status.ERM_ASSIGNED),
-                atLeast(s, WorkflowService.Status.COACHES_ASSIGNED),
-                atLeast(s, WorkflowService.Status.DASHBOARD_ENABLED),
-                atLeast(s, WorkflowService.Status.WEEKLY_REPORTING_ACTIVE),
-                atLeast(s, WorkflowService.Status.EMPLOYMENT_ACCEPTED),
-                atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED),
-                atLeast(s, WorkflowService.Status.PAYMENT_PLAN_ACCEPTED),
-                atLeast(s, WorkflowService.Status.PAYMENTS_TRACKED));
+                atLeast(s, WorkflowService.Status.SIGNED_AGREEMENT_SENT_TO_ERM), // 10 Signed agreement to ERM
+                f.welcomeEmailed(),                                              // 11 Welcome email
+                f.coordinatorEmailed(),                                          // 12 Coordinator intro
+                f.hasErm() && atLeast(s, WorkflowService.Status.ERM_ASSIGNED),  // 13 ERM introduction
+                f.hasCoach() && atLeast(s, WorkflowService.Status.COACHES_ASSIGNED), // 14 Coaches
+                atLeast(s, WorkflowService.Status.DASHBOARD_ENABLED),           // 15 Dashboard
+                f.reportsSubmitted() > 0,                                        // 16 Weekly reporting
+                atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED),           // 17 Employment & Phase 1
+                atLeast(s, WorkflowService.Status.PAYMENT_PLAN_ACCEPTED),       // 18 Payment plan & checks
+                f.hasInvoice(),                                                  // 19 Invoices
+                atLeast(s, WorkflowService.Status.PAYMENTS_TRACKED));           // 20 Payments tracked
     }
 
     /** 1-based number of the first step not done (20 when all are). */
@@ -258,7 +309,12 @@ public class ParticipantDashboardService {
         return action;
     }
 
-    private static Map<String, String> nextActionFor(User user) {
+    /**
+     * The one next action (checklist 3.4). It never points at a tab that
+     * is still locked: while the team is being set up it points to the
+     * welcome page, and the payment plan only once one exists.
+     */
+    static Map<String, String> nextActionFor(User user, RoadmapFacts f) {
         Map<String, String> action = new LinkedHashMap<>();
         String status = user.getCurrentStatus();
         if (status == null) {
@@ -269,27 +325,39 @@ public class ParticipantDashboardService {
         if (user.getParticipantId() != null && !ProfileCompletionService.allStepsComplete(user)) {
             return onboardingActionFor(user);
         }
-        switch (status) {
-            case "DASHBOARD_ENABLED" -> {
-                action.put("label", "Submit your first weekly report");
-                action.put("href", "#weekly");
-            }
-            case "WEEKLY_REPORTING_ACTIVE" -> {
-                action.put("label", "Submit this week's report");
-                action.put("href", "#weekly");
-            }
-            case "EMPLOYMENT_ACCEPTED" -> {
-                action.put("label", "Review your phase-1 completion");
-                action.put("href", "#employment");
-            }
-            case "PHASE_1_COMPLETED" -> {
-                action.put("label", "Accept your payment plan");
+        WorkflowService.Status s = statusOf(user);
+        if (!f.teamReady()) {
+            action.put("label", "See your team being set up");
+            action.put("href", "/welcome");
+        } else if (f.planAwaitingAcceptance() && atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED)) {
+            action.put("label", "Review and accept your payment plan");
+            action.put("href", "#payments");
+        } else if (atLeast(s, WorkflowService.Status.PAYMENT_PLAN_ACCEPTED)) {
+            action.put("label", "Check your invoices and payments");
+            action.put("href", "#payments");
+        } else if (f.employmentReturned()) {
+            action.put("label", "Correct your employment details");
+            action.put("href", "#employment");
+        } else if (atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED)) {
+            if (f.hasPlan()) {
+                action.put("label", "Review and accept your payment plan");
                 action.put("href", "#payments");
-            }
-            default -> {
-                action.put("label", "Stay on track — your team will reach out");
+            } else {
+                action.put("label", "Finance is preparing your payment plan");
                 action.put("href", "#home");
             }
+        } else if (f.lastWeekOwed()) {
+            action.put("label", "Submit last week's report");
+            action.put("href", "#weekly");
+        } else if (atLeast(s, WorkflowService.Status.EMPLOYMENT_ACCEPTED)) {
+            action.put("label", "Review your employment and Phase 1 completion");
+            action.put("href", "#employment");
+        } else if (f.reportsSubmitted() == 0) {
+            action.put("label", "Submit your first weekly report");
+            action.put("href", "#weekly");
+        } else {
+            action.put("label", "Submit this week's report");
+            action.put("href", "#weekly");
         }
         return action;
     }
@@ -302,8 +370,4 @@ public class ParticipantDashboardService {
         return (int) Math.max(0, days / 7);
     }
 
-    private static LocalDate startOfWeek(LocalDate date) {
-        int dow = date.getDayOfWeek().getValue();
-        return date.minusDays(dow - DayOfWeek.MONDAY.getValue());
-    }
 }

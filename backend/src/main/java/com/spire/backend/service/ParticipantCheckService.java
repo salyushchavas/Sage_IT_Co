@@ -64,10 +64,21 @@ public class ParticipantCheckService {
             String checkNumber,
             BigDecimal amount,
             LocalDate checkDate,
-            String notes
+            String notes,
+            Long replacesCheckId
     ) {
         User user = requireGatedUser(userId);
         validateFile(file);
+        // Checklist 2.4: a re-upload replaces one of the participant's own
+        // copies that Finance rejected.
+        if (replacesCheckId != null) {
+            CheckDocument old = checkDocumentRepository.findById(replacesCheckId)
+                    .filter(c -> userId.equals(c.getUserId()))
+                    .orElseThrow(() -> new IllegalArgumentException("That check copy isn't yours."));
+            if (!"REJECTED".equals(old.getReviewStatus())) {
+                throw new IllegalArgumentException("Only a check copy Finance rejected can be replaced.");
+            }
+        }
 
         byte[] bytes;
         try {
@@ -93,8 +104,18 @@ public class ParticipantCheckService {
                 .notes(notes)
                 .reviewStatus("PENDING")
                 .maskingStatus("MASKED")
+                .replacesCheckId(replacesCheckId)
                 .build();
         CheckDocument saved = checkDocumentRepository.save(row);
+
+        // Email #6 — the receipt comes first: the upload may finish the
+        // profile, and the welcome chain that follows must not arrive
+        // before it (checklist 3.1). Best-effort.
+        try { emailTemplateService.sendCheckUploadConfirmationEmail(user); }
+        catch (Exception e) {
+            log.warn("Check upload confirmation email failed for user {}: {}",
+                    userId, e.getMessage());
+        }
 
         // Workflow advance — first check upload bumps the user to
         // CHECK_COPY_UPLOADED, then runs the post-agreement chain.
@@ -113,14 +134,6 @@ public class ParticipantCheckService {
                         "fileSize", file.getSize()
                 ));
         log.info("Check upload user={} id={} size={}", userId, saved.getId(), file.getSize());
-
-        // Email #6 — participant-facing receipt. Best-effort; SMTP
-        // outage shouldn't roll back the upload itself.
-        try { emailTemplateService.sendCheckUploadConfirmationEmail(user); }
-        catch (Exception e) {
-            log.warn("Check upload confirmation email failed for user {}: {}",
-                    userId, e.getMessage());
-        }
         return saved;
     }
 
@@ -159,19 +172,10 @@ public class ParticipantCheckService {
                     triggerEvent);
         }
 
-        agreementRepository.findByUserId(userId).ifPresent(row -> {
-            if (!Boolean.TRUE.equals(row.getErmNotified())) {
-                row.setErmNotified(true);
-                agreementRepository.save(row);
-            }
-        });
-
-        if (!workflowService.isStatusAtLeast(user,
-                WorkflowService.Status.SIGNED_AGREEMENT_SENT_TO_ERM)) {
-            workflowService.transition(user,
-                    WorkflowService.Status.SIGNED_AGREEMENT_SENT_TO_ERM,
-                    "erm_routed");
-        }
+        // Step 10 (the signed agreement to the ERM) is no longer claimed
+        // here, before any ERM exists: the onboarding chain routes it to
+        // a real ERM and only then records SIGNED_AGREEMENT_SENT_TO_ERM
+        // (checklist 2.3).
 
         // Phase 1C: the welcome → coordinator → ERM → coaches chain
         // no longer fires from here. It moved to
@@ -223,6 +227,15 @@ public class ParticipantCheckService {
             if (!ACCEPTED_EXTENSIONS.contains(ext)) {
                 throw new IllegalArgumentException("Only PDF, JPG, or PNG files are allowed.");
             }
+        }
+        // Production-readiness review: check the content itself, since the
+        // browser's label can be anything (or missing).
+        try {
+            if (DocumentStorageService.sniffContentType(file.getBytes()) == null) {
+                throw new IllegalArgumentException("That file isn't a readable PDF, PNG or JPG.");
+            }
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("Couldn't read the uploaded file.");
         }
     }
 }

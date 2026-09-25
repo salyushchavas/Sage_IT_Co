@@ -28,6 +28,7 @@ public class InternalCronController {
     private final WeeklyReminderJob weeklyReminderJob;
     private final DocumentReminderJob documentReminderJob;
     private final ProfileReminderJob profileReminderJob;
+    private final com.spire.backend.service.WeeklyOverdueJob weeklyOverdueJob;
 
     @Value("${agreement.cron.secret:}")
     private String cronSecret;
@@ -39,8 +40,7 @@ public class InternalCronController {
     @PostMapping("/api/internal/weekly-reminder")
     public ResponseEntity<ApiResponse<Map<String, Object>>> runWeeklyReminder(
             @RequestHeader(value = "X-Cron-Secret", required = false) String headerSecret) {
-        if (cronSecret == null || cronSecret.isBlank()
-                || !cronSecret.equals(headerSecret)) {
+        if (!secretMatches(cronSecret, headerSecret)) {
             throw new UnauthorizedException("Invalid cron secret");
         }
         int sent = weeklyReminderJob.sendReminders();
@@ -50,6 +50,17 @@ public class InternalCronController {
         )));
     }
 
+    /** Checklist 4.2: marks missing weekly reports overdue (also runs daily on its own). */
+    @PostMapping("/api/internal/weekly-overdue")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> runWeeklyOverdue(
+            @RequestHeader(value = "X-Cron-Secret", required = false) String headerSecret) {
+        if (!secretMatches(cronSecret, headerSecret)) {
+            throw new UnauthorizedException("Invalid cron secret");
+        }
+        int flagged = weeklyOverdueJob.flagOverdueWeeks();
+        return ResponseEntity.ok(ApiResponse.success(Map.of("ok", true, "flagged", flagged)));
+    }
+
     /**
      * Triggers the document-upload reminder sweep. Idempotent — the
      * job's per-user cooldown prevents back-to-back nudges.
@@ -57,8 +68,7 @@ public class InternalCronController {
     @PostMapping("/api/internal/document-reminder")
     public ResponseEntity<ApiResponse<Map<String, Object>>> runDocumentReminder(
             @RequestHeader(value = "X-Cron-Secret", required = false) String headerSecret) {
-        if (cronSecret == null || cronSecret.isBlank()
-                || !cronSecret.equals(headerSecret)) {
+        if (!secretMatches(cronSecret, headerSecret)) {
             throw new UnauthorizedException("Invalid cron secret");
         }
         int sent = documentReminderJob.sendReminders();
@@ -77,8 +87,7 @@ public class InternalCronController {
     @PostMapping("/api/internal/profile-reminder")
     public ResponseEntity<ApiResponse<Map<String, Object>>> runProfileReminder(
             @RequestHeader(value = "X-Cron-Secret", required = false) String headerSecret) {
-        if (cronSecret == null || cronSecret.isBlank()
-                || !cronSecret.equals(headerSecret)) {
+        if (!secretMatches(cronSecret, headerSecret)) {
             throw new UnauthorizedException("Invalid cron secret");
         }
         int sent = profileReminderJob.sendReminders();
@@ -86,5 +95,13 @@ public class InternalCronController {
                 "ok", true,
                 "sent", sent
         )));
+    }
+
+    /** Constant-time comparison, so the secret can't be guessed from response timing. */
+    public static boolean secretMatches(String expected, String given) {
+        if (expected == null || expected.isBlank() || given == null) return false;
+        return java.security.MessageDigest.isEqual(
+                expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+                given.getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 }

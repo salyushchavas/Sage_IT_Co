@@ -134,10 +134,12 @@ public class AdminRevenueService {
             row.put("studentName", p.getUser() != null ? p.getUser().getFullName() : null);
             row.put("studentEmail", p.getUser() != null ? p.getUser().getEmail() : null);
             row.put("amount", p.getAmount());
-            row.put("currency", "INR");
+            row.put("currency", "USD");
             row.put("status", p.getStatus() != null ? p.getStatus().name() : null);
-            row.put("razorpayPaymentId", p.getRazorpayPaymentId());
-            row.put("razorpayOrderId", p.getRazorpayOrderId());
+            // Checklist 5.4: Stripe payments show their Stripe references in the same columns.
+            row.put("razorpayPaymentId", p.getRazorpayPaymentId() != null ? p.getRazorpayPaymentId() : p.getStripePaymentIntentId());
+            row.put("razorpayOrderId", p.getRazorpayOrderId() != null ? p.getRazorpayOrderId() : p.getStripeSessionId());
+            row.put("provider", p.getProvider() == null ? "RAZORPAY" : p.getProvider());
             row.put("createdAt", p.getCreatedAt());
             out.add(row);
         }

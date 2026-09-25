@@ -11,6 +11,8 @@ import java.util.Optional;
 public interface PaymentPlanRepository extends JpaRepository<PaymentPlan, Long> {
     List<PaymentPlan> findByUserIdOrderByIdDesc(Long userId);
     Optional<PaymentPlan> findByPlanId(String planId);
+    boolean existsByPlanId(String planId);
+    List<PaymentPlan> findByStatus(String status);
 
     /** Latest plan a participant has, regardless of status — used by
      *  the participant Payments tab to render whatever is current. */

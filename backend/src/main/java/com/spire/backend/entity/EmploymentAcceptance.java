@@ -64,4 +64,17 @@ public class EmploymentAcceptance {
     /** ERM-side note captured at verification time. */
     @Column(name = "erm_notes", columnDefinition = "TEXT")
     private String ermNotes;
+
+    /**
+     * Checklist 4.5: the ERM sent this record back for correction. It stays
+     * for the history; the participant's corrected details are a new record.
+     */
+    @Column(name = "returned_at")
+    private LocalDateTime returnedAt;
+
+    @Column(name = "return_reason", columnDefinition = "TEXT")
+    private String returnReason;
+
+    @Column(name = "returned_by")
+    private Long returnedBy;
 }

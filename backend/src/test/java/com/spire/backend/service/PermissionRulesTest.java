@@ -60,7 +60,8 @@ class PermissionRulesTest {
         when(docs.findById(99L)).thenReturn(Optional.of(ParticipantDocument.builder()
                 .id(99L).userId(PARTICIPANT).documentType("SSN_CARD").fileUrl("x").build()));
         return new DocumentService(docs, userRepository, mock(DocumentStorageService.class),
-                mock(WorkflowService.class), recordService, mock(ProfileCompletionService.class), permissionService);
+                mock(WorkflowService.class), recordService, mock(ProfileCompletionService.class), permissionService,
+                mock(EmailTemplateService.class));
     }
 
     @Test
@@ -102,7 +103,8 @@ class PermissionRulesTest {
         when(roles.findByName(anyString())).thenAnswer(inv -> Optional.of(Role.builder().name(inv.getArgument(0)).build()));
         return new AdminService(userRepository, roles, mock(CourseRepository.class), mock(EnrollmentRepository.class),
                 mock(LessonRepository.class), mock(ProgressRepository.class), mock(CertificateRepository.class),
-                mock(SessionRequestRepository.class), mock(MentorAssignmentRepository.class), recordService);
+                mock(SessionRequestRepository.class), mock(MentorAssignmentRepository.class), recordService,
+                mock(AdminRevenueService.class), mock(PaymentLedgerRepository.class));
     }
 
     @Test

@@ -1,24 +1,17 @@
 package com.spire.backend.controller;
 
 import com.spire.backend.dto.ApiResponse;
-import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.exception.UnauthorizedException;
-import com.spire.backend.repository.AgreementAcceptanceRepository;
 import com.spire.backend.service.AgreementService;
 import com.spire.backend.service.TermsContentService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.core.io.FileSystemResource;
-import org.springframework.core.io.Resource;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.io.File;
 import java.util.Map;
 
 /**
@@ -49,7 +42,7 @@ public class AgreementController {
 
     private final AgreementService agreementService;
     private final TermsContentService termsContentService;
-    private final AgreementAcceptanceRepository agreementRepository;
+    private final com.spire.backend.service.SignedAgreementService signedAgreementService;
 
     @Value("${agreement.cron.secret:}")
     private String cronSecret;
@@ -137,8 +130,7 @@ public class AgreementController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> processReply(
             @RequestHeader(value = "X-Cron-Secret", required = false) String headerSecret,
             @RequestBody Map<String, Object> body) {
-        if (cronSecret == null || cronSecret.isBlank()
-                || !cronSecret.equals(headerSecret)) {
+        if (!InternalCronController.secretMatches(cronSecret, headerSecret)) {
             throw new UnauthorizedException("Invalid cron secret");
         }
         Object userIdRaw = body.get("userId");
@@ -175,8 +167,7 @@ public class AgreementController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> checkPendingUser(
             @RequestHeader(value = "X-Cron-Secret", required = false) String headerSecret,
             @RequestBody Map<String, Object> body) {
-        if (cronSecret == null || cronSecret.isBlank()
-                || !cronSecret.equals(headerSecret)) {
+        if (!InternalCronController.secretMatches(cronSecret, headerSecret)) {
             throw new UnauthorizedException("Invalid cron secret");
         }
         Object emailRaw = body.get("email");
@@ -203,57 +194,23 @@ public class AgreementController {
     // ─── Signed-agreement PDF download ──────────────────────────────
 
     /**
-     * Streams the personalized signed-agreement PDF generated when
-     * the user completed OTP verification. Owner-or-admin gated:
-     * the path's {@code userId} must match the JWT principal,
-     * otherwise the caller must hold ROLE_ADMIN. Files live at
-     * {@code signed-agreements/{filename}} on the backend's working
-     * directory; the {@code userId} segment in the URL is purely
-     * for display and a defence-in-depth check on the row lookup.
+     * The older download address for a signed agreement (links in earlier
+     * emails). Served by SignedAgreementService (checklist 2.2): the owner,
+     * their assigned ERM, or an Operations / System admin; the file name in
+     * the path is ignored.
      */
     @GetMapping("/api/agreement/signed-pdf/{userId}/{fileName:.+}")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<Resource> downloadSignedAgreement(
+    public ResponseEntity<?> downloadSignedAgreement(
             @PathVariable Long userId,
             @PathVariable String fileName,
             Authentication auth) {
         Long callerId = Long.parseLong(auth.getPrincipal().toString());
-        boolean isOwner = callerId.equals(userId);
-        boolean isAdmin = auth.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
-        if (!isOwner && !isAdmin) {
-            throw new UnauthorizedException("Not allowed to download this agreement");
-        }
-
-        // Cross-check the row so a user can't probe other users'
-        // filenames even if they accidentally land on a path with
-        // someone else's id swapped in.
-        var row = agreementRepository.findByUserId(userId)
-                .orElseThrow(() -> new ResourceNotFoundException(
-                        "Agreement", "userId", userId));
-        String storedUrl = row.getSignedAgreementPdfUrl();
-        if (storedUrl == null || !storedUrl.endsWith("/" + fileName)) {
-            throw new ResourceNotFoundException("SignedAgreement", "file", fileName);
-        }
-
-        File file = new File("signed-agreements/" + fileName);
-        if (!file.exists()) {
-            return ResponseEntity.notFound().build();
-        }
-        Resource resource = new FileSystemResource(file);
-        return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_PDF)
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"Spire-Agreement-" + userId + ".pdf\"")
-                .body(resource);
+        return ParticipantController.signedPdfResponse(signedAgreementService.forDownload(userId, callerId));
     }
 
+    /** The address our hosting proxy saw (the browser can set the first hop). */
     private static String clientIp(HttpServletRequest request) {
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-        }
-        return request.getRemoteAddr();
+        return com.spire.backend.service.AcknowledgmentService.clientIp(request);
     }
 }

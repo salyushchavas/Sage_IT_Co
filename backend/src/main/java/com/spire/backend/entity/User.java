@@ -55,6 +55,39 @@ public class User {
     @Column(name = "phone", length = 20)
     private String phone;
 
+    /**
+     * Checklist 3.2, for coaches: which coach slots they fill
+     * (CAREER_COACH, RESUME_SPECIALIST, TECHNICAL_ADVISOR, INTERVIEW_COACH)
+     * and the skills they cover (the program's technology options), comma
+     * separated. See CoachProfiles.
+     */
+    @Column(name = "coach_types", length = 200)
+    private String coachTypes;
+
+    @Column(name = "coach_skills", columnDefinition = "TEXT")
+    private String coachSkills;
+
+    /** The phone number in one comparable form (PhoneNumbers.normalize), for the duplicate check. */
+    @Column(name = "phone_normalized", length = 20)
+    private String phoneNormalized;
+
+    /**
+     * Staff onboarding: the person's own email. When set, every email the
+     * portal sends this account (login details, password resets,
+     * notifications) goes here, because the login email may be a company
+     * address that isn't a real mailbox.
+     */
+    @Column(name = "personal_email", length = 255)
+    private String personalEmail;
+
+    /**
+     * Staff onboarding: set when an admin creates the account or sends new
+     * login details (a temporary password). Until the person chooses their
+     * own password, the server refuses everything else.
+     */
+    @Column(name = "must_change_password")
+    private Boolean mustChangePassword;
+
     @Column(name = "location", length = 255)
     private String location;
 

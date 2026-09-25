@@ -19,7 +19,7 @@ import java.util.List;
  * per-user throttled, max 3 reminders per user lifetime so a stuck
  * signup never gets pinged forever.
  *
- * Cron: daily at 04:00 UTC ≈ 09:30 IST. Also reachable via the Vercel
+ * Cron: daily at 9:30 am US Central. Also reachable via the Vercel
  * cron route at {@code /api/cron/profile-reminder} which proxies in
  * with the shared cron secret.
  */
@@ -37,8 +37,8 @@ public class ProfileReminderJob {
     private final EmailTemplateService emailTemplateService;
     private final EmailService emailService;
 
-    /** 04:00 UTC daily ≈ 09:30 IST. */
-    @Scheduled(cron = "0 0 4 * * *")
+    /** 09:30 business time (app.business-zone, Central) daily. */
+    @Scheduled(cron = "0 30 9 * * *", zone = "${app.business-zone:America/Chicago}")
     @Transactional
     public void runScheduled() {
         if (!emailService.isConfigured()) {
@@ -60,8 +60,16 @@ public class ProfileReminderJob {
         // scan is fine for now.
         List<User> users = userRepository.findAll();
         for (User u : users) {
+            // Participants only: staff accounts have no profile steps and
+            // were getting "You're 0% there" emails (checklist 1.5).
+            if (u.getRole() == null
+                    || !DocumentReminderJob.PARTICIPANT_ROLES.contains(u.getRole().getName())) continue;
             if (!Boolean.TRUE.equals(u.getIsActive())) continue;
+            if (!Boolean.TRUE.equals(u.getEmailVerified())) continue;
             if (Boolean.TRUE.equals(u.getProfileComplete())) continue;
+            // The acknowledgment and document steps get the document
+            // reminder instead, so nobody gets two emails for one step.
+            if (DocumentReminderJob.STEPS.contains(profileCompletionService.nextStepKey(u))) continue;
             if (u.getEmail() == null || u.getEmail().isBlank()) continue;
             // Brand-new accounts get a grace window before the first nudge.
             if (u.getCreatedAt() != null
@@ -82,8 +90,9 @@ public class ProfileReminderJob {
             if (remaining.isEmpty()) continue;
 
             try {
-                emailTemplateService.sendProfileReminderEmail(u,
-                        status.getCompletionPercentage(), remaining);
+                // Count and stamp only when it really went out.
+                if (!emailTemplateService.sendProfileReminderEmail(u,
+                        status.getCompletionPercentage(), remaining)) continue;
                 u.setProfileReminderCount(sentSoFar + 1);
                 u.setLastProfileReminderAt(LocalDateTime.now());
                 userRepository.save(u);

@@ -53,6 +53,9 @@ public class CoachAssignmentService {
 
     private final CoachAssignmentRepository coachAssignmentRepository;
     private final UserRepository userRepository;
+    private final EmailTemplateService emailTemplateService;
+    private final com.spire.backend.repository.ProgramSelectionRepository programSelectionRepository;
+    private final RecordService recordService;
 
     /**
      * Assigns coaches across all four roles. Returns the resulting
@@ -93,13 +96,7 @@ public class CoachAssignmentService {
                 continue;
             }
             User coach = chosen.get();
-            CoachAssignment row = CoachAssignment.builder()
-                    .userId(participant.getId())
-                    .coachUserId(coach.getId())
-                    .coachRole(coachRole)
-                    .status("ACTIVE")
-                    .build();
-            coachAssignmentRepository.save(row);
+            saveAndTell(participant, coach, coachRole, "automatic");
             outcome.put(label, coach.getFullName() == null ? "(Assigned)" : coach.getFullName());
             // Update in-memory tally so subsequent roles don't all
             // pile onto the same coach.
@@ -108,6 +105,51 @@ public class CoachAssignmentService {
                     coach.getId(), coachRole, participant.getId());
         }
         return outcome;
+    }
+
+    /**
+     * Operations puts a coach in one of a participant's coach slots
+     * (checklist 3.2). The coach must be an active coach account and the
+     * slot one of the four; the previous coach in that slot is ended (kept
+     * for history, not deleted). The new coach is emailed.
+     */
+    @Transactional
+    public CoachAssignment assignManually(User participant, User coach, String coachRole, Long operatorId) {
+        if (!COACH_ROLES.containsKey(coachRole)) {
+            throw new IllegalArgumentException("Unknown coach slot: " + coachRole);
+        }
+        if (coach == null || !isActiveCoach(coach)) {
+            throw new IllegalArgumentException("That person isn't an active coach.");
+        }
+        for (CoachAssignment old : coachAssignmentRepository.findByUserIdAndStatus(participant.getId(), "ACTIVE")) {
+            if (coachRole.equals(old.getCoachRole())) {
+                if (coach.getId().equals(old.getCoachUserId())) return old;   // already theirs
+                old.setStatus("ENDED");
+                coachAssignmentRepository.save(old);
+            }
+        }
+        return saveAndTell(participant, coach, coachRole, "operations #" + operatorId);
+    }
+
+    /** Records the assignment, audits it and emails the coach about their new participant. */
+    private CoachAssignment saveAndTell(User participant, User coach, String coachRole, String source) {
+        CoachAssignment saved = coachAssignmentRepository.save(CoachAssignment.builder()
+                .userId(participant.getId())
+                .coachUserId(coach.getId())
+                .coachRole(coachRole)
+                .status("ACTIVE")
+                .build());
+        recordService.logAction(participant.getId(), RecordService.Category.ACCOUNT,
+                "Coach assigned: " + COACH_ROLES.get(coachRole),
+                coach.getFullName() + " (" + source + ")",
+                Map.of("coachUserId", coach.getId(), "coachRole", coachRole, "source", source));
+        try {
+            emailTemplateService.sendCoachNewParticipantEmail(coach, participant, COACH_ROLES.get(coachRole),
+                    programSelectionRepository.findFirstByUserIdOrderBySelectionDateDesc(participant.getId()).orElse(null));
+        } catch (Exception e) {
+            log.warn("New-participant email to coach {} failed: {}", coach.getId(), e.getMessage());
+        }
+        return saved;
     }
 
     /** True if the participant has at least one ACTIVE coach. */
@@ -145,38 +187,47 @@ public class CoachAssignmentService {
         return map;
     }
 
+    /**
+     * Checklist 3.2: the coach for one slot. Only coaches whose types
+     * include the slot; the technical advisor must cover the participant's
+     * skill (no match: the slot waits for Operations); for the other slots
+     * a coach with the skill is preferred. Someone not already coaching
+     * this participant in another slot comes first, then the least busy.
+     */
     private Optional<User> pickLeastLoaded(List<User> pool, Map<Long, Integer> load,
                                            String coachRole, User participant) {
-        // Match heuristic — for the technical advisor we prefer
-        // coaches whose role name explicitly says TECHNICAL_ADVISOR;
-        // for everything else any user with role=COACH is eligible.
-        String wantedRole = "TECHNICAL_ADVISOR".equals(coachRole) ? "TECHNICAL_ADVISOR" : "COACH";
-        String wantedSkill = participant.getSelectedTechnology();
-
         List<User> matching = pool.stream()
-                .filter(u -> u.getRole() != null
-                        && wantedRole.equalsIgnoreCase(u.getRole().getName()))
+                .filter(u -> CoachProfiles.typesOf(u).contains(coachRole))
                 .toList();
-        if (matching.isEmpty()) return Optional.empty();
-
-        // Skill-match preference for TECHNICAL_ADVISOR — bio field
-        // is a cheap free-text place to flag the coach's stack.
-        // If we can't tell from the bio, fall through to least-load.
-        if ("TECHNICAL_ADVISOR".equals(coachRole) && wantedSkill != null && !wantedSkill.isBlank()) {
-            String want = wantedSkill.toLowerCase();
-            List<User> skillMatches = matching.stream()
-                    .filter(u -> u.getBio() != null && u.getBio().toLowerCase().contains(want))
-                    .toList();
-            if (!skillMatches.isEmpty()) matching = skillMatches;
+        String skill = participantSkill(participant);
+        if ("TECHNICAL_ADVISOR".equals(coachRole)) {
+            matching = matching.stream().filter(u -> CoachProfiles.hasSkill(u, skill)).toList();
+        } else if (skill != null) {
+            List<User> withSkill = matching.stream().filter(u -> CoachProfiles.hasSkill(u, skill)).toList();
+            if (!withSkill.isEmpty()) matching = withSkill;
         }
-
+        if (matching.isEmpty()) return Optional.empty();
+        Set<Long> alreadyCoaching = new java.util.HashSet<>();
+        coachAssignmentRepository.findByUserIdAndStatus(participant.getId(), "ACTIVE")
+                .forEach(a -> alreadyCoaching.add(a.getCoachUserId()));
+        List<User> fresh = matching.stream().filter(u -> !alreadyCoaching.contains(u.getId())).toList();
+        if (!fresh.isEmpty()) matching = fresh;
         return matching.stream()
                 .min(Comparator
                         .<User, Integer>comparing(u -> load.getOrDefault(u.getId(), 0))
                         .thenComparing(User::getId));
     }
 
-    private boolean isActiveCoach(User u) {
+    /** The participant's chosen technology (their program selection's skillset). */
+    private String participantSkill(User participant) {
+        String skill = programSelectionRepository.findFirstByUserIdOrderBySelectionDateDesc(participant.getId())
+                .map(com.spire.backend.entity.ProgramSelection::getSkillset)
+                .filter(v -> v != null && !v.isBlank())
+                .orElse(participant.getSelectedTechnology());
+        return skill == null || skill.isBlank() ? null : skill.trim();
+    }
+
+    public boolean isActiveCoach(User u) {
         if (Boolean.FALSE.equals(u.getIsActive())) return false;
         Role role = u.getRole();
         if (role == null || role.getName() == null) return false;

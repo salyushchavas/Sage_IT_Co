@@ -97,8 +97,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 return;
             }
 
-            List<SimpleGrantedAuthority> authorities = List.of(
-                    new SimpleGrantedAuthority("ROLE_" + role));
+            List<SimpleGrantedAuthority> authorities = authoritiesFor(role);
 
             log.debug("JWT Auth — userId: {}, role: {}, authorities: {}", userId, role, authorities);
 
@@ -110,5 +109,19 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         }
 
         filterChain.doFilter(request, response);
+    }
+
+    /**
+     * The authorities for a database role. System Admin is the top role and
+     * uses the same admin pages as the legacy ADMIN role, so it also gets
+     * ROLE_ADMIN; otherwise the LMS admin endpoints (courses, coupons,
+     * announcements, sales), which only name ADMIN, refused it.
+     */
+    static List<SimpleGrantedAuthority> authoritiesFor(String role) {
+        if ("SYSTEM_ADMIN".equals(role)) {
+            return List.of(new SimpleGrantedAuthority("ROLE_SYSTEM_ADMIN"),
+                    new SimpleGrantedAuthority("ROLE_ADMIN"));
+        }
+        return List.of(new SimpleGrantedAuthority("ROLE_" + role));
     }
 }

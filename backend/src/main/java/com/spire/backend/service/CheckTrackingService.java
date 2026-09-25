@@ -4,7 +4,6 @@ import com.spire.backend.entity.CheckTracking;
 import com.spire.backend.entity.PaymentPlan;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.CheckTrackingRepository;
 import com.spire.backend.repository.PaymentPlanRepository;
 import com.spire.backend.repository.UserRepository;
@@ -37,6 +36,7 @@ public class CheckTrackingService {
     private final UserRepository userRepository;
     private final WorkflowService workflowService;
     private final RecordService recordService;
+    private final BusinessClock clock;
 
     // ── Participant submission ────────────────────────────────────
 
@@ -46,7 +46,7 @@ public class CheckTrackingService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
         if (!workflowService.isStatusAtLeast(user,
                 WorkflowService.Status.PAYMENT_PLAN_ACCEPTED)) {
-            throw new UnauthorizedException(
+            throw new IllegalStateException(
                     "Payment plan must be accepted before tracking can be submitted.");
         }
         PaymentPlan plan = planRepository.findLatestByUserId(userId)
@@ -82,7 +82,7 @@ public class CheckTrackingService {
                 "Check tracking submitted",
                 saved.getCarrier() + " " + saved.getPhysicalTrackingId(),
                 Map.of("trackingId", saved.getId(),
-                        "checkNumber", saved.getCheckNumber(),
+                        "checkNumber", com.spire.backend.dto.CheckDocumentDTO.maskCheckNumber(saved.getCheckNumber()),
                         "planId", plan.getId()));
         return saved;
     }
@@ -95,7 +95,8 @@ public class CheckTrackingService {
                 .map(t -> {
                     Map<String, Object> r = new LinkedHashMap<>();
                     r.put("id", t.getId());
-                    r.put("checkNumber", t.getCheckNumber());
+                    // Checklist 5.3: check numbers are masked (••••1234), as on check copies.
+                    r.put("checkNumber", com.spire.backend.dto.CheckDocumentDTO.maskCheckNumber(t.getCheckNumber()));
                     r.put("carrier", t.getCarrier());
                     r.put("trackingId", t.getPhysicalTrackingId());
                     r.put("mailedDate", t.getMailedDate());
@@ -125,7 +126,8 @@ public class CheckTrackingService {
                     r.put("userId", uid);
                     r.put("participantId", u == null ? null : u.getParticipantId());
                     r.put("participantName", u == null ? null : u.getFullName());
-                    r.put("checkNumber", t.getCheckNumber());
+                    // Checklist 5.3: masked here; Finance reveals it through an audited call.
+                    r.put("checkNumber", com.spire.backend.dto.CheckDocumentDTO.maskCheckNumber(t.getCheckNumber()));
                     r.put("carrier", t.getCarrier());
                     r.put("trackingId", t.getPhysicalTrackingId());
                     r.put("mailedDate", t.getMailedDate());
@@ -135,6 +137,21 @@ public class CheckTrackingService {
                     return r;
                 })
                 .toList();
+    }
+
+    /** Checklist 5.3: the full check number, for Finance; each view is recorded. */
+    @Transactional
+    public String revealCheckNumber(Long financeUserId, Long trackingId) {
+        CheckTracking row = trackingRepository.findById(trackingId)
+                .orElseThrow(() -> new ResourceNotFoundException("CheckTracking", "id", trackingId));
+        Long uid = planRepository.findById(row.getPaymentPlanId()).map(PaymentPlan::getUserId).orElse(null);
+        if (uid != null) {
+            recordService.record(uid, "CHECK_NUMBER_VIEWED", RecordService.Category.PAYMENT,
+                    "Mailed check number viewed by finance",
+                    "User #" + financeUserId + " revealed the number of tracked check #" + trackingId,
+                    Map.of("trackingId", trackingId, "viewerId", financeUserId));
+        }
+        return row.getCheckNumber() == null ? "" : row.getCheckNumber();
     }
 
     @Transactional
@@ -149,8 +166,9 @@ public class CheckTrackingService {
             throw new IllegalArgumentException("Invalid tracking status.");
         }
         row.setStatus(normalised);
-        if ("RECEIVED".equals(normalised) && receivedDate != null) {
-            row.setReceivedDate(receivedDate);
+        if ("RECEIVED".equals(normalised)) {
+            // Checklist 5.1: "today" is the business day, not the browser's UTC date.
+            row.setReceivedDate(receivedDate != null ? receivedDate : clock.today());
         }
         CheckTracking saved = trackingRepository.save(row);
 

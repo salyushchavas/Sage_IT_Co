@@ -19,7 +19,7 @@ import java.util.List;
 /**
  * Sends a single "we miss you" email per user per fortnight when
  * they've been silent on the platform for 7+ days. Runs nightly at
- * 03:00 UTC (08:30 IST) so the email lands in the morning local time
+ * 9:00 am business time (US Central, checklist 5.3) so the email lands in the morning
  * for our primary student base. The repository query already
  * combines the inactivity + throttle predicates so this class stays
  * small.
@@ -50,11 +50,11 @@ public class EmailNudgeJob {
     private int throttleDays;
 
     /**
-     * Cron: every day at 03:00 UTC ≈ 08:30 IST. Skips entirely when
+     * Cron: every day at 9:00 am US Central. Skips entirely when
      * SMTP isn't configured, so dev/staging don't burn through Gmail
      * quotas testing nothing.
      */
-    @Scheduled(cron = "0 0 3 * * *")
+    @Scheduled(cron = "0 0 9 * * *", zone = "${app.business-zone:America/Chicago}")
     @Transactional
     public void sendInactiveNudges() {
         if (!emailService.isConfigured()) {
@@ -120,9 +120,9 @@ public class EmailNudgeJob {
                 ? appUrl + "/learn/" + courseId + "/" + nextLessonId
                 : appUrl + "/courses/" + courseId;
 
-        emailTemplateService.sendInactiveNudgeEmail(
+        // True (and stamped by the caller) only when it really went out.
+        return emailTemplateService.sendInactiveNudgeEmail(
                 user, courseTitle, Math.max(0, bestPct), mentorName, lessonUrl);
-        return true;
     }
 
     private int progressPercentFor(Long userId, Long courseId) {

@@ -28,16 +28,35 @@ public class CheckDocumentDTO {
     private String notes;
     private String reviewStatus;
     private LocalDateTime uploadedAt;
+    /** Finance's reason, when it rejected the copy. */
+    private String reviewNotes;
+    private LocalDateTime reviewedAt;
+    private Long replacesCheckId;
+
+    /**
+     * Checklist 2.4: the check number is masked (••••1234) everywhere
+     * except Finance's own audited view.
+     */
+    public static String maskCheckNumber(String number) {
+        if (number == null) return null;
+        String digits = number.replaceAll("\\D", "");
+        if (digits.isEmpty()) return "••••";
+        return digits.length() > 4 ? "••••" + digits.substring(digits.length() - 4)
+                : "••" + digits.substring(Math.max(0, digits.length() - 2));
+    }
 
     public static CheckDocumentDTO from(CheckDocument d) {
         return CheckDocumentDTO.builder()
                 .id(d.getId())
-                .checkNumber(d.getCheckNumber())
+                .checkNumber(maskCheckNumber(d.getCheckNumber()))
                 .amount(d.getAmount())
                 .checkDate(d.getCheckDate())
                 .notes(d.getNotes())
                 .reviewStatus(d.getReviewStatus())
                 .uploadedAt(d.getUploadedAt())
+                .reviewNotes(d.getReviewNotes())
+                .reviewedAt(d.getReviewedAt())
+                .replacesCheckId(d.getReplacesCheckId())
                 .build();
     }
 }

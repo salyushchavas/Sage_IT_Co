@@ -23,6 +23,7 @@ import java.util.Map;
 public class CartController {
 
     private final CartService cartService;
+    private final com.spire.backend.service.CourseCheckoutService courseCheckoutService;
     private final ProfileCompletionService profileCompletionService;
     private final UserRepository userRepository;
 
@@ -85,5 +86,22 @@ public class CartController {
                 ? body.get("couponCode").toString() : null;
         Map<String, Object> result = cartService.checkout(userId, couponCode);
         return ResponseEntity.ok(ApiResponse.success("Checkout successful", result));
+    }
+
+    /**
+     * Checklist 5.4: back from the payment page (?session_id=...). Checks
+     * the payment with Stripe and reports whether they're enrolled.
+     */
+    @PostMapping("/checkout/confirm")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> confirmCheckout(
+            Authentication authentication,
+            @RequestBody Map<String, Object> body) {
+        Long userId = Long.parseLong(authentication.getPrincipal().toString());
+        Object sessionId = body.get("sessionId");
+        if (sessionId == null || sessionId.toString().isBlank()) {
+            throw new IllegalArgumentException("sessionId is required");
+        }
+        return ResponseEntity.ok(ApiResponse.success(courseCheckoutService.confirm(userId, sessionId.toString())));
     }
 }

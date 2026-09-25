@@ -67,6 +67,20 @@ public class AgreementGateFilter extends OncePerRequestFilter {
                 || path.startsWith("/api/participants/");
     }
 
+    /**
+     * Checklist 2.1: the Terms gate is only for course-only student
+     * accounts (a student with no Participant ID). Staff don't sign it,
+     * and participants sign their program agreement at step 9, which
+     * their onboarding steps enforce. It used to block both until a
+     * restart happened to mark them "accepted".
+     */
+    static boolean appliesTo(User user) {
+        String role = user.getRole() == null ? "" : user.getRole().getName();
+        boolean studentAccount = "STUDENT".equals(role) || "PARTICIPANT".equals(role);
+        boolean participant = user.getParticipantId() != null && !user.getParticipantId().isBlank();
+        return studentAccount && !participant;
+    }
+
     @Override
     protected void doFilterInternal(
             @NonNull HttpServletRequest request,
@@ -107,7 +121,7 @@ public class AgreementGateFilter extends OncePerRequestFilter {
         }
 
         User user = userOpt.get();
-        if (Boolean.TRUE.equals(user.getAgreementAccepted())) {
+        if (!appliesTo(user) || Boolean.TRUE.equals(user.getAgreementAccepted())) {
             filterChain.doFilter(request, response);
             return;
         }

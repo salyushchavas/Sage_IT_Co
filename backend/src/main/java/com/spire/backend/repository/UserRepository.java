@@ -25,6 +25,9 @@ public interface UserRepository extends JpaRepository<User, Long> {
 
     Optional<User> findByEmail(String email);
 
+    /** Staff onboarding: who a personal (delivery) email belongs to. */
+    Optional<User> findFirstByPersonalEmailIgnoreCase(String personalEmail);
+
     boolean existsByEmail(String email);
 
     /**
@@ -69,4 +72,7 @@ public interface UserRepository extends JpaRepository<User, Long> {
     );
 
     List<User> findByCurrentStatus(String currentStatus);
+
+    /** Checklist 1.5: accounts holding this phone number (normalized form). */
+    List<User> findByPhoneNormalized(String phoneNormalized);
 }

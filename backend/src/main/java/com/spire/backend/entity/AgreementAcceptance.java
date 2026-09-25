@@ -160,6 +160,54 @@ public class AgreementAcceptance {
     @Column(name = "signed_agreement_pdf_url", length = 512)
     private String signedAgreementPdfUrl;
 
+    // ── Checklist 2.2: what exactly was signed, and the kept copy ───
+
+    /** SHA-256 of the exact agreement text signed (TermsContentService.fingerprint). */
+    @Column(name = "text_sha256", length = 64)
+    private String textSha256;
+
+    /** The participant's ID at signing, as printed on the PDF. */
+    @Column(name = "participant_id_snapshot", length = 40)
+    private String participantIdSnapshot;
+
+    /** The program chosen at signing ("Program · Phase · Skillset · Target role"), as printed on the PDF. */
+    @Column(name = "program_snapshot", columnDefinition = "TEXT")
+    private String programSnapshot;
+
+    /** Where the signed PDF is kept (DocumentStorageService path or Cloudinary id). */
+    @Column(name = "pdf_storage_path", length = 512)
+    private String pdfStoragePath;
+
+    /** SHA-256 of the signed PDF's bytes, to show the kept copy is unchanged. */
+    @Column(name = "pdf_sha256", length = 64)
+    private String pdfSha256;
+
+    // ── Checklist 2.3: the signed agreement goes to the ERM (step 10) ──
+
+    /** The ERM the signed agreement was last routed to. */
+    @Column(name = "erm_routed_to")
+    private Long ermRoutedTo;
+
+    @Column(name = "erm_routed_at")
+    private LocalDateTime ermRoutedAt;
+
+    /** When the ERM marked the signed agreement reviewed, and who. */
+    @Column(name = "erm_reviewed_at")
+    private LocalDateTime ermReviewedAt;
+
+    @Column(name = "erm_reviewed_by")
+    private Long ermReviewedBy;
+
+    // ── Checklist 2.5: the participant declined (status DECLINED) ──
+    // They can still sign later; signing clears these (the audit trail
+    // keeps the history).
+
+    @Column(name = "declined_at")
+    private LocalDateTime declinedAt;
+
+    @Column(name = "decline_reason", columnDefinition = "TEXT")
+    private String declineReason;
+
     /**
      * Base64-encoded PNG of the user's digital signature, captured
      * either by drawing on a canvas or uploading an image. Stored

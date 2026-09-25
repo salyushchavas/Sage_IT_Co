@@ -38,6 +38,8 @@ public class AdminService {
     private final SessionRequestRepository sessionRequestRepository;
     private final MentorAssignmentRepository mentorAssignmentRepository;
     private final RecordService recordService;
+    private final AdminRevenueService adminRevenueService;
+    private final com.spire.backend.repository.PaymentLedgerRepository paymentLedgerRepository;
 
     /** Roles that may change other people's roles: System Admin, plus the legacy LMS admin. */
     private static final Set<String> ROLE_MANAGERS = Set.of("SYSTEM_ADMIN", "ADMIN");
@@ -119,6 +121,11 @@ public class AdminService {
         stats.put("totalSessionsCompleted", sessionCompleted);
         stats.put("activeUsersLast7Days", active7);
         stats.put("activeUsersLast30Days", active30);
+        // Checklist 5.3: the Overview's "Revenue" card read a value that was never
+        // sent ("₹undefined"). Money in: course payments completed online plus
+        // program payments recorded by Finance (payments minus reversals), in USD.
+        stats.put("totalRevenue", adminRevenueService.totalLifetimeRevenue()
+                .add(PaymentService.collected(paymentLedgerRepository.findAll())));
         return stats;
     }
 
@@ -364,6 +371,7 @@ public class AdminService {
         user.setEmail("deleted_" + user.getId() + "@removed.com");
         user.setFullName("Deleted User");
         user.setPhone(null);
+        user.setPhoneNormalized(null);
         user.setLocation(null);
         user.setBio(null);
         user.setAvatarUrl(null);

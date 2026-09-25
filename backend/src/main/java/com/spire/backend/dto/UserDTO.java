@@ -70,6 +70,10 @@ public class UserDTO {
     private Boolean programSelectionComplete;
     private Boolean agreementComplete;
     private Boolean checkUploadComplete;
+    /** Staff onboarding: the address the portal's emails go to, when it isn't the login email. */
+    private String personalEmail;
+    /** Staff onboarding: a temporary password is in use; they must choose their own first. */
+    private Boolean mustChangePassword;
 
     public static UserDTO from(User user) {
         return UserDTO.builder()
@@ -101,6 +105,8 @@ public class UserDTO {
                 .programSelectionComplete(Boolean.TRUE.equals(user.getProgramSelectionComplete()))
                 .agreementComplete(Boolean.TRUE.equals(user.getAgreementComplete()))
                 .checkUploadComplete(Boolean.TRUE.equals(user.getCheckUploadComplete()))
+                .personalEmail(user.getPersonalEmail())
+                .mustChangePassword(Boolean.TRUE.equals(user.getMustChangePassword()))
                 .build();
     }
 }

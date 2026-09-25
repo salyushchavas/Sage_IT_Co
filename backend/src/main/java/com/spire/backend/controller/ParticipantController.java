@@ -22,6 +22,7 @@ import com.spire.backend.repository.UserRepository;
 import com.spire.backend.service.AcknowledgmentService;
 import com.spire.backend.service.AuthService;
 import com.spire.backend.service.DocumentService;
+import com.spire.backend.service.PhoneNumbers;
 import com.spire.backend.service.DocumentStorageService;
 import com.spire.backend.service.ParticipantAgreementService;
 import com.spire.backend.service.ParticipantCheckService;
@@ -83,6 +84,9 @@ public class ParticipantController {
     private final com.spire.backend.service.ProfileCompletionService profileCompletionService;
     private final com.spire.backend.service.WishlistService wishlistService;
     private final com.spire.backend.service.EnrollmentService enrollmentService;
+    private final com.spire.backend.service.SignedAgreementService signedAgreementService;
+    private final com.spire.backend.service.ParticipantCoachingService participantCoachingService;
+    private final com.spire.backend.service.InvoicePdfService invoicePdfService;
 
     /** Public — anyone can enroll. Behind the scenes walks the workflow
      *  ladder DRAFT_STARTED → BASIC_INFO_SUBMITTED → EMAIL_VERIFICATION_PENDING. */
@@ -196,9 +200,10 @@ public class ParticipantController {
         if (documentType == null || documentType.isBlank()) {
             throw new IllegalArgumentException("documentType is required");
         }
-        ParticipantDocument saved = documentService.markNotApplicable(userId, documentType);
+        ParticipantDocument saved = documentService.markNotApplicable(userId, documentType, body.get("reason"));
         return ResponseEntity.ok(ApiResponse.success(
-                "Marked as N/A",
+                DocumentService.EXCEPTION_REQUESTED.equals(saved.getReviewStatus())
+                        ? "Sent to Operations for approval" : "Marked as N/A",
                 ParticipantDocumentDTO.from(saved)));
     }
 
@@ -233,40 +238,10 @@ public class ParticipantController {
             return ResponseEntity.notFound().build();
         }
 
-        String url = doc.getFileUrl();
-        if (url.startsWith("http")) {
-            // Cloudinary path — return a 302-style payload with the
-            // signed URL the client can fetch directly.
-            String signed = storageService.signedUrl(url);
-            return ResponseEntity.ok(ApiResponse.success(Map.of(
-                    "url", signed,
-                    "expiresIn", 300
-            )));
-        }
-        // Local-disk path — stream the file inline under auth.
-        File file = new File(url);
-        if (!file.exists()) {
-            return ResponseEntity.notFound().build();
-        }
-        Resource resource = new FileSystemResource(file);
-        String contentType = guessContentType(doc.getFileName());
-        return ResponseEntity.ok()
-                .contentType(MediaType.parseMediaType(contentType))
-                .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "inline; filename=\""
-                                + (doc.getFileName() == null ? "document" : doc.getFileName())
-                                + "\"")
-                .body(resource);
+        // S3 / disk: the bytes under the caller's sign-in; Cloudinary: a signed link.
+        return StoredFileResponse.asNamed(storageService, doc.getFileUrl(), doc.getFileName());
     }
 
-    private static String guessContentType(String filename) {
-        if (filename == null) return "application/octet-stream";
-        String lower = filename.toLowerCase();
-        if (lower.endsWith(".pdf")) return "application/pdf";
-        if (lower.endsWith(".png")) return "image/png";
-        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
-        return "application/octet-stream";
-    }
 
     // ─── Phase 3A: program selection ────────────────────────────────
 
@@ -349,10 +324,79 @@ public class ParticipantController {
                 || signatureImage == null || signatureImage.isBlank()) {
             throw new IllegalArgumentException("legalName and signatureImage are required");
         }
+        Object version = body.get("agreementVersion");
+        Object fingerprint = body.get("textFingerprint");
         Map<String, Object> data = participantAgreementService.sign(
                 userId, legalName, signatureImage, signatureMethod,
-                clientIp(httpRequest), httpRequest.getHeader("User-Agent"));
+                clientIp(httpRequest), httpRequest.getHeader("User-Agent"),
+                version == null ? null : version.toString(),
+                fingerprint == null ? null : fingerprint.toString());
         return ResponseEntity.ok(ApiResponse.success("Agreement signed", data));
+    }
+
+    /**
+     * The participant's own signed agreement (checklist 2.2): a short-lived
+     * link when the copy is in Cloudinary, otherwise the PDF itself.
+     */
+    @GetMapping("/agreement/signed-pdf")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> mySignedAgreement(Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        return signedPdfResponse(signedAgreementService.forDownload(userId, userId));
+    }
+
+    /**
+     * A participant's signed agreement for staff: their assigned ERM or an
+     * Operations / System admin (403 otherwise). Recorded on the
+     * participant's audit trail.
+     */
+    @GetMapping("/{participantUserId}/agreement/signed-pdf")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> participantSignedAgreement(@PathVariable Long participantUserId,
+                                                        Authentication auth) {
+        Long callerId = Long.parseLong(auth.getPrincipal().toString());
+        return signedPdfResponse(signedAgreementService.forDownload(participantUserId, callerId));
+    }
+
+    static ResponseEntity<?> signedPdfResponse(com.spire.backend.service.SignedAgreementService.SignedPdf pdf) {
+        if (pdf.url() != null) {
+            return ResponseEntity.ok(ApiResponse.success(Map.of("url", pdf.url(), "expiresIn", 300)));
+        }
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + pdf.fileName() + "\"")
+                .body(pdf.bytes());
+    }
+
+    /** Checklist 2.5: the participant declines to sign, with a reason (they can still sign later). */
+    @PostMapping("/agreement/decline")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> declineAgreement(
+            @RequestBody Map<String, Object> body, Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        Object reason = body.get("reason");
+        var row = participantAgreementService.decline(userId, reason == null ? null : reason.toString());
+        return ResponseEntity.ok(ApiResponse.success("Agreement declined", Map.of(
+                "status", row.getStatus(),
+                "declinedAt", row.getDeclinedAt() == null ? "" : row.getDeclinedAt().toString())));
+    }
+
+    /** Checklist 4.4: the participant's coaching sessions, tasks and feedback (Resume / Interviews tabs). */
+    @GetMapping("/coaching")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> myCoaching(Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        return ResponseEntity.ok(ApiResponse.success(participantCoachingService.myCoaching(userId)));
+    }
+
+    /** Checklist 4.4: the participant marks one of their own practice tasks done. */
+    @PutMapping("/coaching/tasks/{taskId}/done")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> markCoachingTaskDone(@PathVariable Long taskId,
+                                                                                 Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        var task = participantCoachingService.markTaskDone(userId, taskId);
+        return ResponseEntity.ok(ApiResponse.success("Task marked done", Map.of("id", task.getId(), "status", task.getStatus())));
     }
 
     /** Legacy endpoints — removed in favour of /agreement/sign. */
@@ -378,6 +422,7 @@ public class ParticipantController {
             @RequestParam(value = "amount", required = false) java.math.BigDecimal amount,
             @RequestParam(value = "checkDate", required = false) String checkDate,
             @RequestParam(value = "notes", required = false) String notes,
+            @RequestParam(value = "replacesCheckId", required = false) Long replacesCheckId,
             Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
         java.time.LocalDate date = null;
@@ -388,7 +433,7 @@ public class ParticipantController {
             }
         }
         CheckDocument saved = participantCheckService.upload(
-                userId, file, checkNumber, amount, date, notes);
+                userId, file, checkNumber, amount, date, notes, replacesCheckId);
         return ResponseEntity.ok(ApiResponse.success("Check uploaded",
                 CheckDocumentDTO.from(saved)));
     }
@@ -568,6 +613,14 @@ public class ParticipantController {
             @RequestParam("file") MultipartFile file,
             Authentication auth) throws java.io.IOException {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
+        // Checklist 3.5: like the employment step itself, only once the
+        // participant's team is set up (it stored files for anyone before).
+        User me = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (!workflowService.isStatusAtLeast(me, com.spire.backend.service.WorkflowService.Status.DASHBOARD_ENABLED)) {
+            throw new IllegalStateException(
+                    "Employment can be submitted once your team is set up and your dashboard is ready.");
+        }
         if (file == null || file.isEmpty()) {
             throw new IllegalArgumentException("File is required");
         }
@@ -576,11 +629,32 @@ public class ParticipantController {
         }
         String filename = file.getOriginalFilename() == null
                 ? "offer.pdf" : file.getOriginalFilename();
-        var stored = storageService.upload(userId, "offer-" + filename,
-                file.getBytes(), file.getContentType());
+        // Checklist 4.5: a PDF or a picture only (the ERM opens it).
+        String lower = filename.toLowerCase();
+        if (!(lower.endsWith(".pdf") || lower.endsWith(".png") || lower.endsWith(".jpg") || lower.endsWith(".jpeg"))) {
+            throw new IllegalArgumentException("Upload the offer letter as a PDF, PNG or JPG file.");
+        }
+        String ext = lower.substring(lower.lastIndexOf('.'));
+        byte[] bytes = file.getBytes();
+        // The content must really be a PDF or picture, whatever the name says.
+        if (com.spire.backend.service.DocumentStorageService.sniffContentType(bytes) == null) {
+            throw new IllegalArgumentException("That file isn't a readable PDF, PNG or JPG.");
+        }
+        var stored = storageService.upload(userId, "offer-letter" + ext,
+                bytes, file.getContentType());
         return ResponseEntity.ok(ApiResponse.success(
                 "Offer uploaded",
                 Map.of("url", stored.url())));
+    }
+
+    /** Checklist 4.5: the participant's own offer letter (it used to be a link that didn't open). */
+    @GetMapping("/employment/offer")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<?> employmentOffer(Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        return employmentService.offerFileOf(userId)
+                .<ResponseEntity<?>>map(f -> StoredFileResponse.of(storageService, f, "offer-letter"))
+                .orElseGet(() -> ResponseEntity.notFound().build());
     }
 
     @GetMapping("/employment/status")
@@ -707,6 +781,17 @@ public class ParticipantController {
                 invoiceRepository.findByUserIdOrderByIssueDateDesc(userId)));
     }
 
+    /** Checklist 5.2: one of the participant's own invoices as a PDF. */
+    @GetMapping("/payments/invoices/{invoiceId}/pdf")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<byte[]> myInvoicePdf(@PathVariable Long invoiceId, Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        com.spire.backend.entity.Invoice inv = invoiceRepository.findById(invoiceId)
+                .filter(i -> userId.equals(i.getUserId()))
+                .orElseThrow(() -> new ResourceNotFoundException("Invoice", "id", invoiceId));
+        return invoicePdfService.response(inv);
+    }
+
     @GetMapping("/payments/summary")
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Map<String, Object>>> paymentSummary(Authentication auth) {
@@ -744,11 +829,14 @@ public class ParticipantController {
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         if (body.getFullName() != null && !body.getFullName().isBlank()) {
-            user.setFullName(body.getFullName().trim());
+            user.setFullName(com.spire.backend.service.PersonNames.clean(body.getFullName()));
         }
         if (body.getPhone() != null) {
             String phone = body.getPhone().trim();
-            user.setPhone(phone.isEmpty() ? null : phone);
+            if (!phone.equals(user.getPhone() == null ? "" : user.getPhone())) {
+                user.setPhoneNormalized(PhoneNumbers.requireAvailable(userRepository, phone, user.getId()));
+                user.setPhone(phone.isEmpty() ? null : phone);
+            }
         }
         if (body.getLocation() != null) {
             String loc = body.getLocation().trim();
@@ -910,13 +998,8 @@ public class ParticipantController {
 
     // ── Shared helper ───────────────────────────────────────────────
 
+    /** The address our hosting proxy saw (the browser can set the first hop). */
     private static String clientIp(HttpServletRequest request) {
-        if (request == null) return null;
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-        }
-        return request.getRemoteAddr();
+        return com.spire.backend.service.AcknowledgmentService.clientIp(request);
     }
 }

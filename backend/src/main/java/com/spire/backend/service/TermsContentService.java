@@ -99,9 +99,29 @@ public class TermsContentService {
      * Shape returned to the public API endpoint — uses LinkedHashMap
      * so the field order matches the JSON file order in the response.
      */
+    /**
+     * SHA-256 (hex) of the exact agreement text a version holds: the
+     * version, each section's title and content, then the confirmations,
+     * one per line (checklist 2.2). The page sends it back when signing,
+     * and each signature stores it, so the record names the exact words.
+     */
+    public String fingerprint(String version) {
+        TermsDocument d = getTerms(version);
+        StringBuilder sb = new StringBuilder(d.version()).append('\n');
+        for (Section s : d.sections()) sb.append(s.title()).append('\n').append(s.content()).append('\n');
+        for (String c : d.acceptanceConfirmations()) sb.append(c).append('\n');
+        try {
+            return java.util.HexFormat.of().formatHex(java.security.MessageDigest.getInstance("SHA-256")
+                    .digest(sb.toString().getBytes(java.nio.charset.StandardCharsets.UTF_8)));
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 unavailable", e);
+        }
+    }
+
     public Map<String, Object> toApiResponse(TermsDocument doc) {
         Map<String, Object> out = new LinkedHashMap<>();
         out.put("version", doc.version());
+        out.put("fingerprint", fingerprint(doc.version()));
         out.put("lastUpdated", doc.lastUpdated());
         out.put("effectiveDate", doc.effectiveDate());
         out.put("platform", doc.platform());

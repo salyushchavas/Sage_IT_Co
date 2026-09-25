@@ -31,6 +31,7 @@ public class CartService {
     private final EnrollmentService enrollmentService;
     private final CouponService couponService;
     private final RecordService recordService;
+    private final CourseCheckoutService courseCheckoutService;
 
     @Transactional
     public void addToCart(Long userId, Long courseId) {
@@ -76,57 +77,13 @@ public class CartService {
         cartRepository.deleteByUserId(userId);
     }
 
+    /**
+     * Checklist 5.4: checkout lives in {@link CourseCheckoutService} — free
+     * courses are enrolled, paid ones go through online payment first
+     * (checkout used to enroll every course for free).
+     */
     @Transactional
     public Map<String, Object> checkout(Long userId, String couponCode) {
-        List<CartItem> items = cartRepository.findByUserId(userId);
-        if (items.isEmpty()) {
-            throw new IllegalArgumentException("Cart is empty");
-        }
-
-        BigDecimal subtotal = BigDecimal.ZERO;
-        for (CartItem item : items) {
-            Course course = item.getCourse();
-            subtotal = subtotal.add(course.getPrice() != null ? course.getPrice() : BigDecimal.ZERO);
-        }
-
-        BigDecimal discount = BigDecimal.ZERO;
-        Coupon coupon = null;
-        if (couponCode != null && !couponCode.isBlank()) {
-            // Re-validate at checkout — the cart may have changed since
-            // the student clicked Apply, and we want to fail fast if the
-            // coupon was deactivated or used up in the meantime.
-            coupon = couponService.resolveValidCoupon(couponCode, userId, subtotal);
-            discount = couponService.calculateDiscount(coupon, subtotal);
-        }
-        BigDecimal total = subtotal.subtract(discount).max(BigDecimal.ZERO);
-
-        for (CartItem item : items) {
-            enrollmentService.enrollUser(userId, item.getCourse().getId());
-        }
-
-        if (coupon != null) {
-            couponService.redeem(coupon, userId, discount, total);
-
-            Map<String, Object> couponDetails = new java.util.HashMap<>();
-            couponDetails.put("couponCode", coupon.getCode());
-            couponDetails.put("discountType", coupon.getDiscountType().name());
-            couponDetails.put("discountValue", coupon.getDiscountValue());
-            couponDetails.put("subtotal", subtotal);
-            couponDetails.put("discountAmount", discount);
-            couponDetails.put("finalTotal", total);
-            recordService.record(userId, "COUPON_APPLIED", RecordService.Category.PAYMENT,
-                    "Coupon applied: " + coupon.getCode(),
-                    "Applied coupon " + coupon.getCode() + " — saved ₹" + discount + " on cart total of ₹" + subtotal,
-                    couponDetails);
-        }
-
-        cartRepository.deleteByUserId(userId);
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("subtotal", subtotal);
-        result.put("discount", discount);
-        result.put("total", total);
-        result.put("couponCode", coupon != null ? coupon.getCode() : null);
-        return result;
+        return courseCheckoutService.checkout(userId, couponCode);
     }
 }

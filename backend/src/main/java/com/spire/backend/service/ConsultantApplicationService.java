@@ -66,6 +66,9 @@ import java.util.UUID;
 @Slf4j
 public class ConsultantApplicationService {
 
+    /** Thrown inside the email blocks so a failed email isn't logged as EMAIL_SENT (checklist 1.4). */
+    private static final String EMAIL_NOT_SENT = "the email wasn't sent (see the email log)";
+
     private static final int APPLICATION_TTL_DAYS = 7;
     /**
      * Build Q — the consultant ACCESS LINK is valid for 7 days from the
@@ -261,7 +264,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantInitialFill(app);
+            if (!emailTemplateService.sendConsultantInitialFill(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -865,7 +870,9 @@ public class ConsultantApplicationService {
         // pushback. Best-effort; mirrors the Phase 1 behaviour.
         if (ConsultantApplication.Status.UPDATED.name().equals(app.getStatus())) {
             try {
-                emailTemplateService.sendConsultantApplicationUpdated(app);
+                if (!emailTemplateService.sendConsultantApplicationUpdated(app)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
                 appendEvent(app.getId(),
                         ConsultantApplicationEvent.EventType.EMAIL_SENT,
                         ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -924,7 +931,9 @@ public class ConsultantApplicationService {
                             + "needs to complete the form (status=" + status + ").");
         }
         try {
-            emailTemplateService.sendConsultantInitialFill(app);
+            if (!emailTemplateService.sendConsultantInitialFill(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             // Build L — resetting invite_sent_at to "now" restarts the
             // 15-day expiry clock, so an ERM resend gives the
             // consultant a fresh window without an operator having to
@@ -1129,7 +1138,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantRevisionRequested(app);
+            if (!emailTemplateService.sendConsultantRevisionRequested(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -1202,8 +1213,12 @@ public class ConsultantApplicationService {
                     null);
 
             try {
-                emailTemplateService.sendConsultantApplicationSigned(app);
-                emailTemplateService.sendConsultantApplicationCopy(app);
+                if (!emailTemplateService.sendConsultantApplicationSigned(app)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
+                if (!emailTemplateService.sendConsultantApplicationCopy(app)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
                 appendEvent(app.getId(),
                         ConsultantApplicationEvent.EventType.EMAIL_SENT,
                         ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -1230,7 +1245,9 @@ public class ConsultantApplicationService {
                     "The agreement has not been signed yet.");
         }
         try {
-            emailTemplateService.sendConsultantApplicationCopy(app);
+            if (!emailTemplateService.sendConsultantApplicationCopy(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't email a copy: " + e.getMessage());
@@ -1525,7 +1542,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendErmReviewNotification(app);
+            if (!emailTemplateService.sendErmReviewNotification(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -1777,8 +1796,10 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantRevisionRequest(
-                    app, summary == null ? "" : summary);
+            if (!emailTemplateService.sendConsultantRevisionRequest(
+                    app, summary == null ? "" : summary)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -1858,7 +1879,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantRevisionRequest(app, summary);
+            if (!emailTemplateService.sendConsultantRevisionRequest(app, summary)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -1982,7 +2005,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantRevisionRequest(app, summary);
+            if (!emailTemplateService.sendConsultantRevisionRequest(app, summary)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -2424,7 +2449,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantRevisionWithdrawn(app);
+            if (!emailTemplateService.sendConsultantRevisionWithdrawn(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -3639,7 +3666,9 @@ public class ConsultantApplicationService {
                 // {@code secure_url} returned at upload time 401s when
                 // GET'd later (observed in prod: completion emails
                 // shipped with attachments=0).
-                emailTemplateService.sendCompletedAgreementToParties(app, pdf.bytes());
+                if (!emailTemplateService.sendCompletedAgreementToParties(app, pdf.bytes())) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
                 appendEvent(app.getId(),
                         ConsultantApplicationEvent.EventType.EMAIL_SENT,
                         ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -3752,7 +3781,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantVersionReleased(app);
+            if (!emailTemplateService.sendConsultantVersionReleased(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -4129,7 +4160,9 @@ public class ConsultantApplicationService {
                 request);
 
         try {
-            emailTemplateService.sendConsultantPhase2Notification(app);
+            if (!emailTemplateService.sendConsultantPhase2Notification(app)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
             appendEvent(app.getId(),
                     ConsultantApplicationEvent.EventType.EMAIL_SENT,
                     ConsultantApplicationEvent.ActorType.SYSTEM, null,
@@ -4172,8 +4205,10 @@ public class ConsultantApplicationService {
                     "The final agreement PDF is not yet available.");
         }
         try {
-            emailTemplateService.sendAgreementToCustomRecipient(
-                    app, recipientEmail.trim(), note);
+            if (!emailTemplateService.sendAgreementToCustomRecipient(
+                    app, recipientEmail.trim(), note)) {
+                throw new IllegalStateException(EMAIL_NOT_SENT);
+            }
         } catch (Exception e) {
             throw new IllegalStateException(
                     "Couldn't email the agreement: " + e.getMessage(), e);

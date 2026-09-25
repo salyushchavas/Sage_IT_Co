@@ -17,6 +17,7 @@ import com.spire.backend.repository.SalesInquiryRepository;
 import com.spire.backend.repository.SalesMessageRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,6 +30,7 @@ import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class SalesService {
 
     private static final int PREVIEW_LEN = 140;
@@ -203,14 +205,15 @@ public class SalesService {
                 .status("ACCEPTED")
                 .build());
 
-        // Best-effort enrollment at the negotiated price. We swallow
-        // "already enrolled" because the inquiry may have been opened
-        // for an enrollment that already exists; the price tag is
-        // preserved on the message either way.
-        try {
-            enrollmentService.enrollUser(studentId, inquiry.getCourse().getId());
-        } catch (IllegalArgumentException ignored) {
-            // already enrolled — that's fine
+        // Checklist 5.4: accepting a quote used to enroll the student for
+        // free whatever the quoted price. Now only a free (zero) quote
+        // enrolls straight away; a paid quote is recorded as accepted and
+        // the enrollment waits for payment to be arranged.
+        java.math.BigDecimal quoted = quoteMsg.getQuotedPrice();
+        if (quoted == null || quoted.signum() <= 0) {
+            enrollmentService.enrollAfterPayment(studentId, inquiry.getCourse().getId(), "free quote #" + messageId);
+        } else {
+            log.info("Quote {} accepted by user {} at {}; enrollment waits for payment", messageId, studentId, quoted);
         }
 
         inquiry.setStatus(STATUS_CONVERTED);

@@ -51,11 +51,17 @@ import java.util.Optional;
 @Slf4j
 public class AgreementService {
 
+    /** Checklist 5.3: times in business time (US Central). */
+    @org.springframework.beans.factory.annotation.Value("${app.business-zone:America/Chicago}")
+    private String businessZone;
+
     public static final String CURRENT_VERSION = "v2.0";
 
     public static final String STATUS_WAITING_REPLY = "WAITING_REPLY";
     public static final String STATUS_CODE_SENT = "CODE_SENT";
     public static final String STATUS_VERIFIED = "VERIFIED";
+    /** Checklist 2.5: the participant declined to sign (they can still sign later). */
+    public static final String STATUS_DECLINED = "DECLINED";
 
     private static final int CODE_TTL_MINUTES = 10;
     private static final int AGREEMENT_EMAIL_TTL_MINUTES = 30;
@@ -67,6 +73,14 @@ public class AgreementService {
     private final EmailTemplateService emailTemplateService;
     private final RecordService recordService;
     private final AgreementPdfService agreementPdfService;
+    private final SignedAgreementService signedAgreementService;
+
+    /**
+     * What a participant signs against (checklist 2.2): the fingerprint of
+     * the exact agreement text shown, and their Participant ID and program
+     * at that moment. Recorded on the row and printed on the PDF.
+     */
+    public record SigningDetails(String textSha256, String participantId, String programSummary) {}
 
     // ─── Status read ────────────────────────────────────────────────
 
@@ -107,7 +121,7 @@ public class AgreementService {
     public Map<String, Object> signImmediate(
             Long userId, String legalName,
             String signatureImage, String signatureMethod,
-            String ipAddress, String userAgent
+            String ipAddress, String userAgent, SigningDetails details
     ) {
         if (legalName == null || countWords(legalName) < 2) {
             throw new IllegalArgumentException(
@@ -167,6 +181,13 @@ public class AgreementService {
         row.setVerificationCodeSentAt(null);
         row.setVerificationCodeVerifiedAt(now);
         row.setCodeExpiresAt(null);
+        row.setDeclinedAt(null);
+        row.setDeclineReason(null);
+        if (details != null) {
+            row.setTextSha256(details.textSha256());
+            row.setParticipantIdSnapshot(details.participantId());
+            row.setProgramSnapshot(details.programSummary());
+        }
 
         AgreementAcceptance saved = agreementRepository.save(row);
 
@@ -186,7 +207,10 @@ public class AgreementService {
                 ));
 
         generateAndDeliverSignedPdf(saved);
-        try { emailTemplateService.sendWelcomeEmail(user); } catch (Exception ignored) {}
+        // No welcome email here: it belongs after the signed agreement
+        // reaches the ERM (roadmap steps 10 → 11), and the onboarding
+        // chain sends it once (checklist 3.1). Sending it at signing too
+        // made participants get two.
 
         log.info("Agreement signed on-site for user {} (row {})", userId, saved.getId());
         return Map.of(
@@ -483,45 +507,36 @@ public class AgreementService {
         // email. This is intentionally the LAST email — the welcome
         // would have been premature during signup since the user
         // couldn't actually use the platform until the agreement
-        // was on file.
-        try { emailTemplateService.sendWelcomeEmail(user); } catch (Exception ignored) {}
+        // was on file. Only for the old course-only accounts: a
+        // participant (with a Participant ID) gets their one welcome
+        // from the onboarding chain, after the agreement reaches the
+        // ERM (checklist 3.1).
+        if (user.getParticipantId() == null || user.getParticipantId().isBlank()) {
+            try { emailTemplateService.sendWelcomeEmail(user); } catch (Exception ignored) {}
+        }
     }
 
     /**
      * Renders the personalized signed-agreement PDF for a verified
-     * row, persists its public download URL, and emails the user a
-     * copy as an attachment. All failures are swallowed and logged —
-     * the row is already verified at this point and the PDF is a
-     * post-acceptance artifact, not a precondition.
+     * row, keeps it (SignedAgreementService: document storage, not the
+     * server's disk) and emails the user a copy as an attachment. All
+     * failures are swallowed and logged — the row is already verified
+     * at this point and the PDF is a post-acceptance artifact, not a
+     * precondition.
      */
     private void generateAndDeliverSignedPdf(AgreementAcceptance row) {
-        String fileName = null;
+        byte[] pdfBytes = null;
         try {
-            fileName = agreementPdfService.generate(row);
-            row.setSignedAgreementPdfUrl(
-                    "/api/agreement/signed-pdf/" + row.getUser().getId() + "/" + fileName);
-            agreementRepository.save(row);
+            pdfBytes = signedAgreementService.keep(row);
         } catch (Exception e) {
             log.error("Signed agreement PDF generation failed for user {}: {}",
                     row.getUser().getId(), e.getMessage());
         }
 
-        // Email — read bytes off disk so the relay payload is the
-        // exact file we'll later serve from the download endpoint.
+        // Email the exact bytes that were kept.
         try {
-            byte[] pdfBytes = null;
-            if (fileName != null) {
-                java.nio.file.Path p = java.nio.file.Paths.get(
-                        "signed-agreements/" + fileName);
-                if (java.nio.file.Files.exists(p)) {
-                    pdfBytes = java.nio.file.Files.readAllBytes(p);
-                }
-            }
             String acceptedAt = row.getAcceptedAt() == null ? ""
-                    : row.getAcceptedAt()
-                            .atZone(java.time.ZoneId.of("Asia/Kolkata"))
-                            .format(java.time.format.DateTimeFormatter
-                                    .ofPattern("d MMMM yyyy, h:mm a 'IST'"));
+                    : BusinessTime.stamp(row.getAcceptedAt(), businessZone);
             String recordId = String.format("AGR-%d-%05d",
                     row.getCreatedAt() == null
                             ? java.time.LocalDate.now().getYear()

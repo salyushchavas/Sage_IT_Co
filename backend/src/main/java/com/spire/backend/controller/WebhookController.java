@@ -23,6 +23,8 @@ import java.util.Map;
 public class WebhookController {
 
     private final PaymentRepository paymentRepository;
+    private final com.spire.backend.service.StripeGateway stripe;
+    private final com.spire.backend.service.CourseCheckoutService courseCheckoutService;
 
     @Value("${razorpay.webhook-secret:}")
     private String webhookSecret;
@@ -35,6 +37,44 @@ public class WebhookController {
         if (webhookSecret != null && !webhookSecret.isBlank()) return webhookSecret;
         if (keySecret != null && !keySecret.isBlank()) return keySecret;
         return null;
+    }
+
+    /**
+     * Checklist 5.4: Stripe events for course checkouts. Every event must
+     * carry a valid Stripe-Signature for our endpoint secret and be recent;
+     * anything else is refused and nothing is processed. Completing a
+     * payment is idempotent, so a repeated event changes nothing.
+     */
+    @PostMapping("/stripe")
+    public ResponseEntity<ApiResponse<Void>> handleStripeWebhook(
+            @RequestBody String rawBody,
+            @RequestHeader(value = "Stripe-Signature", required = false) String signature) {
+        String secret = stripe.webhookSecret();
+        if (secret == null) {
+            log.warn("Stripe webhook received but STRIPE_WEBHOOK_SECRET isn't set; ignoring it");
+            return ResponseEntity.status(503).body(ApiResponse.error("Webhook not configured"));
+        }
+        if (!com.spire.backend.service.StripeGateway.verifySignature(rawBody, signature, secret,
+                java.time.Instant.now().getEpochSecond())) {
+            log.warn("Rejected a Stripe webhook with a missing, invalid or stale signature");
+            return ResponseEntity.badRequest().body(ApiResponse.error("Invalid signature"));
+        }
+        com.fasterxml.jackson.databind.JsonNode event = stripe.parse(rawBody);
+        String type = event.path("type").asText("");
+        com.fasterxml.jackson.databind.JsonNode session = event.path("data").path("object");
+        try {
+            switch (type) {
+                case "checkout.session.completed", "checkout.session.async_payment_succeeded" ->
+                        courseCheckoutService.complete(stripe.state(session));
+                case "checkout.session.async_payment_failed", "checkout.session.expired" ->
+                        courseCheckoutService.fail(stripe.state(session));
+                default -> log.info("Unhandled Stripe event: {}", type);
+            }
+        } catch (com.spire.backend.exception.ResourceNotFoundException e) {
+            // A session this site didn't create (e.g. another product on the account).
+            log.info("Stripe event {} for an unknown session; ignored", type);
+        }
+        return ResponseEntity.ok(ApiResponse.success("Webhook processed", null));
     }
 
     @PostMapping("/razorpay")

@@ -21,8 +21,6 @@ import java.io.IOException;
 import java.io.PrintWriter;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -43,11 +41,12 @@ public class RecordController {
     private final UserRecordRepository recordRepository;
     private final UserRepository userRepository;
 
-    // CSV timestamps render in IST. The DB stores LocalDateTime as
-    // server-local (UTC on Railway) so we rebase UTC→IST before
-    // splitting into the Date / Time columns. Header carries the
-    // "(IST)" suffix so the recipient knows the zone unambiguously.
-    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+    // CSV timestamps render in business time (checklist 5.3: US Central).
+    // The DB stores LocalDateTime as server-local (UTC on Railway) so we
+    // rebase before splitting into the Date / Time columns. The header
+    // carries the zone so the recipient knows it unambiguously.
+    @org.springframework.beans.factory.annotation.Value("${app.business-zone:America/Chicago}")
+    private String businessZone;
     private static final DateTimeFormatter CSV_TS = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
     // Sentinel values for the "no filter" case — see UserRecordRepository
@@ -121,18 +120,17 @@ public class RecordController {
                 "attachment; filename=" + safeName + "_complete_records_" + LocalDate.now() + ".csv");
 
         PrintWriter w = response.getWriter();
-        w.println("Date (IST),Time (IST),Category,Type,Title,Description,IP,Device,Browser,OS,City");
+        String zone = com.spire.backend.service.BusinessTime.label(businessZone);
+        w.println("Date (" + zone + "),Time (" + zone + "),Category,Type,Title,Description,IP,Device,Browser,OS,City");
         for (UserRecord r : recordRepository.findByUserIdOrderByCreatedAtDesc(userId)) {
-            // Rebase the stored UTC wall-clock into IST before
-            // splitting — without this the file would group records
-            // under the wrong calendar day for anything past 18:30 UTC.
+            // Rebase the stored UTC wall-clock into business time before
+            // splitting — without this the file would group evening
+            // records under the wrong calendar day.
             String ts = "";
             if (r.getCreatedAt() != null) {
-                LocalDateTime istTs = r.getCreatedAt()
-                        .atOffset(ZoneOffset.UTC)
-                        .atZoneSameInstant(IST)
+                LocalDateTime local = com.spire.backend.service.BusinessTime.of(r.getCreatedAt(), businessZone)
                         .toLocalDateTime();
-                ts = istTs.format(CSV_TS);
+                ts = local.format(CSV_TS);
             }
             String date = ts.length() >= 10 ? ts.substring(0, 10) : ts;
             String time = ts.length() >= 19 ? ts.substring(11, 19) : "";

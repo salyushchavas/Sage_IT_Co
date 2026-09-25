@@ -4,6 +4,7 @@ import com.spire.backend.entity.ParticipantDocument;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 @Repository
@@ -11,4 +12,8 @@ public interface ParticipantDocumentRepository extends JpaRepository<Participant
     List<ParticipantDocument> findByUserIdOrderByUploadedAtDesc(Long userId);
     List<ParticipantDocument> findByReviewStatus(String reviewStatus);
     List<ParticipantDocument> findByUserIdAndDocumentType(Long userId, String documentType);
+    /** Operations review queue: the given statuses, oldest first. */
+    List<ParticipantDocument> findByReviewStatusInOrderByUploadedAtAsc(Collection<String> reviewStatuses);
+    /** Operations review screen, "all documents" view. */
+    List<ParticipantDocument> findTop500ByOrderByUploadedAtDesc();
 }

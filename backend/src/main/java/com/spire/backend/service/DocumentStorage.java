@@ -38,4 +38,7 @@ public interface DocumentStorage {
      * uses the default (15 minutes).
      */
     String presignedGetUrl(String key, Duration ttl, String filename, boolean inline);
+
+    /** Removes the object stored under {@code key} (participant files that are replaced or deleted). */
+    void delete(String key);
 }

@@ -30,6 +30,7 @@ public class ParticipantDocumentDTO {
     private LocalDateTime uploadedAt;
     private LocalDateTime reviewedAt;
     private Boolean notApplicable;
+    private String exceptionReason;
 
     public static ParticipantDocumentDTO from(ParticipantDocument d) {
         return ParticipantDocumentDTO.builder()
@@ -42,6 +43,7 @@ public class ParticipantDocumentDTO {
                 .uploadedAt(d.getUploadedAt())
                 .reviewedAt(d.getReviewedAt())
                 .notApplicable(Boolean.TRUE.equals(d.getNotApplicable()))
+                .exceptionReason(d.getExceptionReason())
                 .build();
     }
 }

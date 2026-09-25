@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -16,6 +17,7 @@ import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 
 @Configuration
@@ -27,6 +29,7 @@ public class SecurityConfig {
     private final JwtAuthFilter jwtAuthFilter;
     private final AgreementErmAuthFilter agreementErmAuthFilter;
     private final AgreementGateFilter agreementGateFilter;
+    private final com.spire.backend.security.PasswordChangeGateFilter passwordChangeGateFilter;
 
     private final CorsConfigurationSource corsConfigurationSource;
 
@@ -36,7 +39,16 @@ public class SecurityConfig {
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+                // A missing, expired or refused sign-in is 401, so the website
+                // renews it with the refresh token. (Spring's default here is
+                // 403, which the website read as "not allowed": everyone was
+                // stuck on "API error 403" 15 minutes after signing in.)
+                // A signed-in user without the right role still gets 403.
+                .exceptionHandling(e -> e.authenticationEntryPoint(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)))
                 .authorizeHttpRequests(auth -> auth
+                        // Spring's error page: shows the real error status
+                        // instead of turning every failure into a sign-in refusal.
+                        .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/health", "/api/brand").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
                         // Phase 1B participant enrollment is public.
@@ -90,7 +102,9 @@ public class SecurityConfig {
                 // resolved principal. It exempts /api/auth/* and
                 // /api/agreement/* internally so the user can always
                 // reach the flow that lets them satisfy it.
-                .addFilterAfter(agreementGateFilter, JwtAuthFilter.class);
+                .addFilterAfter(agreementGateFilter, JwtAuthFilter.class)
+                // Staff onboarding: temporary passwords must be changed first.
+                .addFilterAfter(passwordChangeGateFilter, JwtAuthFilter.class);
 
         return http.build();
     }

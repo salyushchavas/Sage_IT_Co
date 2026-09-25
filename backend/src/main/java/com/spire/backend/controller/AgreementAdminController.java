@@ -319,8 +319,11 @@ public class AgreementAdminController {
         }
         AgreementUser user = agreementUserRepository.findById(id)
                 .orElseThrow(() -> new ResourceNotFoundException("AgreementUser", "id", id));
-        emailTemplateService.sendAgreementUserCredentials(
-                user.getEmail(), user.getFullName(), password);
+        if (!emailTemplateService.sendAgreementUserCredentials(
+                user.getEmail(), user.getFullName(), password)) {
+            throw new IllegalStateException("The email to " + user.getEmail()
+                    + " couldn't be sent. Check the email log, or share the details another way.");
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 "Credentials emailed to " + user.getEmail(), null));
     }

@@ -53,3 +53,10 @@ credentials.xlsx
 ~$*.docx
 *.env.local
 .env.production.local
+
+# Uploaded participant files (local-disk storage fallback). Never commit:
+# they are real people's documents, check copies and signed agreements.
+backend/participant-documents/
+backend/signed-agreements/
+participant-documents/
+signed-agreements/

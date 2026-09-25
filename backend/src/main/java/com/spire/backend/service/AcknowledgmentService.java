@@ -188,7 +188,7 @@ public class AcknowledgmentService {
      * first hop (used before) could be set to anything by the browser.
      * Falls back to the socket address.
      */
-    static String clientIp(HttpServletRequest request) {
+    public static String clientIp(HttpServletRequest request) {
         if (request == null) return null;
         String xff = request.getHeader("X-Forwarded-For");
         if (xff != null && !xff.isBlank()) {

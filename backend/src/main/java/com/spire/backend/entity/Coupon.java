@@ -32,7 +32,7 @@ public class Coupon {
     @Builder.Default
     private DiscountType discountType = DiscountType.PERCENT;
 
-    /** PERCENT: 1-100. FLAT: rupee amount. */
+    /** PERCENT: 1-100. FLAT: dollar amount. */
     @Column(name = "discount_value", nullable = false, precision = 10, scale = 2)
     private BigDecimal discountValue;
 

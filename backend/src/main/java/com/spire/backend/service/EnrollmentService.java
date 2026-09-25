@@ -53,6 +53,38 @@ public class EnrollmentService {
         Course course = courseRepository.findById(courseId)
                 .orElseThrow(() -> new ResourceNotFoundException("Course", "id", courseId));
 
+        // Checklist 5.4: a paid course is bought through the cart (it used
+        // to enroll anyone for free through this call).
+        if (isPaid(course)) {
+            throw new IllegalStateException("\"" + course.getTitle()
+                    + "\" is a paid course. Add it to your cart and check out to pay for it.");
+        }
+        enroll(user, course, null);
+    }
+
+    /** Checklist 5.4: a course that costs money — not marked free, with a price above zero. */
+    public static boolean isPaid(Course course) {
+        return !Boolean.TRUE.equals(course.getIsFree())
+                && course.getPrice() != null && course.getPrice().signum() > 0;
+    }
+
+    /**
+     * Checklist 5.4: enrollment once a course is paid for (or fully covered
+     * by a coupon). Returns false when they're already enrolled.
+     */
+    @Transactional
+    public boolean enrollAfterPayment(Long userId, Long courseId, String paymentReference) {
+        if (enrollmentRepository.existsByUserIdAndCourseId(userId, courseId)) return false;
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        Course course = courseRepository.findById(courseId)
+                .orElseThrow(() -> new ResourceNotFoundException("Course", "id", courseId));
+        enroll(user, course, paymentReference);
+        return true;
+    }
+
+    private void enroll(User user, Course course, String paymentReference) {
+        Long userId = user.getId();
         Enrollment enrollment = Enrollment.builder()
                 .user(user)
                 .course(course)
@@ -77,8 +109,9 @@ public class EnrollmentService {
         details.put("courseId", course.getId());
         details.put("courseTitle", course.getTitle());
         details.put("courseType", course.getType());
-        details.put("amountPaid", course.getPrice());
+        details.put("amountPaid", paymentReference == null ? java.math.BigDecimal.ZERO : course.getPrice());
         details.put("isFree", Boolean.TRUE.equals(course.getIsFree()));
+        if (paymentReference != null) details.put("payment", paymentReference);
         recordService.record(userId, "COURSE_ENROLLED", RecordService.Category.LEARNING,
                 "Enrolled in " + course.getTitle(),
                 "Enrolled in course '" + course.getTitle() + "' (ID: " + course.getId() + ")",

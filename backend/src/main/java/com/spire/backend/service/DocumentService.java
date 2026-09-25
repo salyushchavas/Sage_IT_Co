@@ -3,7 +3,6 @@ package com.spire.backend.service;
 import com.spire.backend.entity.ParticipantDocument;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.ParticipantDocumentRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -14,6 +13,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -24,18 +24,22 @@ import java.util.Set;
  *
  *   - upload validation (file size + content type + auth)
  *   - per-type persistence to the {@code documents} table
- *   - Not-Applicable marker insertion
+ *   - Not-Applicable markers and exception requests
  *   - completeness check + workflow transition to DOCUMENTS_SUBMITTED
+ *   - Operations review (approve / reject with a reason, emailed)
  *
  * Actual byte-level storage is delegated to
  * {@link DocumentStorageService}. The split keeps the file-system /
  * Cloudinary concern out of the row-management code.
  *
- * Required document types (must be uploaded OR marked N/A before
- * Continue is allowed):
+ * Required document types (roadmap step 5: "minimum required documents
+ * uploaded or exception approved"):
  *   GOVERNMENT_ID, WORK_AUTHORIZATION, RESUME
+ * Each needs an upload that isn't rejected, or an exception the
+ * participant asked for with a reason and Operations approved.
  *
- * Optional types (informational; do not gate progression):
+ * Optional types (informational; do not gate progression; can simply
+ * be marked not applicable):
  *   SSN_DOCUMENT, DRIVERS_LICENSE, OTHER
  */
 @Service
@@ -65,6 +69,23 @@ public class DocumentService {
         ALL_DOCUMENT_TYPES = Set.copyOf(all);
     }
 
+    // Review statuses. A file is PENDING, APPROVED or REJECTED; a
+    // "not applicable" marker is NOT_APPLICABLE (optional documents) or,
+    // for a required document, an exception Operations decides.
+    public static final String PENDING = "PENDING";
+    public static final String APPROVED = "APPROVED";
+    public static final String REJECTED = "REJECTED";
+    public static final String NOT_APPLICABLE = "NOT_APPLICABLE";
+    public static final String EXCEPTION_REQUESTED = "EXCEPTION_REQUESTED";
+    public static final String EXCEPTION_APPROVED = "EXCEPTION_APPROVED";
+    public static final String EXCEPTION_DECLINED = "EXCEPTION_DECLINED";
+
+    /** What Operations still has to decide. */
+    public static final List<String> NEEDS_REVIEW = List.of(PENDING, EXCEPTION_REQUESTED);
+
+    static final int MIN_REASON = 5;
+    static final int MAX_REASON = 1000;
+
     private final ParticipantDocumentRepository documentRepository;
     private final UserRepository userRepository;
     private final DocumentStorageService storageService;
@@ -72,6 +93,7 @@ public class DocumentService {
     private final RecordService recordService;
     private final ProfileCompletionService profileCompletionService;
     private final PermissionService permissionService;
+    private final EmailTemplateService emailTemplateService;
 
     // ── Upload ───────────────────────────────────────────────────
 
@@ -85,14 +107,8 @@ public class DocumentService {
         // file rather than accumulate duplicates. The OTHER bucket
         // allows multiple, so we leave previous rows alone.
         boolean multiAllowed = "OTHER".equals(documentType);
-        if (!multiAllowed) {
-            List<ParticipantDocument> existing = documentRepository
-                    .findByUserIdAndDocumentType(userId, documentType);
-            for (ParticipantDocument old : existing) {
-                storageService.delete(old.getStoragePath());
-                documentRepository.delete(old);
-            }
-        }
+        List<ParticipantDocument> replaced = multiAllowed ? List.of()
+                : documentRepository.findByUserIdAndDocumentType(userId, documentType);
 
         byte[] bytes;
         try {
@@ -118,6 +134,14 @@ public class DocumentService {
                 .build();
         ParticipantDocument saved = documentRepository.save(row);
 
+        // The new file is stored and its row saved: only now is the old one
+        // replaced (it used to be deleted first, so a failed upload lost both).
+        // Its file is removed once the change is committed.
+        for (ParticipantDocument old : replaced) {
+            documentRepository.delete(old);
+            deleteFileAfterCommit(old.getStoragePath());
+        }
+
         recordService.logAction(user.getId(), RecordService.Category.DOCUMENT,
                 "Document uploaded: " + documentType,
                 "user=" + userId + " name=" + originalName + " size=" + file.getSize(),
@@ -129,6 +153,21 @@ public class DocumentService {
                 ));
         log.info("Document uploaded user={} type={} id={}", userId, documentType, saved.getId());
         return saved;
+    }
+
+    /** Removes a stored file once the current transaction commits (or now, outside one). */
+    private void deleteFileAfterCommit(String storagePath) {
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            storageService.delete(storagePath);
+                        }
+                    });
+        } else {
+            storageService.delete(storagePath);
+        }
     }
 
     // ── List / view / delete / N/A ───────────────────────────────
@@ -176,49 +215,115 @@ public class DocumentService {
         ParticipantDocument doc = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document", "id", documentId));
         if (!doc.getUserId().equals(callerId)) {
-            throw new UnauthorizedException("Not allowed to delete this document");
+            // 403, not 401: the website treats 401 as "sign in again".
+            throw new org.springframework.security.access.AccessDeniedException("Not allowed to delete this document");
         }
-        if ("APPROVED".equals(doc.getReviewStatus())) {
+        if (APPROVED.equals(doc.getReviewStatus())) {
             throw new IllegalArgumentException(
                     "This document has already been approved by Operations and can't be removed.");
+        }
+        User user = userRepository.findById(callerId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", callerId));
+        // Once the agreement is signed, a required document can be
+        // replaced but not taken away (the record stays audit-ready).
+        if (Boolean.TRUE.equals(user.getAgreementComplete())
+                && REQUIRED_DOCUMENT_TYPES.contains(doc.getDocumentType())
+                && !REJECTED.equals(doc.getReviewStatus())
+                && !EXCEPTION_DECLINED.equals(doc.getReviewStatus())) {
+            throw new IllegalArgumentException(
+                    "Your agreement is signed, so required documents can be replaced but not removed.");
         }
         storageService.delete(doc.getStoragePath());
         documentRepository.delete(doc);
         recordService.logAction(callerId, RecordService.Category.DOCUMENT,
                 "Document removed: " + doc.getDocumentType(),
                 "documentId=" + documentId, null);
+        reopenIfIncomplete(user, "documents_reopened_removed",
+                labelFor(doc.getDocumentType()) + " removed by the participant");
     }
 
+    /**
+     * "Not applicable". For an optional document it simply marks it
+     * (NOT_APPLICABLE). A required document can't be skipped on the
+     * participant's say-so: it becomes an exception request with their
+     * reason, which counts only once Operations approves it.
+     */
     @Transactional
-    public ParticipantDocument markNotApplicable(Long userId, String documentType) {
+    public ParticipantDocument markNotApplicable(Long userId, String documentType, String reason) {
         User user = requireGatedUser(userId);
         validateDocumentType(documentType);
-        // Clear any previously-uploaded file for the same type — a
-        // user flipping to N/A means they no longer have a file to
-        // present.
-        for (ParticipantDocument old : documentRepository.findByUserIdAndDocumentType(userId, documentType)) {
+        if ("OTHER".equals(documentType)) {
+            throw new IllegalArgumentException(
+                    "Additional documents are optional; just leave that section empty.");
+        }
+        boolean required = REQUIRED_DOCUMENT_TYPES.contains(documentType);
+        String why = reason == null ? "" : reason.trim();
+        if (required && why.length() < MIN_REASON) {
+            throw new IllegalArgumentException(
+                    "This document is required. Tell Operations why it doesn't apply to you, "
+                            + "and they'll review your request.");
+        }
+        if (why.length() > MAX_REASON) {
+            throw new IllegalArgumentException(
+                    "Please keep the reason under " + MAX_REASON + " characters.");
+        }
+        List<ParticipantDocument> existing =
+                documentRepository.findByUserIdAndDocumentType(userId, documentType);
+        if (existing.stream().anyMatch(d -> APPROVED.equals(d.getReviewStatus())
+                || EXCEPTION_APPROVED.equals(d.getReviewStatus()))) {
+            throw new IllegalArgumentException(
+                    "This document has already been approved by Operations and can't be changed.");
+        }
+        // Clear any previously-uploaded file (or earlier request) for the
+        // same type — flipping to N/A means there's no file to present.
+        for (ParticipantDocument old : existing) {
             storageService.delete(old.getStoragePath());
             documentRepository.delete(old);
         }
         ParticipantDocument row = ParticipantDocument.builder()
                 .userId(user.getId())
                 .documentType(documentType)
-                .reviewStatus("NOT_APPLICABLE")
+                .reviewStatus(required ? EXCEPTION_REQUESTED : NOT_APPLICABLE)
+                .exceptionReason(why.isEmpty() ? null : why)
                 .retentionCategory(retentionFor(documentType))
                 .notApplicable(true)
                 .build();
         ParticipantDocument saved = documentRepository.save(row);
-        recordService.logAction(userId, RecordService.Category.DOCUMENT,
-                "Document marked N/A: " + documentType,
-                "documentId=" + saved.getId(), null);
+        if (required) {
+            recordService.logAction(userId, RecordService.Category.DOCUMENT,
+                    "Document exception requested: " + documentType,
+                    "documentId=" + saved.getId(),
+                    Map.of("documentId", saved.getId(),
+                            "documentType", documentType,
+                            "reason", why));
+        } else {
+            recordService.logAction(userId, RecordService.Category.DOCUMENT,
+                    "Document marked N/A: " + documentType,
+                    "documentId=" + saved.getId(), null);
+        }
+        reopenIfIncomplete(user, "documents_reopened_exception",
+                labelFor(documentType) + " is waiting for an Operations decision");
         return saved;
     }
 
     // ── Completeness + workflow transition ───────────────────────
 
     /**
+     * Whether a row fulfils its document type: an upload that isn't
+     * rejected, or an exception Operations approved. A pending or
+     * declined exception, and an old unreviewed "N/A" on a required
+     * document, don't count.
+     */
+    static boolean satisfiesRequirement(ParticipantDocument d) {
+        if (Boolean.TRUE.equals(d.getNotApplicable())) {
+            return EXCEPTION_APPROVED.equals(d.getReviewStatus());
+        }
+        return !REJECTED.equals(d.getReviewStatus());
+    }
+
+    /**
      * Returns the list of required types that are still missing for
-     * the user (neither uploaded nor marked N/A). Empty list means
+     * the user (see {@link #satisfiesRequirement}). Empty list means
      * "ready to continue".
      */
     @Transactional(readOnly = true)
@@ -226,11 +331,7 @@ public class DocumentService {
         List<ParticipantDocument> docs = documentRepository.findByUserIdOrderByUploadedAtDesc(userId);
         Set<String> satisfied = new HashSet<>();
         for (ParticipantDocument d : docs) {
-            // Any row (uploaded OR marked N/A) satisfies the type as
-            // long as it isn't an outright REJECTED file.
-            if (!"REJECTED".equals(d.getReviewStatus())) {
-                satisfied.add(d.getDocumentType());
-            }
+            if (satisfiesRequirement(d)) satisfied.add(d.getDocumentType());
         }
         return REQUIRED_DOCUMENT_TYPES.stream()
                 .filter(t -> !satisfied.contains(t))
@@ -242,49 +343,173 @@ public class DocumentService {
         User user = requireGatedUser(userId);
         List<String> missing = missingRequired(userId);
         if (!missing.isEmpty()) {
+            boolean waiting = documentRepository.findByUserIdOrderByUploadedAtDesc(userId).stream()
+                    .anyMatch(d -> missing.contains(d.getDocumentType())
+                            && EXCEPTION_REQUESTED.equals(d.getReviewStatus()));
             return Map.of(
                     "success", false,
                     "missing", missing,
-                    "message", "Please upload all required documents before continuing."
+                    "message", waiting
+                            ? "Operations still has to approve your \"not applicable\" request. "
+                                    + "We'll email you when they do, or you can upload the document instead."
+                            : "Please upload all required documents before continuing."
             );
         }
-        workflowService.transition(user,
-                WorkflowService.Status.DOCUMENTS_SUBMITTED,
-                "docs_complete");
         profileCompletionService.markStepComplete(user, "DOCUMENTS");
+        // The status the flags have really reached: DOCUMENTS_SUBMITTED
+        // the first time, or further along when the step was reopened
+        // after a program had already been chosen. Never moves back.
+        workflowService.transition(user,
+                WorkflowService.statusFromProfile(user),
+                "docs_complete");
+        String nextStep = !Boolean.TRUE.equals(user.getProgramSelectionComplete()) ? "/program-selection"
+                : !Boolean.TRUE.equals(user.getAgreementComplete()) ? "/agreement"
+                : "/dashboard";
         return Map.of(
                 "success", true,
                 "missing", List.of(),
-                "nextStep", "/program-selection"
+                "nextStep", nextStep
         );
     }
 
-    // ── Admin review ─────────────────────────────────────────────
+    // ── Operations review ────────────────────────────────────────
 
+    /**
+     * Operations' decision on a document. {@code decision} is APPROVED or
+     * REJECTED; on an exception request those mean approve / decline.
+     * Sending something back needs a reason: the participant is emailed
+     * which document and why, sees the reason on the upload page, and —
+     * while the agreement isn't signed — the documents step reopens, so
+     * the agreement waits for the fix (roadmap: "do not continue to
+     * agreement until resolved or exception approved").
+     */
     @Transactional
     public ParticipantDocument review(Long documentId, Long reviewerId,
-                                      String newStatus, String notes) {
-        if (!"APPROVED".equals(newStatus) && !"REJECTED".equals(newStatus)) {
+                                      String decision, String notes) {
+        if (!APPROVED.equals(decision) && !REJECTED.equals(decision)) {
             throw new IllegalArgumentException("Status must be APPROVED or REJECTED");
+        }
+        String reason = notes == null ? "" : notes.trim();
+        if (reason.length() > MAX_REASON) {
+            throw new IllegalArgumentException(
+                    "Please keep the note under " + MAX_REASON + " characters.");
         }
         ParticipantDocument doc = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document", "id", documentId));
+        String current = doc.getReviewStatus();
+        boolean exception = Boolean.TRUE.equals(doc.getNotApplicable());
+        if (exception && (current == null || !current.startsWith("EXCEPTION_"))) {
+            throw new IllegalArgumentException(
+                    "Nothing to review: this optional document was simply marked not applicable.");
+        }
+        String newStatus = !exception ? decision
+                : APPROVED.equals(decision) ? EXCEPTION_APPROVED : EXCEPTION_DECLINED;
+        boolean sendBack = REJECTED.equals(newStatus) || EXCEPTION_DECLINED.equals(newStatus);
+        if (sendBack && reason.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Give the participant a reason. It's emailed to them and shown on their upload page.");
+        }
+        if (newStatus.equals(current) && reason.equals(doc.getReviewerNotes() == null ? "" : doc.getReviewerNotes())) {
+            return doc;   // same decision again (double click): nothing new to record or send
+        }
+
         doc.setReviewStatus(newStatus);
         doc.setReviewerId(reviewerId);
-        doc.setReviewerNotes(notes);
+        doc.setReviewerNotes(reason.isEmpty() ? null : reason);
         doc.setReviewedAt(LocalDateTime.now());
         ParticipantDocument saved = documentRepository.save(doc);
 
         recordService.logAction(doc.getUserId(), RecordService.Category.DOCUMENT,
-                "Document " + newStatus.toLowerCase() + ": " + doc.getDocumentType(),
-                "reviewer=" + reviewerId + (notes == null ? "" : " notes=" + notes),
+                "Document " + newStatus.toLowerCase().replace('_', ' ') + ": " + doc.getDocumentType(),
+                "reviewer=" + reviewerId + (reason.isEmpty() ? "" : " notes=" + reason),
                 Map.of(
                         "documentId", documentId,
                         "newStatus", newStatus,
                         "reviewerId", reviewerId,
-                        "notes", notes == null ? "" : notes
+                        "notes", reason
                 ));
+
+        User owner = userRepository.findById(doc.getUserId()).orElse(null);
+        if (owner == null) return saved;
+        String label = labelFor(doc.getDocumentType());
+        if (sendBack) {
+            if (REQUIRED_DOCUMENT_TYPES.contains(doc.getDocumentType())) {
+                reopenIfIncomplete(owner, "documents_reopened_review",
+                        label + " sent back by Operations: " + reason);
+            }
+            emailTemplateService.sendDocumentResubmitEmail(owner, label, reason,
+                    EXCEPTION_DECLINED.equals(newStatus));
+        } else if (EXCEPTION_APPROVED.equals(newStatus)) {
+            emailTemplateService.sendDocumentExceptionApprovedEmail(owner, label);
+        }
         return saved;
+    }
+
+    /** One row of the Operations document review screen. */
+    public record ReviewRow(Long id, Long userId, String participantName, String participantEmail,
+                            String participantId, String documentType, String documentLabel,
+                            boolean required, String fileName, Long fileSize, String reviewStatus,
+                            boolean notApplicable, String exceptionReason, String reviewerNotes,
+                            LocalDateTime uploadedAt, LocalDateTime reviewedAt) {}
+
+    /**
+     * The Operations review screen. {@code filter}: NEEDS_REVIEW (uploads
+     * waiting for a decision and exception requests, oldest first), ALL
+     * (the latest 500), or a single review status.
+     */
+    @Transactional(readOnly = true)
+    public List<ReviewRow> reviewQueue(String filter) {
+        String f = filter == null || filter.isBlank() ? "NEEDS_REVIEW" : filter.trim().toUpperCase();
+        List<ParticipantDocument> docs = switch (f) {
+            case "NEEDS_REVIEW" -> documentRepository.findByReviewStatusInOrderByUploadedAtAsc(NEEDS_REVIEW);
+            case "ALL" -> documentRepository.findTop500ByOrderByUploadedAtDesc();
+            default -> documentRepository.findByReviewStatusInOrderByUploadedAtAsc(List.of(f));
+        };
+        Map<Long, User> owners = new HashMap<>();
+        userRepository.findAllById(docs.stream().map(ParticipantDocument::getUserId).distinct().toList())
+                .forEach(u -> owners.put(u.getId(), u));
+        return docs.stream().map(d -> {
+            User u = owners.get(d.getUserId());
+            return new ReviewRow(d.getId(), d.getUserId(),
+                    u == null ? null : u.getFullName(), u == null ? null : u.getEmail(),
+                    u == null ? null : u.getParticipantId(),
+                    d.getDocumentType(), labelFor(d.getDocumentType()),
+                    REQUIRED_DOCUMENT_TYPES.contains(d.getDocumentType()),
+                    d.getFileName(), d.getFileSize(), d.getReviewStatus(),
+                    Boolean.TRUE.equals(d.getNotApplicable()), d.getExceptionReason(),
+                    d.getReviewerNotes(), d.getUploadedAt(), d.getReviewedAt());
+        }).toList();
+    }
+
+    /**
+     * Keeps "documents step done" honest: while the agreement isn't
+     * signed, a required document that is missing again (sent back,
+     * waiting on an exception, or removed) reopens the step, and the
+     * status goes back to what the flags really reach. A signed
+     * agreement isn't unwound; the participant just uploads again.
+     */
+    public void reopenIfIncomplete(User user, String trigger, String notes) {
+        if (!Boolean.TRUE.equals(user.getDocumentsComplete())) return;
+        if (Boolean.TRUE.equals(user.getAgreementComplete())) return;
+        if (missingRequired(user.getId()).isEmpty()) return;
+        profileCompletionService.reopenStep(user, "DOCUMENTS", notes);
+        WorkflowService.Status real = WorkflowService.statusFromProfile(user);
+        if (workflowService.currentStatus(user).ordinal() > real.ordinal()) {
+            workflowService.repair(user, real, trigger, notes);
+        }
+    }
+
+    /** The name the upload page shows for a document type. */
+    static String labelFor(String type) {
+        if (type == null) return "document";
+        return switch (type) {
+            case "GOVERNMENT_ID" -> "Government-issued ID";
+            case "WORK_AUTHORIZATION" -> "Work Authorization / Visa";
+            case "RESUME" -> "Resume / CV";
+            case "SSN_DOCUMENT" -> "SSN Document";
+            case "DRIVERS_LICENSE" -> "Driving Licence";
+            default -> "Additional Supporting Document";
+        };
     }
 
     // ── Internals ────────────────────────────────────────────────
@@ -325,6 +550,15 @@ public class DocumentService {
             if (!ACCEPTED_EXTENSIONS.contains(ext)) {
                 throw new IllegalArgumentException("Only PDF, JPG, or PNG files are allowed.");
             }
+        }
+        // Production-readiness review: check the content itself, since the
+        // browser's label can be anything (or missing).
+        try {
+            if (DocumentStorageService.sniffContentType(file.getBytes()) == null) {
+                throw new IllegalArgumentException("That file isn't a readable PDF, PNG or JPG.");
+            }
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException("Couldn't read the uploaded file.");
         }
     }
 

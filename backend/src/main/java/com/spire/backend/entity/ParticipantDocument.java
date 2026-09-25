@@ -50,7 +50,12 @@ public class ParticipantDocument {
     @Column(name = "storage_path", length = 500)
     private String storagePath;
 
-    /** PENDING, APPROVED, REJECTED, NOT_APPLICABLE. */
+    /**
+     * A file: PENDING, APPROVED or REJECTED. A "not applicable" marker:
+     * NOT_APPLICABLE (optional documents), or for a required document an
+     * exception that Operations decides: EXCEPTION_REQUESTED,
+     * EXCEPTION_APPROVED or EXCEPTION_DECLINED.
+     */
     @Column(name = "review_status", length = 30)
     @Builder.Default
     private String reviewStatus = "PENDING";
@@ -59,12 +64,17 @@ public class ParticipantDocument {
      * True when the participant explicitly marked this document type
      * as not applicable (e.g. a domestic candidate selecting
      * "Not applicable" for Work Authorization). The row carries no
-     * file_url / file_name in that case; the marker just unblocks
-     * the completeness check.
+     * file_url / file_name in that case. For a required document the
+     * marker only counts once Operations approves it
+     * (EXCEPTION_APPROVED).
      */
     @Column(name = "not_applicable", nullable = false)
     @Builder.Default
     private Boolean notApplicable = false;
+
+    /** The participant's reason when asking for a required document to be waived. */
+    @Column(name = "exception_reason", columnDefinition = "TEXT")
+    private String exceptionReason;
 
     @Column(name = "reviewer_id")
     private Long reviewerId;

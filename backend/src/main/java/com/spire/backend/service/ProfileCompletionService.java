@@ -179,6 +179,40 @@ public class ProfileCompletionService {
         }
     }
 
+    /**
+     * Marks a step as not done any more, e.g. when Operations sends a
+     * required document back before the agreement is signed. Audited;
+     * never fires anything.
+     */
+    @Transactional
+    public void reopenStep(User user, String step, String reason) {
+        switch (step) {
+            case "BASIC_INFO" -> user.setBasicInfoComplete(false);
+            case "ACKNOWLEDGMENT" -> user.setAcknowledgmentComplete(false);
+            case "DOCUMENTS" -> user.setDocumentsComplete(false);
+            case "PROGRAM_SELECTION" -> user.setProgramSelectionComplete(false);
+            case "AGREEMENT" -> user.setAgreementComplete(false);
+            case "CHECK_UPLOAD" -> user.setCheckUploadComplete(false);
+            default -> {
+                log.warn("Unknown profile step '{}' for user {}", step, user.getId());
+                return;
+            }
+        }
+        int newPct = (countCompleted(user) * 100) / STEPS.size();
+        user.setProfileCompletionPct(newPct);
+        userRepository.save(user);
+        try {
+            recordService.record(user.getId(), "PROFILE_STEP_REOPENED",
+                    RecordService.Category.ACCOUNT,
+                    "Profile step reopened",
+                    "Step " + step + " reopened: " + reason,
+                    Map.of("step", step, "reason", reason == null ? "" : reason,
+                            "percentage", String.valueOf(newPct)));
+        } catch (Exception ignored) {
+            // Audit failure is best-effort.
+        }
+    }
+
     /** True when the user has crossed the gate that unlocks purchases. */
     public boolean canEnrollInCourses(User user) {
         return Boolean.TRUE.equals(user.getProfileComplete());

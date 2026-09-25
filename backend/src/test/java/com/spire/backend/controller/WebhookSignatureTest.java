@@ -22,7 +22,8 @@ class WebhookSignatureTest {
     private static final String BODY = "{\"event\":\"payment.failed\",\"payload\":{}}";
 
     private static WebhookController controller(String webhookSecret, String keySecret) {
-        WebhookController c = new WebhookController(mock(PaymentRepository.class));
+        WebhookController c = new WebhookController(mock(PaymentRepository.class),
+                mock(com.spire.backend.service.StripeGateway.class), mock(com.spire.backend.service.CourseCheckoutService.class));
         ReflectionTestUtils.setField(c, "webhookSecret", webhookSecret);
         ReflectionTestUtils.setField(c, "keySecret", keySecret);
         return c;

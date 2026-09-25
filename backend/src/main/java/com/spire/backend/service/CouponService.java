@@ -54,7 +54,7 @@ public class CouponService {
         if (c.getMinOrderAmount() != null
                 && cartTotal.compareTo(c.getMinOrderAmount()) < 0) {
             throw new IllegalArgumentException(
-                    "This coupon requires a minimum order of ₹" + c.getMinOrderAmount() + ".");
+                    "This coupon requires a minimum order of " + Money.usd(c.getMinOrderAmount()) + ".");
         }
         if (userId != null && redemptionRepository.existsByCouponIdAndUserId(c.getId(), userId)) {
             throw new IllegalArgumentException("You've already used this coupon.");

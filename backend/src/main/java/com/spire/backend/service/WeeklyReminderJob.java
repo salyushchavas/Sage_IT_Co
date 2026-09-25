@@ -10,7 +10,6 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.DayOfWeek;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Optional;
@@ -21,7 +20,7 @@ import java.util.Optional;
  *
  * Runs in two places, intentionally idempotent so double-firing is
  * harmless:
- *   - Spring {@code @Scheduled} at 03:30 UTC every Monday (≈ 09:00 IST).
+ *   - Spring {@code @Scheduled} at 9:00 am US Central every Monday.
  *   - Manual trigger via the {@code /api/cron/weekly-reminder} Vercel
  *     route, which calls {@link #sendReminders()} through the internal
  *     controller endpoint (X-Cron-Secret protected).
@@ -39,12 +38,15 @@ public class WeeklyReminderJob {
     private final WeeklyReportRepository weeklyReportRepository;
     private final EmailTemplateService emailTemplateService;
     private final EmailService emailService;
+    private final WeeklyReportService weeklyReportService;
+    private final BusinessClock clock;
 
     /**
-     * 03:30 UTC = 09:00 IST every Monday. Cron field order in Spring:
+     * 09:00 business time (app.business-zone) every Monday — the day last
+     * week's report is due (checklist 4.2). Cron field order in Spring:
      * second minute hour day-of-month month day-of-week.
      */
-    @Scheduled(cron = "0 30 3 * * MON")
+    @Scheduled(cron = "0 0 9 * * MON", zone = "${app.business-zone:America/Chicago}")
     @Transactional
     public void runScheduled() {
         if (!emailService.isConfigured()) {
@@ -56,20 +58,22 @@ public class WeeklyReminderJob {
     }
 
     /**
-     * Returns the number of reminder emails actually dispatched.
-     * Safe to call manually or repeatedly — already-submitted users
-     * are skipped via the SUBMITTED/REVIEWED status check.
+     * Reminds every participant who owes reports and hasn't submitted
+     * LAST week's (it's due today, Monday). It used to check the week that
+     * had just started, and only people at exactly WEEKLY_REPORTING_ACTIVE,
+     * so it missed everyone who hadn't filed their first report yet.
+     * Returns the number of emails that went out.
      */
     @Transactional
     public int sendReminders() {
-        LocalDate weekStart = startOfWeek(LocalDate.now());
+        LocalDate weekStart = clock.startOfWeek().minusWeeks(1);
         LocalDate weekEnd = weekStart.plusDays(6);
-
-        List<User> active = userRepository.findByCurrentStatus("WEEKLY_REPORTING_ACTIVE");
         int sent = 0;
-        for (User u : active) {
-            if (!Boolean.TRUE.equals(u.getIsActive())) continue;
+        for (User u : userRepository.findAll()) {
+            if (!weeklyReportService.owesReports(u)) continue;
             if (u.getEmail() == null || u.getEmail().isBlank()) continue;
+            LocalDate first = weeklyReportService.firstOwedWeek(u);
+            if (first == null || weekStart.isBefore(first)) continue;
             try {
                 Optional<WeeklyReport> existing = weeklyReportRepository
                         .findByUserIdAndWeekStart(u.getId(), weekStart);
@@ -79,8 +83,7 @@ public class WeeklyReminderJob {
                         continue;
                     }
                 }
-                emailTemplateService.sendWeeklyReminderEmail(u, weekStart, weekEnd);
-                sent++;
+                if (emailTemplateService.sendWeeklyReminderEmail(u, weekStart, weekEnd)) sent++;
             } catch (Exception e) {
                 log.warn("Weekly-reminder skipped for user {}: {}", u.getId(), e.getMessage());
             }
@@ -88,8 +91,4 @@ public class WeeklyReminderJob {
         return sent;
     }
 
-    private static LocalDate startOfWeek(LocalDate date) {
-        int dow = date.getDayOfWeek().getValue();
-        return date.minusDays(dow - DayOfWeek.MONDAY.getValue());
-    }
 }

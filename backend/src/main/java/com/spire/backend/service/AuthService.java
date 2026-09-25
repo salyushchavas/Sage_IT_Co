@@ -127,7 +127,7 @@ public class AuthService {
         User user = User.builder()
                 .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
-                .fullName(request.getFullName())
+                .fullName(PersonNames.clean(request.getFullName()))
                 .role(studentRole)
                 .isActive(true)
                 .emailVerified(false)
@@ -193,6 +193,9 @@ public class AuthService {
         if (userRepository.existsByEmailIgnoreCase(email)) {
             throw new IllegalArgumentException("An account with this email already exists.");
         }
+        // Duplicate check on the phone too (checklist 1.5), compared in
+        // one form so "(555) 123-4567" and "+1 555-123-4567" match.
+        String phoneNormalized = PhoneNumbers.requireAvailable(userRepository, request.getPhone(), null);
 
         Role participantRole = roleRepository.findByName("PARTICIPANT")
                 .orElseGet(() -> roleRepository.findByName("STUDENT")
@@ -205,9 +208,10 @@ public class AuthService {
         User user = User.builder()
                 .email(email)
                 .passwordHash(passwordEncoder.encode(request.getPassword()))
-                .fullName(request.getFullName().trim())
+                .fullName(PersonNames.clean(request.getFullName()))
                 .role(participantRole)
-                .phone(request.getPhone())
+                .phone(request.getPhone() == null ? null : request.getPhone().trim())
+                .phoneNormalized(phoneNormalized)
                 .isActive(true)
                 .emailVerified(false)
                 .currentStatus("DRAFT_STARTED")
@@ -351,9 +355,13 @@ public class AuthService {
                 workflowService.transition(saved,
                         WorkflowService.Status.PARTICIPANT_ID_CREATED, "id_generated");
                 try {
-                    emailTemplateService.sendParticipantIdEmail(saved, issued);
-                    workflowService.transition(saved,
-                            WorkflowService.Status.ID_EMAIL_SENT, "id_email_sent");
+                    // ID_EMAIL_SENT only when the email really went out
+                    // (checklist 1.4); otherwise the status stays at
+                    // PARTICIPANT_ID_CREATED and the email log shows why.
+                    if (emailTemplateService.sendParticipantIdEmail(saved, issued)) {
+                        workflowService.transition(saved,
+                                WorkflowService.Status.ID_EMAIL_SENT, "id_email_sent");
+                    }
                 } catch (Exception ignored) {
                     // Email send failure — still report ID_CREATED so
                     // the frontend can show the page. Resend is a
@@ -487,12 +495,43 @@ public class AuthService {
         user.setPasswordHash(passwordEncoder.encode(newPassword));
         user.setResetToken(null);
         user.setResetTokenExpiresAt(null);
+        // They chose their own password: a temporary one no longer applies.
+        user.setMustChangePassword(false);
         userRepository.save(user);
         recordService.record(user.getId(), "ACCOUNT_PASSWORD_RESET",
                 RecordService.Category.SECURITY,
                 "Password reset",
                 "User reset password via emailed link",
                 Map.of("email", user.getEmail()));
+    }
+
+    /**
+     * Staff onboarding: a signed-in user changes their password — required
+     * at first sign-in with the temporary password an admin's email gave
+     * them. Mistakes are 400s (a 401 would make the website try to refresh
+     * the session).
+     */
+    @org.springframework.transaction.annotation.Transactional
+    public void changePassword(Long userId, String currentPassword, String newPassword) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new UnauthorizedException("Not signed in"));
+        if (currentPassword == null || !passwordEncoder.matches(currentPassword, user.getPasswordHash())) {
+            throw new IllegalArgumentException("Your current password isn't right.");
+        }
+        if (newPassword == null || newPassword.length() < 8 || newPassword.length() > 100) {
+            throw new IllegalArgumentException("Choose a password of 8 to 100 characters.");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPasswordHash())) {
+            throw new IllegalArgumentException("Choose a new password, not the one you have now.");
+        }
+        boolean wasTemporary = Boolean.TRUE.equals(user.getMustChangePassword());
+        user.setPasswordHash(passwordEncoder.encode(newPassword));
+        user.setMustChangePassword(false);
+        userRepository.save(user);
+        recordService.record(userId, "ACCOUNT_PASSWORD_CHANGED", RecordService.Category.SECURITY,
+                "Password changed",
+                wasTemporary ? "Chose their own password (replacing the temporary one)" : "Changed their password",
+                Map.of("replacedTemporary", wasTemporary));
     }
 
     public AuthResponse login(LoginRequest request) {

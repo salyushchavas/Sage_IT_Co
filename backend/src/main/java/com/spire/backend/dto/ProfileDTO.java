@@ -64,6 +64,10 @@ public class ProfileDTO {
     private Boolean programSelectionComplete;
     private Boolean agreementComplete;
     private Boolean checkUploadComplete;
+    /** Staff onboarding: where the portal's emails go, when not the login email. */
+    private String personalEmail;
+    /** Staff onboarding: still on a temporary password. */
+    private Boolean mustChangePassword;
 
     private Integer enrolledCoursesCount;
     private Integer completedCoursesCount;
@@ -203,6 +207,8 @@ public class ProfileDTO {
                 .programSelectionComplete(Boolean.TRUE.equals(user.getProgramSelectionComplete()))
                 .agreementComplete(Boolean.TRUE.equals(user.getAgreementComplete()))
                 .checkUploadComplete(Boolean.TRUE.equals(user.getCheckUploadComplete()))
+                .personalEmail(user.getPersonalEmail())
+                .mustChangePassword(Boolean.TRUE.equals(user.getMustChangePassword()))
                 .enrolledCoursesCount(enrolledCoursesCount)
                 .completedCoursesCount(completedCoursesCount)
                 .certificatesCount(certificatesCount)

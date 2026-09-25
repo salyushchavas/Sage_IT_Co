@@ -31,6 +31,17 @@ public class AwsS3Config {
     @Value("${aws.region:}")
     private String region;
 
+    /**
+     * Optional: an S3-compatible endpoint (e.g. a local test server). Empty
+     * in production, where the SDK uses Amazon's own endpoint.
+     */
+    @Value("${aws.s3.endpoint:}")
+    private String endpoint;
+
+    private boolean customEndpoint() {
+        return endpoint != null && !endpoint.isBlank();
+    }
+
     @Bean
     @Lazy
     public S3Client s3Client() {
@@ -43,6 +54,11 @@ public class AwsS3Config {
                 // this bean fail to instantiate (NoClassDefFoundError). The
                 // URLConnection client has no httpclient5 dependency.
                 .httpClient(UrlConnectionHttpClient.create())
+                .applyMutation(b -> {
+                    if (customEndpoint()) {
+                        b.endpointOverride(java.net.URI.create(endpoint)).forcePathStyle(true);
+                    }
+                })
                 // No explicit credentialsProvider → the SDK uses
                 // DefaultCredentialsProvider (env / instance / profile chain).
                 .build();
@@ -51,7 +67,13 @@ public class AwsS3Config {
     @Bean
     @Lazy
     public S3Presigner s3Presigner() {
-        return S3Presigner.builder()
+        S3Presigner.Builder builder = S3Presigner.builder();
+        if (customEndpoint()) {
+            builder.endpointOverride(java.net.URI.create(endpoint))
+                    .serviceConfiguration(software.amazon.awssdk.services.s3.S3Configuration.builder()
+                            .pathStyleAccessEnabled(true).build());
+        }
+        return builder
                 .region(Region.of(region))
                 // No explicit credentialsProvider → the SDK uses
                 // DefaultCredentialsProvider (env / instance / profile chain).

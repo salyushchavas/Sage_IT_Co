@@ -6,7 +6,6 @@ import com.spire.backend.entity.CoachingTask;
 import com.spire.backend.entity.ProgramSelection;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.CoachAssignmentRepository;
 import com.spire.backend.repository.CoachingFeedbackRepository;
 import com.spire.backend.repository.CoachingSessionRepository;
@@ -14,12 +13,15 @@ import com.spire.backend.repository.CoachingTaskRepository;
 import com.spire.backend.repository.ProgramSelectionRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Phase 5B — backing service for the coach dashboard. All read /
@@ -74,7 +76,7 @@ public class CoachService {
                 .toList();
     }
 
-    /** Coaching detail for a single participant. Throws 401 if the
+    /** Coaching detail for a single participant. Throws 403 if the
      *  caller isn't an assigned coach for this participant. */
     @Transactional(readOnly = true)
     public Map<String, Object> participantDetail(Long coachUserId, Long participantId) {
@@ -107,11 +109,28 @@ public class CoachService {
 
     // ── Session notes ─────────────────────────────────────────────
 
+    /**
+     * Always a new row. Only the note's own fields are taken from the
+     * request: an id (or coach id) sent with it would otherwise turn the
+     * save into an update of someone else's note.
+     */
     @Transactional
     public CoachingSession createSession(Long coachUserId, CoachingSession in) {
-        requireAssignment(coachUserId, in.getParticipantUserId());
-        in.setCoachUserId(coachUserId);
-        return sessionRepository.save(in);
+        Long participantId = participantOf(in == null ? null : in.getParticipantUserId());
+        requireAssignment(coachUserId, participantId);
+        Integer minutes = in.getDurationMinutes();
+        if (minutes != null && (minutes < 0 || minutes > 24 * 60)) {
+            throw new IllegalArgumentException("Enter the session length in minutes (0 to 1440).");
+        }
+        return sessionRepository.save(CoachingSession.builder()
+                .participantUserId(participantId)
+                .coachUserId(coachUserId)
+                .sessionDate(in.getSessionDate())
+                .topic(cut(in.getTopic(), 255))
+                .notes(in.getNotes())
+                .nextSteps(in.getNextSteps())
+                .durationMinutes(minutes)
+                .build());
     }
 
     @Transactional(readOnly = true)
@@ -126,12 +145,21 @@ public class CoachService {
 
     // ── Practice tasks ────────────────────────────────────────────
 
+    /** Always a new, open task (see {@link #createSession}). */
     @Transactional
     public CoachingTask createTask(Long coachUserId, CoachingTask in) {
-        requireAssignment(coachUserId, in.getParticipantUserId());
-        in.setCoachUserId(coachUserId);
-        if (in.getStatus() == null || in.getStatus().isBlank()) in.setStatus("OPEN");
-        return taskRepository.save(in);
+        Long participantId = participantOf(in == null ? null : in.getParticipantUserId());
+        requireAssignment(coachUserId, participantId);
+        String title = in.getTitle() == null ? "" : in.getTitle().trim();
+        if (title.isEmpty()) throw new IllegalArgumentException("Give the task a title.");
+        return taskRepository.save(CoachingTask.builder()
+                .participantUserId(participantId)
+                .coachUserId(coachUserId)
+                .title(cut(title, 255))
+                .description(in.getDescription())
+                .dueDate(in.getDueDate())
+                .status("OPEN")
+                .build());
     }
 
     @Transactional(readOnly = true)
@@ -149,22 +177,39 @@ public class CoachService {
         CoachingTask t = taskRepository.findById(taskId)
                 .orElseThrow(() -> new ResourceNotFoundException("CoachingTask", "id", taskId));
         if (!coachUserId.equals(t.getCoachUserId())) {
-            throw new UnauthorizedException("Not your task");
+            throw new AccessDeniedException("This task was set by another coach.");
         }
-        t.setStatus(status);
+        String next = status == null ? "" : status.trim().toUpperCase(Locale.ROOT);
+        if (!TASK_STATUSES.contains(next)) {
+            throw new IllegalArgumentException("A task is OPEN, DONE or CANCELLED.");
+        }
+        t.setStatus(next);
         return taskRepository.save(t);
     }
 
     // ── Feedback ──────────────────────────────────────────────────
 
+    /** Always a new row (see {@link #createSession}). */
     @Transactional
     public CoachingFeedback createFeedback(Long coachUserId, CoachingFeedback in) {
-        requireAssignment(coachUserId, in.getParticipantUserId());
-        in.setCoachUserId(coachUserId);
-        if (in.getFeedbackType() == null || in.getFeedbackType().isBlank()) {
-            in.setFeedbackType("GENERAL");
+        Long participantId = participantOf(in == null ? null : in.getParticipantUserId());
+        requireAssignment(coachUserId, participantId);
+        String content = in.getContent() == null ? "" : in.getContent().trim();
+        if (content.isEmpty()) throw new IllegalArgumentException("Write the feedback first.");
+        String type = in.getFeedbackType() == null || in.getFeedbackType().isBlank()
+                ? "GENERAL" : in.getFeedbackType().trim().toUpperCase(Locale.ROOT);
+        if (!FEEDBACK_TYPES.contains(type)) type = "GENERAL";
+        Integer rating = in.getRating();
+        if (rating != null && (rating < 1 || rating > 5)) {
+            throw new IllegalArgumentException("A rating is from 1 to 5.");
         }
-        return feedbackRepository.save(in);
+        return feedbackRepository.save(CoachingFeedback.builder()
+                .participantUserId(participantId)
+                .coachUserId(coachUserId)
+                .feedbackType(type)
+                .content(content)
+                .rating(rating)
+                .build());
     }
 
     @Transactional(readOnly = true)
@@ -179,13 +224,28 @@ public class CoachService {
 
     // ── Auth gate ─────────────────────────────────────────────────
 
+    private static final Set<String> TASK_STATUSES = Set.of("OPEN", "DONE", "CANCELLED");
+    private static final Set<String> FEEDBACK_TYPES = Set.of("SESSION", "RESUME", "TECHNICAL", "INTERVIEW", "GENERAL");
+
+    private static Long participantOf(Long participantUserId) {
+        if (participantUserId == null) throw new IllegalArgumentException("Pick the participant first.");
+        return participantUserId;
+    }
+
+    private static String cut(String s, int max) {
+        if (s == null) return null;
+        String t = s.trim();
+        return t.length() <= max ? t : t.substring(0, max);
+    }
+
+    /** 403, not 401: the website treats 401 as "sign in again". */
     private void requireAssignment(Long coachUserId, Long participantId) {
-        boolean assigned = coachAssignmentRepository
+        boolean assigned = participantId != null && coachAssignmentRepository
                 .findByCoachUserIdAndStatus(coachUserId, "ACTIVE")
                 .stream()
                 .anyMatch(a -> participantId.equals(a.getUserId()));
         if (!assigned) {
-            throw new UnauthorizedException(
+            throw new AccessDeniedException(
                     "You are not assigned as a coach to this participant.");
         }
     }

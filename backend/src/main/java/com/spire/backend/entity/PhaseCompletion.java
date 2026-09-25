@@ -3,6 +3,7 @@ package com.spire.backend.entity;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
@@ -51,4 +52,11 @@ public class PhaseCompletion {
 
     @Column(name = "erm_notes", columnDefinition = "TEXT")
     private String ermNotes;
+
+    /**
+     * Checklist 4.5: the day the phase begins. Phase 2 (post-offer support)
+     * begins on the verified employment start date.
+     */
+    @Column(name = "start_date")
+    private LocalDate startDate;
 }

@@ -8,7 +8,6 @@ import com.spire.backend.entity.User;
 import com.spire.backend.entity.UserRecord;
 import com.spire.backend.entity.WeeklyReport;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.AgreementAcceptanceRepository;
 import com.spire.backend.repository.CoachAssignmentRepository;
 import com.spire.backend.repository.ErmAssignmentRepository;
@@ -54,11 +53,17 @@ public class ErmService {
     private final UserRecordRepository userRecordRepository;
     private final RecordService recordService;
 
-    /** Roster — participants assigned to this ERM. */
+    /**
+     * Roster — participants whose CURRENT ERM is this ERM (a participant
+     * reassigned to someone else no longer shows here).
+     */
     @Transactional(readOnly = true)
     public List<Map<String, Object>> roster(Long ermUserId) {
         return ermAssignmentRepository.findByErmUserId(ermUserId).stream()
-                .map(a -> userRepository.findById(a.getUserId()).orElse(null))
+                .map(ErmAssignment::getUserId)
+                .distinct()
+                .filter(pid -> isCurrentErm(ermUserId, pid))
+                .map(pid -> userRepository.findById(pid).orElse(null))
                 .filter(Objects::nonNull)
                 .map(p -> {
                     ProgramSelection prog = programSelectionRepository
@@ -77,6 +82,11 @@ public class ErmService {
                     row.put("targetJobTitle", prog != null ? prog.getTargetJobTitle() : null);
                     row.put("currentStatus", p.getCurrentStatus());
                     row.put("lastActivity", lastActivity);
+                    // Checklist 2.3: a signed agreement waiting for this ERM's review.
+                    row.put("agreementToReview", agreementRepository.findByUserId(p.getId())
+                            .map(a -> AgreementService.STATUS_VERIFIED.equals(a.getStatus())
+                                    && ermUserId.equals(a.getErmRoutedTo()) && a.getErmReviewedAt() == null)
+                            .orElse(false));
                     return row;
                 })
                 .toList();
@@ -126,14 +136,20 @@ public class ErmService {
 
         AgreementAcceptance agree = agreementRepository.findByUserId(participantId).orElse(null);
         if (agree != null) {
-            out.put("agreement", Map.of(
-                    "status", agree.getStatus() == null ? "" : agree.getStatus(),
-                    "acceptedAt", agree.getAcceptedAt() == null ? "" : agree.getAcceptedAt().toString(),
-                    "version", agree.getAgreementVersion() == null ? "" : agree.getAgreementVersion()
-            ));
+            Map<String, Object> a = new LinkedHashMap<>();
+            a.put("status", agree.getStatus() == null ? "" : agree.getStatus());
+            a.put("signed", AgreementService.STATUS_VERIFIED.equals(agree.getStatus()));
+            a.put("acceptedAt", agree.getAcceptedAt() == null ? "" : agree.getAcceptedAt().toString());
+            a.put("version", agree.getAgreementVersion() == null ? "" : agree.getAgreementVersion());
+            // Checklist 2.3: routed to this ERM, and reviewed by them.
+            a.put("routedAt", agree.getErmRoutedAt() == null ? "" : agree.getErmRoutedAt().toString());
+            a.put("reviewedAt", agree.getErmReviewedAt() == null ? "" : agree.getErmReviewedAt().toString());
+            out.put("agreement", a);
         }
 
-        out.put("reports", weeklyReportRepository.findByUserIdOrderByWeekStartDesc(participantId));
+        out.put("reports", weeklyReportRepository.findByUserIdOrderByWeekStartDesc(participantId).stream()
+                .filter(r -> !"PENDING".equals(r.getStatus()))
+                .toList());
         out.put("coaches", coachAssignmentRepository
                 .findByUserIdAndStatus(participantId, "ACTIVE").stream()
                 .map(ca -> {
@@ -156,11 +172,41 @@ public class ErmService {
 
     // ── Weekly reports ────────────────────────────────────────────
 
+    /** One weekly report in the ERM's list (checklist 4.1). */
+    public record ReportRow(Long id, Long userId, String participantName, String participantId,
+                            java.time.LocalDate weekStart, java.time.LocalDate weekEnd, java.time.LocalDate dueDate,
+                            String status, LocalDateTime submittedAt, boolean late, boolean needsHelp,
+                            String reportData, String ermNotes, LocalDateTime ermReviewDate) {}
+
+    private static final List<String> REPORT_ORDER = List.of("SUBMITTED", "OVERDUE", "REVIEWED");
+
+    /**
+     * Checklist 4.1: the weekly reports of the ERM's current participants,
+     * with each participant's name and ID and the full report. Drafts
+     * aren't shown (the participant hasn't submitted them). Order: reports
+     * where the participant asked for help first, then submitted (to
+     * review), overdue, reviewed; newest week first within each.
+     */
     @Transactional(readOnly = true)
-    public List<WeeklyReport> reportsForMyParticipants(Long ermUserId) {
+    public List<ReportRow> reportsForMyParticipants(Long ermUserId) {
         return ermAssignmentRepository.findByErmUserId(ermUserId).stream()
-                .flatMap(a -> weeklyReportRepository
-                        .findByUserIdOrderByWeekStartDesc(a.getUserId()).stream())
+                .map(ErmAssignment::getUserId)
+                .distinct()
+                .filter(pid -> isCurrentErm(ermUserId, pid))
+                .flatMap(pid -> {
+                    User p = userRepository.findById(pid).orElse(null);
+                    return weeklyReportRepository.findByUserIdOrderByWeekStartDesc(pid).stream()
+                            .filter(r -> !"PENDING".equals(r.getStatus()))
+                            .map(r -> new ReportRow(r.getId(), pid,
+                                    p == null ? null : p.getFullName(), p == null ? null : p.getParticipantId(),
+                                    r.getWeekStart(), r.getWeekEnd(), r.getSubmissionDueDate(), r.getStatus(),
+                                    r.getSubmittedAt(), r.getOverdueFlaggedAt() != null,
+                                    r.getEscalatedAt() != null, r.getReportData(), r.getErmNotes(), r.getErmReviewDate()));
+                })
+                .sorted(java.util.Comparator
+                        .comparing((ReportRow r) -> !(r.needsHelp() && !"REVIEWED".equals(r.status())))
+                        .thenComparingInt(r -> REPORT_ORDER.indexOf(r.status()))
+                        .thenComparing(ReportRow::weekStart, java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())))
                 .toList();
     }
 
@@ -169,6 +215,11 @@ public class ErmService {
         WeeklyReport r = weeklyReportRepository.findById(reportId)
                 .orElseThrow(() -> new ResourceNotFoundException("WeeklyReport", "id", reportId));
         requireAssignment(ermUserId, r.getUserId());
+        // Only a submitted report can be reviewed: a draft or an overdue
+        // week has nothing from the participant yet (checklist 4.1).
+        if (!"SUBMITTED".equals(r.getStatus())) {
+            throw new IllegalStateException("Only a submitted report can be marked reviewed.");
+        }
         r.setStatus("REVIEWED");
         r.setErmNotes(notes == null ? "" : notes.trim());
         r.setErmReviewDate(LocalDateTime.now());
@@ -210,12 +261,21 @@ public class ErmService {
 
     // ── Auth gate ─────────────────────────────────────────────────
 
+    /**
+     * The participant's CURRENT ERM only (an earlier, replaced ERM no longer
+     * has access). 403 rather than 401: the ERM is signed in, just not
+     * allowed here — a 401 made the website think the session had expired.
+     */
     private void requireAssignment(Long ermUserId, Long participantId) {
-        boolean ok = ermAssignmentRepository.findByErmUserId(ermUserId).stream()
-                .anyMatch(a -> participantId.equals(a.getUserId()));
-        if (!ok) {
-            throw new UnauthorizedException(
+        if (!isCurrentErm(ermUserId, participantId)) {
+            throw new org.springframework.security.access.AccessDeniedException(
                     "You are not the assigned ERM for this participant.");
         }
+    }
+
+    private boolean isCurrentErm(Long ermUserId, Long participantId) {
+        return ermAssignmentRepository.findFirstByUserIdOrderByAssignedDateDesc(participantId)
+                .map(a -> ermUserId.equals(a.getErmUserId()))
+                .orElse(false);
     }
 }
