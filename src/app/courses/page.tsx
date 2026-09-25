@@ -75,7 +75,7 @@ export default function CoursesPage() {
         {/* Error */}
         {error && (
           <div className="text-center py-20">
-            <p className="text-red-400 mb-2">{error}</p>
+            <p className="text-red-700 mb-2">{error}</p>
             <p className="text-zinc-600 text-sm">
               Make sure the backend is running.
             </p>
