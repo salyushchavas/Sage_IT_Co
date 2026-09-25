@@ -97,7 +97,8 @@ public class WebhookController {
         // 2. Parse event manually from raw body (avoid double-deserialization)
         try {
             com.fasterxml.jackson.databind.ObjectMapper mapper = new com.fasterxml.jackson.databind.ObjectMapper();
-            Map<String, Object> payload = mapper.readValue(rawBody, Map.class);
+            Map<String, Object> payload = mapper.readValue(rawBody,
+                    new com.fasterxml.jackson.core.type.TypeReference<Map<String, Object>>() {});
 
             String event = (String) payload.get("event");
             log.info("Razorpay webhook event: {}", event);

@@ -1,6 +1,5 @@
 package com.spire.backend.service;
 
-import com.spire.backend.entity.EmailLog;
 import com.spire.backend.entity.Role;
 import com.spire.backend.entity.User;
 import com.spire.backend.repository.EmailLogRepository;

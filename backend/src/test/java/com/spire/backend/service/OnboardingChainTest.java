@@ -60,7 +60,7 @@ class OnboardingChainTest {
     }
 
     private void ermAvailable() {
-        when(erms.getAssignedErm(10L)).thenReturn(Optional.empty(), Optional.of(erm));
+        when(erms.getAssignedErm(10L)).thenReturn(Optional.empty()).thenReturn(Optional.of(erm));
         when(erms.assignErm(pat)).thenReturn(Optional.of(ErmAssignment.builder().userId(10L).ermUserId(50L).build()));
     }
 

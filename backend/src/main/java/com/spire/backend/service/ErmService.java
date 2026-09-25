@@ -2,7 +2,6 @@ package com.spire.backend.service;
 
 import com.spire.backend.entity.AgreementAcceptance;
 import com.spire.backend.entity.ErmAssignment;
-import com.spire.backend.entity.ParticipantDocument;
 import com.spire.backend.entity.ProgramSelection;
 import com.spire.backend.entity.User;
 import com.spire.backend.entity.UserRecord;

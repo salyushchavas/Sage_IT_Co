@@ -6,7 +6,6 @@ import com.spire.backend.dto.AcknowledgmentSubmitRequest;
 import com.spire.backend.entity.Acknowledgment;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.AcknowledgmentRepository;
 import com.spire.backend.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;

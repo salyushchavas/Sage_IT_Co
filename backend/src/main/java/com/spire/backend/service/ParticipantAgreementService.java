@@ -3,7 +3,6 @@ package com.spire.backend.service;
 import com.spire.backend.entity.AgreementAcceptance;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.AgreementAcceptanceRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;

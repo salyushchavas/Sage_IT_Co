@@ -59,7 +59,7 @@ public class ThumbnailUploadService {
                     // Thumbnails always render in a fixed-aspect card; let
                     // Cloudinary do the resize/crop server-side so we don't
                     // ship 4MB JPEGs to every visitor.
-                    "transformation", new com.cloudinary.Transformation()
+                    "transformation", new com.cloudinary.Transformation<>()
                             .width(1280).height(720).crop("fill").quality("auto").fetchFormat("auto")
             ));
 

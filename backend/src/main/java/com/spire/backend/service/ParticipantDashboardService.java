@@ -65,7 +65,6 @@ public class ParticipantDashboardService {
     private final WeeklyReportRepository weeklyReportRepository;
     private final ErmAssignmentService ermAssignmentService;
     private final CoachAssignmentService coachAssignmentService;
-    private final WorkflowService workflowService;
     private final com.spire.backend.repository.EmailLogRepository emailLogRepository;
     private final com.spire.backend.repository.InvoiceRepository invoiceRepository;
     private final com.spire.backend.repository.PaymentPlanRepository paymentPlanRepository;

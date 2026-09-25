@@ -86,9 +86,6 @@ import org.apache.pdfbox.rendering.PDFRenderer;
 @Slf4j
 public class AgreementDocumentService {
 
-    private static final DateTimeFormatter DATE_FMT =
-            DateTimeFormatter.ofPattern("MMMM d, yyyy");
-
     /** Build G — US short date used wherever the consultant sees a
      *  date in the wizard / cover read-back / PDF date columns. */
     private static final DateTimeFormatter US_SHORT_DATE_FMT =
@@ -2295,31 +2292,6 @@ public class AgreementDocumentService {
             throw new IOException("Cloudinary upload returned no secure_url");
         }
         return new PdfUploadResult(url.toString(), publicId, bytes);
-    }
-
-    private PdfUploadResult uploadBytesToCloudinary(byte[] bytes, String appId) throws IOException {
-        // type=authenticated: bare /raw/upload/agreements/{id} URLs
-        // return 401. Re-fetching requires a signature minted with the
-        // API secret (see signedPdfUrl()). The secure_url returned at
-        // upload time IS pre-signed -- safe to persist on the entity as
-        // the canonical URL for the operator's existing browser tab
-        // (no second sign() round trip), but anyone who only knows the
-        // public_id can't construct it.
-        String publicId = "agreements/" + appId;
-        Map<?, ?> result = cloudinary.uploader().upload(bytes,
-                ObjectUtils.asMap(
-                        "public_id", publicId,
-                        "resource_type", "raw",
-                        "type", "authenticated",
-                        "overwrite", true));
-        Object url = result.get("secure_url");
-        if (url == null) {
-            throw new IOException("Cloudinary upload returned no secure_url");
-        }
-        // Bytes are filled in by the outer generateAgreementPdf() that
-        // already holds them -- the upload helper itself never re-reads
-        // them, so this slot stays null and is replaced upstream.
-        return new PdfUploadResult(url.toString(), publicId, null);
     }
 
     private static void safeDelete(Path p) {

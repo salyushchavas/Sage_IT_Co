@@ -4,7 +4,6 @@ import com.spire.backend.dto.ProgramSelectionRequest;
 import com.spire.backend.entity.ProgramSelection;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
 import com.spire.backend.repository.ProgramSelectionRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -198,10 +197,4 @@ public class ProgramSelectionService {
         if (req.getNotes() != null) row.setNotes(req.getNotes());
     }
 
-    private static ProgramSelection buildRow(Long userId, ProgramSelectionRequest req) {
-        ProgramSelection row = ProgramSelection.builder().userId(userId).build();
-        copyFieldsIntoRow(row, req);
-        if (row.getServiceSummaryVersion() == null) row.setServiceSummaryVersion(CURRENT_SUMMARY_VERSION);
-        return row;
-    }
 }

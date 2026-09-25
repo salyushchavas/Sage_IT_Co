@@ -28,6 +28,8 @@ import java.util.List;
  * Mapped to HTTP 400 by {@link GlobalExceptionHandler}.
  */
 public class IncompleteSubmissionException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
 
     private final List<String> missingFields;
     private final List<String> missingAffirmations;

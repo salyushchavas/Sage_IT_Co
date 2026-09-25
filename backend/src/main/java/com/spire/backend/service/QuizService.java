@@ -39,7 +39,6 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
-import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -551,7 +550,6 @@ public class QuizService {
     private record QuestionGrading(Question question, List<Long> selected, List<Long> correctIds, boolean correct) {}
 
     /** Used by {@link #parseSelectedIds} from the read side. */
-    @SuppressWarnings("unused")
     public List<Long> parseSelectedIds(String json) {
         if (json == null || json.isBlank()) return List.of();
         try {

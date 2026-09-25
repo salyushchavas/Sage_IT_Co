@@ -8,6 +8,8 @@ package com.spire.backend.exception;
  * /agreement.
  */
 public class AgreementRequiredException extends RuntimeException {
+    private static final long serialVersionUID = 1L;
+
     public AgreementRequiredException() {
         super("AGREEMENT_REQUIRED");
     }

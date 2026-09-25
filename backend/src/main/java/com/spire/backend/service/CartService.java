@@ -2,7 +2,6 @@ package com.spire.backend.service;
 
 import com.spire.backend.dto.CourseDTO;
 import com.spire.backend.entity.CartItem;
-import com.spire.backend.entity.Coupon;
 import com.spire.backend.entity.Course;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
@@ -14,8 +13,6 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.math.BigDecimal;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -28,9 +25,6 @@ public class CartService {
     private final UserRepository userRepository;
     private final CourseRepository courseRepository;
     private final EnrollmentRepository enrollmentRepository;
-    private final EnrollmentService enrollmentService;
-    private final CouponService couponService;
-    private final RecordService recordService;
     private final CourseCheckoutService courseCheckoutService;
 
     @Transactional

@@ -104,7 +104,7 @@ class CheckCopiesTest {
         when(storage.upload(anyLong(), anyString(), any(), any()))
                 .thenReturn(new DocumentStorageService.StoredFile("participant-documents/10/c.png", "participant-documents/10/c.png"));
         WorkflowService workflow = new WorkflowService(users, mock(WorkflowStateRepository.class), mock(RecordService.class));
-        return new ParticipantCheckService(checks, mock(AgreementAcceptanceRepository.class), users, storage, workflow,
+        return new ParticipantCheckService(checks, users, storage, workflow,
                 mock(RecordService.class), emails, profile);
     }
 

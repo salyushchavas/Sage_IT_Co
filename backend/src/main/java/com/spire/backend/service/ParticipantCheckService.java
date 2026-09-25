@@ -3,8 +3,6 @@ package com.spire.backend.service;
 import com.spire.backend.entity.CheckDocument;
 import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
-import com.spire.backend.exception.UnauthorizedException;
-import com.spire.backend.repository.AgreementAcceptanceRepository;
 import com.spire.backend.repository.CheckDocumentRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
@@ -47,7 +45,6 @@ public class ParticipantCheckService {
     private static final Set<String> ACCEPTED_EXTENSIONS = Set.of("pdf", "jpg", "jpeg", "png");
 
     private final CheckDocumentRepository checkDocumentRepository;
-    private final AgreementAcceptanceRepository agreementRepository;
     private final UserRepository userRepository;
     private final DocumentStorageService storageService;
     private final WorkflowService workflowService;

@@ -4,7 +4,6 @@ import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ConsultantApplicationEvent;
 import com.spire.backend.repository.ConsultantApplicationEventRepository;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -64,7 +63,6 @@ final class CertFonts {
  */
 @Service
 @RequiredArgsConstructor
-@Slf4j
 public class ConsultantVersionService {
 
     /** Disclosure text shown at the consent gate. Pin in the certificate. */

@@ -10,7 +10,6 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.TimeZone;
 
@@ -69,7 +68,7 @@ class UsDollarsAndTimeTest {
         assertTrue(shown.endsWith("3456") && !shown.contains("000123"), shown);
         assertFalse(service.financeAllTrackings(null).get(0).get("checkNumber").toString().contains("000123"));
         assertEquals("000123456", service.revealCheckNumber(99L, 7L));
-        verify(records).record(eq(10L), eq("CHECK_NUMBER_VIEWED"), anyString(), anyString(), anyString(), any(Map.class));
+        verify(records).record(eq(10L), eq("CHECK_NUMBER_VIEWED"), anyString(), anyString(), anyString(), anyMap());
     }
 
     @Test

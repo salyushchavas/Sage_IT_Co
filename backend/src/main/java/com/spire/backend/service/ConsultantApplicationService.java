@@ -290,12 +290,6 @@ public class ConsultantApplicationService {
 
     // ── Consultant email-OTP gate (Phase D) ──────────────────────────
 
-    private static boolean isConsultantActionable(ConsultantApplication app) {
-        String s = app.getStatus();
-        return ConsultantApplication.Status.SUBMITTED.name().equals(s)
-                || ConsultantApplication.Status.REVISION_REQUESTED.name().equals(s);
-    }
-
     private String generateOtp() {
         return String.format("%06d", secureRandom.nextInt(1_000_000));
     }
@@ -1257,11 +1251,6 @@ public class ConsultantApplicationService {
                 ConsultantApplicationEvent.ActorType.CONSULTANT, null,
                 Map.of("template", "copy", "to", app.getConsultantEmail()),
                 request);
-    }
-
-    private boolean isTerminalCancellation(String status) {
-        return ConsultantApplication.Status.CANCELLED.name().equals(status)
-                || ConsultantApplication.Status.EXPIRED.name().equals(status);
     }
 
     // ── Two-stage workflow transitions (Phase 3) ────────────────────
@@ -2730,20 +2719,6 @@ public class ConsultantApplicationService {
             case "appendix5" -> app.setAffirmedAppendix5(false);
             default -> { /* cover / review carry no affirmation */ }
         }
-    }
-
-    /**
-     * Build Y (B5) / Build P — reject a write to {@code sectionId} when a
-     * section-restricted round is active and that section isn't in scope.
-     * Covers BOTH a Build Y revision round (REVISION_REQUESTED) and a
-     * Phase-2 fill (phase ≥ 2, status SUBMITTED) — in Phase 2 only the
-     * ERM-reopened sections are writable, so a completed Phase-1 upload
-     * (cheques, work-auth, DL/SSN) is rejected here even though the
-     * out-of-band upload endpoints don't pass through {@code consultantFill}.
-     * No-op when unrestricted.
-     */
-    private void assertSectionWritable(ConsultantApplication app, String sectionId) {
-        assertUploadWritable(app, sectionId, null);
     }
 
     /**

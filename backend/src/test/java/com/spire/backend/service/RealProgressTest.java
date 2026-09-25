@@ -152,7 +152,7 @@ class RealProgressTest {
         user.setDocumentsComplete(true);
         user.setProgramSelectionComplete(true);
         ParticipantCheckService checks = new ParticipantCheckService(mock(CheckDocumentRepository.class),
-                mock(AgreementAcceptanceRepository.class), userRepository, mock(DocumentStorageService.class),
+                userRepository, mock(DocumentStorageService.class),
                 workflow, mock(RecordService.class), mock(EmailTemplateService.class),
                 mock(ProfileCompletionService.class));
         IllegalStateException ex = assertThrows(IllegalStateException.class, () -> checks.markNotApplicable(10L));
