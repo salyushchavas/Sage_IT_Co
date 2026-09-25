@@ -80,6 +80,9 @@ export function AdminUsersTab({ canAddStaff }: { canAddStaff: boolean }) {
   const load = useCallback(async () => {
     try {
       setAll(((await getUsers("all")) ?? []) as UserDTO[]);
+    } catch (e) {
+      // A failed load must not look like "No active users found".
+      setNotice({ kind: "error", text: e instanceof Error ? `Couldn't load the users: ${e.message}` : "Couldn't load the users" });
     } finally {
       setLoading(false);
     }
@@ -125,12 +128,14 @@ export function AdminUsersTab({ canAddStaff }: { canAddStaff: boolean }) {
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
       <div className="flex items-center gap-2 flex-wrap mb-5">
         <h1 className="text-2xl font-bold text-zinc-900 mr-auto">All Users</h1>
-        <button
-          onClick={() => setDialog("invite")}
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white/60 border border-zinc-200 text-zinc-700 hover:border-sage-navy hover:text-sage-navy transition cursor-pointer"
-        >
-          <Mail className="w-4 h-4" /> Invite participant
-        </button>
+        {canAddStaff && (
+          <button
+            onClick={() => setDialog("invite")}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-semibold bg-white/60 border border-zinc-200 text-zinc-700 hover:border-sage-navy hover:text-sage-navy transition cursor-pointer"
+          >
+            <Mail className="w-4 h-4" /> Invite participant
+          </button>
+        )}
         {canAddStaff && (
           <button
             onClick={() => setDialog("staff")}
@@ -474,7 +479,8 @@ function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (tex
 }
 
 /** Participants enroll themselves; this emails them the link with their details filled in. */
-function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (text: string, ok: boolean) => void }) {
+/** Also used on the Operations page (Operations admins invite participants too). */
+export function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (text: string, ok: boolean) => void }) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [saving, setSaving] = useState(false);
@@ -484,8 +490,9 @@ function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (text:
     setSaving(true);
     setError("");
     try {
-      const message = await inviteParticipant({ fullName: fullName.trim(), email: email.trim() });
-      onDone(`${message} to ${email.trim()}.`, true);
+      const r = await inviteParticipant({ fullName: fullName.trim(), email: email.trim() });
+      // A failed email is shown as a problem, not a success.
+      onDone(r.emailSent ? `${r.message} to ${email.trim()}.` : `${r.message} (${email.trim()})`, r.emailSent);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't send the invitation");
       setSaving(false);

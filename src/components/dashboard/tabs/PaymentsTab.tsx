@@ -189,7 +189,7 @@ function PaymentPlanSection({
         )}
       </div>
 
-      <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+      <div className="rounded-xl border border-gray-100 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
@@ -398,7 +398,7 @@ function CheckTrackingSection({
       </div>
 
       {trackings.length > 0 && (
-        <div className="mt-3 rounded-xl border border-gray-100 bg-white overflow-hidden">
+        <div className="mt-3 rounded-xl border border-gray-100 bg-white overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
               <tr>
@@ -460,7 +460,7 @@ function InvoicesSection({ invoices }: { invoices: InvoiceDTO[] }) {
     <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-5 space-y-3">
       <h2 className="text-xl font-bold text-gray-900">Invoices</h2>
       {error && <p className="text-sm text-red-700">{error}</p>}
-      <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+      <div className="rounded-xl border border-gray-100 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
@@ -579,7 +579,7 @@ function PaymentSummarySection({
         <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 mb-1.5">
           Payment history
         </p>
-        <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+        <div className="rounded-xl border border-gray-100 bg-white overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
               <tr>

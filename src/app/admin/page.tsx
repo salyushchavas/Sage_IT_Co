@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import {
@@ -160,6 +161,17 @@ export default function AdminPage() {
                 </button>
               ))}
             </nav>
+            {role === "SYSTEM_ADMIN" && (
+              <div className="mt-4 pt-4 border-t border-zinc-200 space-y-1">
+                <p className="px-2 text-[10px] font-bold uppercase tracking-wider text-zinc-400">Also yours</p>
+                <Link href="/operations" className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">
+                  <ClipboardList className="w-4 h-4" /> Operations
+                </Link>
+                <Link href="/finance-dashboard" className="w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">
+                  <DollarSign className="w-4 h-4" /> Finance
+                </Link>
+              </div>
+            )}
           </div>
         </div>
 

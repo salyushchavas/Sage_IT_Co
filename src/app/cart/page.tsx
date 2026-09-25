@@ -70,18 +70,28 @@ export default function CartPage() {
       setNotice("Payment cancelled. Nothing was charged and your cart is unchanged.");
     } else if (outcome === "success" && sessionId) {
       setNotice("Confirming your payment…");
-      confirmCheckout(sessionId)
-        .then((r) => {
-          setNotice(
-            r.status === "COMPLETED"
-              ? `Payment received. You're enrolled in ${r.courses.join(", ")}.`
-              : r.status === "FAILED"
-                ? "The payment didn't go through. Nothing was charged; you can try again."
-                : "We're still waiting for the payment to be confirmed. This page will show it once it's in.",
-          );
-          fetchCart();
-        })
-        .catch(() => setNotice("We couldn't confirm the payment yet. Check My Courses in a minute."));
+      // A payment can take a few seconds to be confirmed: check again
+      // (every 5 seconds, for about a minute) while it's still pending.
+      const check = (attempt: number) => {
+        confirmCheckout(sessionId)
+          .then((r) => {
+            if (r.status !== "COMPLETED" && r.status !== "FAILED" && attempt < 12) {
+              setNotice("We're still waiting for the payment to be confirmed. This page updates by itself.");
+              window.setTimeout(() => check(attempt + 1), 5000);
+              return;
+            }
+            setNotice(
+              r.status === "COMPLETED"
+                ? `Payment received. You're enrolled in ${r.courses.join(", ")}.`
+                : r.status === "FAILED"
+                  ? "The payment didn't go through. Nothing was charged; you can try again."
+                  : "The payment still isn't confirmed. Check My Courses in a few minutes before paying again.",
+            );
+            fetchCart();
+          })
+          .catch(() => setNotice("We couldn't confirm the payment yet. Check My Courses in a minute."));
+      };
+      check(1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

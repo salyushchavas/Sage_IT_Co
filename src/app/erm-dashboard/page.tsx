@@ -17,7 +17,7 @@ import {
   Target,
   Users,
 } from "lucide-react";
-import { formatDateMedium, formatDateTime } from "@/lib/datetime";
+import { formatDateMedium, formatDateTime, formatDay } from "@/lib/datetime";
 
 import {
   RoleDashboardShell,
@@ -43,6 +43,7 @@ import {
   type ErmReportRow,
   type ErmRosterRow,
   type WeeklyReportDTO,
+  loginHere,
 } from "@/lib/api";
 
 /**
@@ -97,7 +98,7 @@ export default function ErmDashboardPage() {
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     if ((user.role ?? "").toUpperCase() !== "ERM") {
@@ -151,8 +152,8 @@ export default function ErmDashboardPage() {
       {active === "profile" && (
         <Placeholder
           title="Profile"
-          copy="Edit your ERM profile from the standard profile page."
-          link={{ label: "Open profile", href: "/dashboard?tab=profile" }}
+          copy="Your name and role are set by the System Admin. You can change your password here."
+          link={{ label: "Change password", href: "/change-password" }}
         />
       )}
     </RoleDashboardShell>
@@ -195,7 +196,7 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
         reports.
       </p>
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
@@ -443,8 +444,8 @@ function SignedAgreementBlock({
 }) {
   const [busy, setBusy] = useState<"download" | "review" | null>(null);
   const [error, setError] = useState("");
-  const fmt = (iso: string) =>
-    iso ? new Date(iso).toLocaleDateString("en-US", { dateStyle: "medium" }) : "—";
+  // Central time (a UTC timestamp read as local time showed the wrong day in the evening).
+  const fmt = (iso: string) => (iso ? formatDay(iso) : "—");
   const run = async (what: "download" | "review") => {
     setBusy(what);
     setError("");
@@ -558,6 +559,10 @@ function ReportsTab() {
       .then((r) => {
         if (!cancelled) setReports(r);
       })
+      .catch((e) => {
+        // A failed load must not look like "No reports match this filter".
+        if (!cancelled) setError(e instanceof Error ? `Couldn't load the reports: ${e.message}` : "Couldn't load the reports");
+      })
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
@@ -626,6 +631,11 @@ function ReportsTab() {
         </div>
       </div>
 
+      {error && !open && (
+        <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
+          <AlertCircle size={14} /> {error}
+        </p>
+      )}
       <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden divide-y divide-gray-100">
         {visible.length === 0 ? (
           <p className="px-4 py-6 text-center text-sm text-gray-400 italic">
@@ -695,7 +705,7 @@ function ReportsTab() {
               Week of <span className="font-mono">{open.weekStart}</span> –{" "}
               <span className="font-mono">{open.weekEnd}</span>
               {open.dueDate && <> · due <span className="font-mono">{open.dueDate}</span></>}
-              {open.submittedAt && <> · submitted {new Date(open.submittedAt).toLocaleDateString("en-US")}</>}
+              {open.submittedAt && <> · submitted {formatDay(open.submittedAt)}</>}
               {open.late && <> · late</>}
             </p>
             {open.status === "OVERDUE" ? (
@@ -736,7 +746,7 @@ function ReportsTab() {
               <div className="mt-4 flex items-end justify-between gap-3">
                 <p className="text-xs text-gray-500">
                   {open.status === "REVIEWED"
-                    ? `Reviewed${open.ermReviewDate ? " " + new Date(open.ermReviewDate).toLocaleDateString("en-US") : ""}${open.ermNotes ? ": " + open.ermNotes : ""}`
+                    ? `Reviewed${open.ermReviewDate ? " " + formatDay(open.ermReviewDate) : ""}${open.ermNotes ? ": " + open.ermNotes : ""}`
                     : ""}
                 </p>
                 <button
@@ -1039,7 +1049,7 @@ function EmploymentTab() {
           <AlertCircle size={14} /> {error}
         </p>
       )}
-      <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
@@ -1262,7 +1272,7 @@ function Phase1Tab() {
           <AlertCircle size={14} /> {error}
         </p>
       )}
-      <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>

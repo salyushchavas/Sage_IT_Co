@@ -12,8 +12,10 @@ import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
   getProgramSelection,
-  saveProgramSelectionDraft, submitProgramSelection,
+  saveProgramSelectionDraft,
+  submitProgramSelection,
   type ProgramSelectionDTO,
+  loginHere,
 } from "@/lib/api";
 
 /**
@@ -113,7 +115,7 @@ function ProgramSelectionPageInner() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     if (!user) return;

@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { businessToday } from "@/lib/datetime";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -13,8 +14,11 @@ import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
   getProfileCompletion,
-  listMyChecks, markCheckNotApplicable, uploadCheckSoftCopy,
+  listMyChecks,
+  markCheckNotApplicable,
+  uploadCheckSoftCopy,
   type CheckDocumentDTO,
+  loginHere,
 } from "@/lib/api";
 
 /**
@@ -48,7 +52,7 @@ const newDraft = (): CheckDraft => ({
   file: null,
   checkNumber: "",
   amount: "",
-  checkDate: new Date().toISOString().slice(0, 10),
+  checkDate: businessToday(),
   notes: "",
   uploading: false,
   error: "",
@@ -82,7 +86,7 @@ function CheckUploadPageInner() {
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     if (!user) return;

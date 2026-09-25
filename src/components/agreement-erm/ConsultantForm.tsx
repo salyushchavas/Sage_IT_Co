@@ -93,7 +93,7 @@ export default function ConsultantForm({
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
             disabled={saving}
-            placeholder="+91 ..."
+            placeholder="+1 ..."
             className="w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
           />
         </Field>

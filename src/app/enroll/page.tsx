@@ -33,7 +33,7 @@ const enrollSchema = z.object({
   phone: z
     .string()
     .min(7, "Phone number is required")
-    .regex(/^[+\d\s()-]{7,20}$/, "Use only digits, spaces, +, -, or parentheses")
+    .regex(/^[+\d\s().-]{7,20}$/, "Use only digits, spaces, +, -, periods or parentheses")
     .refine((v) => v.replace(/\D/g, "").length >= 8, {
       message: "Enter a valid phone number, including the area code",
     }),

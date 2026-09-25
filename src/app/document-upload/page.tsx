@@ -11,12 +11,16 @@ import {
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import {
-  completeDocuments, deleteParticipantDocument,
+  completeDocuments,
+  deleteParticipantDocument,
   documentSatisfiesRequirement,
   listParticipantDocuments,
-  markDocumentNotApplicable, uploadParticipantDocument,
+  markDocumentNotApplicable,
+  uploadParticipantDocument,
   viewParticipantDocument,
-  type DocumentType, type ParticipantDocument,
+  type DocumentType,
+  type ParticipantDocument,
+  loginHere,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 
@@ -97,7 +101,7 @@ function DocumentUploadPageInner() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     if (!user) return;

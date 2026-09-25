@@ -53,7 +53,8 @@ export function roleFromToken(token: string | null | undefined): string | null {
 export function setAccessTokenCookie(token: string, days = 7): void {
   if (typeof document === "undefined") return;
   const expires = new Date(Date.now() + days * 864e5).toUTCString();
-  document.cookie = `access_token=${encodeURIComponent(token)}; expires=${expires}; path=/; SameSite=Lax`;
+  const secure = typeof location !== "undefined" && location.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `access_token=${encodeURIComponent(token)}; expires=${expires}; path=/; SameSite=Lax${secure}`;
 }
 
 export function clearAccessTokenCookie(): void {

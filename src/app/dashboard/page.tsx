@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState, createContext, useContext } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
@@ -107,6 +107,9 @@ function DashboardPageInner() {
   // % badge + home tab + messages tab + team tab all share data.
   const [completion, setCompletion] = useState<ProfileCompletion | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  // A failed load shows why, with a retry (it used to spin for ever).
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   const [team, setTeam] = useState<ParticipantTeam | null>(null);
 
   useEffect(() => {
@@ -180,19 +183,21 @@ function DashboardPageInner() {
   useEffect(() => {
     if (!routingDecided) return;
     let cancelled = false;
-    Promise.all([getParticipantDashboard(), getParticipantTeam()])
-      .then(([d, t]) => {
-        if (cancelled) return;
-        setDashboardData(d);
-        setTeam(t);
-      })
-      .catch(() => {
-        /* tabs that need this data degrade gracefully */
-      });
+    Promise.allSettled([getParticipantDashboard(), getParticipantTeam()]).then(([d, t]) => {
+      if (cancelled) return;
+      if (d.status === "fulfilled") {
+        setDashboardData(d.value);
+        setLoadError("");
+      } else {
+        setLoadError(d.reason instanceof Error ? d.reason.message : "Something went wrong");
+      }
+      // The team card copes without it.
+      if (t.status === "fulfilled") setTeam(t.value);
+    });
     return () => {
       cancelled = true;
     };
-  }, [routingDecided]);
+  }, [routingDecided, reloadKey]);
 
   if (isLoading || !routingDecided) {
     return (
@@ -222,7 +227,21 @@ function DashboardPageInner() {
     <DashboardLayout activeTab={activeTab} badges={badges}>
       <ProfileCompletionBanner />
       <div className="px-6 md:px-10 py-8 md:py-10 max-w-5xl">
-        {renderTab(activeTab, completion, dashboardData, team, user?.email ?? null, handleJumpTo)}
+        {loadError && !dashboardData && (
+          <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            <span>Your dashboard didn&apos;t load: {loadError}</span>
+            <button
+              type="button"
+              onClick={() => { setLoadError(""); setReloadKey((k) => k + 1); }}
+              className="font-semibold text-red-800 underline cursor-pointer"
+            >
+              Try again
+            </button>
+          </div>
+        )}
+        <LoadFailed.Provider value={!!loadError && !dashboardData}>
+          {renderTab(activeTab, completion, dashboardData, team, user?.email ?? null, handleJumpTo)}
+        </LoadFailed.Provider>
       </div>
     </DashboardLayout>
   );
@@ -331,7 +350,12 @@ function renderGatedReal(
   }
 }
 
+/** True while the dashboard data failed to load (the banner above explains). */
+const LoadFailed = createContext(false);
+
 function TabLoading() {
+  const failed = useContext(LoadFailed);
+  if (failed) return null;
   return (
     <div className="text-center py-10">
       <Loader2 size={20} className="animate-spin text-sage-navy inline" />

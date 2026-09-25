@@ -147,6 +147,12 @@ export function safeRedirect(target: string | null | undefined, fallback = "/das
   return target;
 }
 
+/** /login that comes back to this page (with its query) after signing in. */
+export function loginHere(): string {
+  if (typeof window === "undefined") return "/login";
+  return `/login?redirect=${encodeURIComponent(window.location.pathname + window.location.search)}`;
+}
+
 // One renewal at a time: several calls failing together share it.
 let refreshing: Promise<boolean> | null = null;
 
@@ -1002,16 +1008,10 @@ export function documentSatisfiesRequirement(d: ParticipantDocument): boolean {
 export async function uploadParticipantDocument(
   documentType: DocumentType, file: File,
 ): Promise<ParticipantDocument> {
-  const token = typeof window === "undefined"
-    ? null : localStorage.getItem("access_token");
   const form = new FormData();
   form.append("file", file);
   form.append("documentType", documentType);
-  const res = await fetch(`${API_BASE_URL}/api/participants/documents/upload`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  });
+  const res = await authedFetch("/api/participants/documents/upload", { method: "POST", body: form });
   if (!res.ok) {
     let msg = `Upload failed (${res.status})`;
     try {
@@ -1156,29 +1156,66 @@ export async function viewParticipantDocument(documentId: number): Promise<void>
 }
 
 /**
- * Opens a stored file served under the caller's sign-in: a short-lived
- * signed link (Cloudinary) or the file itself (server disk).
+ * A request outside apiFetch (a file download or upload) under the caller's
+ * sign-in; an expired sign-in is renewed once and the request sent again.
  */
-async function openProtectedFile(path: string): Promise<void> {
-  const token = typeof window === "undefined"
-    ? null : localStorage.getItem("access_token");
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) throw new Error(`Couldn't load document (${res.status})`);
-  const contentType = res.headers.get("content-type") ?? "";
-  if (contentType.includes("application/json")) {
-    // Cloudinary path: ApiResponse with { url, expiresIn }.
-    const body = (await res.json()) as ApiResponse<{ url: string }>;
-    const url = body?.data?.url;
-    if (url) window.open(url, "_blank", "noopener,noreferrer");
-    return;
+async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  const call = () => {
+    const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
+    return fetch(`${API_BASE_URL}${path}`, {
+      ...init,
+      headers: { ...(init.headers as Record<string, string> | undefined), ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+  };
+  let res = await call();
+  if (res.status === 401 && (await tryRefresh())) res = await call();
+  return res;
+}
+
+/** The server's reason for a failed file request, or a plain fallback. */
+async function fileError(res: Response, fallback: string): Promise<Error> {
+  try {
+    const body = await res.json();
+    if (body?.message) return new Error(body.message);
+  } catch { /* not JSON */ }
+  return new Error(`${fallback} (${res.status})`);
+}
+
+/**
+ * Opens a signed-in file in a new tab. The tab opens straight away, inside
+ * the click (Safari blocks a tab opened after waiting for the download),
+ * and shows the file once it has arrived.
+ */
+async function openInNewTab(path: string, fallbackError: string): Promise<void> {
+  const tab = typeof window === "undefined" ? null : window.open("", "_blank");
+  try {
+    const res = await authedFetch(path);
+    if (!res.ok) throw await fileError(res, fallbackError);
+    let url: string | null = null;
+    if ((res.headers.get("content-type") ?? "").includes("application/json")) {
+      const body = (await res.json()) as ApiResponse<{ url: string }>;
+      url = body?.data?.url ?? null;
+      if (!url) throw new Error(fallbackError);
+    } else {
+      url = URL.createObjectURL(await res.blob());
+      const objectUrl = url;
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    }
+    if (tab) {
+      tab.opener = null;
+      tab.location.href = url;
+    } else {
+      window.open(url, "_blank", "noopener,noreferrer");
+    }
+  } catch (e) {
+    tab?.close();
+    throw e;
   }
-  // Local-disk path: blob stream.
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  window.open(objectUrl, "_blank", "noopener,noreferrer");
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+/** Opens a stored file (identity documents, offer letters) the caller may see. */
+async function openProtectedFile(path: string): Promise<void> {
+  return openInNewTab(path, "Couldn't load document");
 }
 
 // ─── Phase 3A: program selection ───────────────────────────────────
@@ -1296,8 +1333,6 @@ export async function uploadCheckSoftCopy(
   file: File,
   meta: { checkNumber?: string; amount?: number; checkDate?: string; notes?: string; replacesCheckId?: number },
 ): Promise<CheckDocumentDTO> {
-  const token = typeof window === "undefined"
-    ? null : localStorage.getItem("access_token");
   const form = new FormData();
   form.append("file", file);
   if (meta.checkNumber) form.append("checkNumber", meta.checkNumber);
@@ -1305,11 +1340,7 @@ export async function uploadCheckSoftCopy(
   if (meta.checkDate) form.append("checkDate", meta.checkDate);
   if (meta.notes) form.append("notes", meta.notes);
   if (meta.replacesCheckId) form.append("replacesCheckId", String(meta.replacesCheckId));
-  const res = await fetch(`${API_BASE_URL}/api/participants/checks/upload`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  });
+  const res = await authedFetch("/api/participants/checks/upload", { method: "POST", body: form });
   if (!res.ok) {
     let msg = `Upload failed (${res.status})`;
     try {
@@ -1603,21 +1634,11 @@ export async function resendAgreementCode(): Promise<{ cooldownSeconds: number }
  * a short-lived link (Cloudinary) or the PDF itself.
  */
 export async function downloadSignedAgreement(participantUserId?: number): Promise<void> {
-  const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
   const path = participantUserId
     ? `/api/participants/${participantUserId}/agreement/signed-pdf`
     : "/api/participants/agreement/signed-pdf";
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) {
-    let msg = `Couldn't download the agreement (${res.status})`;
-    try {
-      const body = await res.json();
-      if (body?.message) msg = body.message;
-    } catch { /* not JSON */ }
-    throw new Error(msg);
-  }
+  const res = await authedFetch(path);
+  if (!res.ok) throw await fileError(res, "Couldn't download the agreement");
   if ((res.headers.get("content-type") ?? "").includes("application/json")) {
     const body = (await res.json()) as ApiResponse<{ url: string }>;
     if (body?.data?.url) window.open(body.data.url, "_blank", "noopener,noreferrer");
@@ -1864,15 +1885,9 @@ export async function acceptEmployment(body: EmploymentAcceptRequest): Promise<{
 }
 
 export async function uploadOfferDocument(file: File): Promise<{ url: string }> {
-  const token = typeof window === "undefined"
-    ? null : localStorage.getItem("access_token");
   const form = new FormData();
   form.append("file", file);
-  const res = await fetch(`${API_BASE_URL}/api/participants/employment/offer-upload`, {
-    method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-    body: form,
-  });
+  const res = await authedFetch("/api/participants/employment/offer-upload", { method: "POST", body: form });
   if (!res.ok) {
     let msg = `Upload failed (${res.status})`;
     try { const b = await res.json(); if (b?.message) msg = b.message; } catch {}
@@ -1978,14 +1993,11 @@ export interface FinanceLedgerRow extends PaymentLedgerDTO {
 
 /** Checklist 5.2: download an invoice PDF (the participant's own, or any for Finance). */
 export async function downloadInvoicePdf(invoiceId: number, asFinance = false): Promise<void> {
-  const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
   const path = asFinance
     ? `/api/finance/invoices/${invoiceId}/pdf`
     : `/api/participants/payments/invoices/${invoiceId}/pdf`;
-  const res = await fetch(`${API_BASE_URL}${path}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) throw new Error(`Couldn't download the invoice (${res.status})`);
+  const res = await authedFetch(path);
+  if (!res.ok) throw await fileError(res, "Couldn't download the invoice");
   const disposition = res.headers.get("content-disposition") ?? "";
   const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "invoice.pdf";
   const objectUrl = URL.createObjectURL(await res.blob());
@@ -2293,7 +2305,7 @@ export async function getAuditTrail(opts: {
   if (opts.category) qs.set("category", opts.category);
   if (opts.limit) qs.set("limit", String(opts.limit));
   const wrapper = await apiFetch<ApiResponse<AuditRow[]>>(
-    `/api/admin/operations/audit${qs.size ? `?${qs.toString()}` : ""}`);
+    `/api/admin/operations/audit${qs.toString() ? `?${qs.toString()}` : ""}`);
   return wrapper.data ?? [];
 }
 
@@ -2318,7 +2330,7 @@ export async function getEmailLog(opts: {
   if (opts.userId) qs.set("userId", String(opts.userId));
   if (opts.email) qs.set("email", opts.email);
   const wrapper = await apiFetch<ApiResponse<EmailLogRow[]>>(
-    `/api/admin/operations/emails${qs.size ? `?${qs.toString()}` : ""}`);
+    `/api/admin/operations/emails${qs.toString() ? `?${qs.toString()}` : ""}`);
   return wrapper.data ?? [];
 }
 
@@ -2693,19 +2705,7 @@ export interface FinanceCheckRow {
 
 /** Finance: opens a check image (audited) in a new tab. */
 export async function openFinanceCheckImage(checkId: number): Promise<void> {
-  const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
-  const res = await fetch(`${API_BASE_URL}/api/finance/checks/${checkId}/image`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
-  if (!res.ok) throw new Error(`Couldn't open the check image (${res.status})`);
-  if ((res.headers.get("content-type") ?? "").includes("application/json")) {
-    const body = (await res.json()) as ApiResponse<{ url: string }>;
-    if (body?.data?.url) window.open(body.data.url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  const objectUrl = URL.createObjectURL(await res.blob());
-  window.open(objectUrl, "_blank", "noopener,noreferrer");
-  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+  return openInNewTab(`/api/finance/checks/${checkId}/image`, "Couldn't open the check image");
 }
 
 /** Finance: the full check number (each view is recorded). */
@@ -6034,19 +6034,19 @@ export async function createStaffUser(body: {
 }
 
 /** Emails a staff member a new temporary password (System Admin only). */
-export async function sendNewLoginDetails(userId: number): Promise<string> {
+export async function sendNewLoginDetails(userId: number): Promise<{ message: string; emailSent: boolean; sentTo: string }> {
   const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo: string }>>(
     `/api/admin/users/${userId}/send-login`, { method: "POST" });
-  return wrapper.message ?? "";
+  return { message: wrapper.message ?? "", emailSent: wrapper.data?.emailSent ?? false, sentTo: wrapper.data?.sentTo ?? "" };
 }
 
 /** Emails someone an invitation to enroll as a participant. */
-export async function inviteParticipant(body: { fullName: string; email: string }): Promise<string> {
+export async function inviteParticipant(body: { fullName: string; email: string }): Promise<{ message: string; emailSent: boolean }> {
   const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean }>>("/api/admin/users/invite-participant", {
     method: "POST",
     body: JSON.stringify(body),
   });
-  return wrapper.message ?? "";
+  return { message: wrapper.message ?? "", emailSent: wrapper.data?.emailSent ?? false };
 }
 
 /** The signed-in user changes their password (required after a temporary one). */

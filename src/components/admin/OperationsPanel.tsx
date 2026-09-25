@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { InviteDialog } from "@/components/admin/tabs/AdminUsersTab";
 import {
   AlertCircle,
   ClipboardList,
@@ -79,9 +80,11 @@ const SUB_TABS: { id: OpsTab; label: string; Icon: typeof Users }[] = [
 
 export function OperationsPanel() {
   const [tab, setTab] = useState<OpsTab>("enrollment");
+  const [inviting, setInviting] = useState(false);
+  const [inviteNote, setInviteNote] = useState<{ ok: boolean; text: string } | null>(null);
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         {SUB_TABS.map((s) => (
           <button
             key={s.id}
@@ -98,7 +101,23 @@ export function OperationsPanel() {
             {s.label}
           </button>
         ))}
+        <button
+          type="button"
+          onClick={() => { setInviteNote(null); setInviting(true); }}
+          className="ml-auto inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy transition cursor-pointer"
+        >
+          <Mail size={12} /> Invite participant
+        </button>
       </div>
+      {inviteNote && (
+        <p className={"text-sm " + (inviteNote.ok ? "text-emerald-700" : "text-red-700")}>{inviteNote.text}</p>
+      )}
+      {inviting && (
+        <InviteDialog
+          onClose={() => setInviting(false)}
+          onDone={(text, ok) => { setInviting(false); setInviteNote({ ok, text }); }}
+        />
+      )}
       {tab === "enrollment" && <EnrollmentQueue />}
       {tab === "docReview" && <DocumentReview />}
       {tab === "agreement" && <AgreementQueue />}
@@ -115,11 +134,15 @@ export function OperationsPanel() {
 function EnrollmentQueue() {
   const [rows, setRows] = useState<OperationsQueueRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   useEffect(() => {
     let cancelled = false;
     getEnrollmentQueue()
       .then((r) => {
         if (!cancelled) setRows(r);
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Couldn't load this list");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -129,6 +152,7 @@ function EnrollmentQueue() {
     };
   }, []);
   if (loading) return <Spinner />;
+  if (loadError) return <LoadErrorNote message={loadError} />;
   return (
     <Table
       headers={["Name", "Email", "Status", "Verified", "Created"]}
@@ -477,6 +501,13 @@ function DocumentReview() {
 
 /* ── Assignments panel ───────────────────────────────────────── */
 
+const SLOT_LABELS: Record<string, string> = {
+  CAREER_COACH: "Career",
+  RESUME_SPECIALIST: "Resume",
+  TECHNICAL_ADVISOR: "Tech",
+  INTERVIEW_COACH: "Interview",
+};
+
 function AssignmentsPanel() {
   const [rows, setRows] = useState<Record<string, unknown>[]>([]);
   const [staff, setStaff] = useState<StaffPool | null>(null);
@@ -560,6 +591,9 @@ function AssignmentsPanel() {
         <div className="space-y-2.5">
           {rows.map((r) => {
             const uid = Number(r.userId);
+            // Slots with no active coach (never filled, or the coach was deactivated).
+            const emptySlots = Array.isArray(r.emptyCoachSlots) ? (r.emptyCoachSlots as string[]) : [];
+            const slot = slotFor[uid] ?? emptySlots[0] ?? "CAREER_COACH";
             return (
               <div
                 key={uid}
@@ -586,7 +620,7 @@ function AssignmentsPanel() {
                     </label>
                     <div className="flex gap-1">
                       <select
-                        className="flex-1 px-2 py-1.5 text-xs rounded-md border border-gray-200"
+                        className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-md border border-gray-200"
                         defaultValue=""
                         onChange={(e) => {
                           const v = Number(e.target.value);
@@ -605,17 +639,20 @@ function AssignmentsPanel() {
                   </div>
                   <div>
                     <label className="block text-[10px] uppercase tracking-wider font-semibold text-gray-500 mb-0.5">
-                      Coach {r.coachesAssigned ? "(some assigned)" : ""}
+                      Coach{" "}
+                      {emptySlots.length > 0
+                        ? `(empty: ${emptySlots.map((k) => SLOT_LABELS[k] ?? k).join(", ")})`
+                        : r.coachesAssigned ? "(all assigned)" : ""}
                     </label>
                     <div className="flex gap-1">
                       <select
                         id={`coach-pick-${uid}`}
-                        className="flex-1 px-2 py-1.5 text-xs rounded-md border border-gray-200"
+                        className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-md border border-gray-200"
                         defaultValue=""
                       >
                         <option value="">— Pick coach —</option>
                         {allCoaches
-                          .filter((u) => (u.coachTypes ?? []).includes(slotFor[uid] ?? "CAREER_COACH"))
+                          .filter((u) => (u.coachTypes ?? []).includes(slot))
                           .map((u) => (
                             <option key={u.id} value={u.id}>
                               {u.fullName}
@@ -626,7 +663,7 @@ function AssignmentsPanel() {
                       <select
                         id={`coach-role-${uid}`}
                         className="px-2 py-1.5 text-xs rounded-md border border-gray-200"
-                        value={slotFor[uid] ?? "CAREER_COACH"}
+                        value={slot}
                         onChange={(e) => setSlotFor((prev) => ({ ...prev, [uid]: e.target.value }))}
                       >
                         <option value="CAREER_COACH">Career</option>
@@ -982,12 +1019,16 @@ function EmailLogPanel() {
 function ExceptionsPanel() {
   const [rows, setRows] = useState<OperationsException[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [type, setType] = useState("ALL");
   useEffect(() => {
     let cancelled = false;
     getOperationsExceptions()
       .then((r) => {
         if (!cancelled) setRows(r);
+      })
+      .catch((e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Couldn't load this list");
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -997,6 +1038,8 @@ function ExceptionsPanel() {
     };
   }, []);
   if (loading) return <Spinner />;
+  // A failed load must not look like "No open exceptions".
+  if (loadError) return <LoadErrorNote message={loadError} />;
   const counts = new Map<string, { label: string; n: number }>();
   for (const r of rows) {
     const c = counts.get(r.type) ?? { label: r.label, n: 0 };
@@ -1067,7 +1110,7 @@ function Table({
   empty: string;
 }) {
   return (
-    <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+    <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
           <tr>
@@ -1106,6 +1149,15 @@ function Pill({ children }: { children: React.ReactNode }) {
     <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700">
       {children}
     </span>
+  );
+}
+
+/** A list that failed to load says so, instead of looking empty. */
+function LoadErrorNote({ message }: { message: string }) {
+  return (
+    <p className="inline-flex items-center gap-1.5 text-sm text-red-700 px-4 py-3">
+      <AlertCircle size={14} /> Couldn&apos;t load this list: {message}
+    </p>
   );
 }
 

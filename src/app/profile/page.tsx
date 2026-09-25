@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Loader2 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
-import { dashboardRouteForRole } from "@/lib/api";
+import { dashboardRouteForRole, loginHere } from "@/lib/api";
 
 /**
  * /profile is no longer a standalone page. Every role has a Profile
@@ -21,7 +21,7 @@ export default function ProfileRedirectPage() {
   useEffect(() => {
     if (isLoading) return;
     if (!isAuthenticated || !user) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     router.replace(dashboardRouteForRole(user.role));

@@ -12,9 +12,15 @@ import {
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
-  getParticipantMe, getProgramSelection,
-  getWelcomeStatus, refreshWelcomeStatus, statusAtLeast,
-  type ProgramSelectionDTO, type UserDTO, type WelcomeStatus,
+  getParticipantMe,
+  getProgramSelection,
+  getWelcomeStatus,
+  refreshWelcomeStatus,
+  statusAtLeast,
+  type ProgramSelectionDTO,
+  type UserDTO,
+  type WelcomeStatus,
+  loginHere,
 } from "@/lib/api";
 
 /**
@@ -54,7 +60,7 @@ export default function WelcomePage() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     let cancelled = false;

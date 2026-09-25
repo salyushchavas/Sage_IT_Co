@@ -149,7 +149,10 @@ export default function AdminUserDetailPage() {
     if (!window.confirm(`Email ${profile.fullName ?? profile.email} a new temporary password? Their current password stops working.`)) return;
     setBusy(true);
     try {
-      showToast("success", await sendNewLoginDetails(profile.id));
+      const r = await sendNewLoginDetails(profile.id);
+      // The password was already replaced: a failed email must be noticed.
+      if (r.emailSent) showToast("success", r.message);
+      else showToast("error", `${r.message} Their old password no longer works: check the email log, then send again.`);
       await loadProfile();
     } catch (err) {
       showToast("error", err instanceof Error ? err.message : "Couldn't send new login details");

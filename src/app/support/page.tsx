@@ -29,7 +29,7 @@ const faqs = [
   {
     question: "What payment methods are supported?",
     answer:
-      "We use Razorpay for payment processing, which supports UPI, credit/debit cards, net banking, and popular wallets like Paytm and PhonePe.",
+      "Program payments follow the payment plan in your dashboard: the Payments tab shows each invoice, when it's due and how to pay it. Course purchases use secure card checkout.",
   },
 ];
 

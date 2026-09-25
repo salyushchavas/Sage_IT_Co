@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
 import { CheckCircle2, Loader2 } from "lucide-react";
+import { formatDay } from "@/lib/datetime";
 
 import {
   getMyCoaching,
@@ -70,9 +71,8 @@ export function Loading() {
  */
 export function fmt(value: string | null | undefined): string {
   if (!value) return "";
-  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value);
-  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(value);
-  return isNaN(d.getTime()) ? value : d.toLocaleDateString("en-US", { dateStyle: "medium" });
+  // A plain date stays that day; a server timestamp (UTC) is shown in Central time.
+  return formatDay(value);
 }
 
 export function SessionList({ sessions, empty }: { sessions: CoachingSessionEntry[]; empty: string }) {

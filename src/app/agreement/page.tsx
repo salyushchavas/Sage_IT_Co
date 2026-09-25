@@ -13,10 +13,15 @@ import SignatureCanvas from "react-signature-canvas";
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
-  declineParticipantAgreement, getAgreementStatus,
-  getProgramSelection, getTerms,
+  declineParticipantAgreement,
+  getAgreementStatus,
+  getProgramSelection,
+  getTerms,
   signParticipantAgreement,
-  type ProgramSelectionDTO, type TermsResponse, type UserDTO,
+  type ProgramSelectionDTO,
+  type TermsResponse,
+  type UserDTO,
+  loginHere,
 } from "@/lib/api";
 
 /**
@@ -77,7 +82,7 @@ function AgreementPageInner() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     if (!user) return;

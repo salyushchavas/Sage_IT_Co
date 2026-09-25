@@ -101,13 +101,18 @@ export function RoleDashboardShell({
             {user?.role ?? ""}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={logout}
-          className="shrink-0 text-xs text-gray-500 hover:text-red-700 cursor-pointer"
-        >
-          Sign out
-        </button>
+        <div className="shrink-0 flex flex-col items-end gap-0.5">
+          <Link href="/change-password" className="text-[11px] text-gray-500 hover:text-sage-navy">
+            Change password
+          </Link>
+          <button
+            type="button"
+            onClick={logout}
+            className="text-xs text-gray-500 hover:text-red-700 cursor-pointer"
+          >
+            Sign out
+          </button>
+        </div>
       </div>
     </>
   );

@@ -34,11 +34,17 @@ export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
 
   const refresh = async () => setRows(await getFinancePlans());
 
+  const [loadError, setLoadError] = useState("");
+
   useEffect(() => {
     let cancelled = false;
-    refresh().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+    refresh()
+      .catch((e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Couldn't load the plans");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -55,6 +61,8 @@ export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
   };
 
   if (loading) return <Spinner />;
+  // A failed load must not look like "No payment plans yet".
+  if (loadError) return <p className="text-sm text-red-700">Couldn&apos;t load the plans: {loadError}</p>;
 
   return (
     <div className="space-y-4">
@@ -75,7 +83,7 @@ export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
         </p>
       )}
 
-      <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
@@ -182,7 +190,7 @@ export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
 
 function ScheduleTable({ schedule }: { schedule: PaymentScheduleItem[] }) {
   return (
-    <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+    <div className="rounded-xl border border-gray-100 bg-white overflow-x-auto">
       <table className="w-full text-xs">
         <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
           <tr>
@@ -227,7 +235,9 @@ function PlanDialog({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!editing) getPlanCandidates().then(setCandidates).catch(() => setCandidates([]));
+    // A failed load says so (it used to read "Nobody is ready for a plan").
+    if (!editing) getPlanCandidates().then(setCandidates).catch((e) =>
+      setError(e instanceof Error ? `Couldn't load who is ready for a plan: ${e.message}` : "Couldn't load who is ready for a plan"));
   }, [editing]);
 
   // The server's schedule, shown as Finance types.

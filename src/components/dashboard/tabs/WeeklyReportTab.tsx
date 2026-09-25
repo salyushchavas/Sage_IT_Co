@@ -123,6 +123,10 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
   // Load reports + pre-fill the form from the chosen week's report (if any).
   useEffect(() => {
     let cancelled = false;
+    // Switching weeks: clear the other week's answers and wait for this
+    // week's, so nothing can be filed under the wrong week meanwhile.
+    setLoading(true);
+    setForm(blankForm());
     (async () => {
       try {
         const list = await listWeeklyReports();

@@ -8,7 +8,7 @@ import { CheckCircle2, Copy, Loader2, Mail } from "lucide-react";
 
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import { useAuth } from "@/lib/auth-context";
-import { getParticipantMe } from "@/lib/api";
+import { getParticipantMe, loginHere } from "@/lib/api";
 
 /**
  * Read-only participant-ID display. Not part of the active
@@ -30,7 +30,7 @@ export default function ParticipantIdPage() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     let cancelled = false;

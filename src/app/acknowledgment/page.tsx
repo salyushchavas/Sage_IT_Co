@@ -12,7 +12,7 @@ import SignatureCanvas from "react-signature-canvas";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
-import { getAcknowledgmentText, submitAcknowledgment, type AcknowledgmentText } from "@/lib/api";
+import { getAcknowledgmentText, submitAcknowledgment, type AcknowledgmentText, loginHere } from "@/lib/api";
 
 /**
  * Step 4 — Acknowledgment of Interest and Program Acceptance.
@@ -100,7 +100,7 @@ function AcknowledgmentPageInner() {
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
-      router.replace("/login");
+      router.replace(loginHere());
       return;
     }
     if (!user) return;

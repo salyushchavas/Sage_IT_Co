@@ -41,6 +41,7 @@ export function FinancePaymentsLedgerTab({ readOnly = false }: { readOnly?: bool
   const [rows, setRows] = useState<FinanceLedgerRow[]>([]);
   const [invoices, setInvoices] = useState<FinanceInvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
   const [showRecord, setShowRecord] = useState(false);
 
   const refresh = async () => {
@@ -54,15 +55,21 @@ export function FinancePaymentsLedgerTab({ readOnly = false }: { readOnly?: bool
 
   useEffect(() => {
     let cancelled = false;
-    refresh().finally(() => {
-      if (!cancelled) setLoading(false);
-    });
+    refresh()
+      .catch((e) => {
+        if (!cancelled) setLoadError(e instanceof Error ? e.message : "Couldn't load the ledger");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
   }, []);
 
   if (loading) return <Spinner />;
+  // A failed load must not look like "No payments recorded yet".
+  if (loadError) return <p className="text-sm text-red-700">Couldn&apos;t load the ledger: {loadError}</p>;
 
   return (
     <div className="space-y-4">
@@ -78,7 +85,7 @@ export function FinancePaymentsLedgerTab({ readOnly = false }: { readOnly?: bool
         )}
       </div>
 
-      <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
+      <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
