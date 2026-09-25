@@ -26,6 +26,12 @@ interface Props {
    *  click stays inside the SPA instead of a full navigation.
    *  Falls back to a /dashboard?tab=complete-profile deep link. */
   onContinueSetup?: () => void;
+  /**
+   * Checklist 3.5: the profile is complete and the tab waits for the
+   * team (ERM and coaches) instead — no progress bar; the button leads
+   * to the "setting up your team" page.
+   */
+  teamPending?: boolean;
 }
 
 export default function LockedTabView({
@@ -34,6 +40,7 @@ export default function LockedTabView({
   headline,
   body,
   onContinueSetup,
+  teamPending,
 }: Props) {
   const [data, setData] = useState<ProfileCompletion | null>(null);
 
@@ -61,7 +68,7 @@ export default function LockedTabView({
         <h3 className="text-xl font-bold text-gray-900">{headline}</h3>
         <div className="text-sm text-gray-600 mt-1.5 max-w-md mx-auto">{body}</div>
 
-        {data ? (
+        {teamPending ? null : data ? (
           <div className="mt-5 max-w-md mx-auto">
             <div className="flex items-center justify-between text-[11px] text-gray-500 mb-1">
               <span>Profile completion</span>
@@ -82,7 +89,7 @@ export default function LockedTabView({
           </div>
         )}
 
-        {remaining.length > 0 && (
+        {!teamPending && remaining.length > 0 && (
           <div className="mt-5 max-w-sm mx-auto text-left bg-white rounded-xl border border-gray-100 p-4">
             <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-500 mb-2">
               Remaining
@@ -105,7 +112,14 @@ export default function LockedTabView({
         )}
 
         <div className="mt-6 flex items-center justify-center">
-          {onContinueSetup ? (
+          {teamPending ? (
+            <Link
+              href="/welcome"
+              className="inline-flex items-center gap-1 bg-sage-navy hover:bg-sage-navy-deep text-white text-sm font-bold px-5 py-2.5 rounded-lg shadow-sm transition cursor-pointer"
+            >
+              See your team being set up <ChevronRight size={14} />
+            </Link>
+          ) : onContinueSetup ? (
             <button
               type="button"
               onClick={onContinueSetup}

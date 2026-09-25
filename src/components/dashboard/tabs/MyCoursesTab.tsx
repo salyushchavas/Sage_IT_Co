@@ -9,6 +9,7 @@ import {
   getCourses,
   getEnrollments,
 } from "@/lib/api";
+import { formatMoney } from "@/lib/money";
 
 /**
  * Participant-facing My Courses surface. Two modes:
@@ -348,7 +349,7 @@ function BrowseCoursesView({
                   ) : (
                     c.price != null && (
                       <span className="text-xs font-semibold text-gray-700">
-                        ₹{Number(c.price).toLocaleString()}
+                        {formatMoney(c.price)}
                       </span>
                     )
                   )}

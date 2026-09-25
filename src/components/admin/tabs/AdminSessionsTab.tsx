@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 
 import { downloadAdminCsv, getAdminSessions, type AdminSessionRow } from "@/lib/api";
+import { formatDateTime } from "@/lib/datetime";
 
 const STATUS_STYLES: Record<string, string> = {
   REQUESTED: "bg-amber-100 text-amber-700",
@@ -100,7 +101,7 @@ export function AdminSessionsTab() {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-zinc-500 text-xs">
-                        {r.scheduledAt ? new Date(r.scheduledAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) : "—"}
+                        {r.scheduledAt ? formatDateTime(r.scheduledAt) : "—"}
                       </td>
                     </tr>
                   ))

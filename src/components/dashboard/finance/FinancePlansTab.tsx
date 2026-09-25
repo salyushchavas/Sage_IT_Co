@@ -1,20 +1,35 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { AlertCircle, Loader2 } from "lucide-react";
 
 import {
   createFinancePlan,
   generateInvoice,
   getFinancePlans,
+  getPlanCandidates,
+  previewFinancePlan,
+  updateFinancePlan,
   type FinancePlanRow,
+  type PaymentScheduleItem,
+  type PlanCandidate,
 } from "@/lib/api";
+import { businessToday, formatDateMedium, formatDay } from "@/lib/datetime";
 import { Field, Pill, Spinner, moneyFmt } from "./FinanceParts";
 
+/**
+ * Checklist 5.1: Finance picks the participant by name, and the server
+ * builds the schedule — equal monthly instalments in whole cents that add
+ * up exactly to the total, due on the same day each month. A plan can be
+ * changed until its first invoice; if the participant had accepted it,
+ * they're asked to accept the changed plan.
+ */
 export function FinancePlansTab() {
   const [rows, setRows] = useState<FinancePlanRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
+  const [dialog, setDialog] = useState<{ plan?: FinancePlanRow } | null>(null);
+  const [openId, setOpenId] = useState<number | null>(null);
+  const [error, setError] = useState("");
 
   const refresh = async () => setRows(await getFinancePlans());
 
@@ -28,6 +43,16 @@ export function FinancePlansTab() {
     };
   }, []);
 
+  const invoice = async (id: number) => {
+    setError("");
+    try {
+      await generateInvoice(id);
+      await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't issue the invoice");
+    }
+  };
+
   if (loading) return <Spinner />;
 
   return (
@@ -35,12 +60,17 @@ export function FinancePlansTab() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-gray-900">Payment plans</h1>
         <button
-          onClick={() => setShowCreate(true)}
+          onClick={() => setDialog({})}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
         >
           + Create plan
         </button>
       </div>
+      {error && (
+        <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
+          <AlertCircle size={14} /> {error}
+        </p>
+      )}
 
       <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
         <table className="w-full text-sm">
@@ -67,146 +97,240 @@ export function FinancePlansTab() {
               </tr>
             ) : (
               rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="px-4 py-2 font-mono text-xs text-gray-700">
-                    {r.planNumber}
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="font-medium text-gray-900">
-                      {r.participantName ?? "--"}
-                    </div>
-                    <div className="font-mono text-[10px] text-gray-400">
-                      {r.participantId ?? "--"}
-                    </div>
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {moneyFmt(r.totalAmount)}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {r.installments ?? "--"}
-                  </td>
-                  <td className="px-4 py-2">
-                    <Pill>{r.status}</Pill>
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs text-gray-500">
-                    {r.acceptedAt
-                      ? new Date(r.acceptedAt).toLocaleDateString("en-IN")
-                      : "--"}
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {r.status === "ACTIVE" && (
+                <Fragment key={r.id}>
+                  <tr>
+                    <td className="px-4 py-2 font-mono text-xs text-gray-700">
+                      {r.planNumber}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="font-medium text-gray-900">
+                        {r.participantName ?? "--"}
+                      </div>
+                      <div className="font-mono text-[10px] text-gray-400">
+                        {r.participantId ?? "--"}
+                      </div>
+                    </td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {moneyFmt(r.totalAmount)}
+                    </td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {r.installments ?? "--"}
                       <button
-                        onClick={async () => {
-                          await generateInvoice(r.id);
-                          await refresh();
-                        }}
-                        className="px-2 py-1 rounded-md text-[10px] font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+                        onClick={() => setOpenId(openId === r.id ? null : r.id)}
+                        className="ml-2 text-[10px] font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
                       >
-                        + Invoice
+                        {openId === r.id ? "Hide" : "Schedule"}
                       </button>
-                    )}
-                  </td>
-                </tr>
+                    </td>
+                    <td className="px-4 py-2">
+                      <Pill>{r.status === "PENDING" ? "WAITING FOR PARTICIPANT" : r.status}</Pill>
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500">
+                      {r.acceptedAt ? formatDateMedium(r.acceptedAt) : "--"}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <div className="inline-flex gap-1.5">
+                        {r.invoiceCount === 0 && (r.status === "PENDING" || r.status === "ACTIVE") && (
+                          <button
+                            onClick={() => setDialog({ plan: r })}
+                            className="px-2 py-1 rounded-md text-[10px] font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy cursor-pointer"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        {r.status === "ACTIVE" && r.invoiceCount < (r.installments ?? 0) && (
+                          <button
+                            onClick={() => invoice(r.id)}
+                            className="px-2 py-1 rounded-md text-[10px] font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+                          >
+                            + Invoice
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                  {openId === r.id && (
+                    <tr>
+                      <td colSpan={7} className="px-4 pb-3">
+                        <ScheduleTable schedule={r.schedule} />
+                        <p className="mt-1 text-[11px] text-gray-500">
+                          {r.invoiceCount} of {r.installments ?? r.schedule.length} invoiced.
+                        </p>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))
             )}
           </tbody>
         </table>
       </div>
 
-      {showCreate && (
-        <CreatePlanModal
-          onClose={() => setShowCreate(false)}
-          onCreated={refresh}
+      {dialog && (
+        <PlanDialog
+          plan={dialog.plan}
+          onClose={() => setDialog(null)}
+          onSaved={refresh}
         />
       )}
     </div>
   );
 }
 
-function CreatePlanModal({
+function ScheduleTable({ schedule }: { schedule: PaymentScheduleItem[] }) {
+  return (
+    <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
+      <table className="w-full text-xs">
+        <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
+          <tr>
+            <th className="text-left px-3 py-1.5 w-10">#</th>
+            <th className="text-left px-3 py-1.5">Due date</th>
+            <th className="text-right px-3 py-1.5">Amount</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-gray-100">
+          {schedule.map((s, i) => (
+            <tr key={i}>
+              <td className="px-3 py-1.5 text-gray-500">{i + 1}</td>
+              <td className="px-3 py-1.5 text-gray-700">{formatDay(s.dueDate)}</td>
+              <td className="px-3 py-1.5 text-right text-gray-700">{moneyFmt(s.amount)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+/** Create a plan, or change one that has no invoices yet. */
+function PlanDialog({
+  plan,
   onClose,
-  onCreated,
+  onSaved,
 }: {
+  plan?: FinancePlanRow;
   onClose: () => void;
-  onCreated: () => Promise<void>;
+  onSaved: () => Promise<void>;
 }) {
+  const editing = !!plan;
+  const [candidates, setCandidates] = useState<PlanCandidate[]>([]);
   const [participantId, setParticipantId] = useState("");
-  const [total, setTotal] = useState("");
-  const [installments, setInstallments] = useState("3");
-  const [firstDue, setFirstDue] = useState("");
+  const [total, setTotal] = useState(plan?.totalAmount != null ? String(plan.totalAmount) : "");
+  const [installments, setInstallments] = useState(String(plan?.installments ?? 3));
+  const [firstDue, setFirstDue] = useState(plan?.schedule?.[0]?.dueDate ?? "");
+  const [preview, setPreview] = useState<PaymentScheduleItem[]>([]);
+  const [previewError, setPreviewError] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!editing) getPlanCandidates().then(setCandidates).catch(() => setCandidates([]));
+  }, [editing]);
+
+  // The server's schedule, shown as Finance types.
+  useEffect(() => {
+    const totalNum = Number(total);
+    const n = Number(installments);
+    if (!total || !firstDue || !n || Number.isNaN(totalNum)) {
+      setPreview([]);
+      setPreviewError("");
+      return;
+    }
+    const timer = setTimeout(() => {
+      previewFinancePlan({ totalAmount: totalNum, installments: n, firstDueDate: firstDue })
+        .then((s) => {
+          setPreview(s);
+          setPreviewError("");
+        })
+        .catch((e) => {
+          setPreview([]);
+          setPreviewError(e instanceof Error ? e.message : "Check the amounts");
+        });
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [total, installments, firstDue]);
 
   const handleSubmit = async () => {
     setSaving(true);
     setError("");
     try {
-      const totalNum = Number(total);
-      const n = Math.max(1, Math.min(60, Number(installments) || 1));
-      const installmentAmt = Number((totalNum / n).toFixed(2));
-      const base = firstDue ? new Date(firstDue + "T00:00:00") : new Date();
-      const schedule = Array.from({ length: n }, (_, i) => {
-        const d = new Date(base);
-        d.setMonth(d.getMonth() + i);
-        return {
-          dueDate: d.toISOString().slice(0, 10),
-          amount: installmentAmt,
-          label: `Installment ${i + 1}`,
-        };
-      });
-      await createFinancePlan({
-        participantId: Number(participantId),
-        totalAmount: totalNum,
-        installments: n,
-        schedule,
-      });
-      await onCreated();
+      const terms = { totalAmount: Number(total), installments: Number(installments), firstDueDate: firstDue };
+      if (plan) await updateFinancePlan(plan.id, terms);
+      else await createFinancePlan({ ...terms, participantId: Number(participantId) });
+      await onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't create plan");
+      setError(e instanceof Error ? e.message : "Couldn't save the plan");
     } finally {
       setSaving(false);
     }
   };
 
+  const ready = (editing || participantId) && total && firstDue && preview.length > 0 && !saving;
   return (
     <div
       className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5"
+        className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5 max-h-[90vh] overflow-y-auto"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-bold text-gray-900">Create payment plan</h2>
+        <h2 className="text-lg font-bold text-gray-900">
+          {editing ? `Change plan ${plan?.planNumber}` : "Create payment plan"}
+        </h2>
         <p className="text-xs text-gray-500 mt-1">
-          Auto-generates a monthly schedule of equal installments starting on
-          the first due date.
+          {editing && plan?.acceptedAt
+            ? "The participant already accepted this plan. They'll be emailed to accept the changed plan, and no invoices go out until they do."
+            : "Equal monthly installments, due on the same day each month. The participant is emailed to review and accept it."}
         </p>
         <div className="mt-3 space-y-2">
-          <Field
-            label="Participant user ID"
-            value={participantId}
-            onChange={setParticipantId}
-          />
-          <Field
-            label="Total amount (INR)"
-            type="number"
-            value={total}
-            onChange={setTotal}
-          />
-          <Field
-            label="Installments"
-            type="number"
-            value={installments}
-            onChange={setInstallments}
-          />
-          <Field
-            label="First installment due date"
-            type="date"
-            value={firstDue}
-            onChange={setFirstDue}
-          />
+          {editing ? (
+            <p className="text-sm text-gray-800">
+              {plan?.participantName}{" "}
+              <span className="font-mono text-[10px] text-gray-400">{plan?.participantId}</span>
+            </p>
+          ) : (
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Participant</label>
+              <select
+                value={participantId}
+                onChange={(e) => setParticipantId(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 bg-white"
+              >
+                <option value="">-- Pick a participant --</option>
+                {candidates.map((c) => (
+                  <option key={c.userId} value={c.userId}>
+                    {c.fullName} · {c.participantId}
+                    {c.employer ? ` · ${c.employer}` : ""}
+                  </option>
+                ))}
+              </select>
+              {candidates.length === 0 && (
+                <p className="mt-0.5 text-[10px] text-gray-400">
+                  Nobody is ready for a plan: participants appear here once they&apos;ve completed Phase 1 and don&apos;t have a plan.
+                </p>
+              )}
+            </div>
+          )}
+          <Field label="Total amount (USD)" type="number" value={total} onChange={setTotal} />
+          <Field label="Installments" type="number" value={installments} onChange={setInstallments} />
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-0.5">First installment due date</label>
+            <input
+              type="date"
+              value={firstDue}
+              min={businessToday()}
+              onChange={(e) => setFirstDue(e.target.value)}
+              className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </div>
+          {previewError && (
+            <p className="inline-flex items-center gap-1.5 text-xs text-red-700">
+              <AlertCircle size={12} /> {previewError}
+            </p>
+          )}
+          {preview.length > 0 && <ScheduleTable schedule={preview} />}
         </div>
         {error && (
           <p className="mt-2 inline-flex items-center gap-1.5 text-sm text-red-700">
@@ -222,11 +346,13 @@ function CreatePlanModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={saving || !participantId || !total || !firstDue}
+            disabled={!ready}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
           >
             {saving ? (
               <Loader2 size={12} className="animate-spin" />
+            ) : editing ? (
+              "Save changes"
             ) : (
               "Create plan"
             )}

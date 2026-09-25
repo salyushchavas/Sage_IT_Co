@@ -15,7 +15,7 @@ import { InstructorSalesInbox } from "@/components/sales/InstructorSalesInbox";
  * instructor owns. Selecting a row opens the conversation thread
  * inline; a "Send Quote" button on each open row launches the
  * SendQuoteModal so the instructor can respond with itemised
- * custom pricing in INR.
+ * custom pricing in US dollars.
  *
  * Locked to INSTRUCTOR / ADMIN / SYSTEM_ADMIN.
  */

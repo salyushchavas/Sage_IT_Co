@@ -208,7 +208,7 @@ export default function CreateServicePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1.5">Price (₹)</label>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">Price ($)</label>
                 <input
                   type="number"
                   name="price"

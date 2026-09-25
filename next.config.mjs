@@ -20,6 +20,14 @@ const nextConfig = {
         destination: "/agreements/:path*",
         permanent: true,
       },
+      // Until there is a course-only path (decision D4), everyone joins
+      // through the program: the old course sign-up sends people to the
+      // program enrollment. Not permanent, so D4 can bring it back.
+      {
+        source: "/signup",
+        destination: "/enroll",
+        permanent: false,
+      },
     ];
   },
 };

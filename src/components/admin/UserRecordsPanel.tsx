@@ -13,7 +13,7 @@ import {
 } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/utils";
-import { formatISTDate, formatISTTimeWithZone, istDayKey } from "@/lib/datetime";
+import { formatDateLong, formatTimeWithZone, dayKey as businessDayKey } from "@/lib/datetime";
 
 const CATEGORIES = ["ALL", "ACCOUNT", "LEARNING", "ASSESSMENT", "MENTORSHIP", "PAYMENT", "CERTIFICATE", "SECURITY"] as const;
 type Category = typeof CATEGORIES[number];
@@ -30,19 +30,19 @@ const CATEGORY_STYLE: Record<string, { bg: string; text: string; Icon: typeof Ke
 
 // Date headers + day-bucket key both come from datetime.ts so the
 // "naive ISO is UTC" parsing is applied consistently — without it,
-// a record at 23:30 IST (= 18:00 UTC) would bucket into the wrong
-// day. Times carry an explicit "IST" suffix because admin staff
-// reading the audit log might not be in India.
+// a record late in the evening would bucket into the wrong day.
+// Times carry an explicit zone suffix ("CT", US Central) because
+// admin staff reading the audit log might be elsewhere.
 function formatDateHeader(iso: string): string {
-  return formatISTDate(iso);
+  return formatDateLong(iso);
 }
 
 function formatTime(iso: string): string {
-  return formatISTTimeWithZone(iso);
+  return formatTimeWithZone(iso);
 }
 
 function dayKey(iso: string): string {
-  return istDayKey(iso);
+  return businessDayKey(iso);
 }
 
 interface Props {

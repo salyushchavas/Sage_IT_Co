@@ -1,12 +1,12 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Loader2, MessageSquare, IndianRupee, Inbox } from "lucide-react";
+import { Loader2, MessageSquare, DollarSign, Inbox } from "lucide-react";
 import { getInstructorSalesInquiries, getSalesInquiry, type SalesInquiry } from "@/lib/api";
 import { ConversationThread } from "@/components/sales/ConversationThread";
 import { SendQuoteModal } from "@/components/sales/SendQuoteModal";
 import { cn } from "@/lib/utils";
-import { timeAgoIST } from "@/lib/datetime";
+import { timeAgo } from "@/lib/datetime";
 
 interface Props {
   currentUserId: number;
@@ -23,7 +23,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 function relative(ts: string | null | undefined) {
   if (!ts) return "";
-  return timeAgoIST(ts);
+  return timeAgo(ts);
 }
 
 export function InstructorSalesInbox({ currentUserId }: Props) {
@@ -139,7 +139,7 @@ export function InstructorSalesInbox({ currentUserId }: Props) {
                       onClick={() => setQuoteFor(i)}
                       className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep transition cursor-pointer"
                     >
-                      <IndianRupee size={11} /> Send Quote
+                      <DollarSign size={11} /> Send Quote
                     </button>
                   )}
                 </div>

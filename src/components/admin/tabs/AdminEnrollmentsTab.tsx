@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Download, Loader2 } from "lucide-react";
 
 import { downloadAdminCsv, getAdminEnrollments, type AdminEnrollmentRow } from "@/lib/api";
+import { formatDateMedium } from "@/lib/datetime";
 
 export function AdminEnrollmentsTab() {
   const [rows, setRows] = useState<AdminEnrollmentRow[]>([]);
@@ -100,7 +101,7 @@ export function AdminEnrollmentsTab() {
                       </td>
                       <td className="px-4 py-3 text-zinc-700">{r.mentorName ?? "—"}</td>
                       <td className="px-4 py-3 text-zinc-500 text-xs">
-                        {new Date(r.enrolledAt).toLocaleDateString("en-IN")}
+                        {formatDateMedium(r.enrolledAt)}
                       </td>
                     </tr>
                   ))

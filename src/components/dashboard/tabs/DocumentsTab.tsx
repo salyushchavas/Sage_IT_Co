@@ -6,8 +6,19 @@ import { FileText, Loader2 } from "lucide-react";
 
 import {
   listParticipantDocuments,
+  type DocumentReviewStatus,
   type ParticipantDocument,
 } from "@/lib/api";
+
+const STATUS_LABEL: Record<DocumentReviewStatus, string> = {
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  REJECTED: "UPLOAD AGAIN",
+  NOT_APPLICABLE: "NOT APPLICABLE",
+  EXCEPTION_REQUESTED: "N/A: WAITING FOR OPERATIONS",
+  EXCEPTION_APPROVED: "N/A: APPROVED",
+  EXCEPTION_DECLINED: "UPLOAD NEEDED",
+};
 
 export default function DocumentsTab() {
   const [docs, setDocs] = useState<ParticipantDocument[]>([]);
@@ -73,14 +84,14 @@ export default function DocumentsTab() {
                   "px-2 py-0.5 rounded-full text-[10px] font-bold " +
                   (d.reviewStatus === "APPROVED"
                     ? "bg-emerald-50 text-emerald-700"
-                    : d.reviewStatus === "REJECTED"
+                    : d.reviewStatus === "REJECTED" || d.reviewStatus === "EXCEPTION_DECLINED"
                       ? "bg-red-50 text-red-700"
-                      : d.reviewStatus === "NOT_APPLICABLE"
+                      : d.reviewStatus === "NOT_APPLICABLE" || d.reviewStatus === "EXCEPTION_APPROVED"
                         ? "bg-gray-100 text-gray-600"
                         : "bg-amber-50 text-amber-700")
                 }
               >
-                {d.reviewStatus}
+                {STATUS_LABEL[d.reviewStatus] ?? d.reviewStatus}
               </span>
             </div>
           ))

@@ -7,7 +7,7 @@ import { Loader2, MessageSquare, ChevronRight } from "lucide-react";
 import { getMySalesInquiries, type SalesInquiry } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
-import { timeAgoIST } from "@/lib/datetime";
+import { timeAgo } from "@/lib/datetime";
 
 const STATUS_STYLES: Record<string, string> = {
   NEW: "bg-amber-100 text-amber-700",
@@ -20,7 +20,7 @@ const STATUS_STYLES: Record<string, string> = {
 
 function relative(ts: string | null | undefined) {
   if (!ts) return "";
-  return timeAgoIST(ts);
+  return timeAgo(ts);
 }
 
 export default function MessagesPage() {

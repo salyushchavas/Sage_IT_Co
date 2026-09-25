@@ -67,6 +67,17 @@ function CheckUploadPageInner() {
   const [uploaded, setUploaded] = useState<CheckDocumentDTO[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Checklist 2.4: a copy Finance rejected is replaced by a new upload
+  // (from the email's ?replace=<id> link or the "Upload a new copy" button).
+  const [replaceId, setReplaceId] = useState<number | null>(() => {
+    const id = Number(searchParams.get("replace"));
+    return id > 0 ? id : null;
+  });
+  const [stepWasDone, setStepWasDone] = useState(false);
+  // Set while finishing the step: refreshing the user re-runs the gate
+  // below, which must not send the participant to the checklist while
+  // they're on their way to the welcome page (checklist 3.3).
+  const finishingRef = useRef(false);
 
   useEffect(() => {
     if (isLoading) return;
@@ -75,11 +86,7 @@ function CheckUploadPageInner() {
       return;
     }
     if (!user) return;
-    // Phase 1C — gate on checkUploadComplete + participantId.
-    if (user.checkUploadComplete) {
-      router.replace("/dashboard?tab=complete-profile");
-      return;
-    }
+    if (finishingRef.current) return;
     if (!user.participantId) {
       router.replace("/enroll");
       return;
@@ -93,10 +100,18 @@ function CheckUploadPageInner() {
     (async () => {
       try {
         const existing = await listMyChecks().catch(() => []);
-        if (!cancelled) {
-          setUploaded(existing);
-          if (existing.length > 0) setMode("upload");
+        if (cancelled) return;
+        // A finished step only opens again when Finance rejected a copy
+        // that hasn't been replaced yet.
+        const needsReplacement = existing.some((c) => isUnreplacedRejection(c, existing));
+        if (user.checkUploadComplete && !needsReplacement) {
+          router.replace("/dashboard?tab=complete-profile");
+          return;
         }
+        setStepWasDone(!!user.checkUploadComplete);
+        setReplaceId((id) => (id && existing.some((c) => c.id === id && isUnreplacedRejection(c, existing)) ? id : null));
+        setUploaded(existing);
+        if (existing.length > 0) setMode("upload");
         setGateChecked(true);
       } catch (err) {
         if (!cancelled) {
@@ -128,7 +143,9 @@ function CheckUploadPageInner() {
         amount: draft.amount ? Number(draft.amount) : undefined,
         checkDate: draft.checkDate || undefined,
         notes: draft.notes.trim() || undefined,
+        replacesCheckId: replaceId ?? undefined,
       });
+      setReplaceId(null);
       setUploaded((prev) => [...prev, result]);
       setDrafts((prev) => prev.filter((d) => d.id !== draftId));
       if (drafts.length === 1) setDrafts([newDraft()]);
@@ -143,7 +160,13 @@ function CheckUploadPageInner() {
   // so a 100% rollup here routes the user to /welcome for the
   // celebration; otherwise back to the checklist tab.
   const finishCheckStep = async () => {
+    finishingRef.current = true;
     await refreshUser();
+    if (stepWasDone) {
+      // A replacement after the step was finished: nothing new to unlock.
+      router.push("/dashboard");
+      return;
+    }
     try {
       const completion = await getProfileCompletion();
       const isComplete = completion.isComplete ?? completion.complete ?? false;
@@ -251,7 +274,45 @@ function CheckUploadPageInner() {
                 <p className="text-[11px] uppercase tracking-wider font-semibold text-gray-500">
                   Uploaded
                 </p>
-                {uploaded.map((c) => (
+                {uploaded.map((c) => isUnreplacedRejection(c, uploaded) ? (
+                  <div
+                    key={c.id}
+                    className="rounded-lg border border-red-200 bg-red-50/50 px-3 py-2 text-xs"
+                  >
+                    <div className="flex items-center gap-2">
+                      <AlertCircle size={14} className="text-red-600 shrink-0" />
+                      <span className="font-medium text-gray-800">
+                        Check #{c.checkNumber || c.id}
+                      </span>
+                      <span className="text-[10px] font-bold uppercase tracking-wider text-red-700 bg-red-100 px-1.5 py-0.5 rounded ml-auto">
+                        Rejected
+                      </span>
+                    </div>
+                    {c.reviewNotes && (
+                      <p className="mt-1 text-[11px] text-red-700 italic">Finance note: {c.reviewNotes}</p>
+                    )}
+                    {replaceId !== c.id && (
+                      <button
+                        type="button"
+                        onClick={() => setReplaceId(c.id)}
+                        className="mt-1.5 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy transition cursor-pointer"
+                      >
+                        Upload a new copy
+                      </button>
+                    )}
+                  </div>
+                ) : c.reviewStatus === "REJECTED" ? (
+                  <div
+                    key={c.id}
+                    className="flex items-center gap-2 text-xs rounded-lg border border-gray-200 bg-gray-50/60 px-3 py-2"
+                  >
+                    <FileText size={14} className="text-gray-400 shrink-0" />
+                    <span className="font-medium text-gray-500">
+                      Check #{c.checkNumber || c.id}
+                    </span>
+                    <span className="text-gray-400 ml-auto">Replaced by a newer copy</span>
+                  </div>
+                ) : (
                   <div
                     key={c.id}
                     className="flex items-center gap-2 text-xs rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2"
@@ -263,6 +324,12 @@ function CheckUploadPageInner() {
                     <span className="text-gray-500 ml-auto">{c.reviewStatus}</span>
                   </div>
                 ))}
+                {replaceId && (
+                  <p className="text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                    Uploading a new copy to replace check #
+                    {uploaded.find((c) => c.id === replaceId)?.checkNumber ?? replaceId}.
+                  </p>
+                )}
               </div>
             )}
 
@@ -323,6 +390,11 @@ function CheckUploadPageInner() {
       </motion.section>
     </OnboardingLayout>
   );
+}
+
+/** A copy Finance rejected that no later upload replaces yet. */
+function isUnreplacedRejection(c: CheckDocumentDTO, all: CheckDocumentDTO[]): boolean {
+  return c.reviewStatus === "REJECTED" && !all.some((n) => n.replacesCheckId === c.id);
 }
 
 function DraftCard({

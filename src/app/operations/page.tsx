@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation";
 import { LayoutDashboard, Loader2, LogOut, ShieldCheck } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
+import { canOpenAdminPages } from "@/lib/roles";
 import { OperationsPanel } from "@/components/admin/OperationsPanel";
 
 // /operations -- Operations Admin dashboard. Separate from /admin (LMS
@@ -71,13 +72,15 @@ export default function OperationsPage() {
             <ShieldCheck size={14} />
             <span>Operations</span>
           </div>
-          <Link
-            href="/admin"
-            className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 cursor-pointer"
-          >
-            <LayoutDashboard size={14} />
-            <span className="truncate">LMS Admin</span>
-          </Link>
+          {canOpenAdminPages(role) && (
+            <Link
+              href="/admin"
+              className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900 cursor-pointer"
+            >
+              <LayoutDashboard size={14} />
+              <span className="truncate">LMS Admin</span>
+            </Link>
+          )}
         </nav>
         <div className="p-3 border-t border-gray-100 flex items-center justify-between gap-2">
           <div className="min-w-0">

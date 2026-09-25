@@ -10,11 +10,12 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import {
-  getCourse, getCourseLessons, getCourseAssignments, enroll,
+  addToCart, getCourse, getCourseLessons, getCourseAssignments, enroll,
   createLesson, deleteLesson, checkCertificate, generateCertificate,
   completeLesson, getLessonQuiz, getLessonTasks,
 } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/money";
 
 interface CourseData {
   id: number; title: string; slug: string; description: string; shortDescription: string;
@@ -96,6 +97,14 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
   const handleEnroll = async () => {
     if (!isAuthenticated) { router.push(`/login?redirect=/courses/${id}`); return; }
     setEnrolling(true); setEnrollMsg("");
+    // Checklist 5.4: a paid course is bought through the cart (payment first).
+    if (course && !course.isFree && Number(course.price) > 0) {
+      try {
+        await addToCart(Number(id));
+      } catch { /* already in the cart */ }
+      router.push("/cart");
+      return;
+    }
     try {
       await enroll(Number(id));
       setEnrollMsg("Enrolled successfully!");
@@ -197,7 +206,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
           {/* Sidebar card */}
           <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-6">
             <div className="text-3xl font-bold text-zinc-900 mb-1">
-              {course.isFree ? "Free" : `₹${course.price}`}
+              {course.isFree ? "Free" : formatMoney(course.price)}
             </div>
             <p className="text-sm text-zinc-500 mb-6">{course.isFree ? "No payment required" : "One-time payment"}</p>
 
@@ -211,7 +220,7 @@ export default function CourseDetailPage({ params }: { params: { id: string } })
                 "disabled:opacity-50"
               )}
             >
-              {enrolling ? <><Loader2 className="w-4 h-4 animate-spin" /> Enrolling...</> : "Enroll Now"}
+              {enrolling ? <><Loader2 className="w-4 h-4 animate-spin" /> {course.isFree ? "Enrolling..." : "Opening your cart..."}</> : course.isFree || Number(course.price) <= 0 ? "Enroll Now" : "Buy now"}
             </button>
 
             {enrollMsg && (

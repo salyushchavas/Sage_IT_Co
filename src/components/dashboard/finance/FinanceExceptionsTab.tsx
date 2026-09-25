@@ -5,13 +5,14 @@ import { useEffect, useState } from "react";
 import {
   getFinanceInvoices,
   getFinanceTrackings,
+  type FinanceInvoiceRow,
   type FinanceTrackingRow,
-  type InvoiceDTO,
 } from "@/lib/api";
+import { formatDay } from "@/lib/datetime";
 import { Spinner, moneyFmt } from "./FinanceParts";
 
 export function FinanceExceptionsTab() {
-  const [overdue, setOverdue] = useState<InvoiceDTO[]>([]);
+  const [overdue, setOverdue] = useState<FinanceInvoiceRow[]>([]);
   const [exceptions, setExceptions] = useState<FinanceTrackingRow[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -70,12 +71,18 @@ export function FinanceExceptionsTab() {
                     <td className="px-3 py-1.5 font-mono text-xs text-gray-700">
                       {i.invoiceNumber}
                     </td>
-                    <td className="px-3 py-1.5 text-gray-700">#{i.userId}</td>
                     <td className="px-3 py-1.5 text-gray-700">
-                      {moneyFmt(i.amount)}
+                      {i.participantName ?? `#${i.userId}`}
+                      <div className="font-mono text-[10px] text-gray-400">{i.participantId ?? ""}</div>
                     </td>
-                    <td className="px-3 py-1.5 font-mono text-xs text-gray-700">
-                      {i.dueDate ?? "--"}
+                    <td className="px-3 py-1.5 text-gray-700">
+                      {moneyFmt(i.balance ?? i.amount)}
+                      {i.balance != null && Number(i.balance) < Number(i.amount) && (
+                        <div className="text-[10px] text-gray-400">of {moneyFmt(i.amount)} (part-paid)</div>
+                      )}
+                    </td>
+                    <td className="px-3 py-1.5 text-xs text-gray-700">
+                      {i.dueDate ? formatDay(i.dueDate) : "--"}
                     </td>
                   </tr>
                 ))

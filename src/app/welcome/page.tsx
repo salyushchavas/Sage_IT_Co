@@ -12,8 +12,8 @@ import {
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
-  getOnboardingRoute, getParticipantMe, getProgramSelection,
-  getWelcomeStatus, isDashboardStatus, refreshWelcomeStatus,
+  getParticipantMe, getProgramSelection,
+  getWelcomeStatus, refreshWelcomeStatus, statusAtLeast,
   type ProgramSelectionDTO, type UserDTO, type WelcomeStatus,
 } from "@/lib/api";
 
@@ -62,27 +62,19 @@ export default function WelcomePage() {
       try {
         const me = await getParticipantMe();
         if (cancelled) return;
-        const s = me.currentStatus;
-        // Past the welcome step — go to the dashboard.
-        if (isDashboardStatus(s)) {
+        // Checklist 3.3: this page is for someone who has finished every
+        // onboarding step and whose team is being set up (or has just
+        // been). Not finished yet: back to the checklist. Well past it
+        // (weekly reporting onwards): the dashboard. Every status used
+        // to count as "past onboarding", so the page never showed.
+        if (!me.profileComplete) {
+          router.replace("/dashboard?tab=complete-profile");
+          return;
+        }
+        if (statusAtLeast(me.currentStatus, "WEEKLY_REPORTING_ACTIVE")) {
           router.replace("/dashboard");
           return;
         }
-        // Earlier in the lifecycle — bounce back to that step.
-        const earlierSteps = [
-          "DRAFT_STARTED", "BASIC_INFO_SUBMITTED",
-          "EMAIL_VERIFICATION_PENDING", "EMAIL_VERIFIED",
-          "PARTICIPANT_ID_CREATED", "ID_EMAIL_SENT",
-          "ACKNOWLEDGMENT_ACCEPTED", "DOCUMENTS_SUBMITTED",
-          "DOC_REVIEW_PENDING", "PROGRAM_SELECTED",
-          "AGREEMENT_SENT", "AGREEMENT_COMPLETED",
-        ];
-        if (s && earlierSteps.includes(s)) {
-          router.replace(getOnboardingRoute(s));
-          return;
-        }
-        // Eligible (CHECK_COPY_UPLOADED → COACHES_ASSIGNED) OR
-        // unknown/null. Render and let the poll loop show progress.
         setProfile(me);
         const [progRes, statusRes] = await Promise.allSettled([
           getProgramSelection(),
@@ -117,18 +109,8 @@ export default function WelcomePage() {
     return () => { cancelled = true; clearInterval(t); };
   }, [gateChecked, status.dashboardReady]);
 
-  // ── Auto-redirect once ready ─────────────────────────────────
-  useEffect(() => {
-    if (!status.dashboardReady) return;
-    const t = setTimeout(async () => {
-      // Refresh the auth context so /dashboard sees the new
-      // DASHBOARD_ENABLED status; without this its routing guard
-      // would still see the prior status and bounce the user back.
-      await refreshUser();
-      router.replace("/dashboard");
-    }, 2200);
-    return () => clearTimeout(t);
-  }, [status.dashboardReady, router, refreshUser]);
+  // No automatic redirect once the team is ready: the participant reads
+  // who their team is and enters the dashboard with the button below.
 
   const handleRefresh = async () => {
     setRefreshing(true);
@@ -196,7 +178,9 @@ export default function WelcomePage() {
           </p>
           <ul className="rounded-xl border border-gray-200 bg-gray-50/40 divide-y divide-gray-100">
             <StatusRow done label="Agreement signed and verified" />
-            <StatusRow done label="Signed agreement sent to your team" />
+            <StatusRow done={!!status.agreementSentToErm}
+              label={status.agreementSentToErm ? "Signed agreement sent to your relationship manager" : "Sending your signed agreement to your relationship manager..."}
+              inProgress={!status.agreementSentToErm} />
             <StatusRow done={!!status.welcomeEmailSent} label="Welcome email sent" />
             <StatusRow done={!!status.coordinatorIntroSent} label="Program coordinator introduction sent" />
             <StatusRow done={!!status.ermAssigned}
@@ -205,7 +189,7 @@ export default function WelcomePage() {
                 : "Assigning your relationship manager..."}
               inProgress={!status.ermAssigned} />
             <StatusRow done={!!status.coachesAssigned}
-              label="Assigning your coaching team..."
+              label={status.coachesAssigned ? "Coaching team assigned" : "Assigning your coaching team..."}
               inProgress={!status.coachesAssigned} />
             <StatusRow done={dashboardReady}
               label={dashboardReady ? "Dashboard ready" : "Preparing your dashboard..."}

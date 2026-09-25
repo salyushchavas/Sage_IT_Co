@@ -16,6 +16,7 @@ import {
 import { friendlyEnrollmentError } from "@/lib/utils";
 import { LessonItem } from "@/components/courses/LessonItem";
 import { VideoPlayer } from "@/components/courses/VideoPlayer";
+import { formatMoney } from "@/lib/money";
 
 interface ServiceData {
   id: number;
@@ -254,7 +255,7 @@ export default function ServiceDetailPage({ params }: { params: { id: string } }
               <div className="text-3xl font-bold text-gray-900 mb-1">
                 {service.isFree || service.price <= 0
                   ? "Free"
-                  : `₹${service.price.toLocaleString("en-IN")}`}
+                  : formatMoney(service.price)}
               </div>
               <p className="text-sm text-gray-500 mb-6">
                 {service.isFree ? "No payment required" : "One-time payment"}

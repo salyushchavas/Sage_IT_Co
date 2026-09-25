@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import { Loader2, Trash2, ShoppingCart, ArrowRight, ShieldCheck, Ticket, X, CheckCircle2 } from "lucide-react";
-import { getCart, removeFromCart, clearCart, checkoutCart, validateCoupon, type CouponValidation } from "@/lib/api";
+import { getCart, removeFromCart, clearCart, checkoutCart, confirmCheckout, validateCoupon, type CouponValidation } from "@/lib/api";
 import { friendlyEnrollmentError } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import ProfileGateModal from "@/components/dashboard/ProfileGateModal";
+import { formatMoney } from "@/lib/money";
 
 interface CartCourse {
   id: number;
@@ -53,8 +54,36 @@ export default function CartPage() {
     }
   };
 
+  // Checklist 5.4: what happened with the online payment, shown at the top.
+  const [notice, setNotice] = useState("");
+  const confirmedRef = useRef(false);
+
   useEffect(() => {
     fetchCart();
+    if (confirmedRef.current) return;   // check the payment once
+    confirmedRef.current = true;
+    // Back from the payment page: ?checkout=success&session_id=… or ?checkout=cancelled.
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("checkout");
+    const sessionId = params.get("session_id");
+    if (outcome === "cancelled") {
+      setNotice("Payment cancelled. Nothing was charged and your cart is unchanged.");
+    } else if (outcome === "success" && sessionId) {
+      setNotice("Confirming your payment…");
+      confirmCheckout(sessionId)
+        .then((r) => {
+          setNotice(
+            r.status === "COMPLETED"
+              ? `Payment received. You're enrolled in ${r.courses.join(", ")}.`
+              : r.status === "FAILED"
+                ? "The payment didn't go through. Nothing was charged; you can try again."
+                : "We're still waiting for the payment to be confirmed. This page will show it once it's in.",
+          );
+          fetchCart();
+        })
+        .catch(() => setNotice("We couldn't confirm the payment yet. Check My Courses in a minute."));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleRemove = async (courseId: number) => {
@@ -88,8 +117,22 @@ export default function CartPage() {
     setCheckingOut(true);
     setError("");
     try {
-      await checkoutCart(appliedCoupon?.code ?? null);
-      router.push("/dashboard");
+      const result = await checkoutCart(appliedCoupon?.code ?? null);
+      // Checklist 5.4: paid courses go to the payment page first.
+      if (result?.status === "PAYMENT_REQUIRED" && result.checkoutUrl) {
+        window.location.href = result.checkoutUrl;
+        return;
+      }
+      if (result?.status === "PAYMENT_UNAVAILABLE") {
+        setNotice(
+          (result.enrolled?.length ? `You're enrolled in ${result.enrolled.join(", ")}. ` : "") +
+            (result.message ?? "Online payment isn't available yet."),
+        );
+        await fetchCart();
+        setCheckingOut(false);
+        return;
+      }
+      router.push("/dashboard?tab=courses");
     } catch (err) {
       setError(friendlyEnrollmentError(err));
       setCheckingOut(false);
@@ -188,6 +231,12 @@ export default function CartPage() {
         </div>
       )}
 
+      {notice && (
+        <div className="bg-white border border-zinc-200 text-zinc-700 px-4 py-3 rounded-xl text-sm mb-6">
+          {notice}
+        </div>
+      )}
+
       {!loading && items.length === 0 && (
         <motion.div
           initial={{ opacity: 0, y: 20 }}
@@ -243,7 +292,7 @@ export default function CartPage() {
                   </p>
                 </div>
                 <p className="font-semibold text-gray-900 whitespace-nowrap">
-                  {course.price > 0 ? `₹${course.price}` : "Free"}
+                  {course.price > 0 ? formatMoney(course.price) : "Free"}
                 </p>
                 <button
                   onClick={() => handleRemove(course.id)}
@@ -296,9 +345,9 @@ export default function CartPage() {
                     <p className="text-xs text-emerald-700">
                       {appliedCoupon.discountType === "PERCENT"
                         ? `${appliedCoupon.discountValue}% off`
-                        : `₹${appliedCoupon.discountValue} off`}
-                      {" — saving ₹"}
-                      {Number(appliedCoupon.discountAmount).toLocaleString("en-IN")}
+                        : `${formatMoney(appliedCoupon.discountValue)} off`}
+                      {" — saving "}
+                      {formatMoney(appliedCoupon.discountAmount)}
                     </p>
                   </div>
                   <button
@@ -315,18 +364,18 @@ export default function CartPage() {
             <div className="space-y-1.5 mb-4 text-sm">
               <div className="flex items-center justify-between text-gray-600">
                 <span>Subtotal ({items.length} {items.length === 1 ? "item" : "items"})</span>
-                <span className="tabular-nums">₹{subtotal.toLocaleString("en-IN")}</span>
+                <span className="tabular-nums">{formatMoney(subtotal)}</span>
               </div>
               {appliedCoupon && discount > 0 && (
                 <div className="flex items-center justify-between text-emerald-700">
                   <span>Discount ({appliedCoupon.code})</span>
-                  <span className="tabular-nums">−₹{Number(discount).toLocaleString("en-IN")}</span>
+                  <span className="tabular-nums">−{formatMoney(discount)}</span>
                 </div>
               )}
               <div className="flex items-center justify-between pt-2 border-t border-gray-100">
                 <span className="text-gray-700 font-medium">Total</span>
                 <span className="text-2xl font-bold text-sage-navy tabular-nums">
-                  ₹{total.toLocaleString("en-IN")}
+                  {formatMoney(total)}
                 </span>
               </div>
             </div>

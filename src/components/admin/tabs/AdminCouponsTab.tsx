@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Plus, Pencil, Trash2 } from "lucide-react";
+import { formatDateMedium } from "@/lib/datetime";
+import { formatMoney } from "@/lib/money";
 
 import {
   createCoupon,
@@ -85,13 +87,13 @@ export function AdminCouponsTab() {
                     <tr key={c.id} className="border-b border-zinc-100">
                       <td className="px-4 py-3 font-mono text-xs font-bold text-zinc-900">{c.code}</td>
                       <td className="px-4 py-3 text-zinc-700">
-                        {c.discountType === "PERCENT" ? `${c.discountValue}%` : `₹${c.discountValue.toLocaleString("en-IN")}`}
+                        {c.discountType === "PERCENT" ? `${c.discountValue}%` : formatMoney(c.discountValue)}
                       </td>
-                      <td className="px-4 py-3 text-zinc-700 text-xs">{c.minOrderAmount != null ? `₹${c.minOrderAmount.toLocaleString("en-IN")}` : "—"}</td>
+                      <td className="px-4 py-3 text-zinc-700 text-xs">{c.minOrderAmount != null ? formatMoney(c.minOrderAmount) : "—"}</td>
                       <td className="px-4 py-3 text-zinc-700 tabular-nums text-xs">
                         {c.usesCount}{c.maxUses != null ? ` / ${c.maxUses}` : ""}
                       </td>
-                      <td className="px-4 py-3 text-zinc-500 text-xs">{c.expiresAt ? new Date(c.expiresAt).toLocaleDateString("en-IN") : "—"}</td>
+                      <td className="px-4 py-3 text-zinc-500 text-xs">{c.expiresAt ? formatDateMedium(c.expiresAt) : "—"}</td>
                       <td className="px-4 py-3">
                         <span className={"text-xs px-2 py-0.5 rounded-full font-semibold " + (c.isActive ? "bg-emerald-100 text-emerald-700" : "bg-zinc-100 text-zinc-500")}>
                           {c.isActive ? "ACTIVE" : "INACTIVE"}
@@ -180,12 +182,12 @@ function CouponForm({ initial, onClose, onSaved }: { initial: Coupon | null; onC
           <div className="grid grid-cols-2 gap-2">
             <select value={discountType} onChange={(e) => setDiscountType(e.target.value as "PERCENT" | "FLAT")} className="px-3 py-2 text-sm rounded-md border border-zinc-200">
               <option value="PERCENT">Percent</option>
-              <option value="FLAT">Flat (INR)</option>
+              <option value="FLAT">Flat (USD)</option>
             </select>
             <input type="number" value={discountValue} onChange={(e) => setDiscountValue(e.target.value)} placeholder="Value" className="px-3 py-2 text-sm rounded-md border border-zinc-200 focus:outline-none focus:border-sage-navy" />
           </div>
           <div className="grid grid-cols-2 gap-2">
-            <input type="number" value={minOrderAmount} onChange={(e) => setMinOrderAmount(e.target.value)} placeholder="Min order (₹)" className="px-3 py-2 text-sm rounded-md border border-zinc-200" />
+            <input type="number" value={minOrderAmount} onChange={(e) => setMinOrderAmount(e.target.value)} placeholder="Min order ($)" className="px-3 py-2 text-sm rounded-md border border-zinc-200" />
             <input type="number" value={maxUses} onChange={(e) => setMaxUses(e.target.value)} placeholder="Max uses" className="px-3 py-2 text-sm rounded-md border border-zinc-200" />
           </div>
           <input type="date" value={expiresAt} onChange={(e) => setExpiresAt(e.target.value)} className="w-full px-3 py-2 text-sm rounded-md border border-zinc-200" />

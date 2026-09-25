@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, IndianRupee, Loader2 } from "lucide-react";
+import { Download, DollarSign, Loader2 } from "lucide-react";
+import { formatDateMedium } from "@/lib/datetime";
 
 import {
   downloadAdminCsv,
@@ -13,7 +14,7 @@ import {
 
 function inr(n: number | null | undefined): string {
   if (n == null) return "—";
-  return n.toLocaleString("en-IN", { style: "currency", currency: "INR" });
+  return n.toLocaleString("en-US", { style: "currency", currency: "USD" });
 }
 
 export function AdminRevenueTab() {
@@ -141,7 +142,7 @@ export function AdminRevenueTab() {
                         <td className="px-4 py-3 text-xs text-zinc-600">{t.status ?? "—"}</td>
                         <td className="px-4 py-3 font-mono text-xs text-zinc-500">{t.razorpayPaymentId ?? "—"}</td>
                         <td className="px-4 py-3 text-zinc-500 text-xs">
-                          {t.createdAt ? new Date(t.createdAt).toLocaleDateString("en-IN") : "—"}
+                          {t.createdAt ? formatDateMedium(t.createdAt) : "—"}
                         </td>
                       </tr>
                     ))
@@ -161,7 +162,7 @@ function StatCard({ label, value, accent }: { label: string; value: string; acce
   return (
     <div className="bg-white/60 backdrop-blur-xl border border-zinc-200 rounded-2xl p-4">
       <div className="flex items-center gap-2 mb-2">
-        <IndianRupee size={14} className="text-zinc-400" />
+        <DollarSign size={14} className="text-zinc-400" />
         <span className="text-[11px] uppercase tracking-wider font-semibold text-zinc-500">{label}</span>
       </div>
       <p className={"text-xl font-bold " + accentClass}>{value}</p>

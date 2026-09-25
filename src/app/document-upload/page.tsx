@@ -12,6 +12,7 @@ import {
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import {
   completeDocuments, deleteParticipantDocument,
+  documentSatisfiesRequirement,
   listParticipantDocuments,
   markDocumentNotApplicable, uploadParticipantDocument,
   viewParticipantDocument,
@@ -24,9 +25,15 @@ import { useAuth } from "@/lib/auth-context";
  *
  * The participant has three required slots (Government ID, Work
  * Authorization, Resume) plus optional slots (SSN, Driver's
- * License, Other). Required slots must each carry an upload OR a
- * "Not Applicable" marker before Continue is enabled — the backend
- * re-checks the same rule on /complete so the gate is unbypassable.
+ * License, Other). Required slots must each carry an upload, or a
+ * "Not applicable" request (with a reason) that Operations approved,
+ * before Continue is enabled — the backend re-checks the same rule on
+ * /complete so the gate is unbypassable. Optional slots can simply be
+ * marked not applicable.
+ *
+ * When Operations sends a document back (rejected upload or declined
+ * request) the page opens again, even after the step was finished, so
+ * the participant can upload a new one.
  *
  * "Save and Continue Later" exits the page; the uploads persisted
  * so far stay on record and the routing guard sends the user back
@@ -78,6 +85,10 @@ function DocumentUploadPageInner() {
   const [uploadError, setUploadError] = useState<{ type: DocumentType; message: string } | null>(null);
   const [completeError, setCompleteError] = useState("");
   const [completing, setCompleting] = useState(false);
+  // "Not applicable" on a required document: the reason box.
+  const [naFor, setNaFor] = useState<DocumentType | null>(null);
+  const [naReason, setNaReason] = useState("");
+  const [naBusy, setNaBusy] = useState(false);
   const fileInputs = useRef<Partial<Record<DocumentType, HTMLInputElement | null>>>({});
 
   // ── Gate + load ───────────────────────────────────────────────
@@ -90,10 +101,6 @@ function DocumentUploadPageInner() {
       return;
     }
     if (!user) return;
-    if (user.documentsComplete) {
-      router.replace("/dashboard?tab=complete-profile");
-      return;
-    }
     if (!user.participantId) {
       router.replace("/enroll");
       return;
@@ -108,6 +115,14 @@ function DocumentUploadPageInner() {
       try {
         const docs = await listParticipantDocuments();
         if (cancelled) return;
+        // A finished step only opens again when Operations sent a
+        // document back; otherwise there's nothing to do here.
+        const sentBack = docs.some((d) =>
+          d.reviewStatus === "REJECTED" || d.reviewStatus === "EXCEPTION_DECLINED");
+        if (user.documentsComplete && !sentBack) {
+          router.replace("/dashboard?tab=complete-profile");
+          return;
+        }
         setDocuments(docs);
         setGateChecked(true);
       } catch (err) {
@@ -136,10 +151,8 @@ function DocumentUploadPageInner() {
   const slotDocs = (type: DocumentType): ParticipantDocument[] =>
     documents.filter((d) => d.documentType === type);
 
-  const requiredSatisfied = (s: SlotConfig): boolean => {
-    const docs = slotDocs(s.type);
-    return docs.some((d) => d.reviewStatus !== "REJECTED");
-  };
+  const requiredSatisfied = (s: SlotConfig): boolean =>
+    slotDocs(s.type).some(documentSatisfiesRequirement);
 
   const requiredCount = REQUIRED_SLOTS.length;
   const completedRequired = REQUIRED_SLOTS.filter(requiredSatisfied).length;
@@ -195,12 +208,25 @@ function DocumentUploadPageInner() {
     }
   };
 
-  const handleMarkNA = async (type: DocumentType) => {
+  const handleMarkNA = async (slot: SlotConfig) => {
+    // A required document needs a reason for Operations first.
+    if (slot.required && naFor !== slot.type) {
+      setNaFor(slot.type);
+      setNaReason("");
+      setUploadError(null);
+      return;
+    }
+    setNaBusy(true);
+    setUploadError(null);
     try {
-      await markDocumentNotApplicable(type);
+      await markDocumentNotApplicable(slot.type, slot.required ? naReason.trim() : undefined);
+      setNaFor(null);
+      setNaReason("");
       await refreshDocuments();
     } catch (err) {
-      alert(err instanceof Error ? err.message : "Couldn't mark as N/A.");
+      setUploadError({ type: slot.type, message: err instanceof Error ? err.message : "Couldn't mark as N/A." });
+    } finally {
+      setNaBusy(false);
     }
   };
 
@@ -246,7 +272,12 @@ function DocumentUploadPageInner() {
 
   const renderSlot = useMemo(() => (slot: SlotConfig) => {
     const docs = slot.multiple ? slotDocs(slot.type) : (slotDoc(slot.type) ? [slotDoc(slot.type)!] : []);
-    const isMarkedNA = docs.length > 0 && docs[0].reviewStatus === "NOT_APPLICABLE";
+    // A "not applicable" marker: plain N/A (optional) or an exception
+    // request Operations decides (required).
+    const marker = !slot.multiple && docs.length > 0 && docs[0].notApplicable ? docs[0] : null;
+    const isMarkedNA = marker !== null;
+    const declined = marker?.reviewStatus === "EXCEPTION_DECLINED";
+    const filesOk = docs.length > 0 && !isMarkedNA && docs.every((d) => d.reviewStatus !== "REJECTED");
     const uploading = uploadingType === slot.type;
     const errorHere = uploadError && uploadError.type === slot.type ? uploadError.message : null;
 
@@ -254,11 +285,11 @@ function DocumentUploadPageInner() {
       <li key={slot.type} className="p-4 sm:p-5 first:pt-4 last:pb-4 border-b border-gray-100 last:border-b-0">
         <div className="flex items-start gap-3">
           <div className="shrink-0 mt-0.5">
-            {docs.length > 0 && !isMarkedNA ? (
+            {filesOk ? (
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700">
                 <CheckCircle2 size={14} />
               </span>
-            ) : isMarkedNA ? (
+            ) : isMarkedNA && !declined ? (
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold">
                 N/A
               </span>
@@ -334,8 +365,26 @@ function DocumentUploadPageInner() {
               </div>
             )}
 
-            {isMarkedNA && (
+            {marker?.reviewStatus === "NOT_APPLICABLE" && (
               <p className="mt-2 text-xs text-gray-500 italic">Marked Not Applicable.</p>
+            )}
+            {marker?.reviewStatus === "EXCEPTION_REQUESTED" && (
+              <div className="mt-2 space-y-0.5">
+                <p className="text-xs text-gray-500 italic">
+                  Marked Not Applicable. Waiting for Operations to approve.
+                </p>
+                {marker.exceptionReason && (
+                  <p className="text-[11px] text-gray-500 italic">Your reason: {marker.exceptionReason}</p>
+                )}
+              </div>
+            )}
+            {marker?.reviewStatus === "EXCEPTION_APPROVED" && (
+              <p className="mt-2 text-xs text-gray-500 italic">Not applicable, approved by Operations.</p>
+            )}
+            {declined && (
+              <p className="mt-2 text-[11px] text-red-700 italic">
+                Operations needs this document{marker?.reviewerNotes ? `: ${marker.reviewerNotes}` : "."}
+              </p>
             )}
 
             {/* Upload + N/A actions */}
@@ -347,7 +396,7 @@ function DocumentUploadPageInner() {
                 className="hidden"
                 onChange={(e) => handleFilePicked(slot.type, e.target.files?.[0])}
               />
-              {(docs.length === 0 || slot.multiple) && !isMarkedNA && (
+              {(((docs.length === 0 || slot.multiple) && !isMarkedNA) || declined) && (
                 <button
                   type="button"
                   onClick={() => fileInputs.current[slot.type]?.click()}
@@ -366,19 +415,20 @@ function DocumentUploadPageInner() {
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
                 >
                   {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadIcon size={12} />}
-                  Replace
+                  {docs[0].reviewStatus === "REJECTED" ? "Upload again" : "Replace"}
                 </button>
               )}
-              {slot.allowNotApplicable && !isMarkedNA && (
+              {slot.allowNotApplicable && (!isMarkedNA || declined)
+                && docs[0]?.reviewStatus !== "APPROVED" && naFor !== slot.type && (
                 <button
                   type="button"
-                  onClick={() => handleMarkNA(slot.type)}
+                  onClick={() => handleMarkNA(slot)}
                   className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
                 >
                   Not applicable
                 </button>
               )}
-              {isMarkedNA && (
+              {(marker?.reviewStatus === "NOT_APPLICABLE" || marker?.reviewStatus === "EXCEPTION_REQUESTED") && (
                 <button
                   type="button"
                   onClick={() => {
@@ -393,6 +443,41 @@ function DocumentUploadPageInner() {
               )}
             </div>
 
+            {naFor === slot.type && (
+              <div className="mt-2 space-y-1.5">
+                <label htmlFor={`na-reason-${slot.type}`} className="block text-[11px] text-gray-600">
+                  This document is required. Tell Operations why it doesn&apos;t apply to you; they&apos;ll review your request.
+                </label>
+                <textarea
+                  id={`na-reason-${slot.type}`}
+                  value={naReason}
+                  onChange={(e) => setNaReason(e.target.value)}
+                  rows={2}
+                  maxLength={1000}
+                  placeholder="For example: I'm a US citizen, so I don't have a visa or work permit."
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-400 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy resize-none"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => handleMarkNA(slot)}
+                    disabled={naBusy || naReason.trim().length < 5}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+                  >
+                    {naBusy && <Loader2 size={12} className="animate-spin" />}
+                    Send to Operations
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setNaFor(null); setNaReason(""); }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
             {errorHere && (
               <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-red-600">
                 <AlertCircle size={11} /> {errorHere}
@@ -403,7 +488,7 @@ function DocumentUploadPageInner() {
       </li>
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documents, uploadingType, uploadError]);
+  }, [documents, uploadingType, uploadError, naFor, naReason, naBusy]);
 
   if (authLoading || !gateChecked) {
     return (
@@ -488,7 +573,12 @@ function DocumentUploadPageInner() {
               {missingRequired.length} required {missingRequired.length === 1 ? "document" : "documents"} still missing:
             </p>
             <ul className="mt-1 text-xs text-amber-900 list-disc list-inside">
-              {missingRequired.map((s) => <li key={s.type}>{s.label}</li>)}
+              {missingRequired.map((s) => (
+                <li key={s.type}>
+                  {s.label}
+                  {slotDoc(s.type)?.reviewStatus === "EXCEPTION_REQUESTED" && " (not applicable: waiting for Operations)"}
+                </li>
+              ))}
             </ul>
           </div>
         )}

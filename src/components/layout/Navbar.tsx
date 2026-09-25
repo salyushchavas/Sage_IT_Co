@@ -3,6 +3,7 @@
 import { navLinks, learnLinks } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
+import { canOpenAdminPages } from "@/lib/roles";
 import { AnimatePresence, motion } from "framer-motion";
 import Image from "next/image";
 import Link from "next/link";
@@ -49,7 +50,7 @@ export default function Navbar() {
   }, [pathname]);
 
   const allLinks = [...navLinks, ...learnLinks];
-  const isAdmin = user?.role?.toUpperCase() === "ADMIN";
+  const isAdmin = canOpenAdminPages(user?.role);
   const learnActive = learnLinks.some((l) => pathname === l.href);
 
   return (

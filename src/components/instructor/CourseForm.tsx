@@ -58,7 +58,7 @@ export function CourseForm({ initial, courseId, submitLabel, cancelHref, onSubmi
     if (!values.category.trim()) { setError("Category is required."); return; }
     const priceNum = Number(values.price);
     if (!values.price || Number.isNaN(priceNum) || priceNum < MIN_PRICE) {
-      setError(`Price must be at least ₹${MIN_PRICE}.`);
+      setError(`Price must be at least $${MIN_PRICE}.`);
       return;
     }
 
@@ -165,7 +165,7 @@ export function CourseForm({ initial, courseId, submitLabel, cancelHref, onSubmi
 
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1.5">
-          Price (₹) <span className="text-red-500">*</span>
+          Price ($) <span className="text-red-500">*</span>
         </label>
         <input
           type="number"
@@ -176,7 +176,7 @@ export function CourseForm({ initial, courseId, submitLabel, cancelHref, onSubmi
           placeholder="3499"
           className="w-full px-4 py-2.5 rounded-lg border border-gray-300 text-sm focus:outline-none focus:ring-2 focus:ring-sage-navy/30"
         />
-        <p className="mt-1 text-[11px] text-gray-400">Minimum: ₹{MIN_PRICE}</p>
+        <p className="mt-1 text-[11px] text-gray-400">Minimum: ${MIN_PRICE}</p>
       </div>
 
       <div>

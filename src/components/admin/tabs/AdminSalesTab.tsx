@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Loader2 } from "lucide-react";
+import { formatDateTime } from "@/lib/datetime";
 
 import {
   getAdminSalesInquiries,
@@ -110,7 +111,7 @@ export function AdminSalesTab() {
                           </span>
                         </td>
                         <td className="px-4 py-3 text-xs text-zinc-500">
-                          {i.lastMessageAt ? new Date(i.lastMessageAt).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) : "—"}
+                          {i.lastMessageAt ? formatDateTime(i.lastMessageAt) : "—"}
                         </td>
                       </tr>
                     ))

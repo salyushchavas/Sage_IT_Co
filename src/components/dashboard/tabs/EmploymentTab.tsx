@@ -8,12 +8,14 @@ import {
   Loader2,
   Upload as UploadIcon,
 } from "lucide-react";
+import { formatDateMedium, formatDateTime } from "@/lib/datetime";
 
 import {
   acceptEmployment,
   acceptPhase1Completion,
   getEmploymentStatus,
   uploadOfferDocument,
+  viewMyOfferDocument,
   type EmploymentStatus,
 } from "@/lib/api";
 
@@ -63,27 +65,63 @@ export default function EmploymentTab() {
 
       {!status?.submitted ? (
         <EmploymentForm onSaved={refresh} />
+      ) : status.returned ? (
+        <>
+          <ReturnedCallout status={status} />
+          <EmploymentForm onSaved={refresh} previous={status.details} />
+        </>
       ) : (
         <EmploymentSummary status={status!} />
       )}
 
       {status?.submitted &&
+        !status.returned &&
         (status.ermVerified ? (
           <Phase1Section status={status} onSaved={refresh} />
         ) : (
           <PendingErmCallout ermName={status.ermName ?? null} />
         ))}
+
+      {status?.phase2 && <Phase2Section phase2={status.phase2} />}
     </div>
   );
 }
 
-function EmploymentForm({ onSaved }: { onSaved: () => Promise<void> }) {
-  const [employer, setEmployer] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [startDate, setStartDate] = useState("");
-  const [location, setLocation] = useState("");
-  const [employmentType, setEmploymentType] = useState("Full-time");
-  const [notes, setNotes] = useState("");
+/**
+ * Checklist 4.5: the ERM sent the details back. Their reason is shown and
+ * the form below starts from what was submitted.
+ */
+function ReturnedCallout({ status }: { status: EmploymentStatus }) {
+  const d = status.details;
+  return (
+    <div className="rounded-2xl border border-amber-200 bg-amber-50/40 p-5">
+      <p className="text-sm font-bold text-amber-900 inline-flex items-center gap-1.5">
+        <AlertCircle size={14} /> Your ERM{status.ermName ? ` (${status.ermName})` : ""} sent your employment details back
+      </p>
+      {d?.returnReason && (
+        <p className="mt-2 text-sm text-gray-800 whitespace-pre-wrap">&ldquo;{d.returnReason}&rdquo;</p>
+      )}
+      <p className="text-xs text-gray-600 mt-2">
+        Correct the details below and send them again. Your ERM is emailed as soon as you do.
+      </p>
+    </div>
+  );
+}
+
+function EmploymentForm({
+  onSaved,
+  previous,
+}: {
+  onSaved: () => Promise<void>;
+  /** The details sent back by the ERM, to correct (checklist 4.5). */
+  previous?: EmploymentStatus["details"];
+}) {
+  const [employer, setEmployer] = useState(previous?.employerClient ?? "");
+  const [jobTitle, setJobTitle] = useState(previous?.jobTitle ?? "");
+  const [startDate, setStartDate] = useState(previous?.startDate ?? "");
+  const [location, setLocation] = useState(previous?.location ?? "");
+  const [employmentType, setEmploymentType] = useState(previous?.employmentType ?? "Full-time");
+  const [notes, setNotes] = useState(previous?.notes ?? "");
   const [file, setFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -95,7 +133,8 @@ function EmploymentForm({ onSaved }: { onSaved: () => Promise<void> }) {
     setSaving(true);
     setError("");
     try {
-      let offerUrl: string | null = null;
+      // A correction keeps the offer letter already uploaded unless a new one is chosen.
+      let offerUrl: string | null = previous?.offerDocumentUrl ?? null;
       if (file) {
         const up = await uploadOfferDocument(file);
         offerUrl = up.url;
@@ -120,8 +159,9 @@ function EmploymentForm({ onSaved }: { onSaved: () => Promise<void> }) {
   return (
     <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-5 space-y-3">
       <p className="text-sm text-gray-500">
-        Congratulations on your offer! Provide the following details so your
-        ERM can verify and unlock Phase 1 completion.
+        {previous
+          ? "Correct your employment details and send them to your ERM again."
+          : "Congratulations on your offer! Provide the following details so your ERM can verify and unlock Phase 1 completion."}
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         <Input label="Employer / Client *" value={employer} onChange={setEmployer} />
@@ -154,7 +194,9 @@ function EmploymentForm({ onSaved }: { onSaved: () => Promise<void> }) {
             onChange={(e) => setFile(e.target.files?.[0] ?? null)}
             className="block w-full text-xs file:mr-3 file:py-1.5 file:px-3 file:rounded-md file:border-0 file:text-xs file:font-semibold file:bg-sage-navy file:text-white hover:file:bg-sage-navy-deep cursor-pointer"
           />
-          <p className="text-[10px] text-gray-400 mt-0.5">Max 5 MB.</p>
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            Max 5 MB.{previous?.hasOffer ? " Leave empty to keep the one you uploaded." : ""}
+          </p>
         </div>
       </div>
       <div>
@@ -190,7 +232,7 @@ function EmploymentForm({ onSaved }: { onSaved: () => Promise<void> }) {
           ) : (
             <UploadIcon size={14} />
           )}
-          {saving ? "Submitting…" : "Submit employment acceptance →"}
+          {saving ? "Submitting…" : previous ? "Send corrected details →" : "Submit employment acceptance →"}
         </button>
       </div>
       <p className="text-[11px] text-gray-400">
@@ -233,11 +275,7 @@ function EmploymentSummary({ status }: { status: EmploymentStatus }) {
           label="Submitted"
           value={
             d?.acceptanceDate
-              ? new Date(d.acceptanceDate).toLocaleString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  dateStyle: "medium",
-                  timeStyle: "short",
-                })
+              ? formatDateTime(d.acceptanceDate)
               : null
           }
         />
@@ -247,23 +285,19 @@ function EmploymentSummary({ status }: { status: EmploymentStatus }) {
           &ldquo;{d.notes}&rdquo;
         </p>
       )}
-      {d?.offerDocumentUrl && (
-        <a
-          href={d.offerDocumentUrl}
-          target="_blank"
-          rel="noreferrer"
-          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sage-navy hover:underline"
+      {d?.hasOffer && (
+        <button
+          type="button"
+          onClick={() => viewMyOfferDocument().catch(() => {})}
+          className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sage-navy hover:underline cursor-pointer"
         >
           <FileText size={11} /> View uploaded offer document
-        </a>
+        </button>
       )}
       {verified && d?.ermVerifiedDate && (
         <p className="mt-3 text-xs text-emerald-700">
           Verified by {status.ermName ?? "your ERM"} on{" "}
-          {new Date(d.ermVerifiedDate).toLocaleDateString("en-IN", {
-            timeZone: "Asia/Kolkata",
-            dateStyle: "medium",
-          })}
+          {formatDateMedium(d.ermVerifiedDate)}
           .
           {d.ermNotes && (
             <span className="block text-gray-600 italic mt-1">
@@ -359,14 +393,16 @@ function Phase1Section({
           <span>
             Phase 1 acknowledgment accepted on{" "}
             {status.phase1?.acceptedAt
-              ? new Date(status.phase1.acceptedAt).toLocaleDateString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  dateStyle: "medium",
-                })
+              ? formatDateMedium(status.phase1.acceptedAt)
               : "—"}{" "}
             ·{" "}
             <span className="font-mono text-xs">
               {status.phase1?.acknowledgmentVersion}
+            </span>
+            <span className="block text-xs text-emerald-800 mt-0.5">
+              {status.phase1?.ermApproved
+                ? `Approved by your ERM${status.phase1.ermApprovedDate ? " on " + formatDateMedium(status.phase1.ermApprovedDate) : ""}.`
+                : "Waiting for your ERM to approve it."}
             </span>
           </span>
         </div>
@@ -411,6 +447,34 @@ function Phase1Section({
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * Checklist 4.5: once the ERM approves Phase 1, Phase 2 (post-offer
+ * support) begins on the employment start date.
+ */
+function Phase2Section({ phase2 }: { phase2: NonNullable<EmploymentStatus["phase2"]> }) {
+  const [y, m, d] = (phase2.startDate ?? "").split("-").map(Number);
+  const when = phase2.startDate
+    ? new Date(y, m - 1, d).toLocaleDateString("en-US", { dateStyle: "medium" })
+    : null;
+  return (
+    <div className="rounded-2xl border border-sage-navy/20 bg-sage-navy/5 p-5 space-y-2">
+      <h2 className="text-xl font-bold text-gray-900">Phase 2 — post-offer support</h2>
+      <p className="text-sm text-gray-700">
+        {phase2.started
+          ? `Active since ${when ?? "your start date"}.`
+          : `Starts on ${when ?? "your start date"}, your first day in the new role.`}
+      </p>
+      <ul className="list-disc pl-5 text-[13px] text-gray-700 space-y-0.5">
+        <li>Transition and onboarding support for the new role</li>
+        <li>Role-aligned coaching and technical guidance</li>
+        <li>Documentation support</li>
+        <li>Web-based resources, as set out in your agreement</li>
+      </ul>
+      <p className="text-xs text-gray-500">Your ERM and coaches stay your contacts during Phase 2.</p>
     </div>
   );
 }

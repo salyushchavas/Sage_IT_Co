@@ -3,8 +3,9 @@
 import { ReactNode } from "react";
 import { Loader2 } from "lucide-react";
 
-// Shared finance UI primitives. All currency is rendered in Indian
-// rupees with the en-IN locale; finance views never display dollars.
+import { formatMoney } from "@/lib/money";
+
+// Shared finance UI primitives. All amounts are US dollars (checklist 5.3).
 
 export function Pill({ children }: { children: ReactNode }) {
   return (
@@ -75,9 +76,7 @@ export function Stat({
   );
 }
 
+/** Checklist 5.3: US dollars ("$1,234.50"). */
 export function moneyFmt(v: string | number | null | undefined): string {
-  if (v == null || v === "") return "--";
-  const n = typeof v === "number" ? v : Number(v);
-  if (Number.isNaN(n)) return String(v);
-  return n.toLocaleString("en-IN", { style: "currency", currency: "INR" });
+  return formatMoney(v, "--");
 }

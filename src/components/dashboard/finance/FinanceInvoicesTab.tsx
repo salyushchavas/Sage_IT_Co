@@ -4,14 +4,17 @@ import { useEffect, useState } from "react";
 
 import {
   bulkGenerateInvoices,
+  downloadInvoicePdf,
   getFinanceInvoices,
   markOverdueInvoices,
-  type InvoiceDTO,
+  type FinanceInvoiceRow,
 } from "@/lib/api";
+import { formatDay } from "@/lib/datetime";
 import { Pill, Spinner, moneyFmt } from "./FinanceParts";
 
 export function FinanceInvoicesTab() {
-  const [rows, setRows] = useState<InvoiceDTO[]>([]);
+  const [rows, setRows] = useState<FinanceInvoiceRow[]>([]);
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("ALL");
@@ -53,6 +56,15 @@ export function FinanceInvoicesTab() {
     }
   };
 
+  const download = async (id: number) => {
+    setError("");
+    try {
+      await downloadInvoicePdf(id, true);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't download the invoice");
+    }
+  };
+
   if (loading) return <Spinner />;
 
   return (
@@ -76,6 +88,7 @@ export function FinanceInvoicesTab() {
           </button>
         </div>
       </div>
+      {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
         {["ALL", "UNPAID", "PARTIAL", "PAID", "OVERDUE"].map((s) => (
           <button
@@ -98,18 +111,19 @@ export function FinanceInvoicesTab() {
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
               <th className="text-left px-4 py-2">Invoice</th>
-              <th className="text-left px-4 py-2">User</th>
+              <th className="text-left px-4 py-2">Participant</th>
               <th className="text-left px-4 py-2">Amount</th>
               <th className="text-left px-4 py-2">Balance</th>
               <th className="text-left px-4 py-2">Due</th>
               <th className="text-left px-4 py-2">Status</th>
+              <th className="text-right px-4 py-2">PDF</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={6}
+                  colSpan={7}
                   className="px-4 py-6 text-center text-sm text-gray-400 italic"
                 >
                   No invoices match this filter.
@@ -120,19 +134,33 @@ export function FinanceInvoicesTab() {
                 <tr key={i.id}>
                   <td className="px-4 py-2 font-mono text-xs text-gray-700">
                     {i.invoiceNumber}
+                    {i.planNumber && (
+                      <div className="font-sans text-[10px] text-gray-400">{i.planNumber}</div>
+                    )}
                   </td>
-                  <td className="px-4 py-2 text-gray-700">#{i.userId}</td>
+                  <td className="px-4 py-2">
+                    <div className="font-medium text-gray-900">{i.participantName ?? `#${i.userId}`}</div>
+                    <div className="font-mono text-[10px] text-gray-400">{i.participantId ?? ""}</div>
+                  </td>
                   <td className="px-4 py-2 text-gray-700">
                     {moneyFmt(i.amount)}
                   </td>
                   <td className="px-4 py-2 text-gray-700">
                     {moneyFmt(i.balance)}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-gray-700">
-                    {i.dueDate ?? "--"}
+                  <td className="px-4 py-2 text-xs text-gray-700">
+                    {i.dueDate ? formatDay(i.dueDate) : "--"}
                   </td>
                   <td className="px-4 py-2">
-                    <Pill>{i.status}</Pill>
+                    <Pill>{i.status === "PARTIAL" ? "PART-PAID" : i.status}</Pill>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <button
+                      onClick={() => download(i.id)}
+                      className="text-xs font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
+                    >
+                      Download
+                    </button>
                   </td>
                 </tr>
               ))

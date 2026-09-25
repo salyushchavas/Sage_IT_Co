@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { Loader2, X, Plus, Trash2 } from "lucide-react";
 import { sendSalesQuote, type SalesQuoteItem } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
+import { formatMoney } from "@/lib/money";
 
 interface Props {
   isOpen: boolean;
@@ -126,7 +127,7 @@ export function SendQuoteModal({
                     step="0.01"
                     value={it.price}
                     onChange={(e) => updateItem(idx, { price: e.target.value })}
-                    placeholder="₹"
+                    placeholder="$"
                     className="w-28 px-3 py-2 rounded-lg border border-gray-300 bg-white text-sm tabular-nums focus:outline-none focus:ring-2 focus:ring-sage-navy/30"
                   />
                   <button
@@ -153,7 +154,7 @@ export function SendQuoteModal({
             <div className="flex items-center justify-between bg-sage-navy/5 rounded-lg px-4 py-3 mb-5">
               <span className="text-sm font-semibold text-gray-700">Total</span>
               <span className="text-xl font-bold text-sage-navy tabular-nums">
-                ₹{total.toLocaleString("en-IN")}
+                {formatMoney(total)}
               </span>
             </div>
 

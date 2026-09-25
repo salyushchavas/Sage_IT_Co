@@ -8,6 +8,7 @@ import {
   ArrowLeft,
   CheckCircle2,
   Loader2,
+  Mail,
   Power,
   RotateCcw,
   ShieldCheck,
@@ -15,14 +16,17 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
+import { homeForRole } from "@/lib/roles";
 import {
   getUserProfileAsAdmin,
   reactivateUserAsAdmin,
   softDeleteUserAsAdmin,
   updateUserRoleAsAdmin,
   updateUserStatusAsAdmin,
+  sendNewLoginDetails,
 } from "@/lib/api";
 import { UserRecordsPanel } from "@/components/admin/UserRecordsPanel";
+import { formatDateMedium } from "@/lib/datetime";
 
 interface UserProfile {
   id: number;
@@ -35,7 +39,12 @@ interface UserProfile {
   currentStatus?: string | null;
   participantId?: string | null;
   profileCompletionPct?: number | null;
+  personalEmail?: string | null;
+  mustChangePassword?: boolean;
 }
+
+/** Staff roles a System Admin can send new login details to. */
+const STAFF_ROLES = ["ERM", "COACH", "TECHNICAL_ADVISOR", "FINANCE", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"];
 
 const ROLE_OPTIONS = [
   "STUDENT",
@@ -87,6 +96,8 @@ export default function AdminUserDetailPage() {
         participantId: (p.participantId as string) ?? null,
         profileCompletionPct:
           (p.profileCompletionPct as number | undefined) ?? null,
+        personalEmail: (p.personalEmail as string) ?? null,
+        mustChangePassword: Boolean(p.mustChangePassword),
       });
     } catch (err) {
       setError(
@@ -104,7 +115,7 @@ export default function AdminUserDetailPage() {
       return;
     }
     if (role !== "ADMIN" && role !== "SYSTEM_ADMIN") {
-      router.replace("/dashboard");
+      router.replace(homeForRole(role));
       return;
     }
     void loadProfile();
@@ -127,6 +138,21 @@ export default function AdminUserDetailPage() {
         "error",
         err instanceof Error ? err.message : "Couldn't update role",
       );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  /** A new temporary password, emailed to them; they choose their own at sign-in. */
+  const handleSendLogin = async () => {
+    if (!profile) return;
+    if (!window.confirm(`Email ${profile.fullName ?? profile.email} a new temporary password? Their current password stops working.`)) return;
+    setBusy(true);
+    try {
+      showToast("success", await sendNewLoginDetails(profile.id));
+      await loadProfile();
+    } catch (err) {
+      showToast("error", err instanceof Error ? err.message : "Couldn't send new login details");
     } finally {
       setBusy(false);
     }
@@ -263,6 +289,9 @@ export default function AdminUserDetailPage() {
                 {profile.fullName ?? "(no name)"}
               </h1>
               <p className="text-sm text-zinc-600 truncate">{profile.email}</p>
+              {profile.personalEmail && (
+                <p className="text-xs text-zinc-400 truncate">Emails go to {profile.personalEmail}</p>
+              )}
               <div className="flex flex-wrap items-center gap-2 mt-2 text-xs">
                 <span className="px-2 py-0.5 rounded-full font-semibold bg-sage-navy/10 text-sage-navy">
                   {profile.role}
@@ -282,6 +311,11 @@ export default function AdminUserDetailPage() {
                     {profile.participantId}
                   </span>
                 )}
+                {profile.mustChangePassword && (
+                  <span className="px-2 py-0.5 rounded-full font-semibold bg-amber-50 text-amber-700">
+                    Waiting for first sign-in
+                  </span>
+                )}
                 <span className="text-zinc-400">User #{profile.id}</span>
               </div>
             </div>
@@ -298,11 +332,7 @@ export default function AdminUserDetailPage() {
                   Joined
                 </p>
                 <p className="text-zinc-900">
-                  {new Date(profile.createdAt).toLocaleDateString("en-IN", {
-                    year: "numeric",
-                    month: "short",
-                    day: "numeric",
-                  })}
+                  {formatDateMedium(profile.createdAt)}
                 </p>
               </div>
             )}
@@ -377,6 +407,15 @@ export default function AdminUserDetailPage() {
             soft-delete which scrubs personal data).
           </p>
           <div className="flex flex-wrap gap-3">
+            {role === "SYSTEM_ADMIN" && profile.isActive && STAFF_ROLES.includes(profile.role.toUpperCase()) && (
+              <button
+                onClick={handleSendLogin}
+                disabled={busy || isMe}
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
+              >
+                <Mail size={14} /> Send new login details
+              </button>
+            )}
             {profile.isActive ? (
               <button
                 onClick={handleDeactivate}

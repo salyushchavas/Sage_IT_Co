@@ -13,9 +13,11 @@ import {
   register as apiRegister,
   logout as apiLogout,
   getProfile,
+  refreshSession,
   type AuthResponse,
   type UserDTO,
 } from "./api";
+import { clearAccessTokenCookie, roleFromToken, setAccessTokenCookie } from "./roles";
 
 // Frontend uses same shape as Spring Boot UserDTO (camelCase)
 type AuthUser = UserDTO;
@@ -24,7 +26,7 @@ interface AuthContextValue {
   user: AuthUser | null;
   isAuthenticated: boolean;
   isLoading: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string) => Promise<AuthUser>;
   register: (name: string, email: string, password: string) => Promise<void>;
   logout: () => void;
   // Stash a freshly-minted session (e.g. from the /enroll endpoint
@@ -40,15 +42,6 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
-function setCookie(name: string, value: string, days: number) {
-  const expires = new Date(Date.now() + days * 864e5).toUTCString();
-  document.cookie = `${name}=${encodeURIComponent(value)}; expires=${expires}; path=/; SameSite=Lax`;
-}
-
-function deleteCookie(name: string) {
-  document.cookie = `${name}=; expires=Thu, 01 Jan 1970 00:00:00 GMT; path=/;`;
-}
-
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -56,14 +49,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const storeTokens = (data: AuthResponse) => {
     localStorage.setItem("access_token", data.accessToken);
     localStorage.setItem("refresh_token", data.refreshToken);
-    setCookie("access_token", data.accessToken, 7);
+    setAccessTokenCookie(data.accessToken);
     setUser(data.user);
   };
 
   const clearAuth = useCallback(() => {
     localStorage.removeItem("access_token");
     localStorage.removeItem("refresh_token");
-    deleteCookie("access_token");
+    clearAccessTokenCookie();
     setUser(null);
   }, []);
 
@@ -76,6 +69,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       try {
         const profile = await getProfile();
+        // A role changed since this token was issued: get a token with
+        // the current role, so the route guard and the pages agree.
+        const tokenRole = roleFromToken(localStorage.getItem("access_token"));
+        if (tokenRole && profile.role && tokenRole !== profile.role.toUpperCase()) {
+          await refreshSession();
+        }
+        const current = localStorage.getItem("access_token");
+        if (current) setAccessTokenCookie(current);
         setUser(profile);
       } catch {
         clearAuth();
@@ -89,6 +90,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const login = useCallback(async (email: string, password: string) => {
     const data = await apiLogin({ email, password });
     storeTokens(data);
+    return data.user;
   }, []);
 
   const register = useCallback(

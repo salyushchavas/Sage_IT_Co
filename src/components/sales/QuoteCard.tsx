@@ -4,6 +4,7 @@ import { useState } from "react";
 import { Loader2, CheckCircle2, X } from "lucide-react";
 import { acceptSalesQuote, declineSalesQuote, parseQuoteItems, type SalesMessage } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/money";
 
 interface Props {
   inquiryId: number;
@@ -75,7 +76,7 @@ export function QuoteCard({ inquiryId, message, isStudent, onUpdated }: Props) {
                 "tabular-nums font-medium",
                 it.price < 0 ? "text-emerald-700" : "text-gray-900"
               )}>
-                {it.price < 0 ? "−" : ""}₹{Math.abs(it.price).toLocaleString("en-IN")}
+                {it.price < 0 ? "−" : ""}{formatMoney(Math.abs(it.price))}
               </span>
             </div>
           ))}
@@ -85,7 +86,7 @@ export function QuoteCard({ inquiryId, message, isStudent, onUpdated }: Props) {
       <div className="flex items-center justify-between pt-2 border-t border-current/10">
         <span className="font-semibold text-gray-700">Total</span>
         <span className="text-lg font-bold text-sage-navy tabular-nums">
-          ₹{total.toLocaleString("en-IN")}
+          {formatMoney(total)}
         </span>
       </div>
 

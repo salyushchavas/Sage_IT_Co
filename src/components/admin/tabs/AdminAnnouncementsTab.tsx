@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Plus, Pencil, Trash2 } from "lucide-react";
+import { formatDateMedium } from "@/lib/datetime";
 
 import {
   createAnnouncement,
@@ -82,8 +83,8 @@ export function AdminAnnouncementsTab() {
                     </div>
                     <p className="text-sm text-zinc-600">{a.message}</p>
                     <p className="text-[10px] text-zinc-400 mt-1.5">
-                      Created {new Date(a.createdAt).toLocaleDateString("en-IN")}
-                      {a.expiresAt && <> · expires {new Date(a.expiresAt).toLocaleDateString("en-IN")}</>}
+                      Created {formatDateMedium(a.createdAt)}
+                      {a.expiresAt && <> · expires {formatDateMedium(a.expiresAt)}</>}
                       {a.createdByName && <> · by {a.createdByName}</>}
                     </p>
                   </div>

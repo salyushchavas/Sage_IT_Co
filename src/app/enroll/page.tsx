@@ -7,7 +7,7 @@ import { useForm } from "react-hook-form";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Eye, EyeOff, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import OnboardingProgressBar from "@/components/OnboardingProgressBar";
 import { enrollParticipant } from "@/lib/api";
@@ -33,7 +33,10 @@ const enrollSchema = z.object({
   phone: z
     .string()
     .min(7, "Phone number is required")
-    .regex(/^[+\d\s()-]{7,20}$/, "Use only digits, spaces, +, -, or parentheses"),
+    .regex(/^[+\d\s()-]{7,20}$/, "Use only digits, spaces, +, -, or parentheses")
+    .refine((v) => v.replace(/\D/g, "").length >= 8, {
+      message: "Enter a valid phone number, including the area code",
+    }),
   password: z.string().min(8, "Password must be at least 8 characters"),
 });
 
@@ -51,10 +54,20 @@ export default function EnrollPage() {
   const {
     register,
     handleSubmit,
+    setValue,
     formState: { errors, isSubmitting },
   } = useForm<EnrollValues>({
     resolver: zodResolver(enrollSchema),
   });
+
+  // An invitation link (/enroll?email=…&name=…) fills in their details.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search);
+    const email = q.get("email");
+    const name = q.get("name");
+    if (email) setValue("email", email);
+    if (name) setValue("fullName", name);
+  }, [setValue]);
 
   const onSubmit = async (data: EnrollValues) => {
     setError("");

@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Loader2, X, MessageSquare } from "lucide-react";
 import { createSalesInquiry } from "@/lib/api";
 import { useToast } from "@/components/ui/Toast";
+import { formatMoney } from "@/lib/money";
 
 interface Props {
   isOpen: boolean;
@@ -16,10 +17,10 @@ interface Props {
 }
 
 const BUDGET_OPTIONS = [
-  "Under ₹1,000",
-  "₹1,000-₹2,000",
-  "₹2,000-₹3,000",
-  "₹3,000+",
+  "Under $1,000",
+  "$1,000-$2,000",
+  "$2,000-$3,000",
+  "$3,000+",
   "Flexible",
 ];
 
@@ -94,7 +95,7 @@ export function ContactSalesModal({ isOpen, onClose, courseId, courseTitle, list
             </div>
 
             <div className="bg-gray-50 rounded-lg px-3 py-2 text-xs text-gray-600 mb-5">
-              Listed price: <span className="font-semibold text-gray-900">₹{listedPrice.toLocaleString("en-IN")}</span>
+              Listed price: <span className="font-semibold text-gray-900">{formatMoney(listedPrice)}</span>
             </div>
 
             <div className="space-y-4">

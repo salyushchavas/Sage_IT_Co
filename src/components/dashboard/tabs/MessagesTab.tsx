@@ -7,6 +7,7 @@ import type {
   ParticipantDashboard as DashboardData,
   ParticipantTeam,
 } from "@/lib/api";
+import { formatDateTime } from "@/lib/datetime";
 
 interface Props {
   data: DashboardData;
@@ -62,11 +63,7 @@ export default function MessagesTab({ data, team }: Props) {
                 <p className="text-gray-800">{m.title}</p>
                 <p className="text-[11px] text-gray-400">
                   {m.category} ·{" "}
-                  {new Date(m.createdAt).toLocaleString("en-IN", {
-                    timeZone: "Asia/Kolkata",
-                    dateStyle: "medium",
-                    timeStyle: "short",
-                  })}
+                  {formatDateTime(m.createdAt)}
                 </p>
               </div>
             </div>

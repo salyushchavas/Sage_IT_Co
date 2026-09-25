@@ -9,7 +9,7 @@ import {
   BookOpen, Shield, ExternalLink,
 } from "lucide-react";
 import { verifyCertificate, type CertificateVerification } from "@/lib/api";
-import { formatISTDate } from "@/lib/datetime";
+import { formatDateLong } from "@/lib/datetime";
 
 /**
  * Public certificate verification page. Reachable without auth so a
@@ -128,7 +128,7 @@ function ValidCard({ data }: { data: CertificateVerification }) {
           <DetailRow
             icon={Calendar}
             label="Issued"
-            value={formatISTDate(data.issuedAt)}
+            value={formatDateLong(data.issuedAt)}
           />
         )}
         <DetailRow

@@ -5,6 +5,7 @@ import { AlertCircle, CheckCircle2, Loader2, Send } from "lucide-react";
 
 import {
   acceptPaymentPlan,
+  downloadInvoicePdf,
   getParticipantPaymentPlan,
   getParticipantPaymentSummary,
   listParticipantCheckTracking,
@@ -17,8 +18,27 @@ import {
   type PaymentLedgerDTO,
   type PaymentSummary,
 } from "@/lib/api";
+import { formatDateMedium, formatDay } from "@/lib/datetime";
+import { formatMoney } from "@/lib/money";
 
 const PAYMENT_PLAN_ACK_VERSION = "PPL-v1.0";
+
+/** Checklist 5.2: what each payment-history line is. */
+const ENTRY_LABEL: Record<string, string> = {
+  PAYMENT: "Payment",
+  FAILED: "Didn't go through",
+  WAIVER: "Waived",
+  REVERSAL: "Reversed",
+};
+
+const METHOD_LABEL: Record<string, string> = {
+  CHEQUE: "Check",
+  BANK_TRANSFER: "Bank transfer",
+  CARD: "Card",
+  CASH: "Cash",
+  ONLINE: "Online",
+  WAIVER: "—",
+};
 
 /**
  * Participant payments surface. Read-mostly with two write paths:
@@ -139,6 +159,8 @@ function PaymentPlanSection({
 
   const alreadyAccepted = !!plan.acceptedAt;
   const schedule = res?.schedule ?? [];
+  // Checklist 5.1: Finance can change a plan before its first invoice; the
+  // participant then accepts it again.
 
   return (
     <div
@@ -162,12 +184,7 @@ function PaymentPlanSection({
         {alreadyAccepted && (
           <span className="inline-flex items-center gap-1.5 text-xs font-bold text-emerald-700">
             <CheckCircle2 size={12} /> Accepted
-            {plan.acceptedAt &&
-              " on " +
-                new Date(plan.acceptedAt).toLocaleDateString("en-IN", {
-                  timeZone: "Asia/Kolkata",
-                  dateStyle: "medium",
-                })}
+            {plan.acceptedAt && " on " + formatDateMedium(plan.acceptedAt)}
           </span>
         )}
       </div>
@@ -195,8 +212,8 @@ function PaymentPlanSection({
               schedule.map((s, idx) => (
                 <tr key={idx}>
                   <td className="px-3 py-2 text-gray-700">{idx + 1}</td>
-                  <td className="px-3 py-2 font-mono text-xs text-gray-700">
-                    {s.dueDate ?? "—"}
+                  <td className="px-3 py-2 text-xs text-gray-700">
+                    {formatDay(s.dueDate)}
                   </td>
                   <td className="px-3 py-2 text-gray-700">
                     {formatMoney(s.amount)}
@@ -402,8 +419,8 @@ function CheckTrackingSection({
                   <td className="px-3 py-2 font-mono text-[10px] text-gray-500">
                     {t.trackingId ?? "—"}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs text-gray-700">
-                    {t.mailedDate ?? "—"}
+                  <td className="px-3 py-2 text-xs text-gray-700">
+                    {formatDay(t.mailedDate)}
                   </td>
                   <td className="px-3 py-2">
                     <span
@@ -430,24 +447,36 @@ function CheckTrackingSection({
 }
 
 function InvoicesSection({ invoices }: { invoices: InvoiceDTO[] }) {
+  const [error, setError] = useState("");
+  const download = async (id: number) => {
+    setError("");
+    try {
+      await downloadInvoicePdf(id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't download the invoice");
+    }
+  };
   return (
     <div className="rounded-2xl border border-gray-100 bg-white shadow-sm p-5 space-y-3">
       <h2 className="text-xl font-bold text-gray-900">Invoices</h2>
+      {error && <p className="text-sm text-red-700">{error}</p>}
       <div className="rounded-xl border border-gray-100 bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
               <th className="text-left px-3 py-2">Invoice #</th>
               <th className="text-left px-3 py-2">Amount</th>
+              <th className="text-left px-3 py-2">Still to pay</th>
               <th className="text-left px-3 py-2">Due</th>
               <th className="text-left px-3 py-2">Status</th>
+              <th className="text-right px-3 py-2">PDF</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
             {invoices.length === 0 ? (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={6}
                   className="px-3 py-4 text-center text-xs text-gray-400 italic"
                 >
                   No invoices yet.
@@ -462,11 +491,23 @@ function InvoicesSection({ invoices }: { invoices: InvoiceDTO[] }) {
                   <td className="px-3 py-2 text-gray-700">
                     {formatMoney(i.amount)}
                   </td>
-                  <td className="px-3 py-2 font-mono text-xs text-gray-700">
-                    {i.dueDate ?? "—"}
+                  <td className="px-3 py-2 text-gray-700">
+                    {formatMoney(i.balance ?? i.amount)}
+                  </td>
+                  <td className="px-3 py-2 text-xs text-gray-700">
+                    {formatDay(i.dueDate)}
                   </td>
                   <td className="px-3 py-2">
                     <InvoiceStatusBadge status={i.status} />
+                  </td>
+                  <td className="px-3 py-2 text-right">
+                    <button
+                      type="button"
+                      onClick={() => download(i.id)}
+                      className="text-xs font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
+                    >
+                      Download
+                    </button>
                   </td>
                 </tr>
               ))
@@ -491,7 +532,7 @@ function InvoiceStatusBadge({ status }: { status: string }) {
     <span
       className={"px-2 py-0.5 rounded-full text-[10px] font-bold " + cls}
     >
-      {status}
+      {status === "PARTIAL" ? "PART-PAID" : status}
     </span>
   );
 }
@@ -514,6 +555,9 @@ function PaymentSummarySection({
           accent="emerald"
         />
         <SmallStat label="Balance" value={formatMoney(summary.balance)} />
+        {Number(summary.totalWaived ?? 0) > 0 && (
+          <SmallStat label="Waived" value={formatMoney(summary.totalWaived)} />
+        )}
         <SmallStat
           label="Overdue"
           value={formatMoney(summary.overdue)}
@@ -525,7 +569,7 @@ function PaymentSummarySection({
             summary.nextDueAmount
               ? formatMoney(summary.nextDueAmount) +
                 " · " +
-                (summary.nextDueDate ?? "")
+                formatDay(summary.nextDueDate ?? null)
               : "—"
           }
         />
@@ -540,10 +584,10 @@ function PaymentSummarySection({
             <thead className="bg-gray-50 text-[10px] uppercase tracking-wider font-semibold text-gray-500">
               <tr>
                 <th className="text-left px-3 py-2">Date</th>
+                <th className="text-left px-3 py-2">What</th>
                 <th className="text-left px-3 py-2">Amount</th>
                 <th className="text-left px-3 py-2">Method</th>
-                <th className="text-left px-3 py-2">Invoice</th>
-                <th className="text-left px-3 py-2">Balance</th>
+                <th className="text-left px-3 py-2">Invoice balance after</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -559,17 +603,17 @@ function PaymentSummarySection({
               ) : (
                 history.map((h) => (
                   <tr key={h.id}>
-                    <td className="px-3 py-2 font-mono text-xs text-gray-700">
-                      {h.receiptDate ?? "—"}
+                    <td className="px-3 py-2 text-xs text-gray-700">
+                      {formatDay(h.receiptDate)}
                     </td>
-                    <td className="px-3 py-2 text-gray-700">
+                    <td className="px-3 py-2 text-xs text-gray-700">
+                      {ENTRY_LABEL[h.entryType ?? "PAYMENT"] ?? h.entryType}
+                    </td>
+                    <td className={"px-3 py-2 " + (h.entryType === "FAILED" ? "text-gray-400 line-through" : "text-gray-700")}>
                       {formatMoney(h.amountReceived)}
                     </td>
                     <td className="px-3 py-2 text-gray-700">
-                      {h.method ?? "—"}
-                    </td>
-                    <td className="px-3 py-2 text-xs text-gray-500">
-                      #{h.invoiceId ?? "—"}
+                      {h.method ? METHOD_LABEL[h.method] ?? h.method : "—"}
                     </td>
                     <td className="px-3 py-2 text-gray-700">
                       {formatMoney(h.balance)}
@@ -634,18 +678,4 @@ function Input({
       />
     </div>
   );
-}
-
-/**
- * Format a numeric amount as INR currency. Sage's pricing model is
- * Indian Rupees throughout (services + courses + invoices), so we
- * fix the currency at INR rather than locale-detect -- Spire's
- * USD default was a Spire-specific deployment choice that wouldn't
- * match Sage's catalog rates.
- */
-function formatMoney(v: string | number | null | undefined): string {
-  if (v == null || v === "") return "—";
-  const n = typeof v === "number" ? v : Number(v);
-  if (Number.isNaN(n)) return String(v);
-  return n.toLocaleString("en-IN", { style: "currency", currency: "INR" });
 }

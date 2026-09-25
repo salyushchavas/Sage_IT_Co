@@ -18,6 +18,7 @@ const FULLSCREEN_PREFIXES = [
   "/signup",
   "/forgot-password",
   "/reset-password",
+  "/change-password",
   "/enroll",
   "/verify-email",
   "/participant-id",

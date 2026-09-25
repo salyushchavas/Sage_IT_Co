@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { AlertCircle, CheckCircle2, Loader2, Save } from "lucide-react";
+import { formatDateMedium } from "@/lib/datetime";
 
 import {
   getParticipantProfile,
@@ -92,10 +93,7 @@ export default function ProfileTab() {
             label="Enrolled"
             value={
               profile?.createdAt
-                ? new Date(profile.createdAt).toLocaleDateString("en-IN", {
-                    timeZone: "Asia/Kolkata",
-                    dateStyle: "medium",
-                  })
+                ? formatDateMedium(profile.createdAt)
                 : null
             }
           />

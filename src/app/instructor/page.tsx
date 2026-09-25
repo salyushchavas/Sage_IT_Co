@@ -15,6 +15,7 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
+import { formatMoney } from "@/lib/money";
 
 interface InstructorCourse {
   id: number;
@@ -272,7 +273,7 @@ export default function InstructorHubPage() {
                       <span>· {moduleCount} module{moduleCount === 1 ? "" : "s"}</span>
                       <span>· {c.lessonsCount} lesson{c.lessonsCount === 1 ? "" : "s"}</span>
                       <span className="font-semibold text-gray-700">
-                        {c.isFree ? "Free" : `₹${Number(c.price).toLocaleString("en-IN")}`}
+                        {c.isFree ? "Free" : formatMoney(c.price)}
                       </span>
                       {c.category && <span>· {c.category}</span>}
                     </div>

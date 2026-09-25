@@ -1,6 +1,8 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
+import { canOpenAdminPages, homeForRole, roleFromToken } from "@/lib/roles";
+
 const PROTECTED_PATHS = ["/dashboard", "/admin"];
 const ADMIN_PATHS = ["/admin"];
 
@@ -22,15 +24,14 @@ export function middleware(request: NextRequest) {
 
   const isAdmin = ADMIN_PATHS.some((p) => pathname.startsWith(p));
   if (isAdmin) {
-    try {
-      const payload = JSON.parse(
-        Buffer.from(token.split(".")[1], "base64").toString()
-      );
-      if (payload.role?.toUpperCase() !== "ADMIN") {
-        return NextResponse.redirect(new URL("/dashboard", request.url));
-      }
-    } catch {
+    const role = roleFromToken(token);
+    if (!role) {
       return NextResponse.redirect(new URL("/login", request.url));
+    }
+    // System Admin and Admin get in; anyone else goes to their own home
+    // page (never /admin, so this can't loop).
+    if (!canOpenAdminPages(role)) {
+      return NextResponse.redirect(new URL(homeForRole(role), request.url));
     }
   }
 

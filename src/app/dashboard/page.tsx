@@ -22,6 +22,7 @@ import ProfileTab from "@/components/dashboard/tabs/ProfileTab";
 import ResumeTab from "@/components/dashboard/tabs/ResumeTab";
 import TeamTab from "@/components/dashboard/tabs/TeamTab";
 import { useAuth } from "@/lib/auth-context";
+import { homeForRole } from "@/lib/roles";
 import {
   getOnboardingRoute,
   getParticipantDashboard,
@@ -90,6 +91,9 @@ const GATED_TABS: Record<string, GatedCopy> = {
   },
 };
 
+/** Tabs that also wait for the team to be ready (checklist 3.5). */
+const TEAM_TABS = new Set(["weekly", "employment", "payments"]);
+
 function DashboardPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -115,29 +119,11 @@ function DashboardPageInner() {
         return;
       }
 
-      const role = (user.role ?? "").toUpperCase();
-      if (role === "ADMIN" || role === "INSTRUCTOR") {
-        router.replace("/admin");
-        return;
-      }
-      if (role === "ERM") {
-        router.replace("/erm-dashboard");
-        return;
-      }
-      if (role === "COACH" || role === "TECHNICAL_ADVISOR") {
-        router.replace("/coach-dashboard");
-        return;
-      }
-      if (role === "FINANCE") {
-        router.replace("/finance-dashboard");
-        return;
-      }
-      if (role === "OPERATIONS_ADMIN") {
-        router.replace("/operations");
-        return;
-      }
-      if (role === "SYSTEM_ADMIN") {
-        router.replace("/admin");
+      // Staff go to their own home page (the same map the route guard
+      // uses, so no page and guard can bounce a role between them).
+      const home = homeForRole(user.role);
+      if (home !== "/dashboard") {
+        router.replace(home);
         return;
       }
 
@@ -263,6 +249,18 @@ function renderTab(
           subtitle={gated.subtitle}
           headline={`${gated.title} unlocks once your profile is complete`}
           body={gated.body}
+        />
+      );
+    }
+    // Checklist 3.5: these need the team (ERM + coaches) in place too.
+    if (TEAM_TABS.has(tab) && dashboardData && !dashboardData.teamReady) {
+      return (
+        <LockedTabView
+          title={gated.title}
+          subtitle={gated.subtitle}
+          headline={`${gated.title} opens once your team is ready`}
+          body="We're assigning your relationship manager and coaches. This tab opens as soon as your team is in place."
+          teamPending
         />
       );
     }

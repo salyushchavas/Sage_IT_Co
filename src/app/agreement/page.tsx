@@ -13,6 +13,7 @@ import SignatureCanvas from "react-signature-canvas";
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
+  declineParticipantAgreement, getAgreementStatus,
   getProgramSelection, getTerms,
   signParticipantAgreement,
   type ProgramSelectionDTO, type TermsResponse, type UserDTO,
@@ -32,7 +33,7 @@ import {
  * on its own /check-upload page now.
  */
 
-const AGREEMENT_VERSION = "v1.0";
+const AGREEMENT_VERSION = "v2.0";  // fallback until the server text loads
 const ACK_VERSION = "ACK-v1.0";
 const SVC_VERSION = "SVC-v1.0";
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
@@ -66,6 +67,13 @@ function AgreementPageInner() {
   const [signError, setSignError] = useState("");
   const [signed, setSigned] = useState(false);
 
+  // Checklist 2.5: declining (with a reason) instead of signing. The
+  // participant can still sign later; Operations sees it in their queue.
+  const [declined, setDeclined] = useState(false);
+  const [showDecline, setShowDecline] = useState(false);
+  const [declineReason, setDeclineReason] = useState("");
+  const [declining, setDeclining] = useState(false);
+
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
@@ -92,13 +100,15 @@ function AgreementPageInner() {
       try {
         setProfile(user);
         if (user.fullName) setLegalName(user.fullName);
-        const [progRes, termsRes] = await Promise.allSettled([
+        const [progRes, termsRes, statusRes] = await Promise.allSettled([
           getProgramSelection(),
           getTerms(),
+          getAgreementStatus(),
         ]);
         if (cancelled) return;
         if (progRes.status === "fulfilled") setProgram(progRes.value);
         if (termsRes.status === "fulfilled") setTerms(termsRes.value);
+        if (statusRes.status === "fulfilled") setDeclined(statusRes.value?.status === "DECLINED");
         setGateChecked(true);
       } catch (err) {
         if (!cancelled) {
@@ -173,6 +183,8 @@ function AgreementPageInner() {
         legalName: legalName.trim(),
         signatureImage: signatureData,
         signatureMethod,
+        agreementVersion: terms?.version,
+        textFingerprint: terms?.fingerprint,
       });
       setSigned(true);
       // Refresh the in-memory user so the auth context picks up
@@ -194,6 +206,21 @@ function AgreementPageInner() {
       setSignError(err instanceof Error ? err.message : "Couldn't sign agreement");
     } finally {
       setSigning(false);
+    }
+  };
+
+  const handleDecline = async () => {
+    setDeclining(true);
+    setSignError("");
+    try {
+      await declineParticipantAgreement(declineReason.trim());
+      setDeclined(true);
+      setShowDecline(false);
+      setDeclineReason("");
+    } catch (err) {
+      setSignError(err instanceof Error ? err.message : "Couldn't record your answer");
+    } finally {
+      setDeclining(false);
     }
   };
 
@@ -252,7 +279,7 @@ function AgreementPageInner() {
               <SummaryRow label="Availability" value={program?.availability} />
               <SummaryRow
                 label="Versions"
-                value={`${AGREEMENT_VERSION} · ${ACK_VERSION} · ${SVC_VERSION}`}
+                value={`${terms?.version ?? AGREEMENT_VERSION} · ${ACK_VERSION} · ${SVC_VERSION}`}
                 mono
               />
             </div>
@@ -426,6 +453,53 @@ function AgreementPageInner() {
               {signing && <Loader2 size={14} className="animate-spin" />}
               {signing ? "Signing…" : "Sign Agreement →"}
             </button>
+
+            {declined ? (
+              <p className="mt-3 inline-flex items-start gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+                <AlertCircle size={12} className="mt-0.5 shrink-0" />
+                You declined this agreement. Operations will be in touch; you can still sign it here whenever you&apos;re ready.
+              </p>
+            ) : showDecline ? (
+              <div className="mt-3 space-y-1.5">
+                <label htmlFor="decline-reason" className="block text-[11px] text-gray-600">
+                  Tell us why you don&apos;t want to sign. Operations will get in touch.
+                </label>
+                <textarea
+                  id="decline-reason"
+                  value={declineReason}
+                  onChange={(e) => setDeclineReason(e.target.value)}
+                  rows={2}
+                  maxLength={1000}
+                  className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-400 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy resize-none"
+                />
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={handleDecline}
+                    disabled={declining || declineReason.trim().length < 5}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+                  >
+                    {declining && <Loader2 size={12} className="animate-spin" />}
+                    Decline agreement
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { setShowDecline(false); setDeclineReason(""); }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setShowDecline(true)}
+                className="mt-3 w-full text-center text-[11px] font-semibold text-gray-500 hover:text-gray-800 cursor-pointer"
+              >
+                Don&apos;t want to sign? Decline and tell us why
+              </button>
+            )}
           </motion.section>
         ) : (
           <motion.section

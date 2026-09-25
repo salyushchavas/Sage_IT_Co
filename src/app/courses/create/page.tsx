@@ -117,7 +117,7 @@ export default function CreateCoursePage() {
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
-                <label className="block text-sm text-zinc-600 mb-1.5">Price (INR)</label>
+                <label className="block text-sm text-zinc-600 mb-1.5">Price (USD)</label>
                 <input type="number" name="price" value={form.price} onChange={handleChange} min="0" step="1" placeholder="0 = Free" className={inputClass} />
                 <p className="text-xs text-zinc-600 mt-1">Leave 0 for free courses</p>
               </div>

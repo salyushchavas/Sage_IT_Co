@@ -10,6 +10,7 @@ import {
   Send,
   Trash2,
 } from "lucide-react";
+import { formatDateMedium } from "@/lib/datetime";
 
 import {
   listWeeklyReports,
@@ -105,7 +106,21 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
 
-  // Load reports + pre-fill form from the current-week draft (if any).
+  // Checklist 4.3: this week or last week (last week can still be filed;
+  // it's what the Monday reminder asks for). Last week is only offered
+  // from the week reporting started.
+  const canFileLastWeek = !!dashboardData.previousWeekStart && !!dashboardData.earliestReportWeek
+    && dashboardData.previousWeekStart >= dashboardData.earliestReportWeek;
+  const [week, setWeek] = useState<"current" | "previous">(
+    canFileLastWeek && dashboardData.previousWeekOwed ? "previous" : "current");
+  const selected = week === "previous"
+    ? { start: dashboardData.previousWeekStart, end: dashboardData.previousWeekEnd, due: dashboardData.previousWeekDue }
+    : { start: dashboardData.currentWeekStart, end: dashboardData.currentWeekEnd, due: dashboardData.currentWeekDue };
+  const selectedStatus = reports.find((r) => r.weekStart === selected.start)?.status;
+  const reviewed = selectedStatus === "REVIEWED";
+  const submitted = selectedStatus === "SUBMITTED";
+
+  // Load reports + pre-fill the form from the chosen week's report (if any).
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -113,7 +128,8 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
         const list = await listWeeklyReports();
         if (cancelled) return;
         setReports(list);
-        const weekStart = dashboardData.currentWeekStart;
+        setForm(blankForm());
+        const weekStart = selected.start;
         if (weekStart) {
           const current = list.find((r) => r.weekStart === weekStart);
           if (current && current.reportData) {
@@ -157,7 +173,8 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [dashboardData.currentWeekStart]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selected.start]);
 
   const metrics = useMemo(() => {
     const subs = form.jobs.filter((j) => (j.company ?? "").trim());
@@ -169,8 +186,8 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
   }, [form]);
 
   const toRequest = (): WeeklyReportRequest => ({
-    weekStart: dashboardData.currentWeekStart,
-    weekEnd: dashboardData.currentWeekEnd,
+    weekStart: selected.start,
+    weekEnd: selected.end,
     jobSubmissions: form.jobs.filter((j) => (j.company ?? "").trim()),
     resumeActivities: {
       resumeVersion: form.resumeVersion,
@@ -253,22 +270,46 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
           </h1>
           <p className="text-xs text-gray-500 mt-0.5">
             Week of{" "}
-            <span className="font-mono">
-              {dashboardData.currentWeekStart}
-            </span>{" "}
+            <span className="font-mono">{selected.start}</span>{" "}
             –{" "}
-            <span className="font-mono">{dashboardData.currentWeekEnd}</span>
-            {dashboardData.currentWeekEnd && (
+            <span className="font-mono">{selected.end}</span>
+            {selected.due && (
               <>
                 {" · "}due{" "}
-                <span className="font-mono">
-                  {addOneDay(dashboardData.currentWeekEnd)}
-                </span>
+                <span className="font-mono">{selected.due}</span>
               </>
+            )}
+            {selectedStatus === "OVERDUE" && (
+              <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-50 text-red-700">OVERDUE</span>
             )}
           </p>
         </div>
+        {canFileLastWeek && (
+          <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
+            {([["previous", "Last week"], ["current", "This week"]] as const).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => { setWeek(id); setFeedback(""); setError(""); }}
+                className={
+                  "px-2.5 py-1 rounded-md font-semibold cursor-pointer " +
+                  (week === id ? "bg-sage-navy text-white" : "text-gray-600 hover:text-sage-navy")
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
+
+      {reviewed && (
+        <p className="text-xs text-blue-700 bg-blue-50 border border-blue-100 rounded-md px-3 py-2">
+          Your ERM has reviewed this report, so it can&apos;t be changed.
+        </p>
+      )}
+
+      <fieldset disabled={reviewed} className="space-y-5 border-0 p-0 m-0 min-w-0">
 
       {/* Metrics */}
       <div className="grid grid-cols-3 gap-2.5">
@@ -469,6 +510,8 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
         )}
       </Section>
 
+      </fieldset>
+
       {error && (
         <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
           <AlertCircle size={14} /> {error}
@@ -484,7 +527,8 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
         <button
           type="button"
           onClick={handleSaveDraft}
-          disabled={saving || submitting}
+          disabled={saving || submitting || submitted || reviewed}
+          title={submitted ? "Already submitted: submit again to update it" : undefined}
           className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 cursor-pointer transition"
         >
           {saving ? (
@@ -497,7 +541,7 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={submitting || saving}
+          disabled={submitting || saving || reviewed}
           className="flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer transition"
         >
           {submitting ? (
@@ -505,7 +549,7 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
           ) : (
             <Send size={14} />
           )}
-          {submitting ? "Submitting…" : "Submit report"}
+          {submitting ? "Submitting…" : submitted ? "Update report" : "Submit report"}
         </button>
       </div>
 
@@ -541,9 +585,7 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
                 {r.submittedAt && (
                   <span className="text-xs text-gray-500">
                     Submitted{" "}
-                    {new Date(r.submittedAt).toLocaleDateString("en-IN", {
-                      timeZone: "Asia/Kolkata",
-                    })}
+                    {formatDateMedium(r.submittedAt)}
                   </span>
                 )}
                 {r.ermNotes && (
@@ -651,13 +693,4 @@ function Select({
       </select>
     </div>
   );
-}
-
-/** YYYY-MM-DD + 1 day -- used for the weekly report's due date hint. */
-function addOneDay(isoDate: string | null | undefined): string {
-  if (!isoDate) return "";
-  const d = new Date(isoDate + "T00:00:00");
-  if (Number.isNaN(d.getTime())) return "";
-  d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
 }

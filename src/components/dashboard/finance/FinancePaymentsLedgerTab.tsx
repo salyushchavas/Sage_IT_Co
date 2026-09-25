@@ -7,14 +7,38 @@ import {
   getFinanceInvoices,
   getFinanceLedger,
   recordPaymentReceipt,
-  type InvoiceDTO,
-  type PaymentLedgerDTO,
+  type FinanceInvoiceRow,
+  type FinanceLedgerRow,
+  type LedgerEntryType,
 } from "@/lib/api";
-import { Field, Spinner, moneyFmt } from "./FinanceParts";
+import { businessToday, formatDay } from "@/lib/datetime";
+import { Field, Pill, Spinner, moneyFmt } from "./FinanceParts";
 
+const ENTRY_LABEL: Record<LedgerEntryType, string> = {
+  PAYMENT: "Payment",
+  FAILED: "Failed payment",
+  WAIVER: "Waiver",
+  REVERSAL: "Reversal",
+};
+
+const METHOD_LABEL: Record<string, string> = {
+  CHEQUE: "Check",
+  BANK_TRANSFER: "Bank transfer",
+  CARD: "Card",
+  CASH: "Cash",
+  ONLINE: "Online",
+  WAIVER: "Waiver",
+  ADJUSTMENT: "Adjustment",
+};
+
+/**
+ * Checklist 5.2: the ledger takes payments, failed payments (the balance
+ * doesn't change), waivers and reversals of an earlier payment (e.g. a
+ * bounced check). A payment can't be more than the invoice's balance.
+ */
 export function FinancePaymentsLedgerTab() {
-  const [rows, setRows] = useState<PaymentLedgerDTO[]>([]);
-  const [invoices, setInvoices] = useState<InvoiceDTO[]>([]);
+  const [rows, setRows] = useState<FinanceLedgerRow[]>([]);
+  const [invoices, setInvoices] = useState<FinanceInvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showRecord, setShowRecord] = useState(false);
 
@@ -47,19 +71,21 @@ export function FinancePaymentsLedgerTab() {
           onClick={() => setShowRecord(true)}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
         >
-          + Record payment
+          + Record entry
         </button>
       </div>
+
       <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
               <th className="text-left px-4 py-2">Date</th>
-              <th className="text-left px-4 py-2">User</th>
+              <th className="text-left px-4 py-2">Participant</th>
               <th className="text-left px-4 py-2">Invoice</th>
+              <th className="text-left px-4 py-2">Type</th>
               <th className="text-left px-4 py-2">Amount</th>
               <th className="text-left px-4 py-2">Method</th>
-              <th className="text-left px-4 py-2">Balance</th>
+              <th className="text-left px-4 py-2">Balance after</th>
               <th className="text-left px-4 py-2">Notes</th>
             </tr>
           </thead>
@@ -67,44 +93,63 @@ export function FinancePaymentsLedgerTab() {
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={7}
+                  colSpan={8}
                   className="px-4 py-6 text-center text-sm text-gray-400 italic"
                 >
                   No payments recorded yet.
                 </td>
               </tr>
             ) : (
-              rows.map((r) => (
-                <tr key={r.id}>
-                  <td className="px-4 py-2 font-mono text-xs text-gray-700">
-                    {r.receiptDate ?? "--"}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">#{r.userId}</td>
-                  <td className="px-4 py-2 text-xs text-gray-500">
-                    #{r.invoiceId ?? "--"}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {moneyFmt(r.amountReceived)}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {r.method ?? "--"}
-                  </td>
-                  <td className="px-4 py-2 text-gray-700">
-                    {moneyFmt(r.balance)}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-[200px]">
-                    {r.notes ?? ""}
-                  </td>
-                </tr>
-              ))
+              rows.map((r) => {
+                const type = (r.entryType ?? "PAYMENT") as LedgerEntryType;
+                return (
+                  <tr key={r.id}>
+                    <td className="px-4 py-2 text-xs text-gray-700">
+                      {r.receiptDate ? formatDay(r.receiptDate) : "--"}
+                    </td>
+                    <td className="px-4 py-2">
+                      <div className="font-medium text-gray-900">{r.participantName ?? `#${r.userId}`}</div>
+                      <div className="font-mono text-[10px] text-gray-400">{r.participantId ?? ""}</div>
+                    </td>
+                    <td className="px-4 py-2 font-mono text-xs text-gray-500">
+                      {r.invoiceNumber ?? (r.invoiceId ? `#${r.invoiceId}` : "--")}
+                    </td>
+                    <td className="px-4 py-2">
+                      <Pill>{ENTRY_LABEL[type] ?? type}</Pill>
+                      {r.reversed && (
+                        <div className="mt-0.5 text-[10px] text-red-700">reversed</div>
+                      )}
+                    </td>
+                    <td
+                      className={
+                        "px-4 py-2 " +
+                        (type === "FAILED" ? "text-gray-400 line-through" : "text-gray-700")
+                      }
+                    >
+                      {type === "REVERSAL" ? "−" : ""}
+                      {moneyFmt(r.amountReceived)}
+                    </td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {r.method ? METHOD_LABEL[r.method] ?? r.method : "--"}
+                    </td>
+                    <td className="px-4 py-2 text-gray-700">
+                      {moneyFmt(r.balance)}
+                    </td>
+                    <td className="px-4 py-2 text-xs text-gray-500 truncate max-w-[200px]">
+                      {r.notes ?? ""}
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
       </div>
 
       {showRecord && (
-        <RecordPaymentModal
+        <RecordEntryModal
           invoices={invoices}
+          ledger={rows}
           onClose={() => setShowRecord(false)}
           onSaved={refresh}
         />
@@ -113,28 +158,39 @@ export function FinancePaymentsLedgerTab() {
   );
 }
 
-function RecordPaymentModal({
+function RecordEntryModal({
   invoices,
+  ledger,
   onClose,
   onSaved,
 }: {
-  invoices: InvoiceDTO[];
+  invoices: FinanceInvoiceRow[];
+  ledger: FinanceLedgerRow[];
   onClose: () => void;
   onSaved: () => Promise<void>;
 }) {
-  const unpaid = invoices.filter(
-    (i) =>
-      i.status === "UNPAID" ||
-      i.status === "PARTIAL" ||
-      i.status === "OVERDUE",
-  );
+  const [type, setType] = useState<LedgerEntryType>("PAYMENT");
   const [invoiceId, setInvoiceId] = useState<string>("");
   const [amount, setAmount] = useState("");
-  const [date, setDate] = useState("");
+  const [date, setDate] = useState(businessToday());
   const [method, setMethod] = useState("CHEQUE");
   const [notes, setNotes] = useState("");
+  const [reversesId, setReversesId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+
+  // Payments and waivers go on invoices with a balance; a reversal undoes
+  // a payment on any invoice; a failed payment can be on any open invoice.
+  const choices = invoices.filter((i) =>
+    type === "REVERSAL"
+      ? ledger.some((l) => l.invoiceId === i.id && (l.entryType ?? "PAYMENT") === "PAYMENT" && !l.reversed)
+      : i.status === "UNPAID" || i.status === "PARTIAL" || i.status === "OVERDUE",
+  );
+  const invoice = invoices.find((i) => String(i.id) === invoiceId);
+  const payments = ledger.filter(
+    (l) => String(l.invoiceId) === invoiceId && (l.entryType ?? "PAYMENT") === "PAYMENT" && !l.reversed,
+  );
+  const needsReason = type !== "PAYMENT";
 
   const handleSubmit = async () => {
     setSaving(true);
@@ -142,19 +198,27 @@ function RecordPaymentModal({
     try {
       await recordPaymentReceipt({
         invoiceId: Number(invoiceId),
-        amountReceived: Number(amount),
+        entryType: type,
+        amountReceived: type === "REVERSAL" ? undefined : Number(amount),
         receiptDate: date || undefined,
-        method,
+        method: type === "WAIVER" || type === "REVERSAL" ? undefined : method,
         notes,
+        reversesLedgerId: type === "REVERSAL" ? Number(reversesId) : undefined,
       });
       await onSaved();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't record payment");
+      setError(e instanceof Error ? e.message : "Couldn't record it");
     } finally {
       setSaving(false);
     }
   };
+
+  const ready =
+    !!invoiceId &&
+    (type === "REVERSAL" ? !!reversesId : !!amount) &&
+    (!needsReason || notes.trim().length >= 3) &&
+    !saving;
 
   return (
     <div
@@ -165,7 +229,31 @@ function RecordPaymentModal({
         className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5"
         onClick={(e) => e.stopPropagation()}
       >
-        <h2 className="text-lg font-bold text-gray-900">Record payment</h2>
+        <h2 className="text-lg font-bold text-gray-900">Record a ledger entry</h2>
+        <div className="mt-3 inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
+          {(Object.keys(ENTRY_LABEL) as LedgerEntryType[]).map((t) => (
+            <button
+              key={t}
+              onClick={() => {
+                setType(t);
+                setInvoiceId("");
+                setReversesId("");
+              }}
+              className={
+                "px-2.5 py-1 rounded-md font-semibold cursor-pointer " +
+                (type === t ? "bg-sage-navy text-white" : "text-gray-600 hover:text-sage-navy")
+              }
+            >
+              {ENTRY_LABEL[t]}
+            </button>
+          ))}
+        </div>
+        <p className="mt-1.5 text-[11px] text-gray-500">
+          {type === "PAYMENT" && "Money received. It can't be more than the invoice's balance."}
+          {type === "FAILED" && "An attempt that didn't go through (declined card, check that never cleared). The balance doesn't change; the participant is emailed."}
+          {type === "WAIVER" && "Part or all of the balance written off. Give the reason."}
+          {type === "REVERSAL" && "Undo a recorded payment (e.g. a bounced check). Its amount goes back on the balance; the participant is emailed."}
+        </p>
         <div className="mt-3 space-y-2">
           <div>
             <label className="block text-[11px] font-medium text-gray-600 mb-0.5">
@@ -173,50 +261,84 @@ function RecordPaymentModal({
             </label>
             <select
               value={invoiceId}
-              onChange={(e) => setInvoiceId(e.target.value)}
+              onChange={(e) => {
+                setInvoiceId(e.target.value);
+                setReversesId("");
+              }}
               className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200"
             >
               <option value="">-- Pick invoice --</option>
-              {unpaid.map((i) => (
+              {choices.map((i) => (
                 <option key={i.id} value={i.id}>
-                  {i.invoiceNumber} · user #{i.userId} ·{" "}
+                  {i.invoiceNumber} · {i.participantName ?? `user #${i.userId}`} ·{" "}
                   {moneyFmt(i.balance ?? i.amount)} balance
                 </option>
               ))}
             </select>
           </div>
-          <Field
-            label="Amount received"
-            type="number"
-            value={amount}
-            onChange={setAmount}
-          />
-          <Field
-            label="Receipt date"
-            type="date"
-            value={date}
-            onChange={setDate}
-          />
-          <div>
-            <label className="block text-[11px] font-medium text-gray-600 mb-0.5">
-              Method
-            </label>
-            <select
-              value={method}
-              onChange={(e) => setMethod(e.target.value)}
-              className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200"
-            >
-              {["CHEQUE", "BANK_TRANSFER", "CARD", "CASH", "ADJUSTMENT"].map(
-                (m) => (
-                  <option key={m} value={m}>
-                    {m}
+          {type === "REVERSAL" ? (
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-0.5">
+                Payment to reverse
+              </label>
+              <select
+                value={reversesId}
+                onChange={(e) => setReversesId(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200"
+              >
+                <option value="">-- Pick the payment --</option>
+                {payments.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.receiptDate ? formatDay(l.receiptDate) : "--"} · {moneyFmt(l.amountReceived)} ·{" "}
+                    {l.method ? METHOD_LABEL[l.method] ?? l.method : ""}
                   </option>
-                ),
-              )}
-            </select>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <Field
+              label={
+                type === "WAIVER"
+                  ? "Amount to waive"
+                  : type === "FAILED"
+                    ? "Amount attempted"
+                    : `Amount received${invoice ? ` (balance ${moneyFmt(invoice.balance ?? invoice.amount)})` : ""}`
+              }
+              type="number"
+              value={amount}
+              onChange={setAmount}
+            />
+          )}
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Date</label>
+            <input
+              type="date"
+              value={date}
+              max={businessToday()}
+              onChange={(e) => setDate(e.target.value)}
+              className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
           </div>
+          {(type === "PAYMENT" || type === "FAILED") && (
+            <div>
+              <label className="block text-[11px] font-medium text-gray-600 mb-0.5">
+                Method
+              </label>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200"
+              >
+                {["CHEQUE", "BANK_TRANSFER", "CARD", "CASH", "ONLINE"].map((m) => (
+                  <option key={m} value={m}>
+                    {METHOD_LABEL[m]}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
           <Field
-            label="Notes (optional)"
+            label={needsReason ? "Reason (required)" : "Notes (optional)"}
             value={notes}
             onChange={setNotes}
           />
@@ -235,7 +357,7 @@ function RecordPaymentModal({
           </button>
           <button
             onClick={handleSubmit}
-            disabled={saving || !invoiceId || !amount}
+            disabled={!ready}
             className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
           >
             {saving ? <Loader2 size={12} className="animate-spin" /> : "Record"}

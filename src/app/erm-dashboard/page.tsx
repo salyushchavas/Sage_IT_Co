@@ -7,6 +7,7 @@ import {
   Briefcase,
   CheckCircle2,
   ClipboardList,
+  Download,
   FileText,
   GraduationCap,
   Loader2,
@@ -16,6 +17,7 @@ import {
   Target,
   Users,
 } from "lucide-react";
+import { formatDateMedium, formatDateTime } from "@/lib/datetime";
 
 import {
   RoleDashboardShell,
@@ -25,15 +27,20 @@ import { useAuth } from "@/lib/auth-context";
 import {
   addErmNote,
   approvePhase1,
+  downloadSignedAgreement,
   getErmParticipantDetail,
   getErmPendingEmployment,
   getErmPendingPhaseApprovals,
   getErmReports,
   getErmRoster,
+  markErmAgreementReviewed,
+  returnEmployment,
   reviewErmReport,
   verifyEmployment,
+  viewErmOfferDocument,
   type ErmPendingEmploymentRow,
   type ErmPendingPhaseRow,
+  type ErmReportRow,
   type ErmRosterRow,
   type WeeklyReportDTO,
 } from "@/lib/api";
@@ -78,6 +85,11 @@ export default function ErmDashboardPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
   const [active, setActive] = useState<TabId>("home");
+  // ?tab=<id>: emails link straight to a tab (e.g. employment to verify).
+  useEffect(() => {
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    if (tab && TABS.some((t) => t.id === tab)) setActive(tab as TabId);
+  }, []);
   const [roster, setRoster] = useState<ErmRosterRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -166,6 +178,14 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
     }
   };
 
+  // The "signed agreement ready for review" email links here with
+  // ?participant=<id>: open that participant straight away.
+  useEffect(() => {
+    const id = Number(new URLSearchParams(window.location.search).get("participant"));
+    if (id && roster.some((r) => r.userId === id)) openParticipant(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [roster]);
+
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-900">My participants</h1>
@@ -206,6 +226,11 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
                 >
                   <td className="px-4 py-2 font-medium text-gray-900">
                     {r.fullName ?? "—"}
+                    {r.agreementToReview && (
+                      <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                        Agreement to review
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs text-gray-700">
                     {r.participantId ?? "—"}
@@ -223,11 +248,7 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {r.lastActivity
-                      ? new Date(r.lastActivity).toLocaleString("en-IN", {
-                          timeZone: "Asia/Kolkata",
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })
+                      ? formatDateTime(r.lastActivity)
                       : "—"}
                   </td>
                 </tr>
@@ -263,6 +284,7 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
                   setOpenId(null);
                   setDetail(null);
                 }}
+                onChanged={() => openId && openParticipant(openId)}
               />
             )}
           </div>
@@ -275,16 +297,18 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
 function DetailPanel({
   detail,
   onClose,
+  onChanged,
 }: {
   detail: Record<string, unknown> | null;
   onClose: () => void;
+  onChanged: () => void;
 }) {
   if (!detail)
     return (
       <p className="text-sm text-gray-500">Couldn&apos;t load details.</p>
     );
   const program = detail.program as Record<string, string | null> | undefined;
-  const agreement = detail.agreement as Record<string, string> | undefined;
+  const agreement = detail.agreement as Record<string, string | boolean> | undefined;
   const documents =
     (detail.documents as Array<Record<string, unknown>>) ?? [];
   const reports = (detail.reports as Array<Record<string, unknown>>) ?? [];
@@ -319,8 +343,18 @@ function DetailPanel({
         <SmallStat label="Skillset" value={program?.skillset ?? "—"} />
         <SmallStat label="Target role" value={program?.targetJobTitle ?? "—"} />
         <SmallStat label="Availability" value={program?.availability ?? "—"} />
-        <SmallStat label="Agreement" value={agreement?.status ?? "—"} />
+        <SmallStat label="Agreement" value={String(agreement?.status ?? "—")} />
       </div>
+
+      {agreement?.signed === true && (
+        <SignedAgreementBlock
+          participantUserId={Number(detail.userId)}
+          acceptedAt={String(agreement.acceptedAt ?? "")}
+          version={String(agreement.version ?? "")}
+          reviewedAt={String(agreement.reviewedAt ?? "")}
+          onChanged={onChanged}
+        />
+      )}
 
       <DetailBlock title={`Documents (${documents.length})`}>
         {documents.length === 0 ? (
@@ -390,6 +424,84 @@ function DetailPanel({
   );
 }
 
+/**
+ * Checklist 2.3 (roadmap step 10): the ERM opens the participant's signed
+ * agreement and confirms they reviewed it.
+ */
+function SignedAgreementBlock({
+  participantUserId,
+  acceptedAt,
+  version,
+  reviewedAt,
+  onChanged,
+}: {
+  participantUserId: number;
+  acceptedAt: string;
+  version: string;
+  reviewedAt: string;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<"download" | "review" | null>(null);
+  const [error, setError] = useState("");
+  const fmt = (iso: string) =>
+    iso ? new Date(iso).toLocaleDateString("en-US", { dateStyle: "medium" }) : "—";
+  const run = async (what: "download" | "review") => {
+    setBusy(what);
+    setError("");
+    try {
+      if (what === "download") await downloadSignedAgreement(participantUserId);
+      else {
+        await markErmAgreementReviewed(participantUserId);
+        onChanged();
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Something went wrong");
+    } finally {
+      setBusy(null);
+    }
+  };
+  return (
+    <DetailBlock title="Signed agreement">
+      <div className="flex flex-wrap items-center gap-2 text-xs">
+        <span className="text-gray-700">
+          Signed {fmt(acceptedAt)}
+          {version && <span className="text-gray-500"> · {version}</span>}
+        </span>
+        <span className="flex-1" />
+        <button
+          type="button"
+          onClick={() => run("download")}
+          disabled={busy !== null}
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 cursor-pointer"
+        >
+          {busy === "download" ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
+          Download
+        </button>
+        {reviewedAt ? (
+          <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
+            <CheckCircle2 size={12} /> Reviewed {fmt(reviewedAt)}
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => run("review")}
+            disabled={busy !== null}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
+          >
+            {busy === "review" && <Loader2 size={12} className="animate-spin" />}
+            Mark reviewed
+          </button>
+        )}
+      </div>
+      {error && (
+        <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-red-600">
+          <AlertCircle size={11} /> {error}
+        </p>
+      )}
+    </DetailBlock>
+  );
+}
+
 function SmallStat({ label, value }: { label: string; value: string }) {
   return (
     <div className="rounded-lg bg-gray-50 border border-gray-100 px-2 py-1.5">
@@ -422,13 +534,19 @@ function DetailBlock({
 
 /* ── Reports tab ─────────────────────────────────────────────── */
 
+/**
+ * Checklist 4.1: the ERM's weekly reports — each participant's name and
+ * ID, the full report, "Needs help" and "Late" flags. Drafts aren't
+ * listed, and only a submitted report can be marked reviewed.
+ */
 function ReportsTab() {
-  const [reports, setReports] = useState<WeeklyReportDTO[]>([]);
+  const [reports, setReports] = useState<ErmReportRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>("ALL");
   const [openId, setOpenId] = useState<number | null>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   const refresh = async () => {
     setReports(await getErmReports());
@@ -450,22 +568,29 @@ function ReportsTab() {
 
   const visible = useMemo(() => {
     if (filter === "ALL") return reports;
+    if (filter === "NEEDS HELP") return reports.filter((r) => r.needsHelp);
     return reports.filter((r) => r.status === filter);
   }, [reports, filter]);
+
+  const open = reports.find((x) => x.id === openId) ?? null;
 
   const openReport = (id: number) => {
     const r = reports.find((x) => x.id === id);
     setOpenId(id);
     setNotes(r?.ermNotes ?? "");
+    setError("");
   };
 
   const submitReview = async () => {
     if (!openId) return;
     setSaving(true);
+    setError("");
     try {
       await reviewErmReport(openId, notes);
       await refresh();
       setOpenId(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't save the review");
     } finally {
       setSaving(false);
     }
@@ -483,7 +608,7 @@ function ReportsTab() {
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-gray-900">Weekly reports</h1>
         <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
-          {["ALL", "SUBMITTED", "REVIEWED", "OVERDUE", "PENDING"].map((s) => (
+          {["ALL", "NEEDS HELP", "SUBMITTED", "OVERDUE", "REVIEWED"].map((s) => (
             <button
               key={s}
               type="button"
@@ -510,8 +635,12 @@ function ReportsTab() {
           visible.map((r) => (
             <div
               key={r.id}
-              className="px-4 py-3 flex items-center gap-3 text-sm hover:bg-gray-50"
+              className="px-4 py-3 flex items-center gap-3 text-sm hover:bg-gray-50 flex-wrap"
             >
+              <span className="w-44 shrink-0">
+                <span className="block font-medium text-gray-900 truncate">{r.participantName ?? "—"}</span>
+                <span className="block font-mono text-[10px] text-gray-400">{r.participantId ?? ""}</span>
+              </span>
               <span className="font-mono text-xs text-gray-700 w-44 shrink-0">
                 {r.weekStart} – {r.weekEnd}
               </span>
@@ -529,63 +658,188 @@ function ReportsTab() {
               >
                 {r.status}
               </span>
-              <span className="text-xs text-gray-500 ml-auto">User #{r.id}</span>
+              {r.needsHelp && (
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                  NEEDS HELP
+                </span>
+              )}
+              {r.late && r.status !== "OVERDUE" && (
+                <span className="text-[10px] font-semibold text-gray-500">late</span>
+              )}
               <button
                 type="button"
                 onClick={() => openReport(r.id)}
-                className="text-xs font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
+                className="ml-auto text-xs font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
               >
-                Review
+                {r.status === "SUBMITTED" ? "Review" : "Open"}
               </button>
             </div>
           ))
         )}
       </div>
 
-      {openId && (
+      {open && (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
           onClick={() => setOpenId(null)}
         >
           <div
-            className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-5"
+            className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-bold text-gray-900">
-              Review report #{openId}
+              {open.participantName ?? "Participant"}{" "}
+              <span className="font-mono text-xs text-gray-400">{open.participantId ?? ""}</span>
             </h2>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={5}
-              className="mt-3 w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
-              placeholder="Notes for the participant + audit trail"
-            />
-            <div className="mt-3 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setOpenId(null)}
-                className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={submitReview}
-                disabled={saving}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
-              >
-                {saving ? (
-                  <Loader2 size={12} className="animate-spin" />
-                ) : (
-                  <CheckCircle2 size={12} />
-                )}
-                {saving ? "Saving…" : "Mark reviewed"}
-              </button>
-            </div>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Week of <span className="font-mono">{open.weekStart}</span> –{" "}
+              <span className="font-mono">{open.weekEnd}</span>
+              {open.dueDate && <> · due <span className="font-mono">{open.dueDate}</span></>}
+              {open.submittedAt && <> · submitted {new Date(open.submittedAt).toLocaleDateString("en-US")}</>}
+              {open.late && <> · late</>}
+            </p>
+            {open.status === "OVERDUE" ? (
+              <p className="mt-4 text-sm text-gray-500 italic">Not submitted yet.</p>
+            ) : (
+              <ReportContent data={open.reportData} />
+            )}
+            {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
+            {open.status === "SUBMITTED" ? (
+              <>
+                <textarea
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  rows={4}
+                  className="mt-4 w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+                  placeholder="Notes for the participant + audit trail"
+                />
+                <div className="mt-3 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setOpenId(null)}
+                    className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={submitReview}
+                    disabled={saving}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
+                  >
+                    {saving ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
+                    {saving ? "Saving…" : "Mark reviewed"}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="mt-4 flex items-end justify-between gap-3">
+                <p className="text-xs text-gray-500">
+                  {open.status === "REVIEWED"
+                    ? `Reviewed${open.ermReviewDate ? " " + new Date(open.ermReviewDate).toLocaleDateString("en-US") : ""}${open.ermNotes ? ": " + open.ermNotes : ""}`
+                    : ""}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setOpenId(null)}
+                  className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer"
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/** The participant's report, grouped as they filled it in. */
+function ReportContent({ data }: { data: string | null }) {
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = data ? JSON.parse(data) : {};
+  } catch {
+    parsed = {};
+  }
+  const jobs = Array.isArray(parsed.jobSubmissions) ? (parsed.jobSubmissions as Record<string, string>[]) : [];
+  const group = (key: string) => (parsed[key] && typeof parsed[key] === "object" ? (parsed[key] as Record<string, string>) : {});
+  const resume = group("resumeActivities");
+  const interview = group("interviewTraining");
+  const comms = group("communications");
+  const rows = (entries: [string, string | undefined][]) =>
+    entries.filter(([, v]) => v && String(v).trim() && v !== "false");
+  const fieldList = (entries: [string, string | undefined][]) => {
+    const shown = rows(entries);
+    return shown.length === 0 ? (
+      <p className="text-xs text-gray-400 italic">Nothing entered.</p>
+    ) : (
+      <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-1 text-xs">
+        {shown.map(([k, v]) => (
+          <div key={k}>
+            <dt className="text-gray-500">{k}</dt>
+            <dd className="text-gray-800 whitespace-pre-wrap">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    );
+  };
+  return (
+    <div className="mt-4 space-y-3">
+      <DetailBlock title={`Job submissions (${jobs.length})`}>
+        {jobs.length === 0 ? (
+          <p className="text-xs text-gray-400 italic">None this week.</p>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="text-[10px] uppercase tracking-wider text-gray-500">
+              <tr>
+                <th className="text-left py-1">Company</th>
+                <th className="text-left py-1">Job title</th>
+                <th className="text-left py-1">Portal</th>
+                <th className="text-left py-1">Status</th>
+                <th className="text-left py-1">Follow-up</th>
+              </tr>
+            </thead>
+            <tbody>
+              {jobs.map((j, i) => (
+                <tr key={i} className="border-t border-gray-100">
+                  <td className="py-1 text-gray-800">{j.company}</td>
+                  <td className="py-1 text-gray-700">{j.jobTitle}</td>
+                  <td className="py-1 text-gray-700">{j.portal}</td>
+                  <td className="py-1 text-gray-700">{j.status}</td>
+                  <td className="py-1 text-gray-700">{j.followUpDate}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </DetailBlock>
+      <DetailBlock title="Resume and profile">
+        {fieldList([
+          ["Resume version", resume.resumeVersion],
+          ["Profile updates", resume.profileUpdates],
+          ["Portal updates", resume.portalUpdates],
+          ["LinkedIn updates", resume.linkedinUpdates],
+        ])}
+      </DetailBlock>
+      <DetailBlock title="Interview training">
+        {fieldList([
+          ["Mock interview", interview.mockDate],
+          ["Topic", interview.topic],
+          ["Coach", interview.coach],
+          ["Feedback", interview.feedback],
+          ["Improvements", interview.improvements],
+          ["Next practice", interview.nextPracticeDate],
+        ])}
+      </DetailBlock>
+      <DetailBlock title="Communications">
+        {fieldList([
+          ["Messages acknowledged", comms.messagesAcknowledged],
+          ["Questions", comms.questions],
+          ["Needs help", comms.escalation === "true" ? comms.escalationDetail || "Yes" : undefined],
+        ])}
+      </DetailBlock>
     </div>
   );
 }
@@ -701,10 +955,16 @@ function CommsTab({ roster }: { roster: ErmRosterRow[] }) {
 
 /* ── Employment tab ───────────────────────────────────────────── */
 
+/**
+ * Checklist 4.5: the ERM verifies a participant's employment details, or
+ * sends them back with what needs correcting (the participant is emailed
+ * and submits corrected details). The offer letter opens through the
+ * portal; each view is recorded.
+ */
 function EmploymentTab() {
   const [rows, setRows] = useState<ErmPendingEmploymentRow[]>([]);
   const [loading, setLoading] = useState(true);
-  const [openId, setOpenId] = useState<number | null>(null);
+  const [dialog, setDialog] = useState<{ userId: number; mode: "verify" | "return" } | null>(null);
   const [notes, setNotes] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -726,23 +986,34 @@ function EmploymentTab() {
     };
   }, []);
 
-  const openVerify = (uid: number) => {
-    setOpenId(uid);
+  const open = (userId: number, mode: "verify" | "return") => {
+    setDialog({ userId, mode });
     setNotes("");
+    setError("");
   };
 
-  const handleVerify = async () => {
-    if (openId == null) return;
+  const handleSave = async () => {
+    if (dialog == null) return;
     setSaving(true);
     setError("");
     try {
-      await verifyEmployment(openId, notes);
+      if (dialog.mode === "verify") await verifyEmployment(dialog.userId, notes);
+      else await returnEmployment(dialog.userId, notes.trim());
       await refresh();
-      setOpenId(null);
+      setDialog(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Verify failed");
+      setError(e instanceof Error ? e.message : "Couldn't save");
     } finally {
       setSaving(false);
+    }
+  };
+
+  const viewOffer = async (userId: number) => {
+    setError("");
+    try {
+      await viewErmOfferDocument(userId);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't open the offer letter");
     }
   };
 
@@ -753,16 +1024,17 @@ function EmploymentTab() {
       </div>
     );
 
+  const returning = dialog?.mode === "return";
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-900">
         Employment verification
       </h1>
       <p className="text-sm text-gray-500">
-        Pending employment acceptances from your assigned participants.
-        Verifying flips Gate 6 open and unlocks Phase 1 acknowledgment.
+        Employment details from your participants. Verify them to unlock the
+        Phase 1 acknowledgment, or send them back with what needs correcting.
       </p>
-      {error && (
+      {error && !dialog && (
         <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
           <AlertCircle size={14} /> {error}
         </p>
@@ -800,6 +1072,9 @@ function EmploymentTab() {
                     <div className="font-mono text-[10px] text-gray-400">
                       {r.participantId ?? "—"}
                     </div>
+                    {r.resubmitted && !r.returned && (
+                      <div className="text-[10px] font-semibold text-sage-navy">Corrected details</div>
+                    )}
                   </td>
                   <td className="px-4 py-2 text-gray-700">
                     {r.employerClient ?? "—"}
@@ -812,33 +1087,48 @@ function EmploymentTab() {
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {r.acceptanceDate
-                      ? new Date(r.acceptanceDate).toLocaleString("en-IN", {
-                          timeZone: "Asia/Kolkata",
-                          dateStyle: "medium",
-                        })
+                      ? formatDateMedium(r.acceptanceDate)
                       : "—"}
                   </td>
                   <td className="px-4 py-2">
-                    {r.offerDocumentUrl ? (
-                      <a
-                        href={r.offerDocumentUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="text-xs font-semibold text-sage-navy hover:underline"
+                    {r.hasOffer ? (
+                      <button
+                        onClick={() => viewOffer(r.userId)}
+                        className="text-xs font-semibold text-sage-navy hover:underline cursor-pointer"
                       >
                         View
-                      </a>
+                      </button>
                     ) : (
                       <span className="text-xs text-gray-400">—</span>
                     )}
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <button
-                      onClick={() => openVerify(r.userId)}
-                      className="px-3 py-1 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
-                    >
-                      Verify
-                    </button>
+                    {r.returned ? (
+                      <div className="text-left sm:text-right">
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                          Sent back
+                        </span>
+                        <div className="mt-1 text-[11px] text-gray-500 italic max-w-[220px] sm:ml-auto">
+                          {r.returnReason}
+                        </div>
+                        <div className="text-[10px] text-gray-400">Waiting for the participant</div>
+                      </div>
+                    ) : (
+                      <div className="inline-flex gap-1.5">
+                        <button
+                          onClick={() => open(r.userId, "verify")}
+                          className="px-3 py-1 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+                        >
+                          Verify
+                        </button>
+                        <button
+                          onClick={() => open(r.userId, "return")}
+                          className="px-3 py-1 rounded-md text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy cursor-pointer"
+                        >
+                          Send back
+                        </button>
+                      </div>
+                    )}
                   </td>
                 </tr>
               ))
@@ -847,49 +1137,64 @@ function EmploymentTab() {
         </table>
       </div>
 
-      {openId != null && (
+      {dialog != null && (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setOpenId(null)}
+          onClick={() => setDialog(null)}
         >
           <div
             className="bg-white rounded-2xl shadow-xl max-w-md w-full p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-lg font-bold text-gray-900">
-              Verify employment
+              {returning ? "Send back for correction" : "Verify employment"}
             </h2>
             <p className="text-xs text-gray-500 mt-1">
-              Confirms the offer details on file and unlocks Phase 1 for the
-              participant.
+              {returning
+                ? "The participant is emailed your reason and asked to submit corrected details."
+                : "Confirms the offer details on file and unlocks Phase 1 for the participant."}
             </p>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
+              maxLength={2000}
               className="mt-3 w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
-              placeholder="Optional ERM notes (audit trail)"
+              placeholder={
+                returning
+                  ? "What needs correcting (emailed to the participant)"
+                  : "Optional ERM notes (audit trail)"
+              }
             />
+            {error && (
+              <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-red-700">
+                <AlertCircle size={12} /> {error}
+              </p>
+            )}
             <div className="mt-3 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setOpenId(null)}
+                onClick={() => setDialog(null)}
                 className="px-3 py-1.5 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer"
               >
                 Cancel
               </button>
               <button
                 type="button"
-                onClick={handleVerify}
-                disabled={saving}
+                onClick={handleSave}
+                disabled={saving || (returning && notes.trim().length < 5)}
                 className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
               >
                 {saving ? (
                   <Loader2 size={12} className="animate-spin" />
+                ) : returning ? (
+                  <Send size={12} />
                 ) : (
                   <CheckCircle2 size={12} />
                 )}
-                {saving ? "Verifying…" : "Verify ✓"}
+                {returning
+                  ? saving ? "Sending…" : "Send back and email"
+                  : saving ? "Verifying…" : "Verify ✓"}
               </button>
             </div>
           </div>
@@ -948,8 +1253,9 @@ function Phase1Tab() {
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-900">Phase 1 approvals</h1>
       <p className="text-sm text-gray-500">
-        Participants who self-attested Phase 1 completion. Approving closes
-        Phase 1 audit-side; the payment plan activation remains with finance.
+        Participants who accepted the Phase 1 completion acknowledgment.
+        Approving closes Phase 1 and starts their Phase 2 post-offer support
+        from their employment start date. Finance sets up the payment plan.
       </p>
       {error && (
         <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
@@ -961,6 +1267,7 @@ function Phase1Tab() {
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
               <th className="text-left px-4 py-2">Participant</th>
+              <th className="text-left px-4 py-2">Employment</th>
               <th className="text-left px-4 py-2">Accepted</th>
               <th className="text-left px-4 py-2">Version</th>
               <th className="text-right px-4 py-2">Action</th>
@@ -970,7 +1277,7 @@ function Phase1Tab() {
             {rows.length === 0 ? (
               <tr>
                 <td
-                  colSpan={4}
+                  colSpan={5}
                   className="px-4 py-6 text-center text-sm text-gray-400 italic"
                 >
                   No Phase 1 approvals pending.
@@ -987,12 +1294,15 @@ function Phase1Tab() {
                       {r.participantId ?? "—"}
                     </div>
                   </td>
+                  <td className="px-4 py-2 text-gray-700">
+                    <div>{r.employerClient ?? "—"}</div>
+                    {r.startDate && (
+                      <div className="font-mono text-[10px] text-gray-400">starts {r.startDate}</div>
+                    )}
+                  </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {r.acceptedAt
-                      ? new Date(r.acceptedAt).toLocaleString("en-IN", {
-                          timeZone: "Asia/Kolkata",
-                          dateStyle: "medium",
-                        })
+                      ? formatDateMedium(r.acceptedAt)
                       : "—"}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs text-gray-700">

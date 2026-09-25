@@ -40,7 +40,7 @@ import {
 //   excepts  -- overdue invoices + tracking exceptions
 //
 // Locked to FINANCE / SYSTEM_ADMIN / OPERATIONS_ADMIN at both the
-// router and API layer. All currency rendered in INR (en-IN).
+// router and API layer. All amounts are US dollars (checklist 5.3).
 
 type TabId =
   | "home"
@@ -86,6 +86,12 @@ export default function FinanceDashboardPage() {
       });
       return;
     }
+    // Checklist 2.4: check copies are Finance's only (System Admin
+    // included); Operations sees the other finance tabs.
+    if (role !== "FINANCE" && role !== "SYSTEM_ADMIN") {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     getFinanceChecks()
       .then((c) => {
@@ -113,10 +119,14 @@ export default function FinanceDashboardPage() {
     );
   }
 
+  const role = (user?.role ?? "").toUpperCase();
+  const canSeeChecks = role === "FINANCE" || role === "SYSTEM_ADMIN";
+  const tabs = canSeeChecks ? TABS : TABS.filter((t) => t.id !== "checks");
+
   return (
     <RoleDashboardShell
       title="Finance"
-      tabs={TABS}
+      tabs={tabs}
       active={active}
       onSelect={(id) => setActive(id as TabId)}
     >
@@ -129,7 +139,7 @@ export default function FinanceDashboardPage() {
       {active === "plans" && <FinancePlansTab />}
       {active === "invoices" && <FinanceInvoicesTab />}
       {active === "payments" && <FinancePaymentsLedgerTab />}
-      {active === "checks" && (
+      {active === "checks" && canSeeChecks && (
         <FinanceChecksTab checks={checks} onRefresh={refreshChecks} />
       )}
       {active === "tracking" && <FinanceTrackingTab />}

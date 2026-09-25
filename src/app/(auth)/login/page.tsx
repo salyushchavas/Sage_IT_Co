@@ -9,6 +9,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
+import { safeRedirect } from "@/lib/api";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 
 const schema = z.object({
@@ -21,7 +22,8 @@ type FormData = z.infer<typeof schema>;
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get("redirect") || "/dashboard";
+  // Only a page on this site (a link could otherwise send people elsewhere).
+  const redirect = safeRedirect(searchParams.get("redirect"));
   const justReset = searchParams.get("reset") === "1";
   const { login } = useAuth();
 
@@ -39,8 +41,9 @@ function LoginForm() {
     setApiError("");
     setLoading(true);
     try {
-      await login(data.email, data.password);
-      router.push(redirect);
+      const me = await login(data.email, data.password);
+      // Staff onboarding: a temporary password must be replaced first.
+      router.push(me?.mustChangePassword ? "/change-password" : redirect);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Login failed";
       if (message === "EMAIL_NOT_VERIFIED") {

@@ -1,3 +1,5 @@
+import { clearAccessTokenCookie, homeForRole, setAccessTokenCookie } from "./roles";
+
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
 // Exported alias used by the participant-lifecycle code paths that
@@ -45,12 +47,20 @@ export interface UserDTO {
   programSelectionComplete?: boolean;
   agreementComplete?: boolean;
   checkUploadComplete?: boolean;
+  /** All six onboarding steps done. */
+  profileComplete?: boolean;
   // Cached profile-completion percentage. The banner watches this so
   // it can re-fetch when a step elsewhere on the page flips it.
   profileCompletionPct?: number;
   // Optional fields surfaced on the Profile tab.
   location?: string | null;
   createdAt?: string | null;
+  isActive?: boolean;
+  emailVerified?: boolean;
+  /** Staff onboarding: where the portal's emails go, when not the login email. */
+  personalEmail?: string | null;
+  /** Staff onboarding: still on a temporary password; must choose their own first. */
+  mustChangePassword?: boolean;
 }
 
 export interface AuthResponse {
@@ -84,27 +94,28 @@ export async function apiFetch<T = unknown>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  const res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+  let res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
 
-  // Handle 401 — try refresh, but don't redirect for non-auth failures
-  if (res.status === 401) {
-    const refreshed = await tryRefresh();
-    if (refreshed) {
+  // 401 means the sign-in is missing or has expired (a signed-in user who
+  // isn't allowed gets 403). Renew it once with the refresh token and try
+  // again. Not for the sign-in calls themselves: there 401 is a wrong password.
+  if (res.status === 401 && token && !endpoint.startsWith("/api/auth/")) {
+    if (await tryRefresh()) {
       headers["Authorization"] = `Bearer ${localStorage.getItem("access_token")}`;
-      const retry = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
-      if (retry.ok) return retry.json();
+      res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+    } else {
+      endSession();
+      throw new Error("Your sign-in has expired. Please sign in again.");
     }
-    // Only redirect to login if we have no valid token at all
-    // (not for 401s caused by enrollment/permission checks)
-    const hasToken = typeof window !== "undefined" && localStorage.getItem("access_token");
-    if (!hasToken && typeof window !== "undefined") {
-      window.location.href = "/login";
-    }
-    throw new Error("Unauthorized");
   }
 
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
+    // Staff onboarding: still on the temporary password an admin emailed.
+    if (res.status === 403 && body.message === "PASSWORD_CHANGE_REQUIRED" && typeof window !== "undefined"
+        && window.location.pathname !== "/change-password") {
+      window.location.href = "/change-password";
+    }
     throw new Error(body.message || body.detail || `API error ${res.status}`);
   }
 
@@ -112,7 +123,38 @@ export async function apiFetch<T = unknown>(
   return res.json();
 }
 
+/** The session can't be renewed: forget it and go to sign-in, then come back here. */
+function endSession(): void {
+  if (typeof window === "undefined") return;
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+  clearAccessTokenCookie();
+  const here = window.location.pathname + window.location.search;
+  if (!window.location.pathname.startsWith("/login")) {
+    window.location.href = `/login?redirect=${encodeURIComponent(here)}`;
+  }
+}
+
+/**
+ * Where to go after signing in: only a page on this site. Anything else
+ * (another site, "//host", "javascript:…") goes to the dashboard instead.
+ */
+export function safeRedirect(target: string | null | undefined, fallback = "/dashboard"): string {
+  if (!target || !target.startsWith("/") || target.startsWith("//") || target.startsWith("/\\")) return fallback;
+  return target;
+}
+
+// One renewal at a time: several calls failing together share it.
+let refreshing: Promise<boolean> | null = null;
+
 async function tryRefresh(): Promise<boolean> {
+  if (!refreshing) {
+    refreshing = doRefresh().finally(() => { refreshing = null; });
+  }
+  return refreshing;
+}
+
+async function doRefresh(): Promise<boolean> {
   const refreshToken =
     typeof window !== "undefined" ? localStorage.getItem("refresh_token") : null;
   if (!refreshToken) return false;
@@ -127,10 +169,19 @@ async function tryRefresh(): Promise<boolean> {
     const wrapper: ApiResponse<AuthResponse> = await res.json();
     localStorage.setItem("access_token", wrapper.data.accessToken);
     localStorage.setItem("refresh_token", wrapper.data.refreshToken);
+    setAccessTokenCookie(wrapper.data.accessToken);
     return true;
   } catch {
     return false;
   }
+}
+
+/**
+ * Swaps the stored tokens for fresh ones (the new access token carries
+ * the account's current role). False when the session can't be renewed.
+ */
+export async function refreshSession(): Promise<boolean> {
+  return tryRefresh();
 }
 
 // ─── Auth ───────────────────────────────────────────────────────────
@@ -914,8 +965,15 @@ export type DocumentType =
   | "GOVERNMENT_ID" | "WORK_AUTHORIZATION" | "RESUME"
   | "SSN_DOCUMENT" | "DRIVERS_LICENSE" | "OTHER";
 
+/**
+ * A file is PENDING, APPROVED or REJECTED. "Not applicable" is
+ * NOT_APPLICABLE on an optional document; on a required one it is an
+ * exception Operations decides (EXCEPTION_REQUESTED / _APPROVED /
+ * _DECLINED), and only an approved one counts.
+ */
 export type DocumentReviewStatus =
-  | "PENDING" | "APPROVED" | "REJECTED" | "NOT_APPLICABLE";
+  | "PENDING" | "APPROVED" | "REJECTED" | "NOT_APPLICABLE"
+  | "EXCEPTION_REQUESTED" | "EXCEPTION_APPROVED" | "EXCEPTION_DECLINED";
 
 export interface ParticipantDocument {
   id: number;
@@ -927,6 +985,14 @@ export interface ParticipantDocument {
   uploadedAt: string | null;
   reviewedAt: string | null;
   notApplicable: boolean;
+  /** The participant's reason, on an exception request. */
+  exceptionReason?: string | null;
+}
+
+/** Whether a document row fulfils its type (mirrors DocumentService.satisfiesRequirement). */
+export function documentSatisfiesRequirement(d: ParticipantDocument): boolean {
+  if (d.notApplicable) return d.reviewStatus === "EXCEPTION_APPROVED";
+  return d.reviewStatus !== "REJECTED";
 }
 
 /** Uploads a single file as the named documentType (multipart/form-data). */
@@ -955,6 +1021,39 @@ export async function uploadParticipantDocument(
   return body.data;
 }
 
+// ─── Checklist 4.4: the participant's coaching record ─────────────
+
+export interface CoachingEntryBase {
+  id: number;
+  coachName: string | null;
+  /** CAREER_COACH, RESUME_SPECIALIST, TECHNICAL_ADVISOR or INTERVIEW_COACH. */
+  coachRole: string | null;
+}
+export interface CoachingSessionEntry extends CoachingEntryBase {
+  date: string | null; topic: string | null; nextSteps: string | null; durationMinutes: number | null;
+}
+export interface CoachingTaskEntry extends CoachingEntryBase {
+  title: string; description: string | null; dueDate: string | null; status: string;
+}
+export interface CoachingFeedbackEntry extends CoachingEntryBase {
+  /** SESSION, RESUME, TECHNICAL, INTERVIEW or GENERAL. */
+  type: string; content: string | null; rating: number | null; createdAt: string | null;
+}
+export interface MyCoaching {
+  sessions: CoachingSessionEntry[];
+  tasks: CoachingTaskEntry[];
+  feedback: CoachingFeedbackEntry[];
+}
+
+export async function getMyCoaching(): Promise<MyCoaching> {
+  const wrapper = await apiFetch<ApiResponse<MyCoaching>>("/api/participants/coaching");
+  return wrapper.data ?? { sessions: [], tasks: [], feedback: [] };
+}
+
+export async function markCoachingTaskDone(taskId: number): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>(`/api/participants/coaching/tasks/${taskId}/done`, { method: "PUT" });
+}
+
 export async function listParticipantDocuments(): Promise<ParticipantDocument[]> {
   const wrapper = await apiFetch<ApiResponse<ParticipantDocument[]>>("/api/participants/documents");
   return wrapper.data ?? [];
@@ -966,12 +1065,64 @@ export async function deleteParticipantDocument(documentId: number): Promise<voi
     { method: "DELETE" });
 }
 
+/**
+ * "Not applicable". For a required document this sends an exception
+ * request to Operations, and `reason` is required.
+ */
 export async function markDocumentNotApplicable(
   documentType: DocumentType,
+  reason?: string,
 ): Promise<ParticipantDocument> {
   const wrapper = await apiFetch<ApiResponse<ParticipantDocument>>(
     "/api/participants/documents/mark-na",
-    { method: "POST", body: JSON.stringify({ documentType }) },
+    { method: "POST", body: JSON.stringify({ documentType, reason }) },
+  );
+  return wrapper.data;
+}
+
+/** One row of the Operations document review screen. */
+export interface DocumentReviewRow {
+  id: number;
+  userId: number;
+  participantName: string | null;
+  participantEmail: string | null;
+  participantId: string | null;
+  documentType: DocumentType;
+  documentLabel: string;
+  required: boolean;
+  fileName: string | null;
+  fileSize: number | null;
+  reviewStatus: DocumentReviewStatus;
+  notApplicable: boolean;
+  exceptionReason: string | null;
+  reviewerNotes: string | null;
+  uploadedAt: string | null;
+  reviewedAt: string | null;
+}
+
+/** Operations: "NEEDS_REVIEW" (default), "ALL", or one review status. */
+export async function getDocumentReviewQueue(
+  filter: string = "NEEDS_REVIEW",
+): Promise<DocumentReviewRow[]> {
+  const wrapper = await apiFetch<ApiResponse<DocumentReviewRow[]>>(
+    `/api/admin/documents?status=${encodeURIComponent(filter)}`,
+  );
+  return wrapper.data ?? [];
+}
+
+/**
+ * Operations: approve, or send back with a reason (emailed to the
+ * participant). On an exception request, APPROVED / REJECTED mean
+ * approve / decline.
+ */
+export async function reviewDocument(
+  documentId: number,
+  status: "APPROVED" | "REJECTED",
+  notes?: string,
+): Promise<ParticipantDocument> {
+  const wrapper = await apiFetch<ApiResponse<ParticipantDocument>>(
+    `/api/admin/documents/${documentId}/review`,
+    { method: "PUT", body: JSON.stringify({ status, notes }) },
   );
   return wrapper.data;
 }
@@ -998,9 +1149,17 @@ export async function completeDocuments(): Promise<CompleteDocumentsResponse> {
  * server streams the bytes inline.
  */
 export async function viewParticipantDocument(documentId: number): Promise<void> {
+  return openProtectedFile(`/api/participants/documents/${documentId}/view`);
+}
+
+/**
+ * Opens a stored file served under the caller's sign-in: a short-lived
+ * signed link (Cloudinary) or the file itself (server disk).
+ */
+async function openProtectedFile(path: string): Promise<void> {
   const token = typeof window === "undefined"
     ? null : localStorage.getItem("access_token");
-  const res = await fetch(`${API_BASE_URL}/api/participants/documents/${documentId}/view`, {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
     headers: token ? { Authorization: `Bearer ${token}` } : {},
   });
   if (!res.ok) throw new Error(`Couldn't load document (${res.status})`);
@@ -1096,6 +1255,9 @@ export interface SignAgreementRequest {
   legalName: string;
   signatureImage: string;
   signatureMethod: "draw" | "upload";
+  /** The agreement version and text fingerprint the page showed (checked by the server). */
+  agreementVersion?: string;
+  textFingerprint?: string;
 }
 
 export async function signParticipantAgreement(
@@ -1114,17 +1276,22 @@ export async function signParticipantAgreement(
 
 export interface CheckDocumentDTO {
   id: number;
+  /** Masked (••••1234). */
   checkNumber: string | null;
   amount: number | null;
   checkDate: string | null;
   notes: string | null;
   reviewStatus: string;
   uploadedAt: string | null;
+  /** Finance's reason, when it rejected the copy. */
+  reviewNotes?: string | null;
+  reviewedAt?: string | null;
+  replacesCheckId?: number | null;
 }
 
 export async function uploadCheckSoftCopy(
   file: File,
-  meta: { checkNumber?: string; amount?: number; checkDate?: string; notes?: string },
+  meta: { checkNumber?: string; amount?: number; checkDate?: string; notes?: string; replacesCheckId?: number },
 ): Promise<CheckDocumentDTO> {
   const token = typeof window === "undefined"
     ? null : localStorage.getItem("access_token");
@@ -1134,6 +1301,7 @@ export async function uploadCheckSoftCopy(
   if (meta.amount !== undefined && meta.amount !== null) form.append("amount", String(meta.amount));
   if (meta.checkDate) form.append("checkDate", meta.checkDate);
   if (meta.notes) form.append("notes", meta.notes);
+  if (meta.replacesCheckId) form.append("replacesCheckId", String(meta.replacesCheckId));
   const res = await fetch(`${API_BASE_URL}/api/participants/checks/upload`, {
     method: "POST",
     headers: token ? { Authorization: `Bearer ${token}` } : {},
@@ -1167,6 +1335,8 @@ export async function listMyChecks(): Promise<CheckDocumentDTO[]> {
 
 export interface WelcomeStatus {
   workflowStatus?: string;
+  /** Step 10: the signed agreement reached an ERM (checklist 2.3). */
+  agreementSentToErm?: boolean;
   welcomeEmailSent?: boolean;
   coordinatorIntroSent?: boolean;
   ermAssigned?: boolean;
@@ -1196,6 +1366,8 @@ export async function refreshWelcomeStatus(): Promise<WelcomeStatus> {
 // ─── Phase 5A: participant dashboard ───────────────────────────────
 
 export interface ParticipantDashboard {
+  /** Weekly, Employment and Payments open once this is true (checklist 3.5). */
+  teamReady?: boolean;
   participantId: string | null;
   fullName: string | null;
   email: string | null;
@@ -1222,8 +1394,18 @@ export interface ParticipantDashboard {
   stats?: { weeksEnrolled: number; reportsSubmitted: number };
   currentWeekStart?: string;
   currentWeekEnd?: string;
+  /** Business-time due date: the Monday after the week (checklist 4.3). */
+  currentWeekDue?: string;
   currentWeekReportStatus?: string;
   currentWeekReportId?: number;
+  /** Last week can still be filed (and is what the Monday reminder asks for). */
+  previousWeekStart?: string;
+  previousWeekEnd?: string;
+  previousWeekDue?: string;
+  previousWeekOwed?: boolean;
+  previousWeekReportStatus?: string;
+  /** The earliest week a report can be filed for (the week the dashboard opened). */
+  earliestReportWeek?: string | null;
 }
 
 export async function getParticipantDashboard(): Promise<ParticipantDashboard> {
@@ -1300,6 +1482,23 @@ export function getOnboardingRoute(status: string | null | undefined): string {
   }
 }
 
+/** The workflow statuses in their order (the server's WorkflowService.Status). */
+export const STATUS_ORDER = [
+  "DRAFT_STARTED", "BASIC_INFO_SUBMITTED", "EMAIL_VERIFICATION_PENDING", "EMAIL_VERIFIED",
+  "PARTICIPANT_ID_CREATED", "ID_EMAIL_SENT", "ACKNOWLEDGMENT_ACCEPTED", "DOCUMENTS_SUBMITTED",
+  "DOC_REVIEW_PENDING", "PROGRAM_SELECTED", "AGREEMENT_SENT", "AGREEMENT_COMPLETED",
+  "CHECK_COPY_UPLOADED", "SIGNED_AGREEMENT_SENT_TO_ERM", "WELCOME_SENT", "DEEPTHI_INTRO_SENT",
+  "ERM_ASSIGNED", "COACHES_ASSIGNED", "DASHBOARD_ENABLED", "WEEKLY_REPORTING_ACTIVE",
+  "EMPLOYMENT_ACCEPTED", "PHASE_1_COMPLETED", "PAYMENT_PLAN_ACCEPTED", "CHECK_TRACKING_ADDED",
+  "INVOICING_ACTIVE", "PAYMENTS_TRACKED",
+] as const;
+
+/** Whether `status` is `target` or later in the workflow (unknown statuses: false). */
+export function statusAtLeast(status: string | null | undefined, target: (typeof STATUS_ORDER)[number]): boolean {
+  const i = STATUS_ORDER.indexOf((status ?? "") as (typeof STATUS_ORDER)[number]);
+  return i >= 0 && i >= STATUS_ORDER.indexOf(target);
+}
+
 /** Coarse "is this user past onboarding?" check the routing guard uses. */
 export function isDashboardStatus(status: string | null | undefined): boolean {
   return getOnboardingRoute(status) === "/dashboard";
@@ -1316,13 +1515,16 @@ export interface TermsResponse {
   version: string;
   lastUpdated: string;
   sections: TermsSection[];
+  /** SHA-256 of the exact text; sent back when signing. */
+  fingerprint?: string;
 }
 
 export type AgreementStatusValue =
   | "NOT_STARTED"
   | "WAITING_REPLY"
   | "CODE_SENT"
-  | "VERIFIED";
+  | "VERIFIED"
+  | "DECLINED";
 
 export interface AgreementStatus {
   status: AgreementStatusValue;
@@ -1389,6 +1591,46 @@ export async function resendAgreementCode(): Promise<{ cooldownSeconds: number }
     { method: "POST" },
   );
   return wrapper.data ?? { cooldownSeconds: 60 };
+}
+
+/**
+ * Downloads a signed agreement (checklist 2.2): the caller's own when
+ * `participantUserId` is omitted, otherwise that participant's (their
+ * assigned ERM or an Operations / System admin only). The server sends
+ * a short-lived link (Cloudinary) or the PDF itself.
+ */
+export async function downloadSignedAgreement(participantUserId?: number): Promise<void> {
+  const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
+  const path = participantUserId
+    ? `/api/participants/${participantUserId}/agreement/signed-pdf`
+    : "/api/participants/agreement/signed-pdf";
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) {
+    let msg = `Couldn't download the agreement (${res.status})`;
+    try {
+      const body = await res.json();
+      if (body?.message) msg = body.message;
+    } catch { /* not JSON */ }
+    throw new Error(msg);
+  }
+  if ((res.headers.get("content-type") ?? "").includes("application/json")) {
+    const body = (await res.json()) as ApiResponse<{ url: string }>;
+    if (body?.data?.url) window.open(body.data.url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "Sage-IT-Co-Agreement.pdf";
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 /**
@@ -1549,6 +1791,8 @@ export interface EmploymentAcceptRequest {
 export interface EmploymentStatus {
   submitted: boolean;
   ermVerified: boolean;
+  /** Checklist 4.5: the ERM sent the latest details back for correction. */
+  returned?: boolean;
   ermName?: string | null;
   ermEmail?: string | null;
   details?: {
@@ -1559,10 +1803,13 @@ export interface EmploymentStatus {
     location: string | null;
     employmentType: string | null;
     offerDocumentUrl: string | null;
+    hasOffer?: boolean;
     notes: string | null;
     acceptanceDate: string | null;
     ermVerifiedDate: string | null;
     ermNotes: string | null;
+    returnedAt?: string | null;
+    returnReason?: string | null;
   };
   phase1?: {
     acceptedAt: string | null;
@@ -1570,6 +1817,16 @@ export interface EmploymentStatus {
     ermApproved: boolean;
     ermApprovedDate: string | null;
   };
+  /** Checklist 4.5: Phase 2 (post-offer support), once the ERM approved Phase 1. */
+  phase2?: {
+    startDate: string | null;
+    started: boolean;
+  };
+}
+
+/** Checklist 4.5: the participant's own offer letter. */
+export async function viewMyOfferDocument(): Promise<void> {
+  return openProtectedFile("/api/participants/employment/offer");
 }
 
 export async function acceptEmployment(body: EmploymentAcceptRequest): Promise<{
@@ -1661,10 +1918,21 @@ export interface InvoiceDTO {
   status: string;
 }
 
+/** Checklist 5.2: Finance's invoice rows name the participant and the plan. */
+export interface FinanceInvoiceRow extends InvoiceDTO {
+  participantId: string | null;
+  participantName: string | null;
+  planNumber: string | null;
+}
+
+/** Checklist 5.2: PAYMENT, FAILED, WAIVER or REVERSAL. */
+export type LedgerEntryType = "PAYMENT" | "FAILED" | "WAIVER" | "REVERSAL";
+
 export interface PaymentLedgerDTO {
   id: number;
   invoiceId: number | null;
   userId: number;
+  entryType?: LedgerEntryType | null;
   amountReceived: string | number | null;
   receiptDate: string | null;
   method: string | null;
@@ -1672,12 +1940,45 @@ export interface PaymentLedgerDTO {
   balance: string | number | null;
   notes: string | null;
   financeReviewer: string | null;
+  reversesLedgerId?: number | null;
   createdAt: string | null;
+}
+
+export interface FinanceLedgerRow extends PaymentLedgerDTO {
+  invoiceNumber: string | null;
+  participantId: string | null;
+  participantName: string | null;
+  /** A payment that a later REVERSAL undid. */
+  reversed: boolean;
+}
+
+/** Checklist 5.2: download an invoice PDF (the participant's own, or any for Finance). */
+export async function downloadInvoicePdf(invoiceId: number, asFinance = false): Promise<void> {
+  const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
+  const path = asFinance
+    ? `/api/finance/invoices/${invoiceId}/pdf`
+    : `/api/participants/payments/invoices/${invoiceId}/pdf`;
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Couldn't download the invoice (${res.status})`);
+  const disposition = res.headers.get("content-disposition") ?? "";
+  const filename = /filename="([^"]+)"/.exec(disposition)?.[1] ?? "invoice.pdf";
+  const objectUrl = URL.createObjectURL(await res.blob());
+  const a = document.createElement("a");
+  a.href = objectUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(objectUrl);
 }
 
 export interface PaymentSummary {
   totalDue?: string | number;
   totalPaid?: string | number;
+  /** Checklist 5.2: amounts Finance wrote off. */
+  totalWaived?: string | number;
   balance?: string | number;
   overdue?: string | number;
   nextDueAmount?: string | number | null;
@@ -1764,9 +2065,15 @@ export interface ErmPendingEmploymentRow {
   startDate: string | null;
   location: string | null;
   employmentType: string | null;
-  offerDocumentUrl: string | null;
+  hasOffer: boolean;
   notes: string | null;
   acceptanceDate: string | null;
+  /** Checklist 4.5: sent back for correction, waiting for the participant. */
+  returned: boolean;
+  returnedAt: string | null;
+  returnReason: string | null;
+  /** These are corrected details (an earlier record was sent back). */
+  resubmitted: boolean;
 }
 
 export async function getErmPendingEmployment(): Promise<ErmPendingEmploymentRow[]> {
@@ -1782,6 +2089,18 @@ export async function verifyEmployment(participantId: number, notes = ""): Promi
   return wrapper.data;
 }
 
+/** Checklist 4.5: send the employment details back to the participant with a reason. */
+export async function returnEmployment(participantId: number, reason: string): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>(
+    `/api/erm/employment/${participantId}/return`,
+    { method: "PUT", body: JSON.stringify({ reason }) });
+}
+
+/** Checklist 4.5: a current participant's offer letter (the view is recorded). */
+export async function viewErmOfferDocument(participantId: number): Promise<void> {
+  return openProtectedFile(`/api/erm/employment/${participantId}/offer`);
+}
+
 export interface ErmPendingPhaseRow {
   userId: number;
   participantId: string | null;
@@ -1789,6 +2108,8 @@ export interface ErmPendingPhaseRow {
   phaseCompletionId: number;
   acceptedAt: string | null;
   acknowledgmentVersion: string | null;
+  employerClient?: string | null;
+  startDate?: string | null;
 }
 
 export async function getErmPendingPhaseApprovals(): Promise<ErmPendingPhaseRow[]> {
@@ -1814,6 +2135,8 @@ export interface ErmRosterRow {
   targetJobTitle: string | null;
   currentStatus: string | null;
   lastActivity: string | null;
+  /** A signed agreement is waiting for this ERM's review (checklist 2.3). */
+  agreementToReview?: boolean;
 }
 
 export async function getErmRoster(): Promise<ErmRosterRow[]> {
@@ -1827,8 +2150,32 @@ export async function getErmParticipantDetail(participantId: number): Promise<Re
   return wrapper.data ?? {};
 }
 
-export async function getErmReports(): Promise<WeeklyReportDTO[]> {
-  const wrapper = await apiFetch<ApiResponse<WeeklyReportDTO[]>>("/api/erm/reports");
+/** The assigned ERM confirms they reviewed the participant's signed agreement. */
+export async function markErmAgreementReviewed(participantUserId: number): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>(
+    `/api/erm/participants/${participantUserId}/agreement/reviewed`, { method: "PUT" });
+}
+
+/** One weekly report in the ERM's list (checklist 4.1). */
+export interface ErmReportRow {
+  id: number;
+  userId: number;
+  participantName: string | null;
+  participantId: string | null;
+  weekStart: string | null;
+  weekEnd: string | null;
+  dueDate: string | null;
+  status: string;
+  submittedAt: string | null;
+  late: boolean;
+  needsHelp: boolean;
+  reportData: string | null;
+  ermNotes: string | null;
+  ermReviewDate: string | null;
+}
+
+export async function getErmReports(): Promise<ErmReportRow[]> {
+  const wrapper = await apiFetch<ApiResponse<ErmReportRow[]>>("/api/erm/reports");
   return wrapper.data ?? [];
 }
 
@@ -1880,10 +2227,28 @@ export async function getEnrollmentQueue(): Promise<OperationsQueueRow[]> {
   return wrapper.data ?? [];
 }
 
-export async function getAgreementQueue(): Promise<OperationsQueueRow[]> {
-  const wrapper = await apiFetch<ApiResponse<OperationsQueueRow[]>>(
+/** One row of Operations' agreement queue (checklist 2.5). */
+export interface AgreementQueueRow {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  email: string | null;
+  /** DECLINED, EXPIRED, NEEDS_ERM, WAITING, CHECK_STEP or ERM_REVIEW. */
+  stage: string;
+  since: string | null;
+  detail: string | null;
+}
+
+export async function getAgreementQueue(): Promise<AgreementQueueRow[]> {
+  const wrapper = await apiFetch<ApiResponse<AgreementQueueRow[]>>(
     "/api/admin/operations/agreement-queue");
   return wrapper.data ?? [];
+}
+
+/** The participant declines to sign, with a reason; they can still sign later. */
+export async function declineParticipantAgreement(reason: string): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>("/api/participants/agreement/decline",
+    { method: "POST", body: JSON.stringify({ reason }) });
 }
 
 export interface AuditRow {
@@ -1908,12 +2273,41 @@ export async function getAuditTrail(opts: {
   return wrapper.data ?? [];
 }
 
+/** One email the platform tried to send (Operations → Email log). */
+export interface EmailLogRow {
+  id: number;
+  userId: number | null;
+  emailType: string;
+  recipient: string | null;
+  subject: string | null;
+  status: "SENT" | "FAILED" | "SKIPPED" | string;
+  triggerEvent: string | null;
+  errorMessage: string | null;
+  sentAt: string | null;
+}
+
+export async function getEmailLog(opts: {
+  status?: string; userId?: number; email?: string;
+} = {}): Promise<EmailLogRow[]> {
+  const qs = new URLSearchParams();
+  if (opts.status) qs.set("status", opts.status);
+  if (opts.userId) qs.set("userId", String(opts.userId));
+  if (opts.email) qs.set("email", opts.email);
+  const wrapper = await apiFetch<ApiResponse<EmailLogRow[]>>(
+    `/api/admin/operations/emails${qs.size ? `?${qs.toString()}` : ""}`);
+  return wrapper.data ?? [];
+}
+
+/** Checklist 6.2: one row per open exception (roadmap §14, plus failed emails). */
 export interface OperationsException {
   type: string;
-  userId: number;
+  label: string;
+  userId: number | null;
+  participantId: string | null;
   fullName: string | null;
-  currentStatus: string | null;
-  openSince: string | null;
+  detail: string | null;
+  since: string | null;
+  where: string | null;
 }
 
 export async function getOperationsExceptions(): Promise<OperationsException[]> {
@@ -1922,10 +2316,35 @@ export async function getOperationsExceptions(): Promise<OperationsException[]> 
   return wrapper.data ?? [];
 }
 
+export interface StaffMember {
+  id: number;
+  fullName: string;
+  email: string;
+  /** Coach slots this coach fills (checklist 3.2). */
+  coachTypes?: string[];
+  /** Program technologies this coach covers. */
+  coachSkills?: string[];
+}
+
 export interface StaffPool {
-  erm: { id: number; fullName: string; email: string }[];
-  coach: { id: number; fullName: string; email: string }[];
-  technicalAdvisor: { id: number; fullName: string; email: string }[];
+  erm: StaffMember[];
+  coach: StaffMember[];
+  technicalAdvisor: StaffMember[];
+}
+
+/** The program technologies coaches can cover (same list as program selection). */
+export const COACH_SKILLS = [
+  "Java Full Stack", "Python Full Stack", ".NET Full Stack", "Data Engineering",
+  "Cloud & DevOps", "React / Angular Frontend", "QA / Testing", "Data Science & AI",
+  "Salesforce", "ServiceNow", "Cybersecurity",
+] as const;
+
+/** Operations sets which coach slots a coach fills and the skills they cover. */
+export async function updateCoachProfile(
+  coachUserId: number, coachTypes: string[], coachSkills: string[],
+): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>(`/api/admin/coaches/${coachUserId}/profile`,
+    { method: "PUT", body: JSON.stringify({ coachTypes, coachSkills }) });
 }
 
 export async function getStaffPool(): Promise<StaffPool> {
@@ -1942,29 +2361,10 @@ export async function getAssignmentQueue(): Promise<Record<string, unknown>[]> {
 
 /**
  * Routes a logged-in user to the dashboard URL appropriate for their
- * role. Used by the participant /dashboard gatekeeper (and any other
- * "land here on login" router) to direct staff away from the
- * participant flow.
- *
- *   ERM            -> /erm-dashboard
- *   COACH / TECHNICAL_ADVISOR -> /coach-dashboard
- *   FINANCE        -> /finance-dashboard
- *   OPERATIONS_ADMIN -> /operations
- *   SYSTEM_ADMIN / ADMIN -> /admin (full admin surface; SYSTEM_ADMIN
- *                                   gets the same LMS view + can still
- *                                   reach /operations via sidebar)
- *   INSTRUCTOR     -> /instructor
- *   anything else / participant -> /dashboard
+ * role (see homeForRole in lib/roles.ts, which the route guard shares).
  */
 export function dashboardRouteForRole(role: string | null | undefined): string {
-  const r = (role ?? "").toUpperCase();
-  if (r === "ERM") return "/erm-dashboard";
-  if (r === "COACH" || r === "TECHNICAL_ADVISOR") return "/coach-dashboard";
-  if (r === "FINANCE") return "/finance-dashboard";
-  if (r === "OPERATIONS_ADMIN") return "/operations";
-  if (r === "SYSTEM_ADMIN" || r === "ADMIN") return "/admin";
-  if (r === "INSTRUCTOR") return "/instructor";
-  return "/dashboard";
+  return homeForRole(role);
 }
 
 export async function assignCoachToParticipant(
@@ -2100,6 +2500,8 @@ export interface FinancePlanRow {
   status: string;
   acceptedAt: string | null;
   schedule: PaymentScheduleItem[];
+  /** Checklist 5.1: a plan can be changed until its first invoice. */
+  invoiceCount: number;
 }
 
 export async function getFinancePlans(): Promise<FinancePlanRow[]> {
@@ -2107,21 +2509,51 @@ export async function getFinancePlans(): Promise<FinancePlanRow[]> {
   return wrapper.data ?? [];
 }
 
-export async function createFinancePlan(body: {
-  participantId: number;
+/** Checklist 5.1: the server builds the schedule (whole cents, calendar months). */
+export interface PlanTerms {
   totalAmount: number;
   installments: number;
-  schedule: { dueDate: string; amount: number; label?: string }[];
-}): Promise<PaymentPlanDTO> {
+  firstDueDate: string;
+}
+
+export interface PlanCandidate {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  employer?: string | null;
+  startDate?: string | null;
+}
+
+export async function getPlanCandidates(): Promise<PlanCandidate[]> {
+  const wrapper = await apiFetch<ApiResponse<PlanCandidate[]>>("/api/finance/plan-candidates");
+  return wrapper.data ?? [];
+}
+
+export async function previewFinancePlan(terms: PlanTerms): Promise<PaymentScheduleItem[]> {
+  const wrapper = await apiFetch<ApiResponse<PaymentScheduleItem[]>>(
+    "/api/finance/plans/preview",
+    { method: "POST", body: JSON.stringify(terms) });
+  return wrapper.data ?? [];
+}
+
+export async function createFinancePlan(body: PlanTerms & { participantId: number }): Promise<PaymentPlanDTO> {
   const wrapper = await apiFetch<ApiResponse<PaymentPlanDTO>>(
     "/api/finance/plans",
     { method: "POST", body: JSON.stringify(body) });
   return wrapper.data;
 }
 
-export async function getFinanceInvoices(status?: string): Promise<InvoiceDTO[]> {
+/** Checklist 5.1: change a plan (before its first invoice); an accepted plan needs accepting again. */
+export async function updateFinancePlan(planId: number, terms: PlanTerms): Promise<PaymentPlanDTO> {
+  const wrapper = await apiFetch<ApiResponse<PaymentPlanDTO>>(
+    `/api/finance/plans/${planId}`,
+    { method: "PUT", body: JSON.stringify(terms) });
+  return wrapper.data;
+}
+
+export async function getFinanceInvoices(status?: string): Promise<FinanceInvoiceRow[]> {
   const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-  const wrapper = await apiFetch<ApiResponse<InvoiceDTO[]>>(
+  const wrapper = await apiFetch<ApiResponse<FinanceInvoiceRow[]>>(
     `/api/finance/invoices${qs}`);
   return wrapper.data ?? [];
 }
@@ -2147,18 +2579,20 @@ export async function markOverdueInvoices(): Promise<{ marked: number }> {
   return wrapper.data;
 }
 
-export async function getFinanceLedger(): Promise<PaymentLedgerDTO[]> {
-  const wrapper = await apiFetch<ApiResponse<PaymentLedgerDTO[]>>(
+export async function getFinanceLedger(): Promise<FinanceLedgerRow[]> {
+  const wrapper = await apiFetch<ApiResponse<FinanceLedgerRow[]>>(
     "/api/finance/payments");
   return wrapper.data ?? [];
 }
 
 export async function recordPaymentReceipt(body: {
   invoiceId: number;
-  amountReceived: number;
+  amountReceived?: number;
   receiptDate?: string;
   method?: string;
   notes?: string;
+  entryType?: LedgerEntryType;
+  reversesLedgerId?: number;
 }): Promise<PaymentLedgerDTO> {
   const wrapper = await apiFetch<ApiResponse<PaymentLedgerDTO>>(
     "/api/finance/payments/receive",
@@ -2178,6 +2612,13 @@ export async function getFinanceTrackings(status?: string): Promise<FinanceTrack
   const wrapper = await apiFetch<ApiResponse<FinanceTrackingRow[]>>(
     `/api/finance/check-tracking${qs}`);
   return wrapper.data ?? [];
+}
+
+/** Checklist 5.3: the full number of a mailed check (Finance only; the view is recorded). */
+export async function revealTrackingCheckNumber(trackingId: number): Promise<string> {
+  const wrapper = await apiFetch<ApiResponse<{ checkNumber: string }>>(
+    `/api/finance/check-tracking/${trackingId}/number`);
+  return wrapper.data?.checkNumber ?? "";
 }
 
 export async function updateTrackingStatus(
@@ -2213,14 +2654,41 @@ export interface FinanceCheckRow {
   userId: number;
   participantId: string | null;
   participantName: string | null;
+  /** Masked (••••1234); the full number via revealFinanceCheckNumber (audited). */
   checkNumber: string | null;
   amount: number | null;
   checkDate: string | null;
   notes: string | null;
   reviewStatus: string;
-  maskingStatus: string;
-  fileUrl: string | null;
+  reviewNotes: string | null;
+  reviewedAt: string | null;
+  replacesCheckId: number | null;
+  hasFile: boolean;
   uploadedAt: string | null;
+}
+
+/** Finance: opens a check image (audited) in a new tab. */
+export async function openFinanceCheckImage(checkId: number): Promise<void> {
+  const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
+  const res = await fetch(`${API_BASE_URL}/api/finance/checks/${checkId}/image`, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+  });
+  if (!res.ok) throw new Error(`Couldn't open the check image (${res.status})`);
+  if ((res.headers.get("content-type") ?? "").includes("application/json")) {
+    const body = (await res.json()) as ApiResponse<{ url: string }>;
+    if (body?.data?.url) window.open(body.data.url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  const objectUrl = URL.createObjectURL(await res.blob());
+  window.open(objectUrl, "_blank", "noopener,noreferrer");
+  setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+}
+
+/** Finance: the full check number (each view is recorded). */
+export async function revealFinanceCheckNumber(checkId: number): Promise<string> {
+  const wrapper = await apiFetch<ApiResponse<{ checkNumber: string }>>(
+    `/api/finance/checks/${checkId}/number`);
+  return wrapper.data?.checkNumber ?? "";
 }
 
 export async function getFinanceChecks(status?: string): Promise<FinanceCheckRow[]> {
@@ -3119,6 +3587,27 @@ export interface CheckoutResult {
   discount: number;
   total: number;
   couponCode: string | null;
+  /**
+   * Checklist 5.4: ENROLLED (free, or a coupon covered it), PAYMENT_REQUIRED
+   * (go to checkoutUrl to pay) or PAYMENT_UNAVAILABLE (online payment isn't
+   * set up; paid courses stay in the cart).
+   */
+  status?: "ENROLLED" | "PAYMENT_REQUIRED" | "PAYMENT_UNAVAILABLE";
+  checkoutUrl?: string;
+  message?: string;
+  enrolled?: string[];
+}
+
+/** Checklist 5.4: back from the payment page — is the payment in, and what did it buy? */
+export async function confirmCheckout(sessionId: string): Promise<{
+  status: "PENDING" | "COMPLETED" | "FAILED";
+  amount: number;
+  courses: string[];
+}> {
+  const wrapper = await apiFetch<ApiResponse<{ status: "PENDING" | "COMPLETED" | "FAILED"; amount: number; courses: string[] }>>(
+    "/api/cart/checkout/confirm",
+    { method: "POST", body: JSON.stringify({ sessionId }) });
+  return wrapper.data;
 }
 
 export async function checkoutCart(couponCode?: string | null) {
@@ -5489,4 +5978,57 @@ export async function ermApproveConsultantVersion(applicationId: string) {
     `/api/agreement-erm/applications/${applicationId}/approve-consultant-version`,
     { method: "POST" },
   );
+}
+
+// ─── Staff onboarding (25 Sep) ────────────────────────────────────
+
+/** The roles a System Admin can add in Admin → Users, with plain names. */
+export const STAFF_ROLE_OPTIONS: { value: string; label: string; hint: string }[] = [
+  { value: "ERM", label: "ERM (relationship manager)", hint: "Owns participants, reviews weekly reports, verifies employment" },
+  { value: "COACH", label: "Coach", hint: "Career, resume or interview coaching" },
+  { value: "TECHNICAL_ADVISOR", label: "Technical advisor", hint: "Technical coaching for a skill track" },
+  { value: "FINANCE", label: "Finance", hint: "Payment plans, invoices, check copies" },
+  { value: "OPERATIONS_ADMIN", label: "Operations admin", hint: "Queues, assignments, exceptions" },
+  { value: "SYSTEM_ADMIN", label: "System admin", hint: "Everything, including adding staff" },
+];
+
+/**
+ * Adds a staff member (System Admin only). The temporary password is
+ * emailed to the personal email (or the login email when none is given).
+ */
+export async function createStaffUser(body: {
+  fullName: string;
+  email: string;
+  personalEmail?: string;
+  role: string;
+}): Promise<{ message: string; emailSent: boolean; sentTo: string }> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo: string }>>("/api/admin/users", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return { message: wrapper.message ?? "", emailSent: wrapper.data?.emailSent ?? false, sentTo: wrapper.data?.sentTo ?? "" };
+}
+
+/** Emails a staff member a new temporary password (System Admin only). */
+export async function sendNewLoginDetails(userId: number): Promise<string> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo: string }>>(
+    `/api/admin/users/${userId}/send-login`, { method: "POST" });
+  return wrapper.message ?? "";
+}
+
+/** Emails someone an invitation to enroll as a participant. */
+export async function inviteParticipant(body: { fullName: string; email: string }): Promise<string> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean }>>("/api/admin/users/invite-participant", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  return wrapper.message ?? "";
+}
+
+/** The signed-in user changes their password (required after a temporary one). */
+export async function changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>("/api/auth/change-password", {
+    method: "POST",
+    body: JSON.stringify({ currentPassword, newPassword }),
+  });
 }
