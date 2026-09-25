@@ -12,7 +12,8 @@ import {
 import { formatDay } from "@/lib/datetime";
 import { Pill, Spinner, moneyFmt } from "./FinanceParts";
 
-export function FinanceInvoicesTab() {
+/** readOnly: Operations admins look; only Finance and the System Admin change money. */
+export function FinanceInvoicesTab({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<FinanceInvoiceRow[]>([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -71,7 +72,7 @@ export function FinanceInvoicesTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-gray-900">Invoices</h1>
-        <div className="flex gap-1.5">
+        <div className={readOnly ? "hidden" : "flex gap-1.5"}>
           <button
             onClick={runBulkGenerate}
             disabled={busy}

@@ -7,7 +7,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Loader2, MailCheck, AlertCircle, CheckCircle2 } from "lucide-react";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import { useAuth } from "@/lib/auth-context";
-import { resendVerificationCode, verifyCode } from "@/lib/api";
+import { forgetSignUpPassword, recallSignUpPassword, resendVerificationCode, verifyCode } from "@/lib/api";
 
 /**
  * /verify-email?email=… — OTP gate for new signups.
@@ -51,6 +51,10 @@ function VerifyEmailInner() {
   const [alreadyVerified, setAlreadyVerified] = useState(false);
   const [resending, setResending] = useState(false);
   const [resendInfo, setResendInfo] = useState("");
+  // The password chosen at sign-up proves which sign-up this is. Coming
+  // straight from /enroll or sign-in we already have it; otherwise ask.
+  const [remembered, setRemembered] = useState<string | null>(() => recallSignUpPassword(email));
+  const [password, setPassword] = useState("");
 
   const inputRefs = useRef<Array<HTMLInputElement | null>>([]);
 
@@ -128,11 +132,17 @@ function VerifyEmailInner() {
 
   const handleSubmit = async () => {
     if (!email || !ready || submitting) return;
+    const signUpPassword = remembered ?? password;
+    if (!signUpPassword) {
+      setError("Enter the password you chose when you enrolled.");
+      return;
+    }
     setSubmitting(true);
     setError("");
     setAlreadyVerified(false);
     try {
-      const auth = await verifyCode(email, code);
+      const auth = await verifyCode(email, code, signUpPassword);
+      forgetSignUpPassword();
       setSuccess(true);
       setSession(auth);
       // verify-code mints the participant ID; the participant lands on
@@ -143,6 +153,8 @@ function VerifyEmailInner() {
       const message = err instanceof Error ? err.message : "Verification failed";
       setError(message);
       setAlreadyVerified(/already verified/i.test(message));
+      // The password we had didn't match: let them type it.
+      if (/password doesn't match/i.test(message)) setRemembered(null);
       setShake((n) => n + 1);
       setDigits(Array(CODE_LENGTH).fill(""));
       inputRefs.current[0]?.focus();
@@ -229,6 +241,25 @@ function VerifyEmailInner() {
           ))}
         </motion.div>
 
+        {!remembered && (
+          <div className="mt-6 text-left">
+            <label htmlFor="signup-password" className="block text-sm font-semibold text-gray-700 mb-1.5">
+              Your password
+            </label>
+            <input
+              id="signup-password"
+              type="password"
+              autoComplete="current-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleSubmit(); }}
+              disabled={submitting || success}
+              placeholder="The password you chose when you enrolled"
+              className="w-full px-4 py-3 bg-white border border-gray-200 rounded-lg text-gray-900 placeholder-gray-400 text-sm focus:outline-none focus:ring-2 focus:ring-sage-copper focus:border-transparent transition"
+            />
+          </div>
+        )}
+
         <AnimatePresence>
           {error && (
             <motion.div
@@ -268,7 +299,7 @@ function VerifyEmailInner() {
         <button
           type="button"
           onClick={handleSubmit}
-          disabled={!ready || submitting || success}
+          disabled={!ready || (!remembered && !password) || submitting || success}
           className="mt-6 w-full inline-flex items-center justify-center gap-2 bg-sage-navy hover:bg-sage-navy-deep text-white font-semibold py-3 rounded-lg transition disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {submitting && <Loader2 className="w-4 h-4 animate-spin" />}

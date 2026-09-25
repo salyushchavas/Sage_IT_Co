@@ -99,7 +99,7 @@ export async function apiFetch<T = unknown>(
   // 401 means the sign-in is missing or has expired (a signed-in user who
   // isn't allowed gets 403). Renew it once with the refresh token and try
   // again. Not for the sign-in calls themselves: there 401 is a wrong password.
-  if (res.status === 401 && token && !endpoint.startsWith("/api/auth/")) {
+  if (res.status === 401 && token && !SIGN_IN_CALL.test(endpoint)) {
     if (await tryRefresh()) {
       headers["Authorization"] = `Bearer ${localStorage.getItem("access_token")}`;
       res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
@@ -122,6 +122,9 @@ export async function apiFetch<T = unknown>(
   if (res.status === 204) return undefined as T;
   return res.json();
 }
+
+/** Calls where 401 means wrong details, not an expired sign-in: never renewed. */
+const SIGN_IN_CALL = /^\/api\/auth\/(login|register|refresh|verify-code|resend-code|forgot-password|reset-password)\b/;
 
 /** The session can't be renewed: forget it and go to sign-in, then come back here. */
 function endSession(): void {
@@ -1692,12 +1695,33 @@ export async function getAcknowledgmentText(): Promise<AcknowledgmentText> {
   return wrapper.data;
 }
 
-export async function verifyCode(email: string, code: string): Promise<AuthResponse> {
+/**
+ * Verifying needs the code AND the password chosen at sign-up: the code
+ * proves the email, the password proves which sign-up it is (so nobody can
+ * register someone else's email first and get in once they verify).
+ */
+export async function verifyCode(email: string, code: string, password: string): Promise<AuthResponse> {
   const wrapper = await apiFetch<ApiResponse<AuthResponse>>("/api/auth/verify-code", {
     method: "POST",
-    body: JSON.stringify({ email, code }),
+    body: JSON.stringify({ email, code, password }),
   });
   return wrapper.data;
+}
+
+// The password just typed at sign-up (or sign-in), kept in memory only
+// (never stored) so the verify page doesn't have to ask for it again.
+let signUpPassword: { email: string; password: string } | null = null;
+
+export function rememberSignUpPassword(email: string, password: string): void {
+  signUpPassword = { email: email.trim().toLowerCase(), password };
+}
+
+export function recallSignUpPassword(email: string): string | null {
+  return signUpPassword && signUpPassword.email === email.trim().toLowerCase() ? signUpPassword.password : null;
+}
+
+export function forgetSignUpPassword(): void {
+  signUpPassword = null;
 }
 
 export async function resendVerificationCode(email: string): Promise<{ cooldownSeconds: number }> {
@@ -6027,8 +6051,14 @@ export async function inviteParticipant(body: { fullName: string; email: string 
 
 /** The signed-in user changes their password (required after a temporary one). */
 export async function changeMyPassword(currentPassword: string, newPassword: string): Promise<void> {
-  await apiFetch<ApiResponse<unknown>>("/api/auth/change-password", {
+  const wrapper = await apiFetch<ApiResponse<AuthResponse>>("/api/auth/change-password", {
     method: "POST",
     body: JSON.stringify({ currentPassword, newPassword }),
   });
+  // The change ends every earlier sign-in, this one too: keep the new one.
+  if (wrapper.data?.accessToken && typeof window !== "undefined") {
+    localStorage.setItem("access_token", wrapper.data.accessToken);
+    localStorage.setItem("refresh_token", wrapper.data.refreshToken);
+    setAccessTokenCookie(wrapper.data.accessToken);
+  }
 }

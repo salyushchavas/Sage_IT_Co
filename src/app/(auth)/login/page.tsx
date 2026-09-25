@@ -9,7 +9,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { safeRedirect } from "@/lib/api";
+import { rememberSignUpPassword, safeRedirect } from "@/lib/api";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 
 const schema = z.object({
@@ -48,6 +48,7 @@ function LoginForm() {
       const message = err instanceof Error ? err.message : "Login failed";
       if (message === "EMAIL_NOT_VERIFIED") {
         // Send them to finish verifying instead of showing the raw code.
+        rememberSignUpPassword(data.email, data.password);
         router.push(`/verify-email?email=${encodeURIComponent(data.email.trim())}&from=login`);
         return;
       }

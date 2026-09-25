@@ -36,7 +36,8 @@ const METHOD_LABEL: Record<string, string> = {
  * doesn't change), waivers and reversals of an earlier payment (e.g. a
  * bounced check). A payment can't be more than the invoice's balance.
  */
-export function FinancePaymentsLedgerTab() {
+/** readOnly: Operations admins look; only Finance and the System Admin change money. */
+export function FinancePaymentsLedgerTab({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<FinanceLedgerRow[]>([]);
   const [invoices, setInvoices] = useState<FinanceInvoiceRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,12 +68,14 @@ export function FinancePaymentsLedgerTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-gray-900">Payments ledger</h1>
-        <button
-          onClick={() => setShowRecord(true)}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
-        >
-          + Record entry
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setShowRecord(true)}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+          >
+            + Record entry
+          </button>
+        )}
       </div>
 
       <div className="rounded-2xl border border-gray-100 bg-white overflow-hidden">

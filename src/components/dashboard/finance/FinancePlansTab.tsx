@@ -24,7 +24,8 @@ import { Field, Pill, Spinner, moneyFmt } from "./FinanceParts";
  * changed until its first invoice; if the participant had accepted it,
  * they're asked to accept the changed plan.
  */
-export function FinancePlansTab() {
+/** readOnly: Operations admins look; only Finance and the System Admin change money. */
+export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<FinancePlanRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialog, setDialog] = useState<{ plan?: FinancePlanRow } | null>(null);
@@ -59,12 +60,14 @@ export function FinancePlansTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-gray-900">Payment plans</h1>
-        <button
-          onClick={() => setDialog({})}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
-        >
-          + Create plan
-        </button>
+        {!readOnly && (
+          <button
+            onClick={() => setDialog({})}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+          >
+            + Create plan
+          </button>
+        )}
       </div>
       {error && (
         <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
@@ -130,7 +133,7 @@ export function FinancePlansTab() {
                     </td>
                     <td className="px-4 py-2 text-right">
                       <div className="inline-flex gap-1.5">
-                        {r.invoiceCount === 0 && (r.status === "PENDING" || r.status === "ACTIVE") && (
+                        {!readOnly && r.invoiceCount === 0 && (r.status === "PENDING" || r.status === "ACTIVE") && (
                           <button
                             onClick={() => setDialog({ plan: r })}
                             className="px-2 py-1 rounded-md text-[10px] font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy cursor-pointer"
@@ -138,7 +141,7 @@ export function FinancePlansTab() {
                             Edit
                           </button>
                         )}
-                        {r.status === "ACTIVE" && r.invoiceCount < (r.installments ?? 0) && (
+                        {!readOnly && r.status === "ACTIVE" && r.invoiceCount < (r.installments ?? 0) && (
                           <button
                             onClick={() => invoice(r.id)}
                             className="px-2 py-1 rounded-md text-[10px] font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"

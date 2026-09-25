@@ -10,7 +10,7 @@ import { Eye, EyeOff, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import OnboardingProgressBar from "@/components/OnboardingProgressBar";
-import { enrollParticipant } from "@/lib/api";
+import { enrollParticipant, rememberSignUpPassword } from "@/lib/api";
 
 const QUICK_SIGNUP_STEPS = ["Sign Up", "Verify"] as const;
 
@@ -78,6 +78,7 @@ export default function EnrollPage() {
         phone: data.phone.trim(),
         password: data.password,
       });
+      rememberSignUpPassword(data.email, data.password);
       router.push(`/verify-email?email=${encodeURIComponent(data.email.trim())}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Enrollment failed. Please try again.");

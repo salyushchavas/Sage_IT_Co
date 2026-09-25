@@ -11,7 +11,8 @@ import {
 import { formatDay } from "@/lib/datetime";
 import { Pill, Spinner } from "./FinanceParts";
 
-export function FinanceTrackingTab() {
+/** readOnly: Operations admins see the status, not full check numbers or the update buttons. */
+export function FinanceTrackingTab({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<FinanceTrackingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<number | null>(null);
@@ -100,7 +101,7 @@ export function FinanceTrackingTab() {
                   </td>
                   <td className="px-4 py-2 font-mono text-xs text-gray-700">
                     {revealed[r.id] ?? r.checkNumber ?? "--"}
-                    {!revealed[r.id] && r.checkNumber && (
+                    {!readOnly && !revealed[r.id] && r.checkNumber && (
                       <button
                         onClick={() => reveal(r.id)}
                         className="ml-2 font-sans text-[10px] font-semibold text-sage-navy hover:text-sage-navy-deep cursor-pointer"
@@ -125,7 +126,7 @@ export function FinanceTrackingTab() {
                     <Pill>{r.status}</Pill>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <div className="inline-flex gap-1">
+                    <div className={readOnly ? "hidden" : "inline-flex gap-1"}>
                       <button
                         onClick={() => updateStatus(r.id, "RECEIVED")}
                         disabled={busy === r.id}

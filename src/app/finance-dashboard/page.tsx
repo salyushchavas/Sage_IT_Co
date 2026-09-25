@@ -121,6 +121,8 @@ export default function FinanceDashboardPage() {
 
   const role = (user?.role ?? "").toUpperCase();
   const canSeeChecks = role === "FINANCE" || role === "SYSTEM_ADMIN";
+  // Operations admins look; only Finance and the System Admin change money.
+  const readOnly = !canSeeChecks;
   const tabs = canSeeChecks ? TABS : TABS.filter((t) => t.id !== "checks");
 
   return (
@@ -136,13 +138,16 @@ export default function FinanceDashboardPage() {
         </p>
       )}
       {active === "home" && <FinanceOverviewTab checks={checks} />}
-      {active === "plans" && <FinancePlansTab />}
-      {active === "invoices" && <FinanceInvoicesTab />}
-      {active === "payments" && <FinancePaymentsLedgerTab />}
+      {readOnly && (
+        <p className="mb-4 text-xs text-gray-500">View only: plans, invoices and payments are changed by Finance.</p>
+      )}
+      {active === "plans" && <FinancePlansTab readOnly={readOnly} />}
+      {active === "invoices" && <FinanceInvoicesTab readOnly={readOnly} />}
+      {active === "payments" && <FinancePaymentsLedgerTab readOnly={readOnly} />}
       {active === "checks" && canSeeChecks && (
         <FinanceChecksTab checks={checks} onRefresh={refreshChecks} />
       )}
-      {active === "tracking" && <FinanceTrackingTab />}
+      {active === "tracking" && <FinanceTrackingTab readOnly={readOnly} />}
       {active === "excepts" && <FinanceExceptionsTab />}
     </RoleDashboardShell>
   );
