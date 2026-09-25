@@ -531,7 +531,14 @@ public class ParticipantController {
             @RequestBody com.spire.backend.dto.WeeklyReportRequest req,
             Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
-        com.spire.backend.entity.WeeklyReport saved = weeklyReportService.submit(userId, req);
+        com.spire.backend.entity.WeeklyReport saved;
+        try {
+            saved = weeklyReportService.submit(userId, req);
+        } catch (org.springframework.dao.DataIntegrityViolationException raced) {
+            // The overdue job created this week's row at the same moment
+            // (one row per week is enforced): save onto that row instead.
+            saved = weeklyReportService.submit(userId, req);
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 "Report submitted",
                 com.spire.backend.dto.WeeklyReportDTO.from(saved)));
@@ -543,7 +550,12 @@ public class ParticipantController {
             @RequestBody com.spire.backend.dto.WeeklyReportRequest req,
             Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
-        com.spire.backend.entity.WeeklyReport saved = weeklyReportService.saveDraft(userId, req);
+        com.spire.backend.entity.WeeklyReport saved;
+        try {
+            saved = weeklyReportService.saveDraft(userId, req);
+        } catch (org.springframework.dao.DataIntegrityViolationException raced) {
+            saved = weeklyReportService.saveDraft(userId, req);   // see submit
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 "Draft saved",
                 com.spire.backend.dto.WeeklyReportDTO.from(saved)));
@@ -802,10 +814,25 @@ public class ParticipantController {
 
     @GetMapping("/payments/history")
     @PreAuthorize("isAuthenticated()")
-    public ResponseEntity<ApiResponse<List<com.spire.backend.entity.PaymentLedger>>> paymentHistory(Authentication auth) {
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> paymentHistory(Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
-        return ResponseEntity.ok(ApiResponse.success(
-                paymentLedgerRepository.findByUserIdOrderByCreatedAtDesc(userId)));
+        // The participant's view: no Finance notes or reviewer names.
+        List<Map<String, Object>> rows = paymentLedgerRepository.findByUserIdOrderByCreatedAtDesc(userId).stream()
+                .map(e -> {
+                    Map<String, Object> row = new java.util.LinkedHashMap<>();
+                    row.put("id", e.getId());
+                    row.put("invoiceId", e.getInvoiceId());
+                    row.put("entryType", e.getEntryType());
+                    row.put("amountReceived", e.getAmountReceived());
+                    row.put("receiptDate", e.getReceiptDate());
+                    row.put("method", e.getMethod());
+                    row.put("adjustment", e.getAdjustment());
+                    row.put("balance", e.getBalance());
+                    row.put("createdAt", e.getCreatedAt());
+                    return row;
+                })
+                .toList();
+        return ResponseEntity.ok(ApiResponse.success(rows));
     }
 
     // ─── Phase 5A: profile read / edit (dashboard Profile tab) ─────

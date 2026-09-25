@@ -95,6 +95,10 @@ public class CouponService {
      */
     @Transactional
     public void redeem(Coupon c, Long userId, BigDecimal discountApplied, BigDecimal orderTotal) {
+        // Once per buyer: a second paid checkout with the same coupon must
+        // still complete (the unique key used to roll the payment back, so
+        // the buyer was charged and never enrolled).
+        if (redemptionRepository.existsByCouponIdAndUserId(c.getId(), userId)) return;
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
@@ -105,8 +109,7 @@ public class CouponService {
                 .orderTotal(orderTotal)
                 .build());
 
-        c.setUsesCount((c.getUsesCount() != null ? c.getUsesCount() : 0) + 1);
-        couponRepository.save(c);
+        couponRepository.addUse(c.getId());
     }
 
     // ─── Admin CRUD ──────────────────────────────────────────────

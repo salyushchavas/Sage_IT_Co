@@ -90,22 +90,27 @@ public class User {
 
     /**
      * Sign-ins (access and refresh tokens) issued before this moment, in
-     * epoch seconds, no longer work. Set when the password changes or is
-     * reset, new login details are sent, or the account is deactivated, so
-     * a stolen or forgotten session ends there. Null: no cut-off.
+     * epoch milliseconds, no longer work. Set when the password changes or
+     * is reset, new login details are sent, or the account is deactivated,
+     * so a stolen or forgotten session ends there. Null: no cut-off.
      */
     @Column(name = "sessions_valid_after")
     private Long sessionsValidAfter;
 
     /** Ends every sign-in issued before now (see {@link #sessionsValidAfter}). */
     public void endEarlierSessions() {
-        this.sessionsValidAfter = java.time.Instant.now().getEpochSecond();
+        this.sessionsValidAfter = java.time.Instant.now().toEpochMilli();
     }
 
-    /** Whether a token issued at this moment (epoch seconds) still counts. */
-    public boolean sessionStillValid(Long issuedAtEpochSeconds) {
+    /** Whether a token issued at this moment (epoch milliseconds) still counts. */
+    public boolean sessionStillValid(Long issuedAtMillis) {
         return sessionsValidAfter == null
-                || (issuedAtEpochSeconds != null && issuedAtEpochSeconds >= sessionsValidAfter);
+                || (issuedAtMillis != null && issuedAtMillis >= cutoffMillis(sessionsValidAfter));
+    }
+
+    /** A stored cut-off in milliseconds (the first values, on 25 Sep 2026, were seconds). */
+    public static long cutoffMillis(long stored) {
+        return stored < 100_000_000_000L ? stored * 1000L : stored;
     }
 
     @Column(name = "location", length = 255)

@@ -122,9 +122,12 @@ public class ParticipantDashboardService {
         team.put("coaches", coachAssignmentService.getAssignedCoaches(userId));
         out.put("team", team);
 
-        // Recent activity (last 5 user_records). Newest first.
-        List<UserRecord> all = userRecordRepository.findByUserIdOrderByCreatedAtDesc(userId);
+        // Recent activity: the participant's own last 5 events, newest first.
+        // Staff-side entries (a document or check viewed by staff, ERM
+        // notes), sign-ins and raw status changes stay on the audit trail.
+        List<UserRecord> all = userRecordRepository.findTop50ByUserIdOrderByCreatedAtDesc(userId);
         List<Map<String, Object>> recent = all.stream()
+                .filter(ParticipantDashboardService::shownToParticipant)
                 .limit(5)
                 .map(r -> {
                     Map<String, Object> row = new LinkedHashMap<>();
@@ -256,11 +259,25 @@ public class ParticipantDashboardService {
                 f.hasErm() && atLeast(s, WorkflowService.Status.ERM_ASSIGNED),  // 13 ERM introduction
                 f.hasCoach() && atLeast(s, WorkflowService.Status.COACHES_ASSIGNED), // 14 Coaches
                 atLeast(s, WorkflowService.Status.DASHBOARD_ENABLED),           // 15 Dashboard
-                f.reportsSubmitted() > 0,                                        // 16 Weekly reporting
+                // 16: a report is in, or reports are no longer owed (employment
+                // reported before the first one was due): it mustn't stay stuck.
+                f.reportsSubmitted() > 0 || atLeast(s, WorkflowService.Status.EMPLOYMENT_ACCEPTED), // 16 Weekly reporting
                 atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED),           // 17 Employment & Phase 1
                 atLeast(s, WorkflowService.Status.PAYMENT_PLAN_ACCEPTED),       // 18 Payment plan & checks
                 f.hasInvoice(),                                                  // 19 Invoices
                 atLeast(s, WorkflowService.Status.PAYMENTS_TRACKED));           // 20 Payments tracked
+    }
+
+    /** Record types that stay on the audit trail only (staff views, sign-ins, raw status changes). */
+    private static final java.util.Set<String> STAFF_SIDE_RECORDS = java.util.Set.of(
+            "WORKFLOW", "DOCUMENT_VIEWED", "AGREEMENT_VIEWED", "CHECK_IMAGE_VIEWED", "CHECK_NUMBER_VIEWED",
+            "ACCOUNT_LOGIN", "ACCOUNT_LOGIN_FAILED", "ACCOUNT_SIGNUP_REPLACED", "ACCOUNT_VERIFICATION_LOCKED",
+            "ACCOUNT_LOGIN_DETAILS_SENT");
+
+    static boolean shownToParticipant(UserRecord r) {
+        if (r == null || STAFF_SIDE_RECORDS.contains(r.getRecordType())) return false;
+        String title = r.getTitle() == null ? "" : r.getTitle().toLowerCase(java.util.Locale.ROOT);
+        return !title.contains("viewed by") && !title.contains("escalation") && !title.contains("erm note");
     }
 
     /** 1-based number of the first step not done (20 when all are). */

@@ -158,10 +158,14 @@ public class JwtService {
         return Long.parseLong(extractClaim(token, Claims::getSubject));
     }
 
-    /** When the token was issued, in epoch seconds (null if it has no iat). */
-    public Long extractIssuedAtSeconds(String token) {
-        Date iat = extractClaim(token, Claims::getIssuedAt);
-        return iat == null ? null : iat.getTime() / 1000L;
+    /** When the token was issued, in epoch milliseconds (from iat_ms, else iat); null if unknown. */
+    public Long extractIssuedAtMillis(String token) {
+        return extractClaim(token, claims -> {
+            Object ms = claims.get("iat_ms");
+            if (ms instanceof Number n) return n.longValue();
+            Date iat = claims.getIssuedAt();
+            return iat == null ? null : iat.getTime();
+        });
     }
 
     public String extractRole(String token) {
@@ -190,11 +194,16 @@ public class JwtService {
     }
 
     private String buildToken(Map<String, Object> extraClaims, String subject, long expiration) {
+        long now = System.currentTimeMillis();
+        Map<String, Object> claims = new java.util.HashMap<>(extraClaims);
+        // Issue time to the millisecond ("iat" has whole seconds only), so a
+        // password change ends sign-ins issued earlier in that same second.
+        claims.put("iat_ms", now);
         return Jwts.builder()
-                .claims(extraClaims)
+                .claims(claims)
                 .subject(subject)
-                .issuedAt(new Date())
-                .expiration(new Date(System.currentTimeMillis() + expiration))
+                .issuedAt(new Date(now))
+                .expiration(new Date(now + expiration))
                 .signWith(getSigningKey())
                 .compact();
     }

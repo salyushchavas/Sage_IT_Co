@@ -193,6 +193,19 @@ class PaymentRulesTest {
     }
 
     @Test
+    void aSecondPlanStartsFromItsOwnBalance() {
+        Invoice first = invoiced("3000", 1, TODAY.plusDays(5));
+        service.recordPayment(1L, first.getId(), usd("3000"), TODAY, "CHEQUE", "");
+        assertEquals("COMPLETED", plans.get(0).getStatus());
+        PaymentPlan second = service.createPlan(1L, 10L, usd("1000"), 1, TODAY.plusDays(20), null);
+        Map<String, Object> summary = service.participantSummary(10L);
+        assertMoney("1000", summary.get("totalDue"));
+        assertMoney("0", summary.get("totalPaid"), "the first plan's payments aren't counted again");
+        assertMoney("1000", summary.get("balance"), "it used to show -2,000");
+        assertEquals(second.getId(), plans.get(1).getId());
+    }
+
+    @Test
     void aPartPaidInvoiceStillGoesOverdue() {
         Invoice inv = invoiced("500", 1, TODAY.plusDays(2));
         service.recordPayment(1L, inv.getId(), usd("200"), TODAY, "CHEQUE", "");

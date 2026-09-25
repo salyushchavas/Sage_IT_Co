@@ -617,6 +617,19 @@ public class PaymentService {
         List<PaymentLedger> ledger = ledgerRepository.findByUserIdOrderByCreatedAtDesc(userId);
 
         BigDecimal totalDue = plan.map(PaymentPlan::getTotalAmount).orElse(BigDecimal.ZERO);
+        // The current plan's money only: after a second plan, what was paid
+        // on the first one mustn't count against it (a $3,000 plan paid in
+        // full, then a $1,000 plan, showed a balance of -$2,000).
+        if (plan.isPresent()) {
+            Long planId = plan.get().getId();
+            Set<Long> planInvoiceIds = new java.util.HashSet<>();
+            for (Invoice i : invoices) {
+                if (planId.equals(i.getPaymentPlanId())) planInvoiceIds.add(i.getId());
+            }
+            ledger = ledger.stream()
+                    .filter(e -> e.getInvoiceId() == null || planInvoiceIds.contains(e.getInvoiceId()))
+                    .toList();
+        }
         BigDecimal totalPaid = sum(ledger, ENTRY_PAYMENT).subtract(sum(ledger, ENTRY_REVERSAL));
         BigDecimal totalWaived = sum(ledger, ENTRY_WAIVER);
         BigDecimal balance = totalDue.subtract(totalPaid).subtract(totalWaived);

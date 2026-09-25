@@ -63,6 +63,9 @@ public class DataSeeder implements CommandLineRunner {
     @Autowired
     private com.spire.backend.repository.PhaseCompletionRepository phaseCompletionRepository;
 
+    @Autowired(required = false)
+    private org.springframework.transaction.PlatformTransactionManager transactionManager;
+
     // Super-admin bootstrap for the consultant-agreement console. The
     // single SUPER_ADMIN is provisioned from these env vars, never
     // through the UI. Blank defaults => bootstrap is skipped (logged).
@@ -309,7 +312,8 @@ public class DataSeeder implements CommandLineRunner {
         // Checklist 1.3: "not applicable" on a required document is now an
         // exception request Operations decides. Convert old markers and
         // re-check who really has their required documents. Idempotent.
-        requireApprovalForRequiredNotApplicable();
+        // After this seeder commits, in its own transaction (see afterSeederCommits).
+        afterSeederCommits("required-document rules", this::requireApprovalForRequiredNotApplicable);
 
         // Checklist 1.5: phone numbers compared in one form for the
         // duplicate check. Fill in old accounts; report duplicates.
@@ -322,8 +326,18 @@ public class DataSeeder implements CommandLineRunner {
 
         // Checklist 4.5: Phase 2 (post-offer support) is recorded when the
         // ERM approves Phase 1. Participants approved before that get their
-        // Phase 2 record now. Idempotent.
-        backfillPhase2();
+        // Phase 2 record now. Idempotent. After this seeder commits.
+        afterSeederCommits("Phase 2 records", this::backfillPhase2);
+
+        // One weekly report per participant per week, and one record per
+        // phase: merge any duplicates a race left, then let the database
+        // refuse new ones. Each after this seeder commits. Idempotent.
+        afterSeederCommits("merge duplicate weekly reports", this::mergeDuplicateWeeklyReports);
+        afterSeederCommits("one weekly report per week",
+                () -> createUniqueIndex("uk_weekly_user_week", "weekly_reports", "user_id, week_start"));
+        afterSeederCommits("merge duplicate phase records", this::mergeDuplicatePhaseCompletions);
+        afterSeederCommits("one record per phase",
+                () -> createUniqueIndex("uk_phase_user_phase", "phase_completions", "user_id, phase"));
 
         // Portal phase: consultant_verification was keyed by
         // application_id; the portal keys it by email instead. Add the
@@ -355,10 +369,10 @@ public class DataSeeder implements CommandLineRunner {
             // feature. Idempotent — does nothing if the trainer + 4 services
             // already exist.
             seedServicesAndTrainer(trainerRole);
-            // Bring legacy course/service prices up to the new realistic
-            // values. Only touches courses that still hold the OLD seed
-            // price so any admin-edited price is preserved.
-            backfillCoursePrices();
+            // backfillCoursePrices() no longer runs on every start: it reset
+            // any course priced $0, $499 or $999 (e.g. by Operations) to the
+            // old rupee-era numbers, which would now be charged in dollars.
+            // Prices are set by the owner (decision D3).
             // Wipe the fabricated rating + enrolled-count seeds from
             // already-deployed DBs. We never had a rating system, so the
             // 4.7/4.8/4.9 stars and 1k+ ratingsCount values were always
@@ -1305,6 +1319,137 @@ public class DataSeeder implements CommandLineRunner {
     }
 
     /**
+     * Runs a startup step once this seeder's own transaction has committed,
+     * in a transaction of its own, and never lets it stop the server from
+     * starting. Steps that call other services' transactions belong here:
+     * inside the one seeder transaction, a caught error in them still marked
+     * the whole seeder for rollback, and the app then refused to start. A
+     * failure is logged and the step tries again on the next start.
+     */
+    void afterSeederCommits(String name, Runnable step) {
+        Runnable guarded = () -> {
+            try {
+                if (transactionManager == null) {
+                    step.run();
+                    return;
+                }
+                org.springframework.transaction.support.TransactionTemplate tx =
+                        new org.springframework.transaction.support.TransactionTemplate(transactionManager);
+                tx.setPropagationBehavior(org.springframework.transaction.TransactionDefinition.PROPAGATION_REQUIRES_NEW);
+                tx.executeWithoutResult(status -> step.run());
+            } catch (Exception e) {
+                log.warn("Startup step '{}' skipped: {}", name, e.getMessage());
+            }
+        };
+        if (org.springframework.transaction.support.TransactionSynchronizationManager.isSynchronizationActive()) {
+            org.springframework.transaction.support.TransactionSynchronizationManager.registerSynchronization(
+                    new org.springframework.transaction.support.TransactionSynchronization() {
+                        @Override
+                        public void afterCommit() {
+                            guarded.run();
+                        }
+                    });
+        } else {
+            guarded.run();
+        }
+    }
+
+    /** Rank for keeping one of several rows for the same week: the one furthest along. */
+    private static int weeklyRank(Object status) {
+        String s = status == null ? "" : status.toString();
+        return switch (s) {
+            case "REVIEWED" -> 0;
+            case "SUBMITTED" -> 1;
+            case "DRAFT" -> 2;
+            default -> 3;
+        };
+    }
+
+    /**
+     * Two rows for one participant and week (a submit racing the overdue
+     * job): keep the one furthest along (reviewed, then submitted, then a
+     * draft; the oldest on a tie), carry the "overdue" mark over to it, and
+     * delete the others. Returns the number of rows deleted.
+     */
+    int mergeDuplicateWeeklyReports() {
+        int deleted = 0;
+        java.util.List<java.util.Map<String, Object>> groups = jdbcTemplate.queryForList(
+                "SELECT user_id, week_start FROM weekly_reports GROUP BY user_id, week_start HAVING COUNT(*) > 1");
+        for (java.util.Map<String, Object> g : groups) {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, status, overdue_flagged_at FROM weekly_reports WHERE user_id = ? AND week_start = ? ORDER BY id",
+                    g.get("user_id"), g.get("week_start"));
+            java.util.Map<String, Object> keep = rows.stream()
+                    .min(java.util.Comparator.comparingInt(r -> weeklyRank(r.get("status"))))
+                    .orElse(null);
+            if (keep == null) continue;
+            Object flagged = rows.stream().map(r -> r.get("overdue_flagged_at"))
+                    .filter(java.util.Objects::nonNull).findFirst().orElse(null);
+            if (keep.get("overdue_flagged_at") == null && flagged != null) {
+                jdbcTemplate.update("UPDATE weekly_reports SET overdue_flagged_at = ? WHERE id = ?", flagged, keep.get("id"));
+            }
+            for (java.util.Map<String, Object> r : rows) {
+                if (r.get("id").equals(keep.get("id"))) continue;
+                deleted += jdbcTemplate.update("DELETE FROM weekly_reports WHERE id = ?", r.get("id"));
+            }
+        }
+        if (deleted > 0) log.info("Merged duplicate weekly reports: {} extra row(s) removed", deleted);
+        return deleted;
+    }
+
+    /**
+     * Two records of one phase for a participant (an ERM approving twice at
+     * once): keep the approved one (the oldest on a tie) and delete the others.
+     */
+    int mergeDuplicatePhaseCompletions() {
+        int deleted = 0;
+        java.util.List<java.util.Map<String, Object>> groups = jdbcTemplate.queryForList(
+                "SELECT user_id, phase FROM phase_completions GROUP BY user_id, phase HAVING COUNT(*) > 1");
+        for (java.util.Map<String, Object> g : groups) {
+            java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
+                    "SELECT id, erm_approved FROM phase_completions WHERE user_id = ? AND phase = ? ORDER BY id",
+                    g.get("user_id"), g.get("phase"));
+            java.util.Map<String, Object> keep = rows.stream()
+                    .filter(r -> Boolean.TRUE.equals(r.get("erm_approved")) || Integer.valueOf(1).equals(r.get("erm_approved")))
+                    .findFirst().orElse(rows.get(0));
+            for (java.util.Map<String, Object> r : rows) {
+                if (r.get("id").equals(keep.get("id"))) continue;
+                deleted += jdbcTemplate.update("DELETE FROM phase_completions WHERE id = ?", r.get("id"));
+            }
+        }
+        if (deleted > 0) log.info("Merged duplicate phase records: {} extra row(s) removed", deleted);
+        return deleted;
+    }
+
+    void createUniqueIndex(String name, String table, String columns) {
+        createIndex(name, table, columns, true);
+    }
+
+    /**
+     * An index, if it isn't there yet. Run through afterSeederCommits: in
+     * the seeder's transaction, Postgres held a lock on the table (blocking
+     * sign-ups) until the whole seeder finished.
+     */
+    void createIndex(String name, String table, String columns, boolean unique) {
+        String kind = unique ? "CREATE UNIQUE INDEX " : "CREATE INDEX ";
+        try {
+            jdbcTemplate.execute(kind + "IF NOT EXISTS " + name + " ON " + table + " (" + columns + ")");
+        } catch (Exception postgresSyntaxFailed) {
+            // MySQL has no IF NOT EXISTS here. Its own transaction, so trying again is safe.
+            try {
+                Integer exists = jdbcTemplate.queryForObject(
+                        "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema = DATABASE() "
+                                + "AND table_name = ? AND index_name = ?", Integer.class, table, name);
+                if (exists == null || exists == 0) {
+                    jdbcTemplate.execute(kind + name + " ON " + table + " (" + columns + ")");
+                }
+            } catch (Exception e) {
+                log.warn("Couldn't add the unique index {}: {}", name, e.getMessage());
+            }
+        }
+    }
+
+    /**
      * Until checklist 1.3, a participant could mark any document "not
      * applicable" and it counted, required ones included. Now a required
      * document needs an upload or an exception Operations approves:
@@ -1361,13 +1506,8 @@ public class DataSeeder implements CommandLineRunner {
      * a value are touched.
      */
     int backfillNormalizedPhones() {
-        try {
-            // Postgres (production); MySQL has no IF NOT EXISTS here and
-            // just logs the error, which is harmless.
-            jdbcTemplate.execute("CREATE INDEX IF NOT EXISTS idx_users_phone_normalized ON users (phone_normalized)");
-        } catch (Exception e) {
-            log.debug("Couldn't create idx_users_phone_normalized: {}", e.getMessage());
-        }
+        afterSeederCommits("phone number index",
+                () -> createIndex("idx_users_phone_normalized", "users", "phone_normalized", false));
         int filled = 0;
         try {
             java.util.List<java.util.Map<String, Object>> rows = jdbcTemplate.queryForList(
@@ -2312,36 +2452,6 @@ public class DataSeeder implements CommandLineRunner {
                 .build());
 
         log.info("seedSampleCoursesIfMissing: seeded 6 published courses.");
-    }
-
-    private void backfillCoursePrices() {
-        record PriceMigration(String slug, BigDecimal expectedOld, BigDecimal newPrice, boolean wasFree) {}
-        List<PriceMigration> migrations = List.of(
-                new PriceMigration("full-stack-web-development",         BigDecimal.ZERO,                new BigDecimal("4999.00"), true),
-                new PriceMigration("react-mastery",                      new BigDecimal("499.00"),       new BigDecimal("3499.00"), false),
-                new PriceMigration("python-for-data-science",            BigDecimal.ZERO,                new BigDecimal("3999.00"), true),
-                new PriceMigration("cloud-architecture-with-aws",        new BigDecimal("499.00"),       new BigDecimal("5499.00"), false),
-                new PriceMigration("ui-ux-design-fundamentals",          new BigDecimal("499.00"),       new BigDecimal("2999.00"), false),
-                new PriceMigration("mobile-app-development-with-react-native", new BigDecimal("499.00"), new BigDecimal("3999.00"), false),
-                new PriceMigration("linkedin-profile-optimization",      new BigDecimal("999.00"),       new BigDecimal("1499.00"), false)
-        );
-
-        int updated = 0;
-        for (PriceMigration m : migrations) {
-            var opt = courseRepository.findBySlug(m.slug());
-            if (opt.isEmpty()) continue;
-            Course c = opt.get();
-            BigDecimal current = c.getPrice() != null ? c.getPrice() : BigDecimal.ZERO;
-            // compareTo (not equals) — same numeric value, different scale.
-            if (current.compareTo(m.expectedOld()) == 0) {
-                c.setPrice(m.newPrice());
-                if (m.wasFree()) c.setIsFree(false);
-                courseRepository.save(c);
-                updated++;
-                log.info("Backfilled price for {}: {} → {}", m.slug(), current, m.newPrice());
-            }
-        }
-        if (updated > 0) log.info("Course price backfill complete — {} row(s) updated.", updated);
     }
 
     /**

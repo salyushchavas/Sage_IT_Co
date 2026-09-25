@@ -288,28 +288,23 @@ public class OperationsExceptionService {
                     "Finance → Check Tracking: follow up with the carrier"));
         }
 
-        // Emails that failed and weren't sent successfully since.
-        Map<String, LocalDateTime> lastSent = new HashMap<>();
-        List<EmailLog> recent = emailLogRepository.findTop300ByOrderBySentAtDesc();
-        for (EmailLog e : recent) {
-            if ("SENT".equals(e.getStatus()) && e.getSentAt() != null) {
-                lastSent.merge(e.getEmailType() + "|" + nz(e.getRecipient()).toLowerCase(), e.getSentAt(),
-                        (a, b) -> a.isAfter(b) ? a : b);
-            }
-        }
+        // Emails that failed and weren't sent successfully since. Read by
+        // status, so a busy day of reminders can't push a failure off the list.
         Set<String> reported = new HashSet<>();
-        for (EmailLog e : recent) {
-            if (!"FAILED".equals(e.getStatus()) || e.getSentAt() == null
-                    || e.getSentAt().isBefore(now.minusDays(EMAIL_LOOKBACK_DAYS))) continue;
+        for (EmailLog e : emailLogRepository.findTop500ByStatusAndSentAtAfterOrderBySentAtDesc(
+                "FAILED", now.minusDays(EMAIL_LOOKBACK_DAYS))) {
+            if (e.getSentAt() == null) continue;
             String key = e.getEmailType() + "|" + nz(e.getRecipient()).toLowerCase();
-            LocalDateTime later = lastSent.get(key);
-            if ((later != null && later.isAfter(e.getSentAt())) || !reported.add(key)) continue;
+            if (!reported.add(key)) continue;                   // newest failure per email and address
+            if (e.getEmailType() != null && e.getRecipient() != null
+                    && emailLogRepository.existsByEmailTypeAndRecipientIgnoreCaseAndStatusAndSentAtAfter(
+                            e.getEmailType(), e.getRecipient(), "SENT", e.getSentAt())) continue;
             User u = e.getUserId() != null ? people.get(e.getUserId())
                     : userRepository.findByEmail(e.getRecipient()).orElse(null);
             rows.add(new Row("EMAIL_FAILED", TYPES.get("EMAIL_FAILED"), u == null ? null : u.getId(),
                     u == null ? null : u.getParticipantId(), u == null ? e.getRecipient() : u.getFullName(),
                     e.getEmailType() + (e.getErrorMessage() == null ? "" : " · " + e.getErrorMessage()),
-                    e.getSentAt(), "Operations → Email log: check the address, then resend"));
+                    e.getSentAt(), "Operations → Email log: check the address and the error, then contact the person"));
         }
 
         List<String> order = new ArrayList<>(TYPES.keySet());

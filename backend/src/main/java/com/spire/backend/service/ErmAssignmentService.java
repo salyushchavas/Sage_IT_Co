@@ -34,16 +34,25 @@ public class ErmAssignmentService {
     private final ErmAssignmentRepository ermAssignmentRepository;
     private final UserRepository userRepository;
 
+    /** Audit of manual assignments (field-injected so older tests keep their constructor). */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private RecordService recordService;
+
     @Transactional
     public Optional<ErmAssignment> assignErm(User participant) {
         // Skip if there's already an active assignment.
         Optional<ErmAssignment> existing = ermAssignmentRepository
                 .findFirstByUserIdOrderByAssignedDateDesc(participant.getId());
-        if (existing.isPresent() && existing.get().getErmUserId() != null) {
+        boolean currentErmActive = existing.isPresent() && existing.get().getErmUserId() != null
+                && userRepository.findById(existing.get().getErmUserId())
+                        .map(u -> !Boolean.FALSE.equals(u.getIsActive())).orElse(false);
+        if (currentErmActive) {
             log.debug("Participant {} already has ERM {}",
                     participant.getId(), existing.get().getErmUserId());
             return existing;
         }
+        // A deactivated ERM is replaced by a new row; the old one stays as history.
+        if (existing.isPresent() && existing.get().getErmUserId() != null) existing = Optional.empty();
 
         Optional<User> chosen = pickLeastLoadedErm();
         if (chosen.isEmpty()) {
@@ -63,6 +72,43 @@ public class ErmAssignmentService {
         ErmAssignment saved = ermAssignmentRepository.save(row);
         log.info("Assigned ERM {} to participant {}", erm.getId(), participant.getId());
         return Optional.of(saved);
+    }
+
+    /**
+     * Operations assigns or changes a participant's ERM (checklist 2.x /
+     * roadmap step 13). The person must be an active ERM and the target a
+     * participant. A new row is added: earlier ones stay as history and only
+     * the newest counts. Recorded with who made the change.
+     */
+    @Transactional
+    public ErmAssignment assignManually(User participant, User erm, Long operatorId) {
+        if (erm == null || !isActiveErm(erm)) {
+            throw new IllegalArgumentException("That person isn't an active ERM.");
+        }
+        String role = participant.getRole() == null || participant.getRole().getName() == null
+                ? "" : participant.getRole().getName().toUpperCase();
+        if (!role.equals("PARTICIPANT") && !role.equals("STUDENT")) {
+            throw new IllegalArgumentException("ERMs are assigned to participants only.");
+        }
+        Optional<ErmAssignment> current = ermAssignmentRepository.findFirstByUserIdOrderByAssignedDateDesc(participant.getId());
+        if (current.isPresent() && erm.getId().equals(current.get().getErmUserId())) {
+            return current.get();                               // already theirs
+        }
+        ErmAssignment row = ermAssignmentRepository.save(ErmAssignment.builder()
+                .userId(participant.getId())
+                .ermUserId(erm.getId())
+                // SENT / FAILED once the intro email has really been tried.
+                .introEmailStatus("PENDING")
+                .build());
+        if (recordService != null) {
+            recordService.logAction(participant.getId(), RecordService.Category.ACCOUNT,
+                    "ERM assigned by Operations",
+                    erm.getFullName() + " (operations #" + operatorId + ")",
+                    Map.of("ermUserId", erm.getId(), "operatorId", operatorId == null ? "" : operatorId,
+                            "previousErmUserId", current.map(ErmAssignment::getErmUserId).map(Object::toString).orElse("")));
+        }
+        log.info("Operations user {} assigned ERM {} to participant {}", operatorId, erm.getId(), participant.getId());
+        return row;
     }
 
     /** Records whether the participant's ERM intro email went out. */

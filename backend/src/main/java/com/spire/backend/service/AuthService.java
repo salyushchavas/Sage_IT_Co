@@ -721,7 +721,7 @@ public class AuthService {
             throw new UnauthorizedException("Invalid or expired refresh token");
         }
         // Issued before a password change, reset or deactivation: ended.
-        if (!user.sessionStillValid(jwtService.extractIssuedAtSeconds(refreshToken))) {
+        if (!user.sessionStillValid(jwtService.extractIssuedAtMillis(refreshToken))) {
             throw new UnauthorizedException("Invalid or expired refresh token");
         }
 

@@ -152,6 +152,21 @@ public class CoachAssignmentService {
         return saved;
     }
 
+    /**
+     * The coach slots (role keys) with no active coach: never filled, or
+     * filled by a coach whose account was deactivated since.
+     */
+    @Transactional(readOnly = true)
+    public java.util.List<String> emptySlots(Long participantId) {
+        java.util.Set<String> filled = new java.util.HashSet<>();
+        for (CoachAssignment a : coachAssignmentRepository.findByUserIdAndStatus(participantId, "ACTIVE")) {
+            boolean coachActive = a.getCoachUserId() != null && userRepository.findById(a.getCoachUserId())
+                    .map(u -> !Boolean.FALSE.equals(u.getIsActive())).orElse(false);
+            if (coachActive) filled.add(a.getCoachRole());
+        }
+        return COACH_ROLES.keySet().stream().filter(k -> !filled.contains(k)).toList();
+    }
+
     /** True if the participant has at least one ACTIVE coach. */
     @Transactional(readOnly = true)
     public boolean hasAnyCoach(Long participantId) {

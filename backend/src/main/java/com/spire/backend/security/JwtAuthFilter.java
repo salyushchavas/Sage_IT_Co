@@ -100,8 +100,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             // Issued before a password change, reset or deactivation: ended.
             Long validAfter = signIn.getSessionsValidAfter();
             if (validAfter != null) {
-                Long issuedAt = jwtService.extractIssuedAtSeconds(token);
-                if (issuedAt == null || issuedAt < validAfter) {
+                Long issuedAt = jwtService.extractIssuedAtMillis(token);
+                if (issuedAt == null || issuedAt < com.spire.backend.entity.User.cutoffMillis(validAfter)) {
                     log.info("Rejected an ended sign-in for user {}", userId);
                     filterChain.doFilter(request, response);
                     return;

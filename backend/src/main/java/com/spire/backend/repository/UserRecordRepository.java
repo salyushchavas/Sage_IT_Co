@@ -37,6 +37,9 @@ public interface UserRecordRepository extends JpaRepository<UserRecord, Long> {
 
     List<UserRecord> findByUserIdOrderByCreatedAtDesc(Long userId);
 
+    /** The latest records only (the dashboard's recent activity). */
+    List<UserRecord> findTop50ByUserIdOrderByCreatedAtDesc(Long userId);
+
     @Query("SELECT r.category, COUNT(r) FROM UserRecord r " +
            "WHERE r.userId = :userId GROUP BY r.category")
     List<Object[]> countByCategoryForUser(@Param("userId") Long userId);

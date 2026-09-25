@@ -99,8 +99,8 @@ public class AgreementErmAuthFilter extends OncePerRequestFilter {
             }
             Long validAfter = current.getSessionsValidAfter();
             if (validAfter != null) {
-                Long issuedAt = jwtService.extractIssuedAtSeconds(token);
-                if (issuedAt == null || issuedAt < validAfter) {
+                Long issuedAt = jwtService.extractIssuedAtMillis(token);
+                if (issuedAt == null || issuedAt < com.spire.backend.entity.User.cutoffMillis(validAfter)) {
                     log.info("Rejected an ended console session for user {}", current.getId());
                     filterChain.doFilter(request, response);
                     return;

@@ -68,7 +68,7 @@ class OperationsExceptionsTest {
         when(tracking.findAll()).thenReturn(List.of(CheckTracking.builder().id(1L).paymentPlanId(9L).carrier("USPS")
                 .physicalTrackingId("9400").mailedDate(LocalDate.now().minusDays(30)).status("IN_TRANSIT").build()));
         EmailLogRepository emails = mock(EmailLogRepository.class);
-        when(emails.findTop300ByOrderBySentAtDesc()).thenReturn(List.of(EmailLog.builder().userId(4L).emailType("WELCOME")
+        when(emails.findTop500ByStatusAndSentAtAfterOrderBySentAtDesc(eq("FAILED"), any())).thenReturn(List.of(EmailLog.builder().userId(4L).emailType("WELCOME")
                 .recipient("p4@x.com").status("FAILED").errorMessage("Mailbox unavailable").sentAt(LocalDateTime.now().minusDays(1)).build()));
         CheckDocumentRepository checks = mock(CheckDocumentRepository.class);
         when(checks.findByReviewStatus("REJECTED")).thenReturn(List.of());
@@ -87,9 +87,8 @@ class OperationsExceptionsTest {
         assertEquals(2, rows.stream().filter(r -> r.type().equals("DUPLICATE_CONTACT")).count(), "both accounts are flagged");
 
         // Resolved: the email went out later, the plan was accepted.
-        when(emails.findTop300ByOrderBySentAtDesc()).thenReturn(List.of(
-                EmailLog.builder().userId(4L).emailType("WELCOME").recipient("p4@x.com").status("SENT").sentAt(LocalDateTime.now()).build(),
-                EmailLog.builder().userId(4L).emailType("WELCOME").recipient("p4@x.com").status("FAILED").sentAt(LocalDateTime.now().minusDays(1)).build()));
+        when(emails.existsByEmailTypeAndRecipientIgnoreCaseAndStatusAndSentAtAfter(eq("WELCOME"), eq("p4@x.com"), eq("SENT"), any()))
+                .thenReturn(true);
         when(plans.findByStatus("PENDING")).thenReturn(List.of());
         Set<String> after = new HashSet<>();
         service.all().forEach(r -> after.add(r.type()));

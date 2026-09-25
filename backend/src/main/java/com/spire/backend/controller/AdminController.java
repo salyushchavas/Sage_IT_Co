@@ -420,18 +420,18 @@ public class AdminController {
     @GetMapping("/assignments/queue")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> assignmentQueue() {
         List<Map<String, Object>> rows = new java.util.ArrayList<>();
-        // Anyone who's past program-selection but not yet at
-        // DASHBOARD_ENABLED is potentially in the queue. We surface
-        // the workflow status + which slots are pending.
+        // Every active participant whose onboarding reached the ERM step
+        // (agreement signed, check step done) and who has no active ERM or
+        // an empty coach slot, whatever their status: the dashboard may be
+        // open already, or their ERM or coach may have been deactivated.
         for (com.spire.backend.entity.User u : userRepository.findAll()) {
-            String status = u.getCurrentStatus();
-            if (status == null) continue;
-            boolean pending = "SIGNED_AGREEMENT_SENT_TO_ERM".equals(status)
-                    || "WELCOME_SENT".equals(status)
-                    || "DEEPTHI_INTRO_SENT".equals(status)
-                    || "ERM_ASSIGNED".equals(status)
-                    || "COACHES_ASSIGNED".equals(status);
-            if (!pending) continue;
+            if (Boolean.FALSE.equals(u.getIsActive()) || u.getRole() == null) continue;
+            String role = u.getRole().getName() == null ? "" : u.getRole().getName().toUpperCase();
+            if (!role.equals("PARTICIPANT") && !role.equals("STUDENT")) continue;
+            if (!Boolean.TRUE.equals(u.getAgreementComplete()) || !Boolean.TRUE.equals(u.getCheckUploadComplete())) continue;
+            boolean hasErm = ermAssignmentService.getAssignedErm(u.getId()).isPresent();
+            List<String> emptySlots = coachAssignmentService.emptySlots(u.getId());
+            if (hasErm && emptySlots.isEmpty()) continue;
 
             Map<String, Object> row = new java.util.LinkedHashMap<>();
             row.put("userId", u.getId());
@@ -439,9 +439,10 @@ public class AdminController {
             row.put("fullName", u.getFullName());
             row.put("email", u.getEmail());
             row.put("skillset", u.getSelectedTechnology());
-            row.put("currentStatus", status);
-            row.put("ermAssigned", ermAssignmentService.getAssignedErm(u.getId()).isPresent());
-            row.put("coachesAssigned", coachAssignmentService.hasAnyCoach(u.getId()));
+            row.put("currentStatus", u.getCurrentStatus());
+            row.put("ermAssigned", hasErm);
+            row.put("coachesAssigned", emptySlots.size() < com.spire.backend.service.CoachAssignmentService.COACH_ROLES.size());
+            row.put("emptyCoachSlots", emptySlots);
             rows.add(row);
         }
         return ResponseEntity.ok(ApiResponse.success(rows));
@@ -456,7 +457,8 @@ public class AdminController {
     @PutMapping("/assignments/erm/{participantId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> assignErm(
             @PathVariable Long participantId,
-            @RequestBody Map<String, Object> body) {
+            @RequestBody Map<String, Object> body,
+            org.springframework.security.core.Authentication auth) {
         Object ermIdRaw = body.get("ermUserId");
         if (ermIdRaw == null) throw new IllegalArgumentException("ermUserId is required");
         Long ermUserId = ermIdRaw instanceof Number n ? n.longValue() : Long.parseLong(ermIdRaw.toString());
@@ -468,13 +470,9 @@ public class AdminController {
                 .orElseThrow(() -> new com.spire.backend.exception.ResourceNotFoundException(
                         "User", "id", ermUserId));
 
-        ErmAssignment row = ermAssignmentRepository
-                .findFirstByUserIdOrderByAssignedDateDesc(participantId)
-                .orElseGet(() -> ErmAssignment.builder().userId(participantId).build());
-        row.setErmUserId(erm.getId());
-        // Marked SENT / FAILED when the intro email is really tried.
-        row.setIntroEmailStatus("PENDING");
-        ermAssignmentRepository.save(row);
+        // An active ERM only; a new row keeps the history (see assignManually).
+        Long operatorId = auth == null ? null : Long.parseLong(auth.getPrincipal().toString());
+        ermAssignmentService.assignManually(participant, erm, operatorId);
 
         // Bring a new ERM up to date (the signed agreement and the
         // participant introduction, if those steps already happened),

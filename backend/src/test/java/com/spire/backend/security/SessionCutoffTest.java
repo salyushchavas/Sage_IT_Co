@@ -70,11 +70,12 @@ class SessionCutoffTest {
 
     @Test
     void aTokenFromBeforeAPasswordChangeNoLongerWorks() throws Exception {
-        when(userRepository.findActiveSignIn(10L)).thenReturn(Optional.of(signIn("PARTICIPANT", 2_000L)));
-        when(jwtService.extractIssuedAtSeconds("token")).thenReturn(1_999L);
-        assertNull(runFilter(), "issued a second before the change");
+        long change = 1_790_000_000_500L;   // a password change, in milliseconds
+        when(userRepository.findActiveSignIn(10L)).thenReturn(Optional.of(signIn("PARTICIPANT", change)));
+        when(jwtService.extractIssuedAtMillis("token")).thenReturn(change - 1);
+        assertNull(runFilter(), "issued a millisecond before the change, in the same second");
         SecurityContextHolder.clearContext();
-        when(jwtService.extractIssuedAtSeconds("token")).thenReturn(2_000L);
+        when(jwtService.extractIssuedAtMillis("token")).thenReturn(change);
         assertNotNull(runFilter(), "issued at (or after) the change");
     }
 
@@ -85,9 +86,9 @@ class SessionCutoffTest {
                 mock(ParticipantIdService.class));
         when(jwtService.isRefreshToken("refresh")).thenReturn(true);
         when(jwtService.extractUserId("refresh")).thenReturn(10L);
-        when(jwtService.extractIssuedAtSeconds("refresh")).thenReturn(1_000L);
+        when(jwtService.extractIssuedAtMillis("refresh")).thenReturn(1_790_000_000_000L);
         when(userRepository.findById(10L)).thenReturn(Optional.of(User.builder().id(10L)
-                .role(Role.builder().name("ERM").build()).isActive(true).sessionsValidAfter(2_000L).build()));
+                .role(Role.builder().name("ERM").build()).isActive(true).sessionsValidAfter(1_790_000_000_500L).build()));
         assertThrows(UnauthorizedException.class, () -> authService.refreshToken("refresh"));
     }
 
