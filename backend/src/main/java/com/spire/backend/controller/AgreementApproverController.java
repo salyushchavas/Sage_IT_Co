@@ -121,7 +121,9 @@ public class AgreementApproverController {
             @RequestParam(value = "role", required = false) String role,
             HttpServletRequest request) {
         ApproverRole gate = resolveRole(request, role);
-        ConsultantApplication app = consultantService.getForApprover(appId, gate, AgreementAuthz.userId(request));
+        // Masked: an approver reviews the agreement through the rasterised PDF
+        // preview, so the JSON detail must not carry SSN / bank numbers.
+        ConsultantApplication app = consultantService.getForApproverMasked(appId, gate, AgreementAuthz.userId(request));
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("application", app);
         view.put("approvals", consultantService.listApprovals(appId));

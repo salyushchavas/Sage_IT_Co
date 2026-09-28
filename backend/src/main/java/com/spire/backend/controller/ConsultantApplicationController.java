@@ -1578,13 +1578,10 @@ public class ConsultantApplicationController {
     }
 
     private static String clientIp(HttpServletRequest request) {
-        if (request == null) return null;
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-        }
-        return request.getRemoteAddr();
+        // The proxy-appended (last) X-Forwarded-For hop, not the first one the
+        // client can set, so rate-limit keys and audit IPs can't be spoofed.
+        // Same trusted-hop logic the rest of the app and AuthRateLimitFilter use.
+        return com.spire.backend.service.AcknowledgmentService.clientIp(request);
     }
 
     // ── DTOs ────────────────────────────────────────────────────────

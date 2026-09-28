@@ -111,6 +111,34 @@ public class ConsultantApplicationService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final SecureRandom secureRandom = new SecureRandom();
 
+    @jakarta.persistence.PersistenceContext
+    private jakarta.persistence.EntityManager entityManager;
+
+    /**
+     * A detached copy of the row with the most sensitive PII removed, for
+     * responses that go to someone other than the owning ERM — the approver
+     * queue/detail and the ERM roster list, whose UIs render only name/status/
+     * rate, never these fields. The row is detached first so nulling the fields
+     * is never flushed back to the database (open-in-view is on). SSN, driver's
+     * licence, State-ID and bank account/routing numbers and date of birth are
+     * removed; the owning ERM's single-agreement view still shows them.
+     */
+    private void stripSensitivePii(ConsultantApplication app) {
+        if (app == null) return;
+        entityManager.detach(app);
+        app.setBgFullSsn(null);
+        app.setBgDriverLicense(null);
+        app.setBgStateId(null);
+        app.setAchAccountNumber(null);
+        app.setAchRoutingNumber(null);
+        app.setBgDateOfBirth(null);
+    }
+
+    /** {@link #stripSensitivePii} over a list. */
+    private void stripSensitivePii(java.util.List<ConsultantApplication> apps) {
+        if (apps != null) apps.forEach(this::stripSensitivePii);
+    }
+
     // Consultant OTP gate tunables.
     private static final int OTP_TTL_MINUTES = 10;
     private static final int OTP_MAX_ATTEMPTS = 5;
@@ -574,7 +602,22 @@ public class ConsultantApplicationService {
         // Build Q — derived "link expired — resend" indicator for the ERM
         // dashboard; never hides or mutates the agreement.
         page.getContent().forEach(app -> app.setLinkExpired(isConsultantLinkExpired(app)));
+        // The roster list renders only name / status / rate; it must not ship
+        // SSN or bank numbers. The owning ERM still sees them in the single
+        // agreement's detail view.
+        stripSensitivePii(page.getContent());
         return page;
+    }
+
+    /** Approver read-only detail with SSN / bank numbers removed (see {@link #stripSensitivePii}). */
+    @Transactional(readOnly = true)
+    public ConsultantApplication getForApproverMasked(
+            String applicationId,
+            com.spire.backend.entity.AgreementApproval.ApproverRole role,
+            String approverUserId) {
+        ConsultantApplication app = getForApprover(applicationId, role, approverUserId);
+        stripSensitivePii(app);
+        return app;
     }
 
     /**
@@ -3279,6 +3322,7 @@ public class ConsultantApplicationService {
         out.sort(java.util.Comparator.comparing(
                 ConsultantApplication::getUpdatedAt,
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
+        stripSensitivePii(out);   // approver JSON never carries SSN / bank numbers
         return out;
     }
 
@@ -3316,6 +3360,7 @@ public class ConsultantApplicationService {
         apps.sort(java.util.Comparator.comparing(
                 ConsultantApplication::getUpdatedAt,
                 java.util.Comparator.nullsLast(java.util.Comparator.reverseOrder())));
+        stripSensitivePii(apps);   // approver JSON never carries SSN / bank numbers
         return apps;
     }
 
@@ -3524,6 +3569,8 @@ public class ConsultantApplicationService {
         // and approverApplications. Harmless on the ERM-scoped path (a single
         // owner id resolves to a single row).
         populateOwnerNames(apps);
+        // The board renders only status / owner grouping; no SSN or bank numbers.
+        stripSensitivePii(apps);
         java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
         for (ConsultantApplication app : apps) {
             java.util.Map<String, Object> row = new java.util.LinkedHashMap<>();
@@ -5311,13 +5358,10 @@ public class ConsultantApplicationService {
     }
 
     private static String clientIp(HttpServletRequest request) {
-        if (request == null) return null;
-        String xff = request.getHeader("X-Forwarded-For");
-        if (xff != null && !xff.isBlank()) {
-            int comma = xff.indexOf(',');
-            return (comma > 0 ? xff.substring(0, comma) : xff).trim();
-        }
-        return request.getRemoteAddr();
+        // The proxy-appended (last) X-Forwarded-For hop, not the first one the
+        // client can set, so rate-limit keys and audit IPs can't be spoofed.
+        // Same trusted-hop logic the rest of the app and AuthRateLimitFilter use.
+        return com.spire.backend.service.AcknowledgmentService.clientIp(request);
     }
 
     // ── F-4 effective-requirements gate ──────────────────────────────
