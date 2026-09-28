@@ -9,7 +9,7 @@ import {
   CheckCircle2, X,
 } from "lucide-react";
 import {
-  getQuizForStudent, submitQuiz,
+  getQuizForStudent, safeRedirect, submitQuiz,
   type Quiz, type QuizSubmitResult,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
@@ -19,7 +19,9 @@ export default function QuizTakePage({ params }: { params: { id: string } }) {
   const quizId = Number(params.id);
   const router = useRouter();
   const searchParams = useSearchParams();
-  const returnTo = searchParams.get("return");
+  // Only a page on this site: "?return=javascript:…" or another site must not
+  // end up in the Back links below.
+  const returnTo = safeRedirect(searchParams.get("return"));
   const { user, isLoading: authLoading } = useAuth();
 
   const [quiz, setQuiz] = useState<Quiz | null>(null);

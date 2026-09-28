@@ -38,8 +38,8 @@ const supportOptions = [
     icon: Mail,
     title: "Email Support",
     description: "Get help via email within 24 hours",
-    action: "support@sageit.com",
-    href: "mailto:support@sageit.com",
+    action: "support@sageitco.com",
+    href: "mailto:support@sageitco.com",
     color: "#1B2A5C",
   },
   {

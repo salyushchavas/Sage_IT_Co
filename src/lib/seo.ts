@@ -46,6 +46,10 @@ interface PageMetaInput {
  */
 export function pageMeta({ title, description, path, image }: PageMetaInput): Metadata {
   const url = path.startsWith("/") ? path : `/${path}`;
+  // Next merges metadata one level deep: these openGraph / twitter objects
+  // REPLACE the root layout's, so the brand image, site name and locale must
+  // be repeated here or every page's social preview loses its picture.
+  const socialImage = image ?? "/sage_logo.png";
   return {
     title,
     description,
@@ -55,12 +59,15 @@ export function pageMeta({ title, description, path, image }: PageMetaInput): Me
       description,
       url,
       type: "website",
-      images: image ? [image] : undefined,
+      siteName: "Sage IT",
+      locale: "en_US",
+      images: [socialImage],
     },
     twitter: {
+      card: "summary_large_image",
       title,
       description,
-      images: image ? [image] : undefined,
+      images: [socialImage],
     },
   };
 }

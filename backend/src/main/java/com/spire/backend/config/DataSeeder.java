@@ -252,15 +252,6 @@ public class DataSeeder implements CommandLineRunner {
             log.warn("agreement_acceptances rename/cleanup skipped: {}", e.getMessage());
         }
 
-        // Phase 4 — seed a starter ERM + coach team so dev / first
-        // production deploys have a non-empty assignment pool. The
-        // OnboardingService chain picks from these candidates when
-        // a participant finishes their agreement; without at least
-        // one ERM the participant stays at SIGNED_AGREEMENT_SENT_TO_ERM
-        // forever. Idempotent — only creates each user when the
-        // email isn't already taken.
-        seedPhase4Team();
-
         // Drop the legacy unique constraint on quiz_attempts(quiz_id,
         // user_id) before any other migration runs — without this,
         // the new multi-attempt quiz flow would fail the second time
@@ -286,6 +277,20 @@ public class DataSeeder implements CommandLineRunner {
         // gives every existing row the right default, so Hibernate's
         // subsequent run is a clean no-op.
         addUserEmailColumnsIfMissing();
+
+        // Phase 4 — seed a starter ERM + coach team so dev / first
+        // production deploys have a non-empty assignment pool. The
+        // OnboardingService chain picks from these candidates when
+        // a participant finishes their agreement; without at least
+        // one ERM the participant stays at SIGNED_AGREEMENT_SENT_TO_ERM
+        // forever. Idempotent — only creates each user when the
+        // email isn't already taken.
+        //
+        // Runs after the users-table columns are added: on a new Postgres
+        // database, inserting users first and then adding a column made the
+        // next insert fail ("cached plan must not change result type") and
+        // the backend could never start with SEED_DEMO_ACCOUNTS=true.
+        seedPhase4Team();
 
         // Two-stage consultant-agreement fill workflow: ~48 nullable
         // columns added to consultant_applications for the ERM rate

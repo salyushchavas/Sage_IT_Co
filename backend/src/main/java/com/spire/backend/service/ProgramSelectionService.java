@@ -68,6 +68,13 @@ public class ProgramSelectionService {
             throw new IllegalStateException(
                     "Your program selection is locked because your agreement has been signed.");
         }
+        // A submitted selection only changes through a full, validated submit:
+        // a draft (no validation) could blank the program and job title that
+        // the agreement then records at signing.
+        if (Boolean.TRUE.equals(user.getProgramSelectionComplete())) {
+            throw new IllegalStateException(
+                    "Your program selection is already submitted. To change it, submit the form again.");
+        }
         ProgramSelection row = programSelectionRepository
                 .findFirstByUserIdOrderBySelectionDateDesc(userId)
                 .orElseGet(() -> ProgramSelection.builder().userId(userId).build());

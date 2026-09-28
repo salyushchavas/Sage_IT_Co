@@ -55,6 +55,7 @@ function AgreementPageInner() {
   const [profile, setProfile] = useState<UserDTO | null>(null);
   const [program, setProgram] = useState<ProgramSelectionDTO | null>(null);
   const [terms, setTerms] = useState<TermsResponse | null>(null);
+  const [termsError, setTermsError] = useState(false);
 
   const [scrolledToBottom, setScrolledToBottom] = useState(false);
   const [confirmAccept, setConfirmAccept] = useState(false);
@@ -112,7 +113,10 @@ function AgreementPageInner() {
         ]);
         if (cancelled) return;
         if (progRes.status === "fulfilled") setProgram(progRes.value);
-        if (termsRes.status === "fulfilled") setTerms(termsRes.value);
+        // The terms must load for the participant to read and sign them; a
+        // failed load shows an error with Retry, not "Loading terms…" forever.
+        if (termsRes.status === "fulfilled") { setTerms(termsRes.value); setTermsError(false); }
+        else setTermsError(true);
         if (statusRes.status === "fulfilled") setDeclined(statusRes.value?.status === "DECLINED");
         setGateChecked(true);
       } catch (err) {
@@ -298,7 +302,18 @@ function AgreementPageInner() {
                 className="rounded-xl border border-gray-200 bg-white overflow-y-auto p-4 text-sm text-gray-700 leading-relaxed"
                 style={{ height: "min(35vh, 240px)" }}
               >
-                {!terms ? (
+                {termsError ? (
+                  <div className="text-sm text-red-700">
+                    <p>We couldn&apos;t load the agreement terms just now.</p>
+                    <button
+                      type="button"
+                      onClick={() => { setTermsError(false); getTerms().then((t) => { setTerms(t); }).catch(() => setTermsError(true)); }}
+                      className="mt-2 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+                    >
+                      Try again
+                    </button>
+                  </div>
+                ) : !terms ? (
                   <p className="text-gray-400 italic">Loading terms…</p>
                 ) : (
                   <div className="space-y-3">

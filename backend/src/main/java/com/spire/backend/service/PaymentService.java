@@ -429,7 +429,9 @@ public class PaymentService {
     public PaymentLedger recordEntry(Long financeUserId, Long invoiceId, String entryType,
                                      BigDecimal amount, LocalDate receiptDate,
                                      String method, String notes, Long reversesLedgerId) {
-        Invoice inv = invoiceRepository.findById(invoiceId)
+        // Locked: two simultaneous entries on one invoice (two Finance tabs,
+        // a double submit) used to overpay it or reverse one payment twice.
+        Invoice inv = invoiceRepository.findByIdForUpdate(invoiceId)
                 .orElseThrow(() -> new ResourceNotFoundException("Invoice", "id", invoiceId));
         String type = entryType == null || entryType.isBlank() ? ENTRY_PAYMENT : entryType.trim().toUpperCase();
         if (!ENTRY_TYPES.contains(type)) {

@@ -1245,48 +1245,25 @@ public class ConsultantApplicationController {
         return ResponseEntity.ok(ApiResponse.success(content));
     }
 
-    @PostMapping("/api/consultant/applications/{appId}/verify-details")
-    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantVerifyDetails(
+    /**
+     * The legacy verify-details / request-revision / sign transitions are
+     * retired. The /fill wizard submits through /submit, and signing goes
+     * through the ERM approval + countersign pipeline. These endpoints let a
+     * consultant move their own agreement SUBMITTED -> VERIFIED -> SIGNED ->
+     * COMPLETED with no approvals and no countersign, or pull it out of
+     * AWAITING_APPROVALS. Like the retired download endpoints they now answer
+     * 410 Gone (token still required so we don't leak existence to anonymous
+     * callers).
+     */
+    @PostMapping({"/api/consultant/applications/{appId}/verify-details",
+            "/api/consultant/applications/{appId}/request-revision",
+            "/api/consultant/applications/{appId}/sign"})
+    public ResponseEntity<ApiResponse<Void>> consultantLegacyTransitionGone(
             @PathVariable String appId,
             HttpServletRequest request) {
         requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
-        }
-        return ResponseEntity.ok(ApiResponse.success(
-                "Details verified",
-                consultantService.verifyDetails(appId, request)));
-    }
-
-    @PostMapping("/api/consultant/applications/{appId}/request-revision")
-    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantRequestRevision(
-            @PathVariable String appId,
-            @RequestBody Map<String, String> body,
-            HttpServletRequest request) {
-        requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
-        }
-        return ResponseEntity.ok(ApiResponse.success(
-                "Revision requested",
-                consultantService.requestRevision(appId, body.get("reason"), request)));
-    }
-
-    @PostMapping("/api/consultant/applications/{appId}/sign")
-    public ResponseEntity<ApiResponse<ConsultantApplication>> consultantSign(
-            @PathVariable String appId,
-            @RequestBody SignBody body,
-            HttpServletRequest request) {
-        requireConsultantToken(appId, request);
-        if (!rateLimiter.allowWrite(appId)) {
-            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
-                    .body(ApiResponse.error("Too many requests. Try again in a minute."));
-        }
-        return ResponseEntity.ok(ApiResponse.success(
-                "Signed",
-                consultantService.sign(appId, body.legalName, body.signatureImage, request)));
+        return ResponseEntity.status(HttpStatus.GONE).body(ApiResponse.error(
+                "This step has moved. Open your agreement link to continue in the guided form."));
     }
 
     @PostMapping("/api/consultant/applications/{appId}/request-copy")

@@ -128,7 +128,20 @@ class PermissionRulesTest {
         AdminService admin = adminService();
         assertThrows(AccessDeniedException.class, () -> admin.updateUserRole(PARTICIPANT, "SYSTEM_ADMIN", LEGACY_ADMIN));
         assertThrows(AccessDeniedException.class, () -> admin.updateUserRole(SYS, "COACH", LEGACY_ADMIN));
-        assertEquals("FINANCE", admin.updateUserRole(PARTICIPANT, "FINANCE", LEGACY_ADMIN).getRole());
+    }
+
+    @Test
+    void legacyAdminCannotGrantOrRemoveAnyStaffRole() {
+        // QA 2026-09-28: a legacy admin made an account it controlled Operations
+        // admin, which then opened a participant's SSN document.
+        AdminService admin = adminService();
+        for (String staffRole : new String[]{"OPERATIONS_ADMIN", "FINANCE", "ERM", "COACH", "TECHNICAL_ADVISOR"}) {
+            assertThrows(AccessDeniedException.class, () -> admin.updateUserRole(PARTICIPANT, staffRole, LEGACY_ADMIN));
+        }
+        assertThrows(AccessDeniedException.class, () -> admin.updateUserRole(FINANCE, "STUDENT", LEGACY_ADMIN));
+        assertEquals("PARTICIPANT", userRepository.findById(PARTICIPANT).orElseThrow().getRole().getName());
+        // Course-site roles stay manageable by the legacy admin.
+        assertEquals("STUDENT", admin.updateUserRole(PARTICIPANT, "STUDENT", LEGACY_ADMIN).getRole());
     }
 
     @Test

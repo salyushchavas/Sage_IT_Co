@@ -77,6 +77,7 @@ class PaymentRulesTest {
             return i;
         });
         when(invRepo.findById(anyLong())).thenAnswer(inv -> invoices.stream().filter(i -> i.getId().equals(inv.getArgument(0))).findFirst());
+        when(invRepo.findByIdForUpdate(anyLong())).thenAnswer(inv -> invoices.stream().filter(i -> i.getId().equals(inv.getArgument(0))).findFirst());
         when(invRepo.findByPaymentPlanId(anyLong())).thenAnswer(inv -> invoices.stream()
                 .filter(i -> inv.getArgument(0).equals(i.getPaymentPlanId())).toList());
         when(invRepo.findByStatusOrderByDueDateAsc(anyString())).thenAnswer(inv -> invoices.stream()

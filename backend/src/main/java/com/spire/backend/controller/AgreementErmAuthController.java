@@ -5,6 +5,7 @@ import com.spire.backend.entity.AgreementUser;
 import com.spire.backend.repository.AgreementUserRepository;
 import com.spire.backend.security.AgreementAuthz;
 import com.spire.backend.security.JwtService;
+import com.spire.backend.security.RateLimiter;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -16,6 +17,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -40,9 +42,14 @@ import java.util.Optional;
 @RequiredArgsConstructor
 public class AgreementErmAuthController {
 
+    /** Wrong passwords allowed per account before it pauses (as on the main site). */
+    static final int LOGIN_FAILURES_ALLOWED = 10;
+    static final Duration LOGIN_FAILURE_WINDOW = Duration.ofMinutes(15);
+
     private final JwtService jwtService;
     private final AgreementUserRepository agreementUserRepository;
     private final PasswordEncoder passwordEncoder;
+    private final RateLimiter rateLimiter;
 
     @PostMapping("/api/agreement-erm/login")
     @Transactional
@@ -59,16 +66,28 @@ public class AgreementErmAuthController {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(denied);
         }
 
+        // Too many wrong passwords for this account lately: pause it, so the
+        // console's passwords (SSNs and bank numbers behind them) can't be
+        // guessed from many addresses. Unknown emails count the same way.
+        String failKey = "console-login-fail:" + body.email.trim().toLowerCase();
+        if (rateLimiter.isOverLimit(failKey, LOGIN_FAILURES_ALLOWED, LOGIN_FAILURE_WINDOW)) {
+            return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(ApiResponse.error(
+                    "Too many sign-in attempts for this account. Wait 15 minutes and try again."));
+        }
+
         Optional<AgreementUser> found =
                 agreementUserRepository.findByEmailIgnoreCase(body.email.trim());
         if (found.isEmpty()) {
+            rateLimiter.record(failKey);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(denied);
         }
         AgreementUser user = found.get();
         if (!user.isActive()
                 || !passwordEncoder.matches(body.password, user.getPasswordHash())) {
+            rateLimiter.record(failKey);
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(denied);
         }
+        rateLimiter.clear(failKey);
 
         user.setLastLoginAt(LocalDateTime.now());
         agreementUserRepository.save(user);

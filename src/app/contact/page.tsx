@@ -36,8 +36,9 @@ export default function ContactPage() {
         body: JSON.stringify(data),
       });
 
-      const result = await res.json();
-      if (!res.ok) throw new Error(result.error || "Failed to send");
+      // An error page (HTML) must not surface as a raw JSON parse error.
+      const result = await res.json().catch(() => ({} as { error?: string }));
+      if (!res.ok) throw new Error(result.error || "We couldn't send your message. Please try again.");
       setSubmitted(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
@@ -140,7 +141,7 @@ export default function ContactPage() {
                     {error && (
                       <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-xl px-4 py-3">{error}</p>
                     )}
-                    <GlowButton type="submit" className="w-full">
+                    <GlowButton type="submit" className="w-full" disabled={sending}>
                       {sending ? "Sending..." : "Send Message"}
                     </GlowButton>
                   </form>

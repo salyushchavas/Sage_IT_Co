@@ -45,6 +45,13 @@ public class AdminService {
     private static final Set<String> ROLE_MANAGERS = Set.of("SYSTEM_ADMIN", "ADMIN");
     /** Top-level admin roles: only a System Admin may grant, remove or deactivate them. */
     private static final Set<String> TOP_ADMIN_ROLES = Set.of("SYSTEM_ADMIN", "ADMIN");
+    /**
+     * Staff roles: only a System Admin may grant or remove them. The legacy LMS
+     * admin could otherwise make an account it controls Operations admin (every
+     * participant's ID and SSN documents) or Finance (money writes).
+     */
+    static final Set<String> STAFF_ROLES = Set.of(
+            "SYSTEM_ADMIN", "ADMIN", "OPERATIONS_ADMIN", "FINANCE", "ERM", "COACH", "TECHNICAL_ADVISOR");
     /** Accounts an Operations admin may deactivate, reactivate or delete. */
     private static final Set<String> PARTICIPANT_ROLES = Set.of("PARTICIPANT", "STUDENT");
 
@@ -303,9 +310,9 @@ public class AdminService {
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         String normalizedRole = roleName.toUpperCase();
-        if ((TOP_ADMIN_ROLES.contains(normalizedRole) || TOP_ADMIN_ROLES.contains(roleNameOf(user)))
+        if ((STAFF_ROLES.contains(normalizedRole) || STAFF_ROLES.contains(roleNameOf(user)))
                 && !"SYSTEM_ADMIN".equals(callerRole)) {
-            throw new AccessDeniedException("Only a System Admin can give or remove admin roles.");
+            throw new AccessDeniedException("Only a System Admin can give or remove staff roles.");
         }
 
         // SECURITY: Cannot directly assign INSTRUCTOR via this endpoint.

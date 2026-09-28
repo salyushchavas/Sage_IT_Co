@@ -570,7 +570,9 @@ public class AuthService {
         }
         findUserByEmail(email).ifPresent(user -> {
             String token = UUID.randomUUID().toString();
-            user.setResetToken(token);
+            // Only a hash is stored (like verification codes), so a copy of
+            // the database can't be used to reset someone's password.
+            user.setResetToken(hashOtp(token));
             user.setResetTokenExpiresAt(LocalDateTime.now().plusHours(1));
             userRepository.save(user);
             try { emailTemplateService.sendPasswordResetEmail(user, token); } catch (Exception ignored) {}
@@ -589,7 +591,8 @@ public class AuthService {
      */
     @Transactional
     public void resetPassword(String token, String newPassword) {
-        User user = userRepository.findByResetToken(token)
+        if (token == null || token.isBlank()) throw new IllegalArgumentException("Invalid or expired reset link");
+        User user = userRepository.findByResetToken(hashOtp(token.trim()))
                 .orElseThrow(() -> new IllegalArgumentException("Invalid or expired reset link"));
         if (user.getResetTokenExpiresAt() == null
                 || user.getResetTokenExpiresAt().isBefore(LocalDateTime.now())) {
@@ -606,6 +609,9 @@ public class AuthService {
         // Whoever else was signed in (the reason for many resets) is out.
         user.endEarlierSessions();
         userRepository.save(user);
+        // The sign-in pause after too many wrong passwords says "or reset your
+        // password": a reset really does end it.
+        rateLimiter.clear("login-fail:" + normalizeEmail(user.getEmail()));
         recordService.record(user.getId(), "ACCOUNT_PASSWORD_RESET",
                 RecordService.Category.SECURITY,
                 "Password reset",

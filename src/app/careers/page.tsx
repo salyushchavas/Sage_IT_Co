@@ -12,15 +12,46 @@ import { useState } from "react";
 export default function CareersPage() {
   const [selectedJob, setSelectedJob] = useState<Job | null>(null);
   const [submitted, setSubmitted] = useState(false);
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [why, setWhy] = useState("");
+  const [sending, setSending] = useState(false);
+  const [error, setError] = useState("");
 
   function handleApply(job: Job) {
     setSelectedJob(job);
     setSubmitted(false);
+    setName(""); setEmail(""); setWhy(""); setError("");
   }
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setSubmitted(true);
+    if (sending) return;
+    setSending(true);
+    setError("");
+    try {
+      // Route the application to the company inbox through the hardened
+      // contact endpoint, so it's actually delivered rather than discarded.
+      const parts = name.trim().split(/\s+/);
+      const res = await fetch("/api/contact", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          firstName: parts[0] || name.trim(),
+          lastName: parts.slice(1).join(" ") || "-",
+          email: email.trim(),
+          service: `Job application: ${selectedJob?.title ?? ""}`,
+          message: `Applying for: ${selectedJob?.title ?? ""} (${selectedJob?.department ?? ""}, ${selectedJob?.location ?? ""})\n\n${why.trim()}`,
+        }),
+      });
+      const result = await res.json().catch(() => ({} as { error?: string }));
+      if (!res.ok) throw new Error(result.error || "We couldn't send your application. Please try again.");
+      setSubmitted(true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setSending(false);
+    }
   }
 
   return (
@@ -130,29 +161,38 @@ export default function CareersPage() {
                         type="text"
                         placeholder="Full Name"
                         required
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
                         className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                       <input
                         type="email"
                         placeholder="Email Address"
                         required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
                         className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                       />
                       <div>
-                        <label className="block text-sm text-zinc-600 mb-2">Resume (PDF)</label>
-                        <input
-                          type="file"
-                          accept=".pdf,.doc,.docx"
-                          className="w-full text-sm text-zinc-600 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-neon-blue/10 file:text-neon-blue hover:file:bg-neon-blue/20 cursor-pointer"
-                        />
+                        <label className="block text-sm text-zinc-600 mb-2">
+                          Email your resume to <a href="mailto:careers@sageitco.com" className="text-neon-blue font-semibold">careers@sageitco.com</a> after applying.
+                        </label>
                       </div>
                       <textarea
                         placeholder="Why are you interested in this role?"
                         rows={3}
+                        required
+                        value={why}
+                        onChange={(e) => setWhy(e.target.value)}
                         className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors resize-none"
                       />
+                      {error && (
+                        <p className="text-red-400 text-sm bg-red-400/10 border border-red-400/20 rounded-xl px-4 py-3">{error}</p>
+                      )}
                       <div className="flex gap-3 pt-2">
-                        <GlowButton type="submit">Submit Application</GlowButton>
+                        <GlowButton type="submit" disabled={sending}>
+                          {sending ? "Submitting…" : "Submit Application"}
+                        </GlowButton>
                         <GlowButton variant="secondary" onClick={() => setSelectedJob(null)}>
                           Cancel
                         </GlowButton>

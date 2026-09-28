@@ -143,7 +143,10 @@ function endSession(): void {
  * (another site, "//host", "javascript:…") goes to the dashboard instead.
  */
 export function safeRedirect(target: string | null | undefined, fallback = "/dashboard"): string {
-  if (!target || !target.startsWith("/") || target.startsWith("//") || target.startsWith("/\\")) return fallback;
+  if (!target || !target.startsWith("/") || target.startsWith("//")) return fallback;
+  // Browsers drop tabs and newlines from a URL and read "\" as "/", so
+  // "/<tab>/evil.example" or "/\evil.example" would become "//evil.example".
+  if (/[\u0000-\u001F\u007F\\]/.test(target)) return fallback;
   return target;
 }
 

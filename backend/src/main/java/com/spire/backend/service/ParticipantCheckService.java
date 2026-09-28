@@ -66,14 +66,25 @@ public class ParticipantCheckService {
     ) {
         User user = requireGatedUser(userId);
         validateFile(file);
+        // A check can't be for zero or a negative amount, or for fractions of a cent.
+        if (amount != null) {
+            if (amount.signum() <= 0) throw new IllegalArgumentException("Enter the check amount as a positive number.");
+            Money.cents(amount);
+        }
+        if (checkNumber != null && checkNumber.trim().length() > 30) {
+            throw new IllegalArgumentException("The check number can be at most 30 characters.");
+        }
         // Checklist 2.4: a re-upload replaces one of the participant's own
-        // copies that Finance rejected.
+        // copies that Finance rejected (once: the new copy is the one Finance reviews).
         if (replacesCheckId != null) {
             CheckDocument old = checkDocumentRepository.findById(replacesCheckId)
                     .filter(c -> userId.equals(c.getUserId()))
                     .orElseThrow(() -> new IllegalArgumentException("That check copy isn't yours."));
             if (!"REJECTED".equals(old.getReviewStatus())) {
                 throw new IllegalArgumentException("Only a check copy Finance rejected can be replaced.");
+            }
+            if (checkDocumentRepository.existsByReplacesCheckId(replacesCheckId)) {
+                throw new IllegalArgumentException("You've already uploaded a new copy of that check.");
             }
         }
 

@@ -136,4 +136,29 @@ class CheckCopiesTest {
         order.verify(emails).sendCheckUploadConfirmationEmail(any());
         order.verify(profile).markStepComplete(any(), eq("CHECK_UPLOAD"));
     }
+
+    @Test
+    void aCheckAmountMustBePositiveWholeCents() {
+        // QA 2026-09-28: a check for -$50 was accepted and finished the check step.
+        CheckDocumentRepository checks = mock(CheckDocumentRepository.class);
+        ParticipantCheckService s = participantSide(checks, mock(EmailTemplateService.class), mock(ProfileCompletionService.class));
+        assertThrows(IllegalArgumentException.class,
+                () -> s.upload(10L, image(), "12345678", new java.math.BigDecimal("-50"), null, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> s.upload(10L, image(), "12345678", java.math.BigDecimal.ZERO, null, null, null));
+        assertThrows(IllegalArgumentException.class,
+                () -> s.upload(10L, image(), "12345678", new java.math.BigDecimal("10.005"), null, null, null));
+        verify(checks, never()).save(any());
+        assertEquals(new java.math.BigDecimal("750.00"),
+                s.upload(10L, image(), "12345678", new java.math.BigDecimal("750.00"), null, null, null).getAmount());
+    }
+
+    @Test
+    void aRejectedCopyIsReplacedOnlyOnce() {
+        CheckDocumentRepository checks = mock(CheckDocumentRepository.class);
+        when(checks.findById(7L)).thenReturn(Optional.of(CheckDocument.builder().id(7L).userId(10L).reviewStatus("REJECTED").build()));
+        when(checks.existsByReplacesCheckId(7L)).thenReturn(true);
+        ParticipantCheckService s = participantSide(checks, mock(EmailTemplateService.class), mock(ProfileCompletionService.class));
+        assertThrows(IllegalArgumentException.class, () -> s.upload(10L, image(), "12345678", null, null, null, 7L));
+    }
 }

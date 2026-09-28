@@ -87,6 +87,7 @@ public class CourseController {
     // service resolves the enrollment via (userId, courseId) and 403s
     // if there isn't one.
     @GetMapping("/{courseId}/progress")
+    @PreAuthorize("isAuthenticated()")   // GET /api/courses/** is public; anonymous callers got a 500
     public ResponseEntity<ApiResponse<CourseProgressDTO>> getCourseProgress(
             @PathVariable Long courseId, Authentication authentication) {
         Long userId = Long.parseLong(authentication.getPrincipal().toString());

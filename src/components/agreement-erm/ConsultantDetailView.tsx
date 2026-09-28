@@ -1596,10 +1596,7 @@ function DocViewButton({
     try {
       const res = await fetchAgreementDocBlob(applicationId, docPath, "inline");
       if (!res.ok) throw new Error(`Couldn't open the document (${res.status})`);
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      window.open(url, "_blank", "noopener,noreferrer");
-      window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      openUploadedBlob(await res.blob(), "document");
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't open the document.");
     } finally {
@@ -2034,6 +2031,33 @@ function extensionForBlobType(mime: string | undefined | null): string {
 }
 
 /**
+ * Types a consultant's upload may be shown as in a new tab. A blob: URL opens
+ * on this site's origin, so an SVG or HTML file shown there could run script
+ * with the signed-in staff member's session. Anything else is downloaded
+ * (as application/octet-stream) instead of rendered.
+ */
+const VIEWABLE_UPLOAD_TYPES = new Set([
+  "application/pdf", "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp",
+]);
+
+function openUploadedBlob(blob: Blob, name: string) {
+  const type = (blob.type ?? "").toLowerCase().split(";")[0].trim();
+  const viewable = VIEWABLE_UPLOAD_TYPES.has(type);
+  const url = URL.createObjectURL(viewable ? blob : new Blob([blob], { type: "application/octet-stream" }));
+  if (viewable) {
+    window.open(url, "_blank", "noopener,noreferrer");
+  } else {
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = name + extensionForBlobType(type);
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+  window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
+}
+
+/**
  * Build G — inline view + download of the consultant's Appendix 5
  * cheque. Bytes are streamed through the backend (re-signs the
  * Cloudinary URL each call), wrapped in a blob URL for the open/
@@ -2097,19 +2121,18 @@ function SecurityChequeCard({
         throw new Error(`Couldn't fetch the cheque (${res.status})`);
       }
       const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const name = `SageITCO-Cheque-${entry.index + 1}_${app.applicationId}`;
       if (mode === "view") {
-        window.open(url, "_blank", "noopener,noreferrer");
-      } else {
-        const a = document.createElement("a");
-        a.href = url;
-        a.download =
-          `SageITCO-Cheque-${entry.index + 1}_${app.applicationId}`
-          + extensionForBlobType(blob.type);
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
+        openUploadedBlob(blob, name);
+        return;
       }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = name + extensionForBlobType(blob.type);
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
       window.setTimeout(() => URL.revokeObjectURL(url), 60_000);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't fetch the cheque.");

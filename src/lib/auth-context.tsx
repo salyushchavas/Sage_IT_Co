@@ -68,7 +68,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       try {
-        const profile = await getProfile();
+        // A server waking up (Railway cold start, a 502) or a dropped
+        // connection must not sign anyone out: try a few times first.
+        let profile: Awaited<ReturnType<typeof getProfile>> | null = null;
+        for (let attempt = 0; profile === null; attempt++) {
+          try {
+            profile = await getProfile();
+          } catch (e) {
+            // A refused sign-in already ended the session (apiFetch
+            // renews once, then clears the tokens): nothing to retry.
+            if (attempt >= 2 || !localStorage.getItem("access_token")) throw e;
+            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+          }
+        }
         // A role changed since this token was issued: get a token with
         // the current role, so the route guard and the pages agree.
         const tokenRole = roleFromToken(localStorage.getItem("access_token"));
@@ -79,7 +91,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (current) setAccessTokenCookie(current);
         setUser(profile);
       } catch {
-        clearAuth();
+        // Tokens still here means the server couldn't be reached, not that
+        // the sign-in is invalid: keep them so a reload picks up where the
+        // user left off. (A refused sign-in has already removed them.)
+        if (!localStorage.getItem("access_token")) clearAuth();
       } finally {
         setIsLoading(false);
       }

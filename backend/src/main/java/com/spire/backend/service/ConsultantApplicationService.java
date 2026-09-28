@@ -4451,8 +4451,8 @@ public class ConsultantApplicationService {
                     "Cheque file is too large (>10 MB).");
         }
         String normalisedType = contentType == null ? "" : contentType.toLowerCase();
-        boolean isImage = normalisedType.startsWith("image/");
-        boolean isPdf = normalisedType.equals("application/pdf");
+        boolean isImage = isSafeImage(normalisedType, bytes);
+        boolean isPdf = normalisedType.equals("application/pdf") && hasPdfSignature(bytes);
         if (!isImage && !isPdf) {
             throw new IllegalArgumentException(
                     "Cheque must be an image (JPG/PNG/HEIC) or PDF.");
@@ -4511,6 +4511,33 @@ public class ConsultantApplicationService {
 
     private static final java.time.format.DateTimeFormatter S3_KEY_TS =
             java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss");
+
+    /** Image types a consultant may upload; anything else (SVG above all) is refused. */
+    private static final java.util.Set<String> SAFE_IMAGE_TYPES = java.util.Set.of(
+            "image/jpeg", "image/jpg", "image/png", "image/gif", "image/webp", "image/heic", "image/heif");
+
+    /**
+     * An allowed image type whose bytes really are an image. Staff open these
+     * files in the browser, so the declared type alone can't be trusted: an
+     * SVG (or HTML labelled image/png) would run script on the site's origin.
+     */
+    static boolean isSafeImage(String normalisedType, byte[] bytes) {
+        if (!SAFE_IMAGE_TYPES.contains(normalisedType) || bytes == null || bytes.length < 12) return false;
+        int b0 = bytes[0] & 0xff, b1 = bytes[1] & 0xff, b2 = bytes[2] & 0xff, b3 = bytes[3] & 0xff;
+        boolean jpeg = b0 == 0xFF && b1 == 0xD8 && b2 == 0xFF;
+        boolean png = b0 == 0x89 && b1 == 'P' && b2 == 'N' && b3 == 'G';
+        boolean gif = b0 == 'G' && b1 == 'I' && b2 == 'F' && b3 == '8';
+        boolean webp = b0 == 'R' && b1 == 'I' && b2 == 'F' && b3 == 'F'
+                && bytes[8] == 'W' && bytes[9] == 'E' && bytes[10] == 'B' && bytes[11] == 'P';
+        boolean heif = bytes[4] == 'f' && bytes[5] == 't' && bytes[6] == 'y' && bytes[7] == 'p';
+        return jpeg || png || gif || webp || heif;
+    }
+
+    /** The bytes start with the PDF signature. */
+    static boolean hasPdfSignature(byte[] bytes) {
+        return bytes != null && bytes.length >= 5 && bytes[0] == '%' && bytes[1] == 'P'
+                && bytes[2] == 'D' && bytes[3] == 'F' && bytes[4] == '-';
+    }
 
     /** File extension for an S3 key, derived from the upload's content type. */
     private static String extFor(String contentType) {
@@ -4630,8 +4657,8 @@ public class ConsultantApplicationService {
                     "Work-authorization file is too large (>10 MB).");
         }
         String normalisedType = contentType == null ? "" : contentType.toLowerCase();
-        boolean isImage = normalisedType.startsWith("image/");
-        boolean isPdf = normalisedType.equals("application/pdf");
+        boolean isImage = isSafeImage(normalisedType, bytes);
+        boolean isPdf = normalisedType.equals("application/pdf") && hasPdfSignature(bytes);
         if (!isImage && !isPdf) {
             throw new IllegalArgumentException(
                     "Work-authorization document must be an image (JPG/PNG/HEIC) or PDF.");
@@ -4694,8 +4721,8 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException("Offer letter file is too large (>10 MB).");
         }
         String normalisedType = contentType == null ? "" : contentType.toLowerCase();
-        boolean isImage = normalisedType.startsWith("image/");
-        boolean isPdf = normalisedType.equals("application/pdf");
+        boolean isImage = isSafeImage(normalisedType, bytes);
+        boolean isPdf = normalisedType.equals("application/pdf") && hasPdfSignature(bytes);
         if (!isImage && !isPdf) {
             throw new IllegalArgumentException(
                     "Offer letter must be an image (JPG/PNG/HEIC) or PDF.");
@@ -4747,8 +4774,8 @@ public class ConsultantApplicationService {
             throw new IllegalArgumentException(label + " file is too large (>10 MB).");
         }
         String normalisedType = contentType == null ? "" : contentType.toLowerCase();
-        boolean isImage = normalisedType.startsWith("image/");
-        boolean isPdf = normalisedType.equals("application/pdf");
+        boolean isImage = isSafeImage(normalisedType, bytes);
+        boolean isPdf = normalisedType.equals("application/pdf") && hasPdfSignature(bytes);
         if (!isImage && !isPdf) {
             throw new IllegalArgumentException(
                     label + " must be an image (JPG/PNG/HEIC) or PDF.");
@@ -5073,8 +5100,8 @@ public class ConsultantApplicationService {
                     "Cheque file is too large (>10 MB).");
         }
         String normalisedType = contentType == null ? "" : contentType.toLowerCase();
-        boolean isImage = normalisedType.startsWith("image/");
-        boolean isPdf = normalisedType.equals("application/pdf");
+        boolean isImage = isSafeImage(normalisedType, bytes);
+        boolean isPdf = normalisedType.equals("application/pdf") && hasPdfSignature(bytes);
         if (!isImage && !isPdf) {
             throw new IllegalArgumentException(
                     "Cheque must be an image (JPG/PNG/HEIC) or PDF.");

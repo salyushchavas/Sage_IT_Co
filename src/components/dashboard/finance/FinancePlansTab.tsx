@@ -50,13 +50,21 @@ export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
     };
   }, []);
 
+  // One invoice at a time: each click issues (and emails) the NEXT
+  // instalment, so a double-click used to bill the following month early.
+  const [issuing, setIssuing] = useState<number | null>(null);
   const invoice = async (id: number) => {
+    if (issuing !== null) return;
+    if (!window.confirm("Issue the next invoice for this plan now? The participant is emailed.")) return;
+    setIssuing(id);
     setError("");
     try {
       await generateInvoice(id);
       await refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't issue the invoice");
+    } finally {
+      setIssuing(null);
     }
   };
 
@@ -152,9 +160,10 @@ export function FinancePlansTab({ readOnly = false }: { readOnly?: boolean }) {
                         {!readOnly && r.status === "ACTIVE" && r.invoiceCount < (r.installments ?? 0) && (
                           <button
                             onClick={() => invoice(r.id)}
-                            className="px-2 py-1 rounded-md text-[10px] font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+                            disabled={issuing !== null}
+                            className="px-2 py-1 rounded-md text-[10px] font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
                           >
-                            + Invoice
+                            {issuing === r.id ? "Issuing…" : "+ Invoice"}
                           </button>
                         )}
                       </div>
