@@ -1,7 +1,10 @@
 package com.spire.backend.repository;
 
 import com.spire.backend.entity.User;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -13,6 +16,26 @@ import java.util.Optional;
 
 @Repository
 public interface UserRepository extends JpaRepository<User, Long> {
+
+    /**
+     * The user row, locked until the transaction ends. Used at the start of
+     * per-user write transitions (employment acceptance, acknowledgment, check
+     * upload) so a "check then insert" can't run twice concurrently and create
+     * duplicate rows.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select u from User u where u.id = :id")
+    Optional<User> findByIdForUpdate(@Param("id") Long id);
+
+    /**
+     * Atomically flip email_verified false -> true; returns 1 only for the
+     * request that actually flips it. Lets verify-code serialise the
+     * Participant-ID mint without a row lock, so two racing verifications
+     * can't both mint (and email) a different ID.
+     */
+    @Modifying(flushAutomatically = true)
+    @Query("update User u set u.emailVerified = true where u.id = :id and u.emailVerified = false")
+    int markEmailVerifiedIfPending(@Param("id") Long id);
 
     /**
      * The account's CURRENT role name, only while the account is active.

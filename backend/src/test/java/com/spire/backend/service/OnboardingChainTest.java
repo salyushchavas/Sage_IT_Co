@@ -42,6 +42,8 @@ class OnboardingChainTest {
     @BeforeEach
     void setUp() {
         users = mock(UserRepository.class);
+        lenient().when(users.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> users.findById(inv.getArgument(0)));
+        lenient().when(users.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         when(users.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));
         pat = User.builder().id(10L).email("pat@x.com").fullName("Pat Doe").participantId("SAGE-2026-00007")
                 .role(Role.builder().name("PARTICIPANT").build()).isActive(true)

@@ -64,6 +64,10 @@ public class ParticipantCheckService {
             String notes,
             Long replacesCheckId
     ) {
+        // Lock the user row first so two concurrent uploads serialise: the
+        // post-signing onboarding chain (welcome / intros / ERM assignment)
+        // then runs once, not twice, and no duplicate ERM row is created.
+        userRepository.findByIdForUpdate(userId);
         User user = requireGatedUser(userId);
         validateFile(file);
         // A check can't be for zero or a negative amount, or for fractions of a cent.

@@ -46,6 +46,8 @@ class AuthServiceVerificationTest {
     @BeforeEach
     void setUp() {
         userRepository = mock(UserRepository.class);
+        lenient().when(userRepository.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> userRepository.findById(inv.getArgument(0)));
+        lenient().when(userRepository.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         roleRepository = mock(RoleRepository.class);
         jwtService = mock(JwtService.class);
         emailTemplateService = mock(EmailTemplateService.class);

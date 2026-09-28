@@ -66,7 +66,10 @@ public class EmploymentService {
 
     @Transactional
     public EmploymentAcceptance acceptEmployment(Long userId, EmploymentAcceptance in) {
-        User user = userRepository.findById(userId)
+        // Lock the user row so two concurrent submissions serialise and the
+        // "one open record" check below can't be passed by both (which used to
+        // create duplicate employment_acceptances rows).
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         // Gate: must be at or past DASHBOARD_ENABLED. Below that the

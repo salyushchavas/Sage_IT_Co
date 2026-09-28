@@ -1533,6 +1533,28 @@ public class DataSeeder implements CommandLineRunner {
             if (shared != null && shared > 0) {
                 log.warn("{} phone number(s) are shared by more than one active account", shared);
             }
+            // Enforce one active account per phone number at the database, so a
+            // burst of simultaneous sign-ups with the same number can't slip
+            // several past the application-level check. Partial (active +
+            // non-null) so deactivated accounts can free their number and rows
+            // without a phone are unaffected. Best-effort: if legacy duplicates
+            // already exist the index won't build — logged, not fatal, and the
+            // application-level PhoneNumbers check still applies.
+            if (shared == null || shared == 0) {
+                afterSeederCommits("phone uniqueness index", () -> {
+                    try {
+                        jdbcTemplate.execute(
+                                "CREATE UNIQUE INDEX IF NOT EXISTS uq_users_phone_normalized_active "
+                                        + "ON users(phone_normalized) WHERE phone_normalized IS NOT NULL AND is_active = TRUE");
+                        log.info("Ensured unique uq_users_phone_normalized_active");
+                    } catch (Exception e) {
+                        log.warn("Couldn't create the active-phone unique index (duplicates present?): {}", e.getMessage());
+                    }
+                });
+            } else {
+                log.warn("Skipping the active-phone unique index while duplicates exist; "
+                        + "resolve them (Operations) then restart to enforce it.");
+            }
         } catch (Exception e) {
             log.warn("Couldn't fill in comparable phone numbers: {}", e.getMessage());
         }

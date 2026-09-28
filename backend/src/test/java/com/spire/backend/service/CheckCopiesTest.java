@@ -47,6 +47,8 @@ class CheckCopiesTest {
         when(checks.findById(3L)).thenReturn(Optional.of(check));
         when(checks.save(any())).thenAnswer(inv -> inv.getArgument(0));
         UserRepository users = mock(UserRepository.class);
+        lenient().when(users.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> users.findById(inv.getArgument(0)));
+        lenient().when(users.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         when(users.findById(10L)).thenReturn(Optional.of(User.builder().id(10L).email("p@x.com")
                 .role(Role.builder().name("PARTICIPANT").build()).build()));
         EmailTemplateService emails = mock(EmailTemplateService.class);

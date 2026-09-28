@@ -53,7 +53,9 @@ public class AcknowledgmentService {
     public Acknowledgment submit(Long userId,
                                  AcknowledgmentSubmitRequest req,
                                  HttpServletRequest httpRequest) {
-        User user = userRepository.findById(userId)
+        // Lock the user row so two concurrent submits serialise (they used to
+        // both pass the "already accepted?" check and write duplicate rows).
+        User user = userRepository.findByIdForUpdate(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
 
         // ── Gate: the steps before this one must really be done ─────

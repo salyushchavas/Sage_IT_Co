@@ -412,7 +412,14 @@ public class AuthService {
             throw new IllegalStateException("This account is deactivated. Contact support if you think this is a mistake.");
         }
 
-        // Success — promote.
+        // Success — promote. Flip email_verified atomically so two verify
+        // requests racing for the same pending account can't both proceed to
+        // mint a Participant ID (which would email two different IDs). Only the
+        // thread that actually flips the row (1 updated) goes on to assign one.
+        int flipped = userRepository.markEmailVerifiedIfPending(user.getId());
+        if (flipped == 0) {
+            throw new IllegalStateException("This email is already verified. Sign in with your password.");
+        }
         user.setEmailVerified(true);
         user.setVerificationCodeHash(null);
         user.setVerificationCodeExpiresAt(null);

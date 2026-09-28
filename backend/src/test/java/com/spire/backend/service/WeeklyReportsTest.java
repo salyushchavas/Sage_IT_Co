@@ -50,6 +50,8 @@ class WeeklyReportsTest {
     void setUp() {
         clock = new BusinessClock(TUESDAY);
         users = mock(UserRepository.class);
+        lenient().when(users.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> users.findById(inv.getArgument(0)));
+        lenient().when(users.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         pat = User.builder().id(10L).fullName("Pat Doe").participantId("SAGE-2026-00007").email("pat@x.com")
                 .role(Role.builder().name("PARTICIPANT").build()).isActive(true)
                 .currentStatus("WEEKLY_REPORTING_ACTIVE").build();

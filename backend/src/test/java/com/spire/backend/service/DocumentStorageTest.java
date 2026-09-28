@@ -82,6 +82,8 @@ class DocumentStorageTest {
     @Test
     void aReUploadKeepsTheOldFileUntilTheNewOneIsStored() {
         UserRepository users = mock(UserRepository.class);
+        lenient().when(users.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> users.findById(inv.getArgument(0)));
+        lenient().when(users.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         User pat = User.builder().id(10L).role(Role.builder().name("PARTICIPANT").build()).participantId("SAGE-2026-00001")
                 .isActive(true).acknowledgmentComplete(true).build();
         when(users.findById(10L)).thenReturn(Optional.of(pat));

@@ -40,6 +40,8 @@ class AcknowledgmentRecordTest {
 
     private static Setup setup() {
         UserRepository users = mock(UserRepository.class);
+        lenient().when(users.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> users.findById(inv.getArgument(0)));
+        lenient().when(users.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         User user = User.builder().id(10L).email("p@x.com").role(Role.builder().name("PARTICIPANT").build())
                 .emailVerified(true).participantId("SIT-2026-00001").basicInfoComplete(true)
                 .currentStatus("ID_EMAIL_SENT").build();

@@ -36,6 +36,8 @@ class RealProgressTest {
     @BeforeEach
     void setUp() {
         userRepository = mock(UserRepository.class);
+        lenient().when(userRepository.findByIdForUpdate(org.mockito.ArgumentMatchers.anyLong())).thenAnswer(inv -> userRepository.findById(inv.getArgument(0)));
+        lenient().when(userRepository.markEmailVerifiedIfPending(org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
         workflowStateRepository = mock(WorkflowStateRepository.class);
         workflow = new WorkflowService(userRepository, workflowStateRepository, mock(RecordService.class));
         user = User.builder().id(10L).email("p@x.com").fullName("Pat Doe")
