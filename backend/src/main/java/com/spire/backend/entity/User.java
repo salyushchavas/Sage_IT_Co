@@ -327,15 +327,4 @@ public class User {
     @Column(name = "ssn_last4", columnDefinition = "TEXT")
     @ToString.Exclude
     private String ssnLast4;
-
-    /**
-     * An ERM checked the documents and program (30 Sep): only then is the
-     * agreement sent and can it be signed. Cleared when the documents step
-     * reopens (a document sent back), so it's verified again.
-     */
-    @Column(name = "erm_verified_at")
-    private LocalDateTime ermVerifiedAt;
-
-    @Column(name = "erm_verified_by")
-    private Long ermVerifiedBy;
 }

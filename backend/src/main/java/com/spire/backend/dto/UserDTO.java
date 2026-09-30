@@ -70,8 +70,6 @@ public class UserDTO {
     private Boolean programSelectionComplete;
     private Boolean agreementComplete;
     private Boolean checkUploadComplete;
-    /** An ERM verified the documents and program: the agreement is sent and can be signed. */
-    private Boolean ermVerified;
     /** Staff onboarding: the address the portal's emails go to, when it isn't the login email. */
     private String personalEmail;
     /** Staff onboarding: a temporary password is in use; they must choose their own first. */
@@ -107,7 +105,6 @@ public class UserDTO {
                 .programSelectionComplete(Boolean.TRUE.equals(user.getProgramSelectionComplete()))
                 .agreementComplete(Boolean.TRUE.equals(user.getAgreementComplete()))
                 .checkUploadComplete(Boolean.TRUE.equals(user.getCheckUploadComplete()))
-                .ermVerified(user.getErmVerifiedAt() != null)
                 .personalEmail(user.getPersonalEmail())
                 .mustChangePassword(Boolean.TRUE.equals(user.getMustChangePassword()))
                 .build();

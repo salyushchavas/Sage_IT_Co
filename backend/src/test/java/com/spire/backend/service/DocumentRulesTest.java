@@ -285,28 +285,12 @@ class DocumentRulesTest {
         assertEquals("ACKNOWLEDGMENT_ACCEPTED", user.getCurrentStatus(), "status back to the real step");
         assertEquals(List.of("PHOTO_ID"), service.missingRequired(10L));
 
-        // The participant uploads a new one and continues: straight back to where they were,
-        // waiting for an ERM to verify the documents before the agreement.
+        // The participant uploads a new one and continues: straight back to where they were.
         upload("GOVERNMENT_ID");
         Map<String, Object> done = service.complete(10L);
         assertEquals(true, done.get("success"));
-        assertEquals("/dashboard", done.get("nextStep"));
+        assertEquals("/agreement", done.get("nextStep"));
         assertEquals("PROGRAM_SELECTED", user.getCurrentStatus());
-    }
-
-    @Test
-    void aDocumentSentBackAfterVerificationMeansVerifyingAgain() {
-        uploadAllRequired();
-        service.complete(10L);
-        user.setProgramSelectionComplete(true);
-        user.setErmVerifiedAt(java.time.LocalDateTime.now());
-        user.setErmVerifiedBy(1L);
-        assertEquals("/agreement", service.complete(10L).get("nextStep"), "verified: the agreement is next");
-
-        ParticipantDocument resume = rows.stream().filter(d -> d.getDocumentType().equals("RESUME")).findFirst().get();
-        service.review(resume.getId(), 1L, "REJECTED", "Please upload your latest resume");
-        assertNull(user.getErmVerifiedAt(), "the ERM verifies again once it's fixed");
-        assertNull(user.getErmVerifiedBy());
     }
 
     @Test

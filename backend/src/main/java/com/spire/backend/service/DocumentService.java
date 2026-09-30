@@ -211,9 +211,7 @@ public class DocumentService {
         ParticipantDocument doc = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document", "id", documentId));
         User viewer = callerId == null ? null : userRepository.findById(callerId).orElse(null);
-        if (!permissionService.canViewDocument(viewer, doc.getUserId(), doc.getDocumentType())
-                && !permissionService.canVerifyDocument(viewer,
-                        userRepository.findById(doc.getUserId()).orElse(null), doc.getDocumentType())) {
+        if (!permissionService.canViewDocument(viewer, doc.getUserId(), doc.getDocumentType())) {
             throw new AccessDeniedException("Not allowed to view this document");
         }
         if (!doc.getUserId().equals(callerId)) {
@@ -418,9 +416,8 @@ public class DocumentService {
         workflowService.transition(user,
                 WorkflowService.statusFromProfile(user),
                 "docs_complete");
-        // The agreement opens once an ERM verified the documents.
         String nextStep = !Boolean.TRUE.equals(user.getProgramSelectionComplete()) ? "/program-selection"
-                : !Boolean.TRUE.equals(user.getAgreementComplete()) && user.getErmVerifiedAt() != null ? "/agreement"
+                : !Boolean.TRUE.equals(user.getAgreementComplete()) ? "/agreement"
                 : "/dashboard";
         return Map.of(
                 "success", true,
@@ -559,9 +556,6 @@ public class DocumentService {
         if (!Boolean.TRUE.equals(user.getDocumentsComplete())) return;
         if (Boolean.TRUE.equals(user.getAgreementComplete())) return;
         if (missingRequired(user.getId()).isEmpty()) return;
-        // An ERM verifies the documents again once they're fixed.
-        user.setErmVerifiedAt(null);
-        user.setErmVerifiedBy(null);
         profileCompletionService.reopenStep(user, "DOCUMENTS", notes);
         WorkflowService.Status real = WorkflowService.statusFromProfile(user);
         if (workflowService.currentStatus(user).ordinal() > real.ordinal()) {

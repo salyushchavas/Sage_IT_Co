@@ -40,7 +40,6 @@ class SignedAgreementTest {
         pat = User.builder().id(10L).email("pat@x.com").fullName("Pat Q Doe").participantId("SAGE-2026-00007")
                 .role(Role.builder().name("PARTICIPANT").build()).isActive(true)
                 .acknowledgmentComplete(true).documentsComplete(true).programSelectionComplete(true)
-                .ermVerifiedAt(java.time.LocalDateTime.now())
                 .currentStatus("PROGRAM_SELECTED").build();
         when(users.findById(10L)).thenReturn(Optional.of(pat));
         when(users.save(any(User.class))).thenAnswer(inv -> inv.getArgument(0));

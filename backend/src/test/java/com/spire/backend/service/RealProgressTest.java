@@ -133,14 +133,8 @@ class RealProgressTest {
         user.setDocumentsComplete(true);
         assertThrows(IllegalStateException.class, () -> signing.sign(10L, "Pat Doe", null, null, null, null, v, fp));
 
-        // 30 Sep: not before an ERM verified the documents.
-        user.setProgramSelectionComplete(true);
-        IllegalStateException notVerified = assertThrows(IllegalStateException.class,
-                () -> signing.sign(10L, "Pat Doe", "data:image/png;base64,AA", "draw", "1.2.3.4", "ua", v, fp));
-        assertTrue(notVerified.getMessage().contains("ERM is verifying"));
-        user.setErmVerifiedAt(java.time.LocalDateTime.now());
-
         // A status jumped past signing used to return "already signed" and tick the step.
+        user.setProgramSelectionComplete(true);
         user.setCurrentStatus("DASHBOARD_ENABLED");
         when(agreements.findByUserId(10L)).thenReturn(Optional.empty());
         signing.sign(10L, "Pat Doe", "data:image/png;base64,AA", "draw", "1.2.3.4", "ua", v, fp);
