@@ -14,8 +14,10 @@ import {
   completeDocuments,
   deleteParticipantDocument,
   documentSatisfiesRequirement,
+  getSsnLast4,
   listParticipantDocuments,
   markDocumentNotApplicable,
+  saveSsnLast4,
   uploadParticipantDocument,
   viewParticipantDocument,
   type DocumentType,
@@ -27,13 +29,16 @@ import { useAuth } from "@/lib/auth-context";
 /**
  * Step 5 — Secure document vault.
  *
- * The participant has three required slots (Government ID, Work
- * Authorization, Resume) plus optional slots (SSN, Driver's
- * License, Other). Required slots must each carry an upload, or a
- * "Not applicable" request (with a reason) that Operations approved,
- * before Continue is enabled — the backend re-checks the same rule on
- * /complete so the gate is unbypassable. Optional slots can simply be
- * marked not applicable.
+ * What the participant needs (the list asked for on 30 Sep):
+ *   - a photo ID: a driver's license or a State ID (one is enough,
+ *     both is fine)
+ *   - work authorization
+ *   - a resume
+ * Each needs an upload, or a "Not applicable" request (with a reason)
+ * that Operations approved, before Continue is enabled — the backend
+ * re-checks the same rule on /complete so the gate is unbypassable.
+ * Optional: the last 4 digits of the SSN (typed, never a document) and
+ * any extra supporting files.
  *
  * When Operations sends a document back (rejected upload or declined
  * request) the page opens again, even after the step was finished, so
@@ -53,19 +58,22 @@ interface SlotConfig {
   allowNotApplicable?: boolean;
   /** OTHER bucket accepts multiple uploads. */
   multiple?: boolean;
+  /** A driver's license or a State ID: either one covers the photo ID. */
+  photoId?: boolean;
 }
 
 const SLOTS: ReadonlyArray<SlotConfig> = [
-  { type: "GOVERNMENT_ID",     label: "Government-issued ID",        description: "Passport, Aadhaar, or Driving Licence", required: true },
-  { type: "WORK_AUTHORIZATION", label: "Work Authorization / Visa",   description: "Visa, work permit, or other proof of work authorization", required: true, allowNotApplicable: true },
-  { type: "RESUME",            label: "Resume / CV",                  description: "Your most recent resume", required: true },
-  { type: "SSN_DOCUMENT",      label: "SSN Document",                 description: "If applicable to your jurisdiction", required: false, allowNotApplicable: true },
-  { type: "DRIVERS_LICENSE",   label: "Driving Licence",              description: "Separate from primary ID if applicable", required: false, allowNotApplicable: true },
+  { type: "DRIVERS_LICENSE",   label: "Driver's License",             description: "A clear photo or scan of your driver's license", required: true, photoId: true, allowNotApplicable: true },
+  { type: "GOVERNMENT_ID",     label: "State ID",                     description: "Your State-issued ID card", required: true, photoId: true, allowNotApplicable: true },
+  { type: "WORK_AUTHORIZATION", label: "Work Authorization",          description: "H-1B, H-2B, EAD, green card or other proof that you can work in the US", required: true, allowNotApplicable: true },
+  { type: "RESUME",            label: "Resume",                       description: "Your updated resume, or an older one if that's what you have", required: true },
   { type: "OTHER",             label: "Additional Supporting Documents", description: "Any additional files reviewers should see", required: false, multiple: true },
 ];
 
-const REQUIRED_SLOTS = SLOTS.filter((s) => s.required);
+const PHOTO_ID_SLOTS = SLOTS.filter((s) => s.photoId);
+const REQUIRED_SLOTS = SLOTS.filter((s) => s.required && !s.photoId);
 const OPTIONAL_SLOTS = SLOTS.filter((s) => !s.required);
+const PHOTO_ID_LABEL = "Driver's License or State ID";
 
 function formatBytes(bytes: number | null | undefined): string {
   if (!bytes && bytes !== 0) return "—";
@@ -93,6 +101,11 @@ function DocumentUploadPageInner() {
   const [naFor, setNaFor] = useState<DocumentType | null>(null);
   const [naReason, setNaReason] = useState("");
   const [naBusy, setNaBusy] = useState(false);
+  // The last 4 digits of the SSN: optional, typed, saved on their own.
+  const [ssn, setSsn] = useState("");
+  const [ssnSaved, setSsnSaved] = useState("");
+  const [ssnBusy, setSsnBusy] = useState(false);
+  const [ssnNote, setSsnNote] = useState<{ ok: boolean; text: string } | null>(null);
   const fileInputs = useRef<Partial<Record<DocumentType, HTMLInputElement | null>>>({});
 
   // ── Gate + load ───────────────────────────────────────────────
@@ -129,6 +142,10 @@ function DocumentUploadPageInner() {
         }
         setDocuments(docs);
         setGateChecked(true);
+        // Optional, so a failure here never blocks the page.
+        getSsnLast4()
+          .then((v) => { if (!cancelled) { setSsn(v); setSsnSaved(v); } })
+          .catch(() => {});
       } catch (err) {
         if (cancelled) return;
         setGateError(err instanceof Error ? err.message : "Couldn't load documents.");
@@ -158,11 +175,17 @@ function DocumentUploadPageInner() {
   const requiredSatisfied = (s: SlotConfig): boolean =>
     slotDocs(s.type).some(documentSatisfiesRequirement);
 
-  const requiredCount = REQUIRED_SLOTS.length;
-  const completedRequired = REQUIRED_SLOTS.filter(requiredSatisfied).length;
+  // One photo ID (either slot) covers that requirement.
+  const photoIdSatisfied = PHOTO_ID_SLOTS.some(requiredSatisfied);
+  const photoIdWaiting = !photoIdSatisfied
+    && PHOTO_ID_SLOTS.some((s) => slotDocs(s.type).some((d) => d.reviewStatus === "EXCEPTION_REQUESTED"));
+
+  const requiredCount = REQUIRED_SLOTS.length + 1;
+  const completedRequired = REQUIRED_SLOTS.filter(requiredSatisfied).length + (photoIdSatisfied ? 1 : 0);
   const progressPct = Math.round((completedRequired / requiredCount) * 100);
   const missingRequired = REQUIRED_SLOTS.filter((s) => !requiredSatisfied(s));
-  const canContinue = missingRequired.length === 0 && !completing;
+  const missingCount = missingRequired.length + (photoIdSatisfied ? 0 : 1);
+  const canContinue = missingCount === 0 && !completing;
 
   // ── Actions ──────────────────────────────────────────────────
 
@@ -234,6 +257,25 @@ function DocumentUploadPageInner() {
     }
   };
 
+  const handleSaveSsn = async (value: string) => {
+    setSsnNote(null);
+    if (value !== "" && !/^\d{4}$/.test(value)) {
+      setSsnNote({ ok: false, text: "Enter exactly the last 4 digits, or leave it empty." });
+      return;
+    }
+    setSsnBusy(true);
+    try {
+      const saved = await saveSsnLast4(value);
+      setSsn(saved);
+      setSsnSaved(saved);
+      setSsnNote({ ok: true, text: saved ? "Saved." : "Removed." });
+    } catch (err) {
+      setSsnNote({ ok: false, text: err instanceof Error ? err.message : "Couldn't save." });
+    } finally {
+      setSsnBusy(false);
+    }
+  };
+
   const handleView = async (doc: ParticipantDocument) => {
     try {
       await viewParticipantDocument(doc.id);
@@ -299,14 +341,16 @@ function DocumentUploadPageInner() {
               </span>
             ) : (
               <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white border border-gray-300 text-gray-400 text-[11px] font-bold">
-                {slot.required ? "!" : "○"}
+                {slot.required && !(slot.photoId && photoIdSatisfied) ? "!" : "○"}
               </span>
             )}
           </div>
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 flex-wrap">
               <p className="text-sm font-semibold text-gray-900">{slot.label}</p>
-              {slot.required ? (
+              {slot.photoId ? (
+                <span className="text-[10px] font-bold uppercase tracking-wider text-sage-navy bg-sage-navy/10 px-1.5 py-0.5 rounded">One is enough</span>
+              ) : slot.required ? (
                 <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Required</span>
               ) : (
                 <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Optional</span>
@@ -423,6 +467,7 @@ function DocumentUploadPageInner() {
                 </button>
               )}
               {slot.allowNotApplicable && (!isMarkedNA || declined)
+                && !(slot.photoId && (photoIdSatisfied || docs.length > 0))
                 && docs[0]?.reviewStatus !== "APPROVED" && naFor !== slot.type && (
                 <button
                   type="button"
@@ -458,7 +503,9 @@ function DocumentUploadPageInner() {
                   onChange={(e) => setNaReason(e.target.value)}
                   rows={2}
                   maxLength={1000}
-                  placeholder="For example: I'm a US citizen, so I don't have a visa or work permit."
+                  placeholder={slot.photoId
+                    ? "For example: I don't have a driver's license or a State ID yet."
+                    : "For example: I'm a US citizen, so I don't have a visa or work permit."}
                   className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-400 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy resize-none"
                 />
                 <div className="flex flex-wrap items-center gap-2">
@@ -492,7 +539,7 @@ function DocumentUploadPageInner() {
       </li>
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documents, uploadingType, uploadError, naFor, naReason, naBusy]);
+  }, [documents, uploadingType, uploadError, naFor, naReason, naBusy, photoIdSatisfied]);
 
   if (authLoading || !gateChecked) {
     return (
@@ -549,6 +596,19 @@ function DocumentUploadPageInner() {
           </div>
         </div>
 
+        {/* Photo ID: either one */}
+        <div className="mt-5">
+          <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
+            Photo ID
+          </p>
+          <p className="text-xs text-gray-500 mb-1.5">
+            Upload your driver&apos;s license or your State ID. One is enough; if you have both, you can upload both.
+          </p>
+          <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+            {PHOTO_ID_SLOTS.map(renderSlot)}
+          </ul>
+        </div>
+
         {/* Required slots */}
         <div className="mt-5">
           <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
@@ -559,24 +619,93 @@ function DocumentUploadPageInner() {
           </ul>
         </div>
 
-        {/* Optional slots */}
+        {/* Optional: SSN digits (typed) and extra files */}
         <div className="mt-5">
           <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
-            Optional documents
+            Optional
           </p>
           <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
+            <li className="p-4 sm:p-5 first:pt-4 border-b border-gray-100">
+              <div className="flex items-start gap-3">
+                <div className="shrink-0 mt-0.5">
+                  {ssnSaved ? (
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700">
+                      <CheckCircle2 size={14} />
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white border border-gray-300 text-gray-400 text-[11px] font-bold">
+                      ○
+                    </span>
+                  )}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <label htmlFor="ssn-last4" className="text-sm font-semibold text-gray-900">
+                      SSN, last 4 digits
+                    </label>
+                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Optional</span>
+                  </div>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Only the last 4 digits. Please don&apos;t upload your SSN card.
+                  </p>
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <input
+                      id="ssn-last4"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="off"
+                      maxLength={4}
+                      value={ssn}
+                      onChange={(e) => { setSsn(e.target.value.replace(/\D/g, "").slice(0, 4)); setSsnNote(null); }}
+                      placeholder="1234"
+                      className="w-24 px-3 py-1.5 text-sm font-mono tracking-widest rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-300 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => handleSaveSsn(ssn)}
+                      disabled={ssnBusy || ssn === ssnSaved}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+                    >
+                      {ssnBusy && <Loader2 size={12} className="animate-spin" />}
+                      Save
+                    </button>
+                    {ssnSaved && (
+                      <button
+                        type="button"
+                        onClick={() => handleSaveSsn("")}
+                        disabled={ssnBusy}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
+                      >
+                        Remove
+                      </button>
+                    )}
+                  </div>
+                  {ssnNote && (
+                    <p className={"mt-1.5 text-[11px] " + (ssnNote.ok ? "text-emerald-700" : "text-red-600")}>
+                      {ssnNote.text}
+                    </p>
+                  )}
+                </div>
+              </div>
+            </li>
             {OPTIONAL_SLOTS.map(renderSlot)}
           </ul>
         </div>
 
         {/* Missing list */}
-        {missingRequired.length > 0 && (
+        {missingCount > 0 && (
           <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
             <p className="text-xs font-semibold text-amber-800 inline-flex items-center gap-1.5">
               <AlertCircle size={12} />
-              {missingRequired.length} required {missingRequired.length === 1 ? "document" : "documents"} still missing:
+              {missingCount} required {missingCount === 1 ? "document" : "documents"} still missing:
             </p>
             <ul className="mt-1 text-xs text-amber-900 list-disc list-inside">
+              {!photoIdSatisfied && (
+                <li>
+                  {PHOTO_ID_LABEL}
+                  {photoIdWaiting && " (not applicable: waiting for Operations)"}
+                </li>
+              )}
               {missingRequired.map((s) => (
                 <li key={s.type}>
                   {s.label}

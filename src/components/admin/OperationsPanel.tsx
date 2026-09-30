@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { InviteDialog } from "@/components/admin/tabs/AdminUsersTab";
+import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
 import {
   AlertCircle,
   ClipboardList,
@@ -10,6 +11,7 @@ import {
   Loader2,
   Mail,
   ShieldCheck,
+  UserCheck,
   UserCog,
   Users,
 } from "lucide-react";
@@ -60,6 +62,7 @@ import {
  * also be embedded as a tab inside the legacy /admin LMS dashboard.
  */
 type OpsTab =
+  | "applications"
   | "enrollment"
   | "docReview"
   | "agreement"
@@ -69,6 +72,7 @@ type OpsTab =
   | "exceptions";
 
 const SUB_TABS: { id: OpsTab; label: string; Icon: typeof Users }[] = [
+  { id: "applications", label: "Applications",    Icon: UserCheck },
   { id: "enrollment",  label: "Enrollment queue", Icon: Inbox },
   { id: "docReview",   label: "Document review",  Icon: FileText },
   { id: "agreement",   label: "Agreement queue",  Icon: ShieldCheck },
@@ -118,6 +122,7 @@ export function OperationsPanel() {
           onDone={(text, ok) => { setInviting(false); setInviteNote({ ok, text }); }}
         />
       )}
+      {tab === "applications" && <ApplicationsQueue />}
       {tab === "enrollment" && <EnrollmentQueue />}
       {tab === "docReview" && <DocumentReview />}
       {tab === "agreement" && <AgreementQueue />}
@@ -392,6 +397,9 @@ function DocumentReview() {
                     <p className="text-xs text-gray-500 truncate">
                       {r.participantEmail ?? ""} ·{" "}
                       <span className="font-mono">{r.participantId ?? ""}</span>
+                      {r.ssnLast4 && (
+                        <> · SSN last 4: <span className="font-mono">{r.ssnLast4}</span></>
+                      )}
                     </p>
                   </div>
                   <Pill>{DOC_STATUS_LABEL[r.reviewStatus] ?? r.reviewStatus}</Pill>

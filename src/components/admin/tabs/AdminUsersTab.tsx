@@ -478,7 +478,7 @@ function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (tex
   );
 }
 
-/** Participants enroll themselves; this emails them the link with their details filled in. */
+/** An invitation is an application that is already confirmed: it emails them the link to register. */
 /** Also used on the Operations page (Operations admins invite participants too). */
 export function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone: (text: string, ok: boolean) => void }) {
   const [fullName, setFullName] = useState("");
@@ -502,7 +502,7 @@ export function InviteDialog({ onClose, onDone }: { onClose: () => void; onDone:
   return (
     <Dialog
       title="Invite a participant"
-      subtitle="Participants enroll themselves: they confirm their email and get their Participant ID. This emails them the enrollment link with their name and email filled in."
+      subtitle="This emails them a link to register their account, the same one an applicant gets once their application is confirmed. After registering they get their Participant ID and start their roadmap."
       onClose={onClose}
     >
       <div className="space-y-3">

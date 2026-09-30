@@ -1,4 +1,5 @@
 import Hero from "@/components/sections/Hero";
+import CoursesPreview from "@/components/sections/CoursesPreview";
 import AboutPreview from "@/components/sections/AboutPreview";
 import ResourcesPreview from "@/components/sections/ResourcesPreview";
 import Testimonials from "@/components/sections/Testimonials";
@@ -33,6 +34,7 @@ export default function Home() {
   return (
     <>
       <Hero />
+      <Reveal direction="up"><CoursesPreview /></Reveal>
       <Reveal direction="up"><AboutPreview /></Reveal>
       <Reveal direction="up"><ResourcesPreview /></Reveal>
       <Reveal direction="up"><Testimonials /></Reveal>

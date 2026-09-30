@@ -24,8 +24,8 @@ import { Check } from "lucide-react";
  * compact 2-step list instead.
  */
 const STEPS: ReadonlyArray<string> = [
-  "Enroll",
-  "Verify",
+  "Apply",
+  "Register",
   "ID",
   "Accept",
   "Docs",

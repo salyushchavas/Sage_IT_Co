@@ -10,6 +10,7 @@ import {
   Download,
   FileText,
   GraduationCap,
+  Inbox,
   Loader2,
   MessageSquare,
   Send,
@@ -23,10 +24,12 @@ import {
   RoleDashboardShell,
   type RoleDashboardTab,
 } from "@/components/dashboard/RoleDashboardShell";
+import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
 import { useAuth } from "@/lib/auth-context";
 import {
   addErmNote,
   approvePhase1,
+  documentTypeLabel,
   downloadSignedAgreement,
   getErmParticipantDetail,
   getErmPendingEmployment,
@@ -47,9 +50,11 @@ import {
 } from "@/lib/api";
 
 /**
- * ERM dashboard. Eight tabs:
+ * ERM dashboard. Nine tabs:
  *
  *   home       -- assigned participant roster + drill-in detail panel
+ *   applications -- website applications to confirm (roadmap step 1);
+ *                 confirming emails the applicant a link to register
  *   reports    -- weekly reports across all assigned participants,
  *                 with inline review (add notes + mark reviewed)
  *   comms      -- communication log per participant, free-text notes
@@ -63,6 +68,7 @@ import {
 
 type TabId =
   | "home"
+  | "applications"
   | "reports"
   | "comms"
   | "interviews"
@@ -73,6 +79,7 @@ type TabId =
 
 const TABS: ReadonlyArray<RoleDashboardTab> = [
   { id: "home",       label: "My Participants",  Icon: Users },
+  { id: "applications", label: "Applications",   Icon: Inbox },
   { id: "reports",    label: "Weekly Reports",   Icon: ClipboardList },
   { id: "comms",      label: "Communications",   Icon: MessageSquare },
   { id: "interviews", label: "Interviews",       Icon: Target },
@@ -143,6 +150,7 @@ export default function ErmDashboardPage() {
         </p>
       )}
       {active === "home" && <RosterTab roster={roster} />}
+      {active === "applications" && <ApplicationsQueue />}
       {active === "reports" && <ReportsTab />}
       {active === "comms" && <CommsTab roster={roster} />}
       {active === "interviews" && <InterviewsTab />}
@@ -365,7 +373,7 @@ function DetailPanel({
             {documents.map((d, idx) => (
               <li key={idx} className="flex items-center gap-2">
                 <FileText size={11} className="text-gray-400" />
-                <span className="flex-1">{String(d.documentType)}</span>
+                <span className="flex-1">{documentTypeLabel(String(d.documentType))}</span>
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700">
                   {String(d.reviewStatus)}
                 </span>

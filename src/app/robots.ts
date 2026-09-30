@@ -17,6 +17,8 @@ export default function robots(): MetadataRoute.Robots {
           "/dashboard/",
           "/login",
           "/signup",
+          // One-time registration links from the confirmation email:
+          "/register",
           // Consultant Agreement (hidden internal feature):
           "/consultant",
           "/consultant/",

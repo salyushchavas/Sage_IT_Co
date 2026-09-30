@@ -1,9 +1,9 @@
 import { pageMeta } from "@/lib/seo";
 
 export const metadata = pageMeta({
-  title: "Enroll",
+  title: "Apply",
   description:
-    "Start your career journey with Sage IT Co: create your account, verify your email and get your Participant ID.",
+    "Start your career journey with Sage IT Co: choose a course and apply. Once your application is confirmed, we email you a link to register.",
   path: "/enroll",
 });
 

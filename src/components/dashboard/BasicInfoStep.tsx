@@ -7,6 +7,7 @@ import { Loader2 } from "lucide-react";
 import { useState } from "react";
 
 import { submitBasicInfo } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 
 const TECHNOLOGY_OPTIONS = [
   "Java Full Stack",
@@ -59,11 +60,17 @@ interface Props {
 /** First profile-completion step -- rendered inline in the dashboard checklist. */
 export default function BasicInfoStep({ onComplete }: Props) {
   const [error, setError] = useState("");
+  // The course they applied for is already chosen; they can still change it.
+  const applied = useAuth().user?.selectedTechnology;
+  const appliedCourse = TECHNOLOGY_OPTIONS.find((t) => t === applied);
   const {
     register,
     handleSubmit,
     formState: { errors, isSubmitting },
-  } = useForm<Values>({ resolver: zodResolver(schema) });
+  } = useForm<Values>({
+    resolver: zodResolver(schema),
+    defaultValues: appliedCourse ? { selectedTechnology: appliedCourse } : undefined,
+  });
 
   const onSubmit = async (data: Values) => {
     setError("");

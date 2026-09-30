@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { FileText, Loader2 } from "lucide-react";
 
 import {
+  documentTypeLabel,
   listParticipantDocuments,
   type DocumentReviewStatus,
   type ParticipantDocument,
@@ -76,7 +77,7 @@ export default function DocumentsTab() {
             >
               <FileText size={14} className="text-gray-400" />
               <span className="flex-1 font-medium text-gray-800">
-                {d.documentType}
+                {documentTypeLabel(d.documentType)}
               </span>
               <span className="text-xs text-gray-500">{d.fileName}</span>
               <span

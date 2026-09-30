@@ -124,7 +124,7 @@ export async function apiFetch<T = unknown>(
 }
 
 /** Calls where 401 means wrong details, not an expired sign-in: never renewed. */
-const SIGN_IN_CALL = /^\/api\/auth\/(login|register|refresh|verify-code|resend-code|forgot-password|reset-password)\b/;
+const SIGN_IN_CALL = /^\/api\/(auth\/(login|register|refresh|verify-code|resend-code|forgot-password|reset-password)|participants\/(apply|register|registration))\b/;
 
 /** The session can't be renewed: forget it and go to sign-in, then come back here. */
 function endSession(): void {
@@ -779,32 +779,96 @@ export async function completeTask(taskId: number) {
 // Phases 1B (enrollment) through 4 (welcome / team assembly).
 // Backend mounts these at /api/participants/*, /api/agreement/*, etc.
 // ═══════════════════════════════════════════════════════════════════
-// ─── Phase 1B: participant enrollment ────────────────────────────────
+// ─── Roadmap step 1: apply, an ERM confirms, register from the link ──
 
-export interface ParticipantEnrollRequest {
+export interface ApplicationRequest {
   fullName: string;
   email: string;
   phone: string;
-  password: string;
+  /** The course (technology / skillset) they're applying for. */
+  selectedTechnology: string;
 }
 
-/**
- * Phase 1B enrollment — wider than the legacy {@link register}.
- * Body matches the backend ParticipantEnrollRequest record;
- * response shape stays {@link RegistrationResponse} so call sites
- * can route to /verify-email the same way.
- */
-export async function enrollParticipant(
-  data: ParticipantEnrollRequest,
-): Promise<RegistrationResponse> {
-  const wrapper = await apiFetch<ApiResponse<RegistrationResponse>>(
-    "/api/participants/enroll",
-    {
-      method: "POST",
-      body: JSON.stringify(data),
-    },
+/** A visitor applies. No account yet: an ERM confirms it first. */
+export async function applyToProgram(data: ApplicationRequest): Promise<{ email: string; status: string }> {
+  const wrapper = await apiFetch<ApiResponse<{ email: string; status: string }>>(
+    "/api/participants/apply",
+    { method: "POST", body: JSON.stringify(data) },
   );
   return wrapper.data;
+}
+
+export interface RegistrationDetails {
+  fullName: string;
+  email: string;
+  selectedTechnology: string;
+  /** Invited people have no phone on file yet, so the form asks for it. */
+  needsPhone: boolean;
+}
+
+/** What the emailed registration link belongs to (fails when it expired or was used). */
+export async function getRegistrationDetails(token: string): Promise<RegistrationDetails> {
+  const wrapper = await apiFetch<ApiResponse<RegistrationDetails>>(
+    `/api/participants/registration?token=${encodeURIComponent(token)}`,
+  );
+  return wrapper.data;
+}
+
+/** Registers the account from the link: the email is already verified, so this signs them in. */
+export async function registerFromApplication(
+  token: string, password: string, phone?: string,
+): Promise<AuthResponse> {
+  const wrapper = await apiFetch<ApiResponse<AuthResponse>>(
+    "/api/participants/register",
+    { method: "POST", body: JSON.stringify({ token, password, phone }) },
+  );
+  return wrapper.data;
+}
+
+export type ApplicationStatus = "PENDING" | "APPROVED" | "REGISTERED" | "DECLINED";
+
+/** One row of the staff applications screen (ERM, Operations, System admin). */
+export interface ApplicationRow {
+  id: number;
+  fullName: string;
+  email: string;
+  phone: string | null;
+  selectedTechnology: string | null;
+  status: ApplicationStatus;
+  /** WEBSITE (they applied) or INVITE (Operations invited them). */
+  source: string | null;
+  createdAt: string | null;
+  reviewedAt: string | null;
+  reviewedByName: string | null;
+  declineReason: string | null;
+  registrationEmailSentAt: string | null;
+  linkExpiresAt: string | null;
+  registeredAt: string | null;
+  userId: number | null;
+}
+
+export async function getApplications(status: ApplicationStatus | "ALL" = "PENDING"): Promise<ApplicationRow[]> {
+  const wrapper = await apiFetch<ApiResponse<ApplicationRow[]>>(`/api/applications?status=${status}`);
+  return wrapper.data ?? [];
+}
+
+export async function getApplicationCounts(): Promise<Record<ApplicationStatus, number>> {
+  const wrapper = await apiFetch<ApiResponse<Record<ApplicationStatus, number>>>("/api/applications/counts");
+  return wrapper.data;
+}
+
+/** Confirms an application (or sends the link again): the applicant is emailed a link to register. */
+export async function confirmApplication(id: number, again = false): Promise<{ message: string; emailSent: boolean }> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean }>>(
+    `/api/applications/${id}/${again ? "resend" : "confirm"}`, { method: "POST" });
+  return { message: wrapper.message, emailSent: wrapper.data.emailSent };
+}
+
+export async function declineApplication(id: number, reason: string): Promise<void> {
+  await apiFetch<ApiResponse<ApplicationRow>>(`/api/applications/${id}/decline`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 }
 
 /** Fetches the caller's full profile incl. participantId + currentStatus. */
@@ -973,9 +1037,24 @@ export async function submitAcknowledgment(
 
 // ─── Phase 2B: document vault ──────────────────────────────────────
 
+// GOVERNMENT_ID is the State ID. SSN_DOCUMENT is no longer collected
+// (the last 4 digits are typed instead); older uploads keep the type.
 export type DocumentType =
   | "GOVERNMENT_ID" | "WORK_AUTHORIZATION" | "RESUME"
   | "SSN_DOCUMENT" | "DRIVERS_LICENSE" | "OTHER";
+
+/** The name shown for a document type (the server's DocumentService.labelFor). */
+export function documentTypeLabel(type: string | null | undefined): string {
+  switch (type) {
+    case "DRIVERS_LICENSE": return "Driver's License";
+    case "GOVERNMENT_ID": return "State ID";
+    case "WORK_AUTHORIZATION": return "Work Authorization";
+    case "RESUME": return "Resume";
+    case "SSN_DOCUMENT": return "SSN Document";
+    case "OTHER": return "Additional Supporting Document";
+    default: return type ?? "Document";
+  }
+}
 
 /**
  * A file is PENDING, APPROVED or REJECTED. "Not applicable" is
@@ -1093,6 +1172,8 @@ export interface DocumentReviewRow {
   participantName: string | null;
   participantEmail: string | null;
   participantId: string | null;
+  /** The SSN digits the participant typed; only sent to Operations / System admins. */
+  ssnLast4?: string | null;
   documentType: DocumentType;
   documentLabel: string;
   required: boolean;
@@ -1146,6 +1227,21 @@ export async function completeDocuments(): Promise<CompleteDocumentsResponse> {
     { method: "POST" },
   );
   return wrapper.data;
+}
+
+/** The last 4 digits of the SSN the participant typed (optional), or "". */
+export async function getSsnLast4(): Promise<string> {
+  const wrapper = await apiFetch<ApiResponse<{ ssnLast4: string }>>("/api/participants/documents/ssn-last4");
+  return wrapper.data?.ssnLast4 ?? "";
+}
+
+/** Saves the last 4 digits of the SSN; an empty value removes them. */
+export async function saveSsnLast4(ssnLast4: string): Promise<string> {
+  const wrapper = await apiFetch<ApiResponse<{ ssnLast4: string }>>("/api/participants/documents/ssn-last4", {
+    method: "PUT",
+    body: JSON.stringify({ ssnLast4 }),
+  });
+  return wrapper.data?.ssnLast4 ?? "";
 }
 
 /**

@@ -158,7 +158,7 @@ function LoginForm() {
         <p className="text-center text-sm text-gray-600 mt-6">
           Don&apos;t have an account?{" "}
           <Link href="/enroll" className="text-sage-copper-deep font-semibold hover:underline">
-            Create one
+            Apply for a course
           </Link>
         </p>
       </motion.div>
