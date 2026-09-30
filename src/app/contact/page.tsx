@@ -1,6 +1,6 @@
 "use client";
 
-import { socialLinks } from "@/lib/data";
+import { resources, socialLinks } from "@/lib/data";
 import { fadeUp, staggerContainer, slideInLeft, slideInRight } from "@/lib/utils";
 import { motion } from "framer-motion";
 import { Mail, Phone, MapPin } from "lucide-react";
@@ -122,14 +122,11 @@ export default function ContactPage() {
                       placeholder="Company (optional)"
                       className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-900 placeholder:text-zinc-400 focus:outline-none focus:border-neon-blue/50 transition-colors"
                     />
-                    <select name="service" aria-label="Service you're interested in" className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 focus:outline-none focus:border-neon-blue/50 transition-colors">
-                      <option value="">Select a Service</option>
-                      <option value="Cloud Solutions">Cloud Solutions</option>
-                      <option value="Cybersecurity">Cybersecurity</option>
-                      <option value="Web Development">Web Development</option>
-                      <option value="AI Solutions">AI Solutions</option>
-                      <option value="Digital Marketing">Digital Marketing</option>
-                      <option value="Data & Analytics">Data & Analytics</option>
+                    <select name="service" aria-label="What you're interested in" className="w-full px-4 py-3 rounded-xl bg-white/60 border border-zinc-200 text-zinc-600 focus:outline-none focus:border-neon-blue/50 transition-colors">
+                      <option value="">Select a Resource</option>
+                      {resources.map((r) => (
+                        <option key={r.id} value={r.title}>{r.title}</option>
+                      ))}
                     </select>
                     <textarea
                       name="message"

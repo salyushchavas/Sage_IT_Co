@@ -1,7 +1,7 @@
 import { pageMeta } from "@/lib/seo";
 
 export const metadata = pageMeta({
-  title: "Contact",
+  title: "Contact Us",
   description:
     "Get in touch with SAGEITCO LLC. Headquartered at 4400 State Hwy 121, Suite #324, Lewisville, TX 75056. Email info@sageitco.com or send a message — we respond within 24 hours.",
   path: "/contact",

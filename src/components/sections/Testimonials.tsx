@@ -5,6 +5,7 @@ import { fadeUp, staggerContainer } from "@/lib/utils";
 import { motion } from "framer-motion";
 import SectionHeading from "../ui/SectionHeading";
 import TestimonialCard from "../ui/TestimonialCard";
+import GlowButton from "../ui/GlowButton";
 
 export default function Testimonials() {
   return (
@@ -29,6 +30,12 @@ export default function Testimonials() {
             </motion.div>
           ))}
         </motion.div>
+
+        <div className="text-center mt-10 sm:mt-12">
+          <GlowButton href="/testimonials" variant="secondary">
+            View All Testimonials
+          </GlowButton>
+        </div>
       </div>
     </section>
   );

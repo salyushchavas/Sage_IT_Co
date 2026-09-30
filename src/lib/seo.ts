@@ -30,7 +30,7 @@ import type { Metadata } from "next";
 interface PageMetaInput {
   title: string;
   description: string;
-  /** Path relative to site root, e.g. "/services". Used for canonical + OG URL. */
+  /** Path relative to site root, e.g. "/resources". Used for canonical + OG URL. */
   path: string;
   /** Optional override for the social-card image. Defaults to the brand logo. */
   image?: string;

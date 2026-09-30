@@ -86,7 +86,7 @@ export default function CreateServicePage() {
       });
 
       setSuccess(true);
-      setTimeout(() => router.push("/services"), 1500);
+      setTimeout(() => router.push("/dashboard"), 1500);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to create service");
     } finally {

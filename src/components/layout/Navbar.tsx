@@ -1,6 +1,6 @@
 "use client";
 
-import { navLinks, learnLinks } from "@/lib/data";
+import { navLinks, resourceLinks } from "@/lib/data";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/lib/auth-context";
 import { canOpenAdminPages } from "@/lib/roles";
@@ -15,11 +15,11 @@ export default function Navbar() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
-  const [learnOpen, setLearnOpen] = useState(false);
+  const [resourcesOpen, setResourcesOpen] = useState(false);
   const pathname = usePathname();
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const menuRef = useRef<HTMLDivElement>(null);
-  const learnRef = useRef<HTMLDivElement>(null);
+  const resourcesRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 20);
@@ -37,8 +37,8 @@ export default function Navbar() {
       if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
         setUserMenuOpen(false);
       }
-      if (learnRef.current && !learnRef.current.contains(e.target as Node)) {
-        setLearnOpen(false);
+      if (resourcesRef.current && !resourcesRef.current.contains(e.target as Node)) {
+        setResourcesOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
@@ -46,12 +46,18 @@ export default function Navbar() {
   }, []);
 
   useEffect(() => {
-    setLearnOpen(false);
+    setResourcesOpen(false);
   }, [pathname]);
 
-  const allLinks = [...navLinks, ...learnLinks];
   const isAdmin = canOpenAdminPages(user?.role);
-  const learnActive = learnLinks.some((l) => pathname === l.href);
+  // Courses and learning paths are reached through Resources.
+  const resourcesActive = ["/resources", "/courses", "/categories"].some(
+    (p) => pathname === p || pathname.startsWith(p + "/")
+  );
+  const isActive = (href: string) =>
+    href === "/resources"
+      ? resourcesActive
+      : pathname === href || (href !== "/" && pathname.startsWith(href + "/"));
 
   return (
     <motion.nav
@@ -83,7 +89,74 @@ export default function Navbar() {
         {/* Desktop links — sliding active pill + animated underline */}
         <div className="hidden lg:flex items-center gap-1">
           {navLinks.map((link) => {
-            const active = pathname === link.href;
+            const active = isActive(link.href);
+
+            if (link.href === "/resources") {
+              return (
+                <div className="relative" ref={resourcesRef} key={link.href}>
+                  <button
+                    onClick={() => setResourcesOpen((v) => !v)}
+                    aria-expanded={resourcesOpen}
+                    aria-haspopup="true"
+                    className="relative group px-4 py-2 text-sm font-medium transition-colors duration-300 flex items-center gap-1"
+                  >
+                    {active && (
+                      <motion.span
+                        layoutId="nav-pill"
+                        className="absolute inset-0 rounded-lg bg-gradient-to-br from-slate-900/10 to-orange-300/10 border border-slate-900/15"
+                        transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                      />
+                    )}
+                    <span className={cn("relative z-10", active ? "text-slate-900" : "text-zinc-600 group-hover:text-zinc-900")}>
+                      {link.label}
+                    </span>
+                    <motion.svg
+                      width="10" height="10" viewBox="0 0 10 10"
+                      className={cn("relative z-10", active ? "text-slate-900" : "text-zinc-500")}
+                      animate={{ rotate: resourcesOpen ? 180 : 0 }}
+                      transition={{ duration: 0.25 }}
+                    >
+                      <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+                    </motion.svg>
+                  </button>
+                  <AnimatePresence>
+                    {resourcesOpen && (
+                      <motion.div
+                        className="absolute left-0 top-full mt-2 w-72 glass-strong rounded-2xl p-2 shadow-xl border border-slate-900/10"
+                        initial={{ opacity: 0, y: -8, scale: 0.96 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: -8, scale: 0.96 }}
+                        transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                      >
+                        {resourceLinks.map((l, i) => (
+                          <motion.div
+                            key={l.href}
+                            initial={{ opacity: 0, x: -8 }}
+                            animate={{ opacity: 1, x: 0 }}
+                            transition={{ delay: 0.05 + i * 0.05 }}
+                          >
+                            <Link
+                              href={l.href}
+                              onClick={() => setResourcesOpen(false)}
+                              className="block px-3 py-2.5 rounded-xl hover:bg-zinc-100 transition-colors group"
+                            >
+                              <div className="flex items-baseline justify-between gap-2">
+                                <span className="text-sm font-semibold text-zinc-900 group-hover:text-slate-900 transition-colors">
+                                  {l.label}
+                                </span>
+                                <span className="text-orange-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs">→</span>
+                              </div>
+                              <p className="text-xs text-zinc-500 mt-0.5">{l.desc}</p>
+                            </Link>
+                          </motion.div>
+                        ))}
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+              );
+            }
+
             return (
               <Link
                 key={link.href}
@@ -109,67 +182,6 @@ export default function Navbar() {
               </Link>
             );
           })}
-
-          {/* Learn dropdown */}
-          <div className="relative" ref={learnRef}>
-            <button
-              onClick={() => setLearnOpen((v) => !v)}
-              className="relative group px-4 py-2 text-sm font-medium transition-colors duration-300 flex items-center gap-1"
-            >
-              {learnActive && (
-                <motion.span
-                  layoutId="nav-pill"
-                  className="absolute inset-0 rounded-lg bg-gradient-to-br from-slate-900/10 to-orange-300/10 border border-slate-900/15"
-                  transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                />
-              )}
-              <span className={cn("relative z-10", learnActive ? "text-slate-900" : "text-zinc-600 group-hover:text-zinc-900")}>
-                Learn
-              </span>
-              <motion.svg
-                width="10" height="10" viewBox="0 0 10 10"
-                className={cn("relative z-10", learnActive ? "text-slate-900" : "text-zinc-500")}
-                animate={{ rotate: learnOpen ? 180 : 0 }}
-                transition={{ duration: 0.25 }}
-              >
-                <path d="M2 3.5 L5 6.5 L8 3.5" stroke="currentColor" strokeWidth="1.4" fill="none" strokeLinecap="round" strokeLinejoin="round" />
-              </motion.svg>
-            </button>
-            <AnimatePresence>
-              {learnOpen && (
-                <motion.div
-                  className="absolute left-0 top-full mt-2 w-72 glass rounded-2xl p-2 shadow-xl border border-slate-900/10"
-                  initial={{ opacity: 0, y: -8, scale: 0.96 }}
-                  animate={{ opacity: 1, y: 0, scale: 1 }}
-                  exit={{ opacity: 0, y: -8, scale: 0.96 }}
-                  transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
-                >
-                  {learnLinks.map((l, i) => (
-                    <motion.div
-                      key={l.href}
-                      initial={{ opacity: 0, x: -8 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      transition={{ delay: 0.05 + i * 0.05 }}
-                    >
-                      <Link
-                        href={l.href}
-                        onClick={() => setLearnOpen(false)}
-                        className="block px-3 py-2.5 rounded-xl hover:bg-white/70 transition-colors group"
-                      >
-                        <div className="flex items-baseline justify-between gap-2">
-                          <span className="text-sm font-semibold text-zinc-900 group-hover:text-slate-900 transition-colors">
-                            {l.label}
-                          </span>
-                          <span className="text-orange-400 opacity-0 group-hover:opacity-100 transition-opacity text-xs">→</span>
-                        </div>
-                        <p className="text-xs text-zinc-500 mt-0.5">{l.desc}</p>
-                      </Link>
-                    </motion.div>
-                  ))}
-                </motion.div>
-              )}
-            </AnimatePresence>
-          </div>
 
           {isAuthenticated && (
             <Link
@@ -282,19 +294,38 @@ export default function Navbar() {
             transition={{ duration: 0.3 }}
           >
             <div className="px-4 sm:px-6 py-4 space-y-2 max-h-[calc(100vh-4rem)] overflow-y-auto">
-              {allLinks.map((link) => (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  className={cn(
-                    "block px-4 py-3 rounded-lg text-sm font-medium transition-colors",
-                    pathname === link.href
-                      ? "text-neon-blue bg-neon-blue/10"
-                      : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
+              {navLinks.map((link) => (
+                <div key={link.href}>
+                  <Link
+                    href={link.href}
+                    className={cn(
+                      "block px-4 py-3 rounded-lg text-sm font-medium transition-colors",
+                      isActive(link.href)
+                        ? "text-neon-blue bg-neon-blue/10"
+                        : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
+                    )}
+                  >
+                    {link.label}
+                  </Link>
+                  {link.href === "/resources" && (
+                    <div className="mt-1 ml-4 pl-3 border-l border-zinc-200 space-y-1">
+                      {resourceLinks.map((l) => (
+                        <Link
+                          key={l.href}
+                          href={l.href}
+                          className={cn(
+                            "block px-4 py-2.5 rounded-lg text-sm transition-colors",
+                            pathname === l.href
+                              ? "text-neon-blue bg-neon-blue/10"
+                              : "text-zinc-600 hover:text-zinc-900 hover:bg-white/60"
+                          )}
+                        >
+                          {l.label}
+                        </Link>
+                      ))}
+                    </div>
                   )}
-                >
-                  {link.label}
-                </Link>
+                </div>
               ))}
               {isAuthenticated && (
                 <Link href="/dashboard" className="block px-4 py-3 rounded-lg text-sm font-medium text-zinc-600 hover:text-zinc-900 hover:bg-white/60">

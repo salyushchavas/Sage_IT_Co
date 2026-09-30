@@ -1,5 +1,7 @@
 import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/seo";
+import { resources } from "@/lib/data";
+import { blogPosts } from "@/lib/blog-posts";
 
 /**
  * Public, indexable routes. Auth pages, dashboards, and API surfaces
@@ -14,11 +16,20 @@ const routes: Array<{
   changeFrequency: "daily" | "weekly" | "monthly" | "yearly";
 }> = [
   { path: "/", priority: 1.0, changeFrequency: "weekly" },
-  { path: "/services", priority: 0.9, changeFrequency: "monthly" },
-  { path: "/solutions", priority: 0.9, changeFrequency: "monthly" },
-  { path: "/portfolio", priority: 0.8, changeFrequency: "monthly" },
-  { path: "/about", priority: 0.7, changeFrequency: "monthly" },
-  { path: "/careers", priority: 0.7, changeFrequency: "weekly" },
+  { path: "/about", priority: 0.8, changeFrequency: "monthly" },
+  { path: "/resources", priority: 0.9, changeFrequency: "monthly" },
+  ...resources.map((r) => ({
+    path: `/resources/${r.id}`,
+    priority: 0.8,
+    changeFrequency: "monthly" as const,
+  })),
+  { path: "/testimonials", priority: 0.7, changeFrequency: "monthly" },
+  { path: "/blogs", priority: 0.7, changeFrequency: "weekly" },
+  ...blogPosts.map((p) => ({
+    path: `/blogs/${p.id}`,
+    priority: 0.6,
+    changeFrequency: "yearly" as const,
+  })),
   { path: "/contact", priority: 0.7, changeFrequency: "yearly" },
   { path: "/courses", priority: 0.6, changeFrequency: "weekly" },
   { path: "/categories", priority: 0.5, changeFrequency: "monthly" },

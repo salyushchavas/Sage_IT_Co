@@ -41,6 +41,14 @@ const nextConfig = {
         destination: "/agreements/:path*",
         permanent: true,
       },
+      // Pages removed when the menu became Home / About Us / Resources /
+      // Testimonials / Blogs / Contact Us. Old links land on the nearest
+      // page that still exists. Not permanent, so a page can come back.
+      // (/services/<id> and /services/create are untouched.)
+      { source: "/services", destination: "/resources", permanent: false },
+      { source: "/solutions", destination: "/resources", permanent: false },
+      { source: "/portfolio", destination: "/testimonials", permanent: false },
+      { source: "/careers", destination: "/", permanent: false },
       // Until there is a course-only path (decision D4), everyone joins
       // through the program: the old course sign-up sends people to the
       // program enrollment. Not permanent, so D4 can bring it back.

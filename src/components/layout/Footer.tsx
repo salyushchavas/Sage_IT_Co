@@ -1,6 +1,6 @@
 "use client";
 
-import { navLinks, socialLinks } from "@/lib/data";
+import { navLinks, resourceLinks, socialLinks } from "@/lib/data";
 import { fadeUp, staggerContainer } from "@/lib/utils";
 import { motion } from "framer-motion";
 import Image from "next/image";
@@ -60,19 +60,24 @@ export default function Footer() {
             </ul>
           </motion.div>
 
-          {/* Services */}
+          {/* Resources */}
           <motion.div variants={fadeUp}>
             <h2 className="text-zinc-900 font-semibold mb-4 relative inline-block">
-              Services
+              Resources
               <span className="absolute -bottom-1 left-0 w-8 h-0.5 bg-gradient-to-r from-neon-blue to-neon-violet rounded-full" />
             </h2>
-            <ul className="space-y-2 text-sm text-zinc-600">
-              <li>Cloud Solutions</li>
-              <li>Cybersecurity</li>
-              <li>Web Development</li>
-              <li>AI Solutions</li>
-              <li>Digital Marketing</li>
-              <li>Data & Analytics</li>
+            <ul className="space-y-2">
+              {resourceLinks.map((link) => (
+                <li key={link.href}>
+                  <Link
+                    href={link.href}
+                    className="group inline-flex items-center gap-1.5 text-zinc-600 hover:text-neon-blue transition-colors text-sm"
+                  >
+                    <span className="inline-block w-0 group-hover:w-2 h-px bg-neon-blue transition-all duration-300" />
+                    {link.label}
+                  </Link>
+                </li>
+              ))}
             </ul>
           </motion.div>
 

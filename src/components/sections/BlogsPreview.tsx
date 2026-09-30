@@ -1,20 +1,20 @@
 "use client";
 
-import { portfolio } from "@/lib/data";
+import { blogPosts } from "@/lib/blog-posts";
 import { staggerContainer } from "@/lib/utils";
 import { motion } from "framer-motion";
 import SectionHeading from "../ui/SectionHeading";
-import PortfolioCard from "../ui/PortfolioCard";
+import BlogCard from "../ui/BlogCard";
 import GlowButton from "../ui/GlowButton";
 
-export default function PortfolioPreview() {
+export default function BlogsPreview() {
   return (
     <section className="py-20 sm:py-28 lg:py-32 px-4 sm:px-6 relative">
       <div className="max-w-7xl mx-auto">
         <SectionHeading
-          label="Portfolio"
-          title="Our Impact"
-          description="Real projects, real results. See how we have helped enterprises achieve their technology goals."
+          label="Blogs"
+          title="From Our Blog"
+          description="Practical advice on learning technology and building a career with it."
         />
 
         <motion.div
@@ -24,14 +24,14 @@ export default function PortfolioPreview() {
           whileInView="visible"
           viewport={{ once: true, margin: "-50px" }}
         >
-          {portfolio.slice(0, 3).map((item, i) => (
-            <PortfolioCard key={item.id} item={item} index={i} />
+          {blogPosts.slice(0, 3).map((post, i) => (
+            <BlogCard key={post.id} post={post} index={i} />
           ))}
         </motion.div>
 
         <div className="text-center mt-10 sm:mt-12">
-          <GlowButton href="/portfolio" variant="secondary">
-            View All Projects
+          <GlowButton href="/blogs" variant="secondary">
+            Read All Blogs
           </GlowButton>
         </div>
       </div>

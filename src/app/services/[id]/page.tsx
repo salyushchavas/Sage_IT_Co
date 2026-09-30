@@ -162,10 +162,10 @@ export default function ServiceDetailPage({ params }: { params: { id: string } }
         <h2 className="text-xl font-semibold text-gray-900 mb-2">Service not found</h2>
         <p className="text-gray-500 mb-6">{error || "This service may have been removed."}</p>
         <Link
-          href="/services"
+          href="/resources"
           className="inline-flex items-center gap-2 bg-sage-navy text-white px-5 py-2.5 rounded-full text-sm font-semibold hover:bg-sage-navy-deep"
         >
-          <ChevronLeft size={16} /> Back to Services
+          <ChevronLeft size={16} /> Back to Resources
         </Link>
       </div>
     );
@@ -211,10 +211,10 @@ export default function ServiceDetailPage({ params }: { params: { id: string } }
     <section className="mx-auto max-w-7xl px-6 pt-28 pb-20">
       <motion.div initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4 }}>
         <Link
-          href="/services"
+          href="/resources"
           className="inline-flex items-center gap-1 text-sm text-sage-navy hover:text-sage-navy-deep mb-6"
         >
-          <ChevronLeft size={14} /> All Services
+          <ChevronLeft size={14} /> All Resources
         </Link>
 
         <div className="grid lg:grid-cols-3 gap-10">

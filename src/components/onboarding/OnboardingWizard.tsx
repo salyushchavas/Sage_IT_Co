@@ -43,7 +43,7 @@ const CATEGORY_TILES: Array<{
   { label: "Design",    icon: Palette,     redirect: "/courses?category=Design",            bg: "bg-pink-50",     iconColor: "text-pink-600" },
   { label: "Cloud",     icon: Cloud,       redirect: "/courses?category=Cloud",             bg: "bg-sky-50",      iconColor: "text-sky-600" },
   { label: "Mobile",    icon: Smartphone,  redirect: "/courses?category=Mobile",            bg: "bg-amber-50",    iconColor: "text-amber-600" },
-  { label: "Career",    icon: Briefcase,   redirect: "/services",                            bg: "bg-emerald-50",  iconColor: "text-emerald-600" },
+  { label: "Career",    icon: Briefcase,   redirect: "/resources/career-growth",             bg: "bg-emerald-50",  iconColor: "text-emerald-600" },
 ];
 
 export function OnboardingWizard({ studentName, userId, onClose }: OnboardingWizardProps) {
