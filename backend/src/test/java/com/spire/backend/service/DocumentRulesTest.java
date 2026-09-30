@@ -25,6 +25,10 @@ import static org.mockito.Mockito.*;
  * exception Operations approves; Operations can send a document back only
  * with a reason, which is emailed; while the agreement isn't signed that
  * reopens the documents step.
+ *
+ * The list asked for on 30 Sep: a driver's license or a State ID (one is
+ * enough), work authorization and a resume; the SSN is its last 4 digits,
+ * typed and optional, never a document.
  */
 class DocumentRulesTest {
 
@@ -94,10 +98,97 @@ class DocumentRulesTest {
     // ── "Not applicable" ──────────────────────────────────────────
 
     @Test
-    void anOptionalDocumentCanSimplyBeMarkedNotApplicable() {
-        ParticipantDocument na = service.markNotApplicable(10L, "SSN_DOCUMENT", null);
-        assertEquals("NOT_APPLICABLE", na.getReviewStatus());
+    void ssnDocumentsAreNoLongerCollected() {
+        IllegalArgumentException upload = assertThrows(IllegalArgumentException.class, () -> upload("SSN_DOCUMENT"));
+        assertTrue(upload.getMessage().contains("last 4 digits"));
+        assertThrows(IllegalArgumentException.class, () -> service.markNotApplicable(10L, "SSN_DOCUMENT", null));
         assertThrows(IllegalArgumentException.class, () -> service.markNotApplicable(10L, "OTHER", null));
+    }
+
+    // ── Photo ID: a driver's license or a State ID ────────────────
+
+    @Test
+    void aDriversLicenseAloneIsEnoughPhotoId() {
+        upload("WORK_AUTHORIZATION");
+        upload("RESUME");
+        assertEquals(List.of("PHOTO_ID"), service.missingRequired(10L));
+        assertEquals(false, service.complete(10L).get("success"));
+
+        upload("DRIVERS_LICENSE");
+        assertTrue(service.missingRequired(10L).isEmpty());
+        assertEquals(true, service.complete(10L).get("success"));
+    }
+
+    @Test
+    void aStateIdAloneIsEnoughAndBothIsFine() {
+        upload("WORK_AUTHORIZATION");
+        upload("RESUME");
+        upload("GOVERNMENT_ID");
+        assertTrue(service.missingRequired(10L).isEmpty());
+        upload("DRIVERS_LICENSE");
+        assertTrue(service.missingRequired(10L).isEmpty());
+        assertEquals(true, service.complete(10L).get("success"));
+    }
+
+    @Test
+    void aRejectedLicenseStillLeavesTheStateIdCounting() {
+        uploadAllRequired();
+        ParticipantDocument license = upload("DRIVERS_LICENSE");
+        service.complete(10L);
+        service.review(license.getId(), 1L, "REJECTED", "Expired");
+        assertEquals(Boolean.TRUE, user.getDocumentsComplete(), "the State ID still covers the photo ID");
+        assertTrue(service.missingRequired(10L).isEmpty());
+    }
+
+    @Test
+    void afterSigningOnePhotoIdCanGoWhileTheOtherStays() {
+        uploadAllRequired();
+        ParticipantDocument license = upload("DRIVERS_LICENSE");
+        service.complete(10L);
+        user.setProgramSelectionComplete(true);
+        user.setAgreementComplete(true);
+        ParticipantDocument stateId = rows.stream().filter(d -> d.getDocumentType().equals("GOVERNMENT_ID")).findFirst().get();
+        assertDoesNotThrow(() -> service.delete(license.getId(), 10L), "the State ID still covers it");
+        assertThrows(IllegalArgumentException.class, () -> service.delete(stateId.getId(), 10L), "the last photo ID stays");
+    }
+
+    @Test
+    void havingNeitherPhotoIdIsARequestOperationsDecides() {
+        upload("WORK_AUTHORIZATION");
+        upload("RESUME");
+        assertThrows(IllegalArgumentException.class, () -> service.markNotApplicable(10L, "DRIVERS_LICENSE", null),
+                "needs a reason");
+        ParticipantDocument req = service.markNotApplicable(10L, "DRIVERS_LICENSE", "I only have a passport");
+        assertEquals("EXCEPTION_REQUESTED", req.getReviewStatus());
+        assertEquals(List.of("PHOTO_ID"), service.missingRequired(10L));
+        assertTrue(String.valueOf(service.complete(10L).get("message")).contains("still has to approve"));
+        service.review(req.getId(), 1L, "APPROVED", null);
+        assertTrue(service.missingRequired(10L).isEmpty());
+    }
+
+    // ── SSN: the last 4 digits only, optional ─────────────────────
+
+    @Test
+    void theSsnIsItsLastFourDigitsAndOptional() {
+        assertEquals("", service.ssnLast4(10L));
+        uploadAllRequired();
+        assertEquals(true, service.complete(10L).get("success"), "continuing never needs it");
+
+        assertEquals("1234", service.saveSsnLast4(10L, " 1234 "));
+        assertEquals("1234", user.getSsnLast4());
+        for (String bad : List.of("123", "12345", "12a4", "123-45-6789")) {
+            assertThrows(IllegalArgumentException.class, () -> service.saveSsnLast4(10L, bad), bad);
+        }
+        assertEquals("", service.saveSsnLast4(10L, ""), "blank removes it");
+        assertNull(user.getSsnLast4());
+    }
+
+    @Test
+    void onlyOperationsSeesTheTypedDigitsInTheReviewQueue() {
+        upload("RESUME");
+        service.saveSsnLast4(10L, "9876");
+        assertNull(service.reviewQueue(null).get(0).ssnLast4());
+        assertEquals("9876", service.reviewQueue(null, true).get(0).ssnLast4());
     }
 
     @Test
@@ -120,7 +211,7 @@ class DocumentRulesTest {
 
         service.review(req.getId(), 1L, "APPROVED", null);
         assertEquals("EXCEPTION_APPROVED", req.getReviewStatus());
-        verify(emails).sendDocumentExceptionApprovedEmail(user, "Work Authorization / Visa");
+        verify(emails).sendDocumentExceptionApprovedEmail(user, "Work Authorization");
         assertTrue(service.missingRequired(10L).isEmpty());
         assertEquals(true, service.complete(10L).get("success"));
         assertEquals(Boolean.TRUE, user.getDocumentsComplete());
@@ -133,7 +224,7 @@ class DocumentRulesTest {
                 "declining needs a reason");
         service.review(req.getId(), 1L, "REJECTED", "Please upload any draft resume");
         assertEquals("EXCEPTION_DECLINED", req.getReviewStatus());
-        verify(emails).sendDocumentResubmitEmail(user, "Resume / CV", "Please upload any draft resume", true);
+        verify(emails).sendDocumentResubmitEmail(user, "Resume", "Please upload any draft resume", true);
         assertTrue(service.missingRequired(10L).contains("RESUME"));
     }
 
@@ -146,9 +237,13 @@ class DocumentRulesTest {
     }
 
     @Test
-    void anOptionalMarkerHasNothingToReview() {
-        ParticipantDocument na = service.markNotApplicable(10L, "DRIVERS_LICENSE", null);
+    void anOldPlainNotApplicableMarkerHasNothingToReviewAndDoesntCount() {
+        // Before 30 Sep a driver's license was optional and could simply be marked.
+        ParticipantDocument na = ParticipantDocument.builder().id(ids.incrementAndGet()).userId(10L)
+                .documentType("DRIVERS_LICENSE").reviewStatus("NOT_APPLICABLE").notApplicable(true).build();
+        rows.add(na);
         assertThrows(IllegalArgumentException.class, () -> service.review(na.getId(), 1L, "APPROVED", null));
+        assertTrue(service.missingRequired(10L).contains("PHOTO_ID"));
     }
 
     @Test
@@ -173,7 +268,7 @@ class DocumentRulesTest {
         service.review(id.getId(), 1L, "REJECTED", "The photo is blurry");
         assertEquals("REJECTED", id.getReviewStatus());
         assertEquals("The photo is blurry", id.getReviewerNotes());
-        verify(emails).sendDocumentResubmitEmail(user, "Government-issued ID", "The photo is blurry", false);
+        verify(emails).sendDocumentResubmitEmail(user, "State ID", "The photo is blurry", false);
     }
 
     @Test
@@ -188,7 +283,7 @@ class DocumentRulesTest {
 
         assertEquals(Boolean.FALSE, user.getDocumentsComplete(), "the agreement waits for the new upload");
         assertEquals("ACKNOWLEDGMENT_ACCEPTED", user.getCurrentStatus(), "status back to the real step");
-        assertEquals(List.of("GOVERNMENT_ID"), service.missingRequired(10L));
+        assertEquals(List.of("PHOTO_ID"), service.missingRequired(10L));
 
         // The participant uploads a new one and continues: straight back to where they were.
         upload("GOVERNMENT_ID");
@@ -211,7 +306,7 @@ class DocumentRulesTest {
 
         assertEquals(Boolean.TRUE, user.getDocumentsComplete());
         assertEquals("AGREEMENT_COMPLETED", user.getCurrentStatus());
-        verify(emails).sendDocumentResubmitEmail(user, "Resume / CV", "Wrong file uploaded", false);
+        verify(emails).sendDocumentResubmitEmail(user, "Resume", "Wrong file uploaded", false);
         // ...and a required document can be replaced but not simply removed afterwards.
         ParticipantDocument id = rows.stream().filter(d -> d.getDocumentType().equals("GOVERNMENT_ID")).findFirst().get();
         assertThrows(IllegalArgumentException.class, () -> service.delete(id.getId(), 10L));
@@ -241,7 +336,8 @@ class DocumentRulesTest {
     void theReviewQueueShowsUploadsAndRequestsWithTheParticipant() {
         upload("GOVERNMENT_ID");
         service.markNotApplicable(10L, "WORK_AUTHORIZATION", "Green card holder");
-        service.markNotApplicable(10L, "SSN_DOCUMENT", null);   // optional: nothing to decide
+        rows.add(ParticipantDocument.builder().id(ids.incrementAndGet()).userId(10L)   // an old plain marker: nothing to decide
+                .documentType("SSN_DOCUMENT").reviewStatus("NOT_APPLICABLE").notApplicable(true).build());
 
         List<DocumentService.ReviewRow> queue = service.reviewQueue(null);
         assertEquals(2, queue.size());

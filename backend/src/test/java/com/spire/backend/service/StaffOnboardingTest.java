@@ -55,7 +55,6 @@ class StaffOnboardingTest {
         when(roles.findByName(anyString())).thenAnswer(inv -> Optional.of(Role.builder().name(inv.getArgument(0)).build()));
         emails = mock(EmailTemplateService.class);
         when(emails.sendStaffLoginEmail(any(), anyString(), anyString(), anyBoolean())).thenReturn(true);
-        when(emails.sendParticipantInviteEmail(anyString(), anyString(), anyString())).thenReturn(true);
         service = new StaffOnboardingService(userRepo, roles, encoder, mock(RecordService.class), emails);
         person(1, "SYSTEM_ADMIN");
         person(2, "OPERATIONS_ADMIN");
@@ -105,15 +104,6 @@ class StaffOnboardingTest {
         assertThrows(AccessDeniedException.class, () -> service.sendNewLoginDetails(2L, 5L));
         fin.setIsActive(false);
         assertThrows(IllegalStateException.class, () -> service.sendNewLoginDetails(1L, 5L));
-    }
-
-    @Test
-    void participantsAreInvitedToEnrollThemselves() {
-        assertTrue(service.inviteParticipant(2L, "Jo Doe", "Jo.Doe@Gmail.com"));
-        verify(emails).sendParticipantInviteEmail(eq("jo.doe@gmail.com"), eq("Jo Doe"),
-                argThat(link -> link.endsWith("/enroll?email=jo.doe%40gmail.com&name=Jo+Doe")));
-        assertThrows(IllegalStateException.class, () -> service.inviteParticipant(1L, "Someone", "p4@x.com"), "already has an account");
-        assertThrows(AccessDeniedException.class, () -> service.inviteParticipant(5L, "Jo Doe", "new@x.com"), "Finance can't invite");
     }
 
     @Test

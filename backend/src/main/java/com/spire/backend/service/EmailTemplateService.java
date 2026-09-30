@@ -299,16 +299,67 @@ public class EmailTemplateService {
                 wrap(newDetails ? "New login details" : "Welcome to " + escape(brandName()), body));
     }
 
-    /** An invitation to enroll in the program, with the enrollment link. */
-    public boolean sendParticipantInviteEmail(String email, String fullName, String link) {
-        String first = fullName == null || fullName.isBlank() ? "there" : fullName.trim().split("\\s+")[0];
-        String body = p("Hi " + escape(first) + ",")
-                + p("You're invited to join the " + brandName() + " program. Enrolling takes a few minutes: "
-                        + "you'll confirm your email, get your Participant ID, and then complete your profile.")
-                + button("Start your enrollment", link)
-                + p("Regards,<br/>" + brandName() + "");
-        return emailService.sendEmail(email, "You're invited to enroll — " + brandName(),
-                wrap("You're invited", body));
+    // ── Applications (roadmap step 1: apply, an ERM confirms, register) ──
+    /** The applicant's copy: we have your application, an ERM will confirm it. */
+    public boolean sendApplicationReceivedEmail(String email, String fullName, String technology) {
+        String body = p("Hi " + escape(PersonNames.firstWordForEmail(fullName)) + ",")
+                + p("Thank you for applying to " + escape(brandName()) + ". We have your application"
+                        + (technology == null || technology.isBlank() ? "." : " for:"))
+                + (technology == null || technology.isBlank() ? "" : receipt("Course: " + technology))
+                + p("What happens next:")
+                + bullet("Our team reviews your application")
+                + bullet("Once it's confirmed, we email you a link to register your account")
+                + bullet("After you register, your roadmap opens and guides you step by step")
+                + muted("If you didn't apply, you can ignore this email.")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(email, "We received your application — " + brandName(),
+                wrap("Application received", body));
+    }
+
+    /** Tells a staff member (an ERM) that a new application is waiting to be confirmed. */
+    public boolean sendApplicationToConfirmEmail(User staff, String applicantName, String applicantEmail,
+                                                 String phone, String technology) {
+        if (staff == null || staff.getEmail() == null) return false;
+        String body = p("Hi " + escape(firstName(staff)) + ",")
+                + p("A new application came in from the website and is waiting to be confirmed.")
+                + receipt("Name: " + safe(applicantName),
+                        "Email: " + safe(applicantEmail),
+                        "Phone: " + safe(phone),
+                        "Course: " + safe(technology))
+                + p("Confirming it emails the applicant a link to register their account.")
+                + button("Open applications", appUrl + "/erm-dashboard?tab=applications")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(staff.getEmail(), "New application to confirm — " + safe(applicantName),
+                wrap("New application", body));
+    }
+
+    /**
+     * The applicant was confirmed (or invited by Operations): the one-time
+     * link to register their account. Opening it proves the email address,
+     * so there is no separate verification code.
+     */
+    public boolean sendRegistrationEmail(String email, String fullName, String technology,
+                                         String link, int validDays, boolean invited) {
+        String body = p("Hi " + escape(PersonNames.firstWordForEmail(fullName)) + ",")
+                + p(invited
+                        ? "You're invited to join the " + escape(brandName()) + " program."
+                        : "Good news: your application to " + escape(brandName()) + " has been confirmed.")
+                + (technology == null || technology.isBlank() ? "" : receipt("Course: " + technology))
+                + p("Register your account to get started:")
+                + button("Register your account", link)
+                + ctaFallback(link)
+                + p("Once you register, your roadmap opens:")
+                + bullet("You get your Participant ID")
+                + bullet("You accept the program acknowledgment")
+                + bullet("You upload your documents")
+                + bullet("You choose your program and sign the agreement")
+                + muted("This link is for you only, works once, and expires in " + validDays + " days. "
+                        + "If it has expired, reply to this email and we'll send a new one.")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(email,
+                (invited ? "You're invited — register your account — " : "Your application is confirmed — register your account — ")
+                        + brandName(),
+                wrap(invited ? "You're invited" : "You're confirmed", body));
     }
 
     // ── 18. Online course purchase (checklist 5.4) ──────────────────

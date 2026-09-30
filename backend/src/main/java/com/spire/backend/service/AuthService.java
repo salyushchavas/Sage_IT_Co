@@ -450,9 +450,24 @@ public class AuthService {
             // records an audit row but doesn't move them backward.
         }
 
-        // Only mint an ID if the user hasn't already got one. The
-        // ParticipantIdService is itself idempotent but skipping the
-        // call avoids an extra round-trip on returning users.
+        issueParticipantId(saved);
+
+        // The participant lands on /dashboard (every status from
+        // EMAIL_VERIFIED on routes there) and continues through the
+        // "Complete Your Profile" steps. Their status stays on the real
+        // step: it used to jump straight to DASHBOARD_ENABLED
+        // ("dashboard_enabled_quick_signup"), which made every later check
+        // pass and the roadmap show step 15 to a brand-new participant.
+        return buildAuthResponse(saved);
+    }
+
+    /**
+     * Mints the Participant ID (once) and emails it. Best-effort: the
+     * account is already verified, so a failure here never undoes that;
+     * the status only reaches ID_EMAIL_SENT when the email really went out.
+     */
+    private void issueParticipantId(User saved) {
+        // Only mint an ID if the user hasn't already got one.
         if (saved.getParticipantId() == null || saved.getParticipantId().isBlank()) {
             try {
                 String issued = participantIdService.issue(saved);
@@ -478,13 +493,69 @@ public class AuthService {
                 // an admin can re-mint via /api/participants/me.
             }
         }
+    }
 
-        // The participant lands on /dashboard (every status from
-        // EMAIL_VERIFIED on routes there) and continues through the
-        // "Complete Your Profile" steps. Their status stays on the real
-        // step: it used to jump straight to DASHBOARD_ENABLED
-        // ("dashboard_enabled_quick_signup"), which made every later check
-        // pass and the roadmap show step 15 to a brand-new participant.
+    /**
+     * Creates the participant account for an application an ERM confirmed
+     * (ParticipantApplicationService checks the one-time link first). The
+     * emailed link already proved the address, so the account starts
+     * verified: it gets its Participant ID straight away and the person is
+     * signed in, on roadmap step 3.
+     */
+    @Transactional
+    public AuthResponse registerConfirmedParticipant(String fullName, String rawEmail, String phone,
+                                                     String selectedTechnology, String rawPassword) {
+        String email = normalizeEmail(rawEmail);
+        if (email == null || email.isBlank()) {
+            throw new IllegalArgumentException("Email is required");
+        }
+        if (rawPassword == null || rawPassword.length() < 8) {
+            throw new IllegalArgumentException("Password must be at least 8 characters");
+        }
+        if (rawPassword.length() > 100) {
+            throw new IllegalArgumentException("Password can be at most 100 characters");
+        }
+        if (userRepository.existsByEmailIgnoreCase(email)) {
+            throw new IllegalStateException("An account with this email already exists. Sign in instead.");
+        }
+        String phoneNormalized = PhoneNumbers.requireAvailable(userRepository, phone, null);
+        if (phoneNormalized == null) {
+            throw new IllegalArgumentException("Phone number is required");
+        }
+        Role participantRole = roleRepository.findByName("PARTICIPANT")
+                .orElseGet(() -> roleRepository.findByName("STUDENT")
+                        .orElseThrow(() -> new IllegalStateException(
+                                "Neither PARTICIPANT nor STUDENT role exists")));
+
+        User user = User.builder()
+                .email(email)
+                .passwordHash(passwordEncoder.encode(rawPassword))
+                .fullName(PersonNames.clean(fullName))
+                .role(participantRole)
+                .phone(phone.trim())
+                .phoneNormalized(phoneNormalized)
+                .selectedTechnology(selectedTechnology == null || selectedTechnology.isBlank()
+                        ? null : selectedTechnology.trim())
+                .isActive(true)
+                .emailVerified(true)
+                .currentStatus("DRAFT_STARTED")
+                .verificationFailedAttempts(0)
+                .build();
+        User saved = userRepository.save(user);
+
+        recordService.record(saved.getId(), "ACCOUNT_CREATED", RecordService.Category.ACCOUNT,
+                "Participant registered",
+                "Registered from a confirmed application with email " + saved.getEmail(),
+                Map.of(
+                        "email", saved.getEmail(),
+                        "fullName", saved.getFullName(),
+                        "phone", saved.getPhone(),
+                        "registrationMethod", "confirmed_application"
+                ));
+
+        workflowService.transition(saved, WorkflowService.Status.BASIC_INFO_SUBMITTED, "application_confirmed");
+        workflowService.transition(saved, WorkflowService.Status.EMAIL_VERIFIED, "registration_link");
+        issueParticipantId(saved);
         return buildAuthResponse(saved);
     }
 

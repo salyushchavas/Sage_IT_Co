@@ -23,11 +23,12 @@ public class AuthController {
      * Tokens are only handed out after the OTP is consumed.
      */
     @PostMapping("/register")
-    public ResponseEntity<ApiResponse<RegistrationResponse>> register(
-            @Valid @RequestBody RegisterRequest request) {
-        RegistrationResponse response = authService.register(request);
-        return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success("Registration successful — check your email for a verification code", response));
+    public ResponseEntity<ApiResponse<RegistrationResponse>> register() {
+        // Signing up directly ended on 30 Sep: accounts come from an
+        // application an ERM confirmed (ParticipantApplicationController).
+        return ResponseEntity.status(HttpStatus.GONE).body(ApiResponse.error(
+                "Accounts are created from a confirmed application. Apply on the website and "
+                        + "we'll email you a link to register."));
     }
 
     @PostMapping("/login")

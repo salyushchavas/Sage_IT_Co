@@ -58,6 +58,7 @@ public class AdminController {
     private final com.spire.backend.service.AgreementQueueService agreementQueueService;
     private final com.spire.backend.service.OperationsExceptionService operationsExceptionService;
     private final com.spire.backend.service.StaffOnboardingService staffOnboardingService;
+    private final com.spire.backend.service.ParticipantApplicationService participantApplicationService;
 
     // CSV timestamps render in business time (checklist 5.3: US Central).
     // The DB stores LocalDateTime (timezone-naive, server-local = UTC on
@@ -114,12 +115,12 @@ public class AdminController {
                 Map.of("emailSent", result.emailSent(), "sentTo", result.sentTo())));
     }
 
-    /** Emails someone an invitation to enroll as a participant (System Admin or Operations). */
+    /** Invites someone as a participant: emails them a link to register (System Admin or Operations). */
     @PostMapping("/users/invite-participant")
     public ResponseEntity<ApiResponse<Map<String, Object>>> inviteParticipant(
             @RequestBody Map<String, String> body, Authentication authentication) {
         Long callerId = Long.parseLong(authentication.getPrincipal().toString());
-        boolean sent = staffOnboardingService.inviteParticipant(callerId, body.get("fullName"), body.get("email"));
+        boolean sent = participantApplicationService.invite(callerId, body.get("fullName"), body.get("email"));
         return ResponseEntity.ok(ApiResponse.success(
                 sent ? "Invitation emailed" : "The invitation couldn't be sent. Check the email log.",
                 Map.of("emailSent", sent)));
@@ -375,8 +376,13 @@ public class AdminController {
      */
     @GetMapping("/documents")
     public ResponseEntity<ApiResponse<List<DocumentService.ReviewRow>>> listDocumentsForReview(
-            @RequestParam(value = "status", required = false, defaultValue = "NEEDS_REVIEW") String status) {
-        return ResponseEntity.ok(ApiResponse.success(documentService.reviewQueue(status)));
+            @RequestParam(value = "status", required = false, defaultValue = "NEEDS_REVIEW") String status,
+            Authentication authentication) {
+        // The typed SSN digits go only to the roles that may see SSN details.
+        boolean withSsnLast4 = authentication.getAuthorities().stream()
+                .anyMatch(a -> "ROLE_OPERATIONS_ADMIN".equals(a.getAuthority())
+                        || "ROLE_SYSTEM_ADMIN".equals(a.getAuthority()));
+        return ResponseEntity.ok(ApiResponse.success(documentService.reviewQueue(status, withSsnLast4)));
     }
 
     /**

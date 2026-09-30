@@ -64,7 +64,7 @@ public class ProfileCompletionService {
                         "Accept program acknowledgment",
                         "3 min", user.getAcknowledgmentComplete()),
                 ProfileCompletionDto.StepInfo.of("DOCUMENTS", "Upload Documents",
-                        "Government ID, work authorization, resume",
+                        "Driver's license or State ID, work authorization, resume",
                         "5 min", user.getDocumentsComplete()),
                 ProfileCompletionDto.StepInfo.of("PROGRAM_SELECTION", "Choose Programs",
                         "Select one or more programs",

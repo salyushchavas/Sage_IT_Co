@@ -32,15 +32,18 @@ import java.util.Set;
  * {@link DocumentStorageService}. The split keeps the file-system /
  * Cloudinary concern out of the row-management code.
  *
- * Required document types (roadmap step 5: "minimum required documents
- * uploaded or exception approved"):
- *   GOVERNMENT_ID, WORK_AUTHORIZATION, RESUME
+ * What step 5 needs (roadmap: "minimum required documents uploaded or
+ * exception approved"; the list is the one asked for on 30 Sep):
+ *   - a photo ID: a driver's license (DRIVERS_LICENSE) or a State ID
+ *     (GOVERNMENT_ID). One is enough; both is fine.
+ *   - WORK_AUTHORIZATION
+ *   - RESUME
  * Each needs an upload that isn't rejected, or an exception the
  * participant asked for with a reason and Operations approved.
  *
- * Optional types (informational; do not gate progression; can simply
- * be marked not applicable):
- *   SSN_DOCUMENT, DRIVERS_LICENSE, OTHER
+ * Optional: OTHER (extra files), and the last 4 digits of the SSN, which
+ * the participant types (no SSN document is collected any more; older
+ * SSN_DOCUMENT uploads stay on record).
  */
 @Service
 @RequiredArgsConstructor
@@ -55,18 +58,33 @@ public class DocumentService {
             "pdf", "jpg", "jpeg", "png"
     );
 
+    /** The either/or requirement (not an upload type): a driver's license or a State ID. */
+    public static final String PHOTO_ID = "PHOTO_ID";
+    /** The document types that satisfy {@link #PHOTO_ID}; one is enough. */
+    public static final List<String> PHOTO_ID_TYPES = List.of("DRIVERS_LICENSE", "GOVERNMENT_ID");
+    /** Needed on their own. */
     public static final List<String> REQUIRED_DOCUMENT_TYPES = List.of(
-            "GOVERNMENT_ID", "WORK_AUTHORIZATION", "RESUME"
+            "WORK_AUTHORIZATION", "RESUME"
     );
-    public static final List<String> OPTIONAL_DOCUMENT_TYPES = List.of(
-            "SSN_DOCUMENT", "DRIVERS_LICENSE", "OTHER"
-    );
+    public static final List<String> OPTIONAL_DOCUMENT_TYPES = List.of("OTHER");
+    /** What can be uploaded or marked now. SSN_DOCUMENT is no longer collected. */
     public static final Set<String> ALL_DOCUMENT_TYPES;
     static {
         Set<String> all = new HashSet<>();
+        all.addAll(PHOTO_ID_TYPES);
         all.addAll(REQUIRED_DOCUMENT_TYPES);
         all.addAll(OPTIONAL_DOCUMENT_TYPES);
         ALL_DOCUMENT_TYPES = Set.copyOf(all);
+    }
+
+    /** The requirement a document type counts towards: itself, or the photo ID. */
+    public static String requirementOf(String documentType) {
+        return PHOTO_ID_TYPES.contains(documentType) ? PHOTO_ID : documentType;
+    }
+
+    /** Whether the type counts towards something step 5 needs. */
+    public static boolean countsTowardsRequired(String documentType) {
+        return PHOTO_ID_TYPES.contains(documentType) || REQUIRED_DOCUMENT_TYPES.contains(documentType);
     }
 
     // Review statuses. A file is PENDING, APPROVED or REJECTED; a
@@ -227,11 +245,19 @@ public class DocumentService {
         // Once the agreement is signed, a required document can be
         // replaced but not taken away (the record stays audit-ready).
         if (Boolean.TRUE.equals(user.getAgreementComplete())
-                && REQUIRED_DOCUMENT_TYPES.contains(doc.getDocumentType())
+                && countsTowardsRequired(doc.getDocumentType())
                 && !REJECTED.equals(doc.getReviewStatus())
                 && !EXCEPTION_DECLINED.equals(doc.getReviewStatus())) {
-            throw new IllegalArgumentException(
-                    "Your agreement is signed, so required documents can be replaced but not removed.");
+            // The other photo ID may still cover it (a license and a State ID were both uploaded).
+            String requirement = requirementOf(doc.getDocumentType());
+            boolean stillCovered = documentRepository.findByUserIdOrderByUploadedAtDesc(callerId).stream()
+                    .anyMatch(d -> !d.getId().equals(documentId)
+                            && requirement.equals(requirementOf(d.getDocumentType()))
+                            && satisfiesRequirement(d));
+            if (!stillCovered) {
+                throw new IllegalArgumentException(
+                        "Your agreement is signed, so required documents can be replaced but not removed.");
+            }
         }
         storageService.delete(doc.getStoragePath());
         documentRepository.delete(doc);
@@ -256,7 +282,7 @@ public class DocumentService {
             throw new IllegalArgumentException(
                     "Additional documents are optional; just leave that section empty.");
         }
-        boolean required = REQUIRED_DOCUMENT_TYPES.contains(documentType);
+        boolean required = countsTowardsRequired(documentType);
         String why = reason == null ? "" : reason.trim();
         if (required && why.length() < MIN_REASON) {
             throw new IllegalArgumentException(
@@ -306,6 +332,31 @@ public class DocumentService {
         return saved;
     }
 
+    // ── SSN last 4 digits (optional, typed; no document) ─────────
+
+    /** The participant's own saved digits, or "" when none. */
+    @Transactional(readOnly = true)
+    public String ssnLast4(Long userId) {
+        return userRepository.findById(userId).map(User::getSsnLast4).filter(v -> v != null).orElse("");
+    }
+
+    /** Saves the last 4 digits of the SSN, or clears them when blank. Always optional. */
+    @Transactional
+    public String saveSsnLast4(Long userId, String raw) {
+        User user = requireGatedUser(userId);
+        String digits = raw == null ? "" : raw.trim();
+        if (!digits.isEmpty() && !digits.matches("\\d{4}")) {
+            throw new IllegalArgumentException("Enter exactly the last 4 digits of your SSN, or leave it empty.");
+        }
+        user.setSsnLast4(digits.isEmpty() ? null : digits);
+        userRepository.save(user);
+        // The digits themselves never go into the audit trail.
+        recordService.logAction(userId, RecordService.Category.DOCUMENT,
+                digits.isEmpty() ? "SSN last 4 digits removed" : "SSN last 4 digits saved",
+                "Typed by the participant on the documents step", null);
+        return digits;
+    }
+
     // ── Completeness + workflow transition ───────────────────────
 
     /**
@@ -322,18 +373,21 @@ public class DocumentService {
     }
 
     /**
-     * Returns the list of required types that are still missing for
-     * the user (see {@link #satisfiesRequirement}). Empty list means
-     * "ready to continue".
+     * What is still missing for the user (see {@link #satisfiesRequirement}):
+     * {@link #PHOTO_ID} when neither a driver's license nor a State ID
+     * counts, then the required types. Empty list means "ready to continue".
      */
     @Transactional(readOnly = true)
     public List<String> missingRequired(Long userId) {
         List<ParticipantDocument> docs = documentRepository.findByUserIdOrderByUploadedAtDesc(userId);
         Set<String> satisfied = new HashSet<>();
         for (ParticipantDocument d : docs) {
-            if (satisfiesRequirement(d)) satisfied.add(d.getDocumentType());
+            if (satisfiesRequirement(d)) satisfied.add(requirementOf(d.getDocumentType()));
         }
-        return REQUIRED_DOCUMENT_TYPES.stream()
+        List<String> needed = new java.util.ArrayList<>();
+        needed.add(PHOTO_ID);
+        needed.addAll(REQUIRED_DOCUMENT_TYPES);
+        return needed.stream()
                 .filter(t -> !satisfied.contains(t))
                 .toList();
     }
@@ -344,7 +398,7 @@ public class DocumentService {
         List<String> missing = missingRequired(userId);
         if (!missing.isEmpty()) {
             boolean waiting = documentRepository.findByUserIdOrderByUploadedAtDesc(userId).stream()
-                    .anyMatch(d -> missing.contains(d.getDocumentType())
+                    .anyMatch(d -> missing.contains(requirementOf(d.getDocumentType()))
                             && EXCEPTION_REQUESTED.equals(d.getReviewStatus()));
             return Map.of(
                     "success", false,
@@ -433,7 +487,7 @@ public class DocumentService {
         if (owner == null) return saved;
         String label = labelFor(doc.getDocumentType());
         if (sendBack) {
-            if (REQUIRED_DOCUMENT_TYPES.contains(doc.getDocumentType())) {
+            if (countsTowardsRequired(doc.getDocumentType())) {
                 reopenIfIncomplete(owner, "documents_reopened_review",
                         label + " sent back by Operations: " + reason);
             }
@@ -447,7 +501,7 @@ public class DocumentService {
 
     /** One row of the Operations document review screen. */
     public record ReviewRow(Long id, Long userId, String participantName, String participantEmail,
-                            String participantId, String documentType, String documentLabel,
+                            String participantId, String ssnLast4, String documentType, String documentLabel,
                             boolean required, String fileName, Long fileSize, String reviewStatus,
                             boolean notApplicable, String exceptionReason, String reviewerNotes,
                             LocalDateTime uploadedAt, LocalDateTime reviewedAt) {}
@@ -459,6 +513,15 @@ public class DocumentService {
      */
     @Transactional(readOnly = true)
     public List<ReviewRow> reviewQueue(String filter) {
+        return reviewQueue(filter, false);
+    }
+
+    /**
+     * {@code withSsnLast4}: only for Operations and System admins, the
+     * roles allowed to see SSN details.
+     */
+    @Transactional(readOnly = true)
+    public List<ReviewRow> reviewQueue(String filter, boolean withSsnLast4) {
         String f = filter == null || filter.isBlank() ? "NEEDS_REVIEW" : filter.trim().toUpperCase();
         List<ParticipantDocument> docs = switch (f) {
             case "NEEDS_REVIEW" -> documentRepository.findByReviewStatusInOrderByUploadedAtAsc(NEEDS_REVIEW);
@@ -473,8 +536,9 @@ public class DocumentService {
             return new ReviewRow(d.getId(), d.getUserId(),
                     u == null ? null : u.getFullName(), u == null ? null : u.getEmail(),
                     u == null ? null : u.getParticipantId(),
+                    u == null || !withSsnLast4 ? null : u.getSsnLast4(),
                     d.getDocumentType(), labelFor(d.getDocumentType()),
-                    REQUIRED_DOCUMENT_TYPES.contains(d.getDocumentType()),
+                    countsTowardsRequired(d.getDocumentType()),
                     d.getFileName(), d.getFileSize(), d.getReviewStatus(),
                     Boolean.TRUE.equals(d.getNotApplicable()), d.getExceptionReason(),
                     d.getReviewerNotes(), d.getUploadedAt(), d.getReviewedAt());
@@ -503,11 +567,12 @@ public class DocumentService {
     static String labelFor(String type) {
         if (type == null) return "document";
         return switch (type) {
-            case "GOVERNMENT_ID" -> "Government-issued ID";
-            case "WORK_AUTHORIZATION" -> "Work Authorization / Visa";
-            case "RESUME" -> "Resume / CV";
+            case "PHOTO_ID" -> "Driver's License or State ID";
+            case "DRIVERS_LICENSE" -> "Driver's License";
+            case "GOVERNMENT_ID" -> "State ID";
+            case "WORK_AUTHORIZATION" -> "Work Authorization";
+            case "RESUME" -> "Resume";
             case "SSN_DOCUMENT" -> "SSN Document";
-            case "DRIVERS_LICENSE" -> "Driving Licence";
             default -> "Additional Supporting Document";
         };
     }
@@ -527,6 +592,10 @@ public class DocumentService {
     }
 
     private static void validateDocumentType(String documentType) {
+        if ("SSN_DOCUMENT".equals(documentType)) {
+            throw new IllegalArgumentException(
+                    "SSN documents are no longer collected. You can enter the last 4 digits instead (optional).");
+        }
         if (documentType == null || !ALL_DOCUMENT_TYPES.contains(documentType)) {
             throw new IllegalArgumentException("Unknown documentType: " + documentType);
         }

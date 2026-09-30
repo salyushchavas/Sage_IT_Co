@@ -5,7 +5,6 @@ import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.dto.BasicInfoRequest;
 import com.spire.backend.dto.CheckDocumentDTO;
 import com.spire.backend.dto.ParticipantDocumentDTO;
-import com.spire.backend.dto.ParticipantEnrollRequest;
 import com.spire.backend.dto.ProfileCompletionDto;
 import com.spire.backend.dto.ProgramSelectionDTO;
 import com.spire.backend.dto.ProgramSelectionRequest;
@@ -20,7 +19,6 @@ import com.spire.backend.entity.User;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.UserRepository;
 import com.spire.backend.service.AcknowledgmentService;
-import com.spire.backend.service.AuthService;
 import com.spire.backend.service.DocumentService;
 import com.spire.backend.service.PhoneNumbers;
 import com.spire.backend.service.DocumentStorageService;
@@ -59,7 +57,6 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class ParticipantController {
 
-    private final AuthService authService;
     private final UserRepository userRepository;
     private final AcknowledgmentService acknowledgmentService;
     private final DocumentService documentService;
@@ -85,13 +82,16 @@ public class ParticipantController {
     private final com.spire.backend.service.ParticipantCoachingService participantCoachingService;
     private final com.spire.backend.service.InvoicePdfService invoicePdfService;
 
-    /** Public — anyone can enroll. Behind the scenes walks the workflow
-     *  ladder DRAFT_STARTED → BASIC_INFO_SUBMITTED → EMAIL_VERIFICATION_PENDING. */
+    /**
+     * Signing up directly ended on 30 Sep: a visitor applies
+     * (POST /api/participants/apply), an ERM confirms, and the emailed
+     * link registers the account (ParticipantApplicationController).
+     */
     @PostMapping("/enroll")
-    public ResponseEntity<ApiResponse<RegistrationResponse>> enroll(
-            @Valid @RequestBody ParticipantEnrollRequest request) {
-        RegistrationResponse data = authService.enrollParticipant(request);
-        return ResponseEntity.ok(ApiResponse.success("Enrollment received", data));
+    public ResponseEntity<ApiResponse<RegistrationResponse>> enroll() {
+        return ResponseEntity.status(410).body(ApiResponse.error(
+                "Enrollment now starts with an application. Reload the page and apply; "
+                        + "we'll email you a link to register once it's confirmed."));
     }
 
     /** Auth'd — returns the caller's current profile. Used by the
@@ -202,6 +202,25 @@ public class ParticipantController {
                 DocumentService.EXCEPTION_REQUESTED.equals(saved.getReviewStatus())
                         ? "Sent to Operations for approval" : "Marked as N/A",
                 ParticipantDocumentDTO.from(saved)));
+    }
+
+    /** The last 4 digits of the SSN the participant typed (optional), or "". */
+    @GetMapping("/documents/ssn-last4")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getSsnLast4(Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        return ResponseEntity.ok(ApiResponse.success(Map.of("ssnLast4", documentService.ssnLast4(userId))));
+    }
+
+    /** Saves (or, when blank, clears) the last 4 digits of the SSN. Optional. */
+    @PutMapping("/documents/ssn-last4")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> saveSsnLast4(
+            @RequestBody Map<String, String> body, Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        String saved = documentService.saveSsnLast4(userId, body.get("ssnLast4"));
+        return ResponseEntity.ok(ApiResponse.success(
+                saved.isEmpty() ? "Removed" : "Saved", Map.of("ssnLast4", saved)));
     }
 
     /** Completeness gate — returns nextStep + transitions workflow when all required docs are present. */

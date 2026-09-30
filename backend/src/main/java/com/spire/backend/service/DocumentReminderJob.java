@@ -80,7 +80,7 @@ public class DocumentReminderJob {
             if (!acknowledgmentPending) {
                 List<ParticipantDocument> docs = documentRepository.findByUserIdOrderByUploadedAtDesc(u.getId());
                 missing = documentService.missingRequired(u.getId()).stream()
-                        .filter(t -> docs.stream().noneMatch(d -> t.equals(d.getDocumentType())
+                        .filter(t -> docs.stream().noneMatch(d -> t.equals(DocumentService.requirementOf(d.getDocumentType()))
                                 && DocumentService.EXCEPTION_REQUESTED.equals(d.getReviewStatus())))
                         .map(DocumentService::labelFor)
                         .toList();

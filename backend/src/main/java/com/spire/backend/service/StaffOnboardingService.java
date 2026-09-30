@@ -8,14 +8,11 @@ import com.spire.backend.repository.RoleRepository;
 import com.spire.backend.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -31,9 +28,9 @@ import java.util.regex.Pattern;
  * that account goes there too, since the company address may not be a
  * mailbox. At first sign-in they must choose their own password.
  *
- * Participants aren't created here: they enroll themselves (roadmap steps
- * 1–3 verify their email and give them a Participant ID). An admin can
- * email them an invitation to enroll instead.
+ * Participants aren't created here: they apply, an ERM confirms, and they
+ * register from the emailed link (ParticipantApplicationService, which
+ * also holds Operations' "Invite a participant").
  */
 @Service
 @RequiredArgsConstructor
@@ -51,9 +48,6 @@ public class StaffOnboardingService {
         STAFF_ROLES.put("SYSTEM_ADMIN", "System admin");
     }
 
-    /** Who may invite a participant to enroll. */
-    private static final Set<String> INVITERS = Set.of("SYSTEM_ADMIN", "OPERATIONS_ADMIN");
-
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     /** No look-alike characters (0/O, 1/l/I). */
     private static final String ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
@@ -64,9 +58,6 @@ public class StaffOnboardingService {
     private final PasswordEncoder passwordEncoder;
     private final RecordService recordService;
     private final EmailTemplateService emailTemplateService;
-
-    @Value("${app.url:https://sageitco.com}")
-    private String appUrl;
 
     /** What happened: the account, and whether the login email went out (and where). */
     public record Result(UserDTO user, boolean emailSent, String sentTo) {}
@@ -142,28 +133,6 @@ public class StaffOnboardingService {
         boolean sent = emailTemplateService.sendStaffLoginEmail(saved, STAFF_ROLES.get(role), temporary, true);
         String to = saved.getPersonalEmail() != null ? saved.getPersonalEmail() : saved.getEmail();
         return new Result(UserDTO.from(saved), sent, to);
-    }
-
-    /**
-     * An emailed invitation to enroll, with the enrollment page's link
-     * (their name and email filled in). They verify their email and get
-     * their Participant ID there, as every participant does.
-     */
-    public boolean inviteParticipant(Long callerId, String fullName, String emailAddress) {
-        User caller = requireRole(callerId, INVITERS, "Only a System Admin or Operations admin can invite participants.");
-        String name = PersonNames.clean(fullName);
-        String address = email(emailAddress, "email");
-        if (userRepository.existsByEmailIgnoreCase(address)) {
-            throw new IllegalStateException("There's already an account with " + address + ".");
-        }
-        String link = appUrl + "/enroll?email=" + URLEncoder.encode(address, StandardCharsets.UTF_8)
-                + "&name=" + URLEncoder.encode(name, StandardCharsets.UTF_8);
-        boolean sent = emailTemplateService.sendParticipantInviteEmail(address, name, link);
-        recordService.record(callerId, "PARTICIPANT_INVITED", RecordService.Category.ACCOUNT,
-                "Invited a participant to enroll", name + " <" + address + ">",
-                Map.of("email", address, "emailSent", sent));
-        log.info("User {} invited {} to enroll; email sent: {}", caller.getId(), address, sent);
-        return sent;
     }
 
     /** "Kp7m-X2qd-9RtW-hn4c": four groups of four, no look-alike characters (about 94 bits). */

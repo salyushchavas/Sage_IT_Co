@@ -317,4 +317,14 @@ public class User {
 
     @Column(name = "last_profile_reminder_at")
     private LocalDateTime lastProfileReminderAt;
+
+    /**
+     * Optional, typed by the participant on the documents step (30 Sep):
+     * the last 4 digits of their SSN, nothing more. Encrypted at rest;
+     * shown only to the participant and to Operations / System admins.
+     */
+    @Convert(converter = com.spire.backend.security.SensitiveTextConverter.class)
+    @Column(name = "ssn_last4", columnDefinition = "TEXT")
+    @ToString.Exclude
+    private String ssnLast4;
 }

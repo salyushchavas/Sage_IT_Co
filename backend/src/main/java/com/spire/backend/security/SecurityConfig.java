@@ -51,8 +51,12 @@ public class SecurityConfig {
                         .requestMatchers("/error").permitAll()
                         .requestMatchers("/api/health", "/api/brand").permitAll()
                         .requestMatchers("/api/auth/**").permitAll()
-                        // Phase 1B participant enrollment is public.
-                        .requestMatchers(HttpMethod.POST, "/api/participants/enroll").permitAll()
+                        // Roadmap step 1 is public: apply, then register from the
+                        // link an ERM's confirmation emails. (/enroll only answers
+                        // "this moved"; nobody signs up without a confirmed application.)
+                        .requestMatchers(HttpMethod.POST, "/api/participants/enroll",
+                                "/api/participants/apply", "/api/participants/register").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/participants/registration").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/courses", "/api/courses/**").permitAll()
                         .requestMatchers("/api/webhooks/**").permitAll()
                         .requestMatchers("/api/certificates/verify/**").permitAll()

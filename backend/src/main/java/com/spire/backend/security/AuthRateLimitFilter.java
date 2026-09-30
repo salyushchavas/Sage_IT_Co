@@ -36,6 +36,8 @@ public class AuthRateLimitFilter extends OncePerRequestFilter {
             new Rule("/api/auth/reset-password", 20, Duration.ofMinutes(15)),
             new Rule("/api/auth/register", 30, Duration.ofHours(1)),
             new Rule("/api/participants/enroll", 30, Duration.ofHours(1)),
+            new Rule("/api/participants/apply", 20, Duration.ofHours(1)),
+            new Rule("/api/participants/register", 30, Duration.ofHours(1)),
             new Rule("/api/auth/resend-code", 20, Duration.ofMinutes(15)),
             new Rule("/api/auth/verify-code", 40, Duration.ofMinutes(15)),
             new Rule("/api/auth/change-password", 20, Duration.ofMinutes(15)),

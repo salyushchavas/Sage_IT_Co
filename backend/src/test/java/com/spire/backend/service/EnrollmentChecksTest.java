@@ -101,7 +101,7 @@ class EnrollmentChecksTest {
 
         assertEquals(1, j.job().sendReminders());
         verify(j.emails()).sendDocumentReminderEmail(eq(pat), eq(false),
-                eq(List.of("Work Authorization / Visa", "Resume / CV")));
+                eq(List.of("Work Authorization", "Resume")));
         verify(j.emails(), never()).sendDocumentReminderEmail(eq(erm), anyBoolean(), any());
         assertNotNull(pat.getLastNudgeSentAt());
     }
@@ -118,7 +118,7 @@ class EnrollmentChecksTest {
                 .reviewStatus("PENDING").notApplicable(false).build());
 
         j.job().sendReminders();
-        verify(j.emails()).sendDocumentReminderEmail(eq(pat), eq(false), eq(List.of("Government-issued ID")));
+        verify(j.emails()).sendDocumentReminderEmail(eq(pat), eq(false), eq(List.of("Driver's License or State ID")));
     }
 
     @Test
