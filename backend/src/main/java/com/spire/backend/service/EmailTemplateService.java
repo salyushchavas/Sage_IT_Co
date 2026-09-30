@@ -362,6 +362,37 @@ public class EmailTemplateService {
                 wrap(invited ? "You're invited" : "You're confirmed", body));
     }
 
+    // ── ERM verification before the agreement (30 Sep) ─────────
+    /** A participant finished their documents and program: an ERM verifies them before the agreement goes out. */
+    public boolean sendDocumentsToVerifyEmail(User erm, User participant, String program) {
+        if (erm == null || erm.getEmail() == null) return false;
+        String body = p("Hi " + escape(firstName(erm)) + ",")
+                + p("A participant finished their documents and chose their program. Please verify them; "
+                        + "the agreement is emailed to them as soon as you do.")
+                + receipt("Participant: " + safe(participant.getFullName()),
+                        "Participant ID: " + safe(participant.getParticipantId()),
+                        "Email: " + safe(participant.getEmail()),
+                        "Program: " + safe(program))
+                + button("Verify documents", appUrl + "/erm-dashboard?tab=verify")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(erm.getEmail(),
+                "Documents to verify — " + safe(participant.getFullName()),
+                wrap("Documents to verify", body));
+    }
+
+    /** The ERM verified the documents: the agreement is ready for the participant to sign. */
+    public boolean sendAgreementReadyEmail(User user) {
+        String body = p("Hi " + escape(firstName(user)) + ",")
+                + p("Your ERM has verified your documents. Your agreement is ready for you to review and sign.")
+                + receipt("Participant ID: " + safe(user.getParticipantId()))
+                + button("Review and sign your agreement", appUrl + "/agreement")
+                + p("After signing, you'll upload soft copies of your checks, and then we set up your team.")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(user.getEmail(),
+                "Your agreement is ready to sign — " + brandName(),
+                wrap("Your agreement is ready", body));
+    }
+
     // ── 18. Online course purchase (checklist 5.4) ──────────────────
     /** The participant paid for courses online; they're enrolled. */
     public boolean sendCoursePurchaseEmail(User user, java.util.List<com.spire.backend.entity.Course> courses,
@@ -742,8 +773,9 @@ public class EmailTemplateService {
                         "Availability: " + safe(selection.getAvailability()),
                         "Participant ID: " + safe(user.getParticipantId())
                 )
-                + p("Your next step: Review and sign your agreement.")
-                + button("Continue to Agreement", appUrl + "/agreement")
+                + p("Next, your ERM verifies your documents. As soon as that's done, we'll email you "
+                        + "your agreement to review and sign.")
+                + button("Go to your dashboard", appUrl + "/dashboard")
                 + p("Regards,<br/>" + brandName() + "");
         emailService.sendEmail(
                 user.getEmail(),
@@ -765,7 +797,7 @@ public class EmailTemplateService {
                             "Target: " + safe(selection.getTargetJobTitle()),
                             "Availability: " + safe(selection.getAvailability())
                     )
-                    + p("→ Ready for agreement generation.");
+                    + p("→ Waiting for an ERM to verify the documents; the agreement goes out after that.");
             try {
                 emailService.sendEmail(
                         operationsEmail,

@@ -58,6 +58,7 @@ import java.util.Map;
 public class ParticipantController {
 
     private final UserRepository userRepository;
+    private final com.spire.backend.service.DocumentVerificationService verificationService;
     private final AcknowledgmentService acknowledgmentService;
     private final DocumentService documentService;
     private final DocumentStorageService storageService;
@@ -229,6 +230,7 @@ public class ParticipantController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> completeDocuments(Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
         Map<String, Object> result = documentService.complete(userId);
+        if (Boolean.TRUE.equals(result.get("success"))) verificationService.notifyReady(userId);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 
@@ -287,12 +289,16 @@ public class ParticipantController {
             Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
         ProgramSelection saved = programSelectionService.submit(userId, request);
+        verificationService.notifyReady(userId);
         return ResponseEntity.ok(ApiResponse.success(
                 "Program selection saved",
                 Map.of(
                         "selectionId", saved.getId(),
                         "serviceSummaryVersion", saved.getServiceSummaryVersion(),
-                        "nextStep", "/agreement",
+                        // The agreement opens once an ERM verified the documents.
+                        "nextStep", saved != null && userRepository.findById(userId)
+                                .map(u -> u.getErmVerifiedAt() != null).orElse(false)
+                                ? "/agreement" : "/dashboard?tab=complete-profile",
                         "success", true
                 )));
     }

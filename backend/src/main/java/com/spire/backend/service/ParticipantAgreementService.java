@@ -183,6 +183,11 @@ public class ParticipantAgreementService {
             throw new IllegalStateException(
                     "Complete the acknowledgment, documents and program selection before signing.");
         }
+        // The agreement is sent only once an ERM verified the documents (30 Sep).
+        if (user.getErmVerifiedAt() == null) {
+            throw new IllegalStateException(
+                    "Your ERM is verifying your documents. We'll email you as soon as your agreement is ready to sign.");
+        }
         return user;
     }
 }

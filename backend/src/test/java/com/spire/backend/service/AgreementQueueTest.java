@@ -27,7 +27,7 @@ class AgreementQueueTest {
         return User.builder().id(id).fullName("P" + id).email("p" + id + "@x.com").participantId("SAGE-2026-0000" + id)
                 .role(Role.builder().name("PARTICIPANT").build()).isActive(true)
                 .basicInfoComplete(true).acknowledgmentComplete(true).documentsComplete(true)
-                .programSelectionComplete(true).build();
+                .programSelectionComplete(true).ermVerifiedAt(java.time.LocalDateTime.now()).build();
     }
 
     @Test
