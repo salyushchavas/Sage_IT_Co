@@ -48,6 +48,7 @@ public class ProgramSelectionService {
     private final RecordService recordService;
     private final EmailTemplateService emailTemplateService;
     private final ProfileCompletionService profileCompletionService;
+    private final DocumentService documentService;
 
     // ── Reads ───────────────────────────────────────────────────
 
@@ -165,6 +166,11 @@ public class ProgramSelectionService {
         if (!Boolean.TRUE.equals(user.getDocumentsComplete())) {
             throw new IllegalStateException(
                     "Upload your required documents before selecting a program.");
+        }
+        // An ERM checks the documents first; the program step opens after that.
+        if (!Boolean.TRUE.equals(user.getProgramSelectionComplete()) && !documentService.documentsVerified(userId)) {
+            throw new IllegalStateException(
+                    "Your documents are under review. You can choose your program once they're verified.");
         }
         return user;
     }

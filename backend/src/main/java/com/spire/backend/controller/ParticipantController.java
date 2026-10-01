@@ -58,6 +58,7 @@ import java.util.Map;
 public class ParticipantController {
 
     private final UserRepository userRepository;
+    private final com.spire.backend.service.DocumentVerificationService verificationService;
     private final AcknowledgmentService acknowledgmentService;
     private final DocumentService documentService;
     private final DocumentStorageService storageService;
@@ -204,6 +205,14 @@ public class ParticipantController {
                 ParticipantDocumentDTO.from(saved)));
     }
 
+    /** Under review, verified, or sent back (with the reasons): what the dashboard shows about the documents. */
+    @GetMapping("/documents/review-state")
+    @PreAuthorize("isAuthenticated()")
+    public ResponseEntity<ApiResponse<DocumentService.ReviewState>> documentReviewState(Authentication auth) {
+        Long userId = Long.parseLong(auth.getPrincipal().toString());
+        return ResponseEntity.ok(ApiResponse.success(documentService.reviewState(userId)));
+    }
+
     /** The last 4 digits of the SSN the participant typed (optional), or "". */
     @GetMapping("/documents/ssn-last4")
     @PreAuthorize("isAuthenticated()")
@@ -229,6 +238,8 @@ public class ParticipantController {
     public ResponseEntity<ApiResponse<Map<String, Object>>> completeDocuments(Authentication auth) {
         Long userId = Long.parseLong(auth.getPrincipal().toString());
         Map<String, Object> result = documentService.complete(userId);
+        // ERMs hear that there are documents to check.
+        if (Boolean.TRUE.equals(result.get("success"))) verificationService.notifyErms(userId);
         return ResponseEntity.ok(ApiResponse.success(result));
     }
 

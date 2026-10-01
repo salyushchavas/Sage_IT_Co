@@ -79,6 +79,9 @@ public class SecurityConfig {
                                 .hasAnyRole("AGREEMENT_MANAGER", "AGREEMENT_ACCOUNTS")
                         .requestMatchers("/api/agreement-erm/applications/**")
                                 .hasRole("AGREEMENT_ERM")
+                        // Participants waiting for their agreement (filled into the create form).
+                        .requestMatchers("/api/agreement-erm/participant-requests", "/api/agreement-erm/participant-requests/**")
+                                .hasRole("AGREEMENT_ERM")
                         // Identity endpoint: every authenticated console
                         // user (ERM, SUPER_ADMIN, MANAGER, ACCOUNTS) can
                         // read /me to render role-aware UI.

@@ -211,7 +211,9 @@ public class DocumentService {
         ParticipantDocument doc = documentRepository.findById(documentId)
                 .orElseThrow(() -> new ResourceNotFoundException("Document", "id", documentId));
         User viewer = callerId == null ? null : userRepository.findById(callerId).orElse(null);
-        if (!permissionService.canViewDocument(viewer, doc.getUserId(), doc.getDocumentType())) {
+        if (!permissionService.canViewDocument(viewer, doc.getUserId(), doc.getDocumentType())
+                && !permissionService.canVerifyDocument(viewer,
+                        userRepository.findById(doc.getUserId()).orElse(null), doc.getDocumentType())) {
             throw new AccessDeniedException("Not allowed to view this document");
         }
         if (!doc.getUserId().equals(callerId)) {
@@ -357,6 +359,66 @@ public class DocumentService {
         return digits;
     }
 
+    // ── ERM verification (before the program step) ──────────────
+
+    /**
+     * An ERM (or Operations) checked the documents: every requirement has an
+     * approved file or an approved exemption, and nothing of a required type
+     * is still waiting for review (so a license AND a State ID, when both
+     * were uploaded, have both been looked at), and nothing sent back is
+     * still waiting for a new copy. Worked out from the review statuses;
+     * nothing extra is stored.
+     */
+    @Transactional(readOnly = true)
+    public boolean documentsVerified(Long userId) {
+        Set<String> approved = new HashSet<>();
+        for (ParticipantDocument d : documentRepository.findByUserIdOrderByUploadedAtDesc(userId)) {
+            if (isSentBack(d)) return false;
+            if (!countsTowardsRequired(d.getDocumentType())) continue;
+            if (PENDING.equals(d.getReviewStatus())) return false;
+            if (APPROVED.equals(d.getReviewStatus()) || EXCEPTION_APPROVED.equals(d.getReviewStatus())) {
+                approved.add(requirementOf(d.getDocumentType()));
+            }
+        }
+        return approved.contains(PHOTO_ID) && approved.containsAll(REQUIRED_DOCUMENT_TYPES);
+    }
+
+    /**
+     * Sent back to the participant (a document, or a declined not-applicable
+     * request) and not yet replaced. SSN documents aren't collected any more,
+     * so an old one can't hold anybody up.
+     */
+    static boolean isSentBack(ParticipantDocument d) {
+        return (REJECTED.equals(d.getReviewStatus()) || EXCEPTION_DECLINED.equals(d.getReviewStatus()))
+                && !"SSN_DOCUMENT".equals(d.getDocumentType());
+    }
+
+    /** How many of the participant's documents were sent back and still wait for a new copy. */
+    @Transactional(readOnly = true)
+    public int sentBackCount(Long userId) {
+        return (int) documentRepository.findByUserIdOrderByUploadedAtDesc(userId).stream()
+                .filter(DocumentService::isSentBack)
+                .count();
+    }
+
+    /** A document our team sent back, as the participant sees it. */
+    public record SentBack(Long documentId, String documentType, String label, String reason, boolean exemption) {}
+
+    /** What the participant's dashboard shows about their documents. */
+    public record ReviewState(boolean submitted, boolean verified, List<SentBack> sentBack) {}
+
+    @Transactional(readOnly = true)
+    public ReviewState reviewState(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        List<SentBack> sentBack = documentRepository.findByUserIdOrderByUploadedAtDesc(userId).stream()
+                .filter(DocumentService::isSentBack)
+                .map(d -> new SentBack(d.getId(), d.getDocumentType(), labelFor(d.getDocumentType()),
+                        d.getReviewerNotes(), EXCEPTION_DECLINED.equals(d.getReviewStatus())))
+                .toList();
+        return new ReviewState(Boolean.TRUE.equals(user.getDocumentsComplete()), documentsVerified(userId), sentBack);
+    }
+
     // ── Completeness + workflow transition ───────────────────────
 
     /**
@@ -416,7 +478,9 @@ public class DocumentService {
         workflowService.transition(user,
                 WorkflowService.statusFromProfile(user),
                 "docs_complete");
-        String nextStep = !Boolean.TRUE.equals(user.getProgramSelectionComplete()) ? "/program-selection"
+        // The program step opens once an ERM verified the documents.
+        String nextStep = !Boolean.TRUE.equals(user.getProgramSelectionComplete())
+                ? (documentsVerified(userId) ? "/program-selection" : "/dashboard?tab=complete-profile")
                 : !Boolean.TRUE.equals(user.getAgreementComplete()) ? "/agreement"
                 : "/dashboard";
         return Map.of(

@@ -111,11 +111,20 @@ class RealProgressTest {
     @Test
     void programSelectionNeedsTheDocuments() {
         user.setAcknowledgmentComplete(true);
+        DocumentService documents = mock(DocumentService.class);
         ProgramSelectionService programs = new ProgramSelectionService(mock(ProgramSelectionRepository.class),
                 userRepository, workflow, mock(RecordService.class), mock(EmailTemplateService.class),
-                mock(ProfileCompletionService.class));
+                mock(ProfileCompletionService.class), documents);
         assertThrows(IllegalStateException.class, () -> programs.submit(10L, null));
         assertThrows(IllegalStateException.class, () -> programs.saveDraft(10L, null));
+
+        // Documents submitted but not yet checked by an ERM: still closed.
+        user.setDocumentsComplete(true);
+        IllegalStateException underReview = assertThrows(IllegalStateException.class, () -> programs.submit(10L, null));
+        assertTrue(underReview.getMessage().contains("under review"));
+        // Once verified, the step opens (the empty request is then refused for its fields).
+        when(documents.documentsVerified(10L)).thenReturn(true);
+        assertThrows(IllegalArgumentException.class, () -> programs.submit(10L, null));
     }
 
     @Test

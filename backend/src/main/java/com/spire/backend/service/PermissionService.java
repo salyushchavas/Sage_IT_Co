@@ -125,6 +125,18 @@ public class PermissionService {
         return !("ERM".equals(roleOf(viewer)) && ERM_HIDDEN_DOCUMENT_TYPES.contains(documentType));
     }
 
+    /**
+     * An ERM checks a participant's documents before any ERM is assigned to
+     * them, so any ERM may open the documents of a participant who hasn't
+     * signed yet (never the SSN document). Every staff view is recorded.
+     */
+    public boolean canVerifyDocument(User viewer, User owner, String documentType) {
+        if (viewer == null || owner == null) return false;
+        if (!"ERM".equals(roleOf(viewer))) return false;
+        if (owner.getParticipantId() == null || Boolean.TRUE.equals(owner.getAgreementComplete())) return false;
+        return !ERM_HIDDEN_DOCUMENT_TYPES.contains(documentType);
+    }
+
     /** Staff who may open any participant's documents. */
     private static final Set<String> DOCUMENT_ADMIN_ROLES = Set.of("OPERATIONS_ADMIN", "SYSTEM_ADMIN");
 

@@ -362,6 +362,56 @@ public class EmailTemplateService {
                 wrap(invited ? "You're invited" : "You're confirmed", body));
     }
 
+    // ── ERM checks the documents before the program step ────────
+    /** A participant submitted their documents: an ERM checks them before the program step opens. */
+    public boolean sendDocumentsToVerifyEmail(User erm, User participant) {
+        if (erm == null || erm.getEmail() == null) return false;
+        String body = p("Hi " + escape(firstName(erm)) + ",")
+                + p("A participant submitted their documents. Please check them; they can choose their "
+                        + "program once you confirm.")
+                + receipt("Participant: " + safe(participant.getFullName()),
+                        "Participant ID: " + safe(participant.getParticipantId()),
+                        "Email: " + safe(participant.getEmail()))
+                + button("Check documents", appUrl + "/erm-dashboard?tab=verify")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(erm.getEmail(),
+                "Documents to check — " + safe(participant.getFullName()),
+                wrap("Documents to check", body));
+    }
+
+    /** The ERM confirmed the documents: the participant can choose their program. */
+    public boolean sendDocumentsVerifiedEmail(User user) {
+        String body = p("Hi " + escape(firstName(user)) + ",")
+                + p("Your documents have been verified. You're ready for the next step: choosing your program.")
+                + receipt("Participant ID: " + safe(user.getParticipantId()))
+                + button("Choose your program", appUrl + "/program-selection")
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(user.getEmail(),
+                "Your documents are verified — " + brandName(),
+                wrap("Documents verified", body));
+    }
+
+    // ── The real agreement (the /agreements console) ────────────
+    /**
+     * A participant said they're ready to sign their agreement: tells a
+     * console user (ERM / super-admin) so they can start it from the
+     * participant's details.
+     */
+    public boolean sendAgreementRequestedEmail(String to, String consoleUserName, User participant, String startLink) {
+        if (to == null || to.isBlank()) return false;
+        String body = p("Hi " + escape(PersonNames.firstWordForEmail(consoleUserName)) + ",")
+                + p("A participant is ready to sign their agreement.")
+                + receipt("Participant: " + safe(participant.getFullName()),
+                        "Participant ID: " + safe(participant.getParticipantId()),
+                        "Email: " + safe(participant.getEmail()))
+                + p("Start the agreement from their details: they're filled in for you, and you add your side.")
+                + button("Start the agreement", startLink)
+                + p("Regards,<br/>" + escape(brandName()));
+        return emailService.sendEmail(to,
+                "Ready for the agreement — " + safe(participant.getFullName()),
+                wrap("Ready for the agreement", body));
+    }
+
     // ── 18. Online course purchase (checklist 5.4) ──────────────────
     /** The participant paid for courses online; they're enrolled. */
     public boolean sendCoursePurchaseEmail(User user, java.util.List<com.spire.backend.entity.Course> courses,

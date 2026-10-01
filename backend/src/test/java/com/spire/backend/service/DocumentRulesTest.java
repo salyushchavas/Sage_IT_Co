@@ -166,6 +166,56 @@ class DocumentRulesTest {
         assertTrue(service.missingRequired(10L).isEmpty());
     }
 
+    // ── An ERM's check before the program step ────────────────────
+
+    @Test
+    void documentsAreVerifiedOnlyWhenEveryRequirementIsApproved() {
+        uploadAllRequired();
+        assertFalse(service.documentsVerified(10L), "uploaded but not checked yet");
+        for (ParticipantDocument d : List.copyOf(rows)) service.review(d.getId(), 1L, "APPROVED", null);
+        assertTrue(service.documentsVerified(10L));
+    }
+
+    @Test
+    void whenBothPhotoIdsWereUploadedBothMustBeChecked() {
+        uploadAllRequired();                       // State ID, work authorization, resume
+        ParticipantDocument license = upload("DRIVERS_LICENSE");
+        for (ParticipantDocument d : List.copyOf(rows)) {
+            if (d != license) service.review(d.getId(), 1L, "APPROVED", null);
+        }
+        assertFalse(service.documentsVerified(10L), "the license is still waiting");
+        service.review(license.getId(), 1L, "REJECTED", "Expired");
+        assertFalse(service.documentsVerified(10L), "sent back: the participant has to answer it first");
+        assertEquals(1, service.sentBackCount(10L));
+        service.review(upload("DRIVERS_LICENSE").getId(), 1L, "APPROVED", null);
+        assertTrue(service.documentsVerified(10L), "the new copy is checked");
+        assertEquals(0, service.sentBackCount(10L));
+    }
+
+    @Test
+    void anApprovedExemptionCountsAsVerified() {
+        ParticipantDocument id = upload("GOVERNMENT_ID");
+        ParticipantDocument resume = upload("RESUME");
+        ParticipantDocument req = service.markNotApplicable(10L, "WORK_AUTHORIZATION", "US citizen, no visa needed");
+        service.review(id.getId(), 1L, "APPROVED", null);
+        service.review(resume.getId(), 1L, "APPROVED", null);
+        assertFalse(service.documentsVerified(10L));
+        service.review(req.getId(), 1L, "APPROVED", null);
+        assertTrue(service.documentsVerified(10L));
+    }
+
+    @Test
+    void theDashboardSeesWhatWasSentBackAndWhy() {
+        uploadAllRequired();
+        ParticipantDocument resume = rows.stream().filter(d -> d.getDocumentType().equals("RESUME")).findFirst().get();
+        service.review(resume.getId(), 1L, "REJECTED", "Please upload your latest resume");
+        DocumentService.ReviewState state = service.reviewState(10L);
+        assertFalse(state.verified());
+        assertEquals(1, state.sentBack().size());
+        assertEquals("Resume", state.sentBack().get(0).label());
+        assertEquals("Please upload your latest resume", state.sentBack().get(0).reason());
+    }
+
     // ── SSN: the last 4 digits only, optional ─────────────────────
 
     @Test
