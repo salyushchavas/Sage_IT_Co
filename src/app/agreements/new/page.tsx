@@ -15,6 +15,7 @@ import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
 import {
   createConsultantApplication,
   getAgreementErmToken,
+  getParticipantAgreementRequest,
 } from "@/lib/api";
 import { WORK_AUTHORIZATION_OPTIONS } from "@/lib/agreement-sections";
 
@@ -126,6 +127,8 @@ export default function NewConsultantApplicationPage() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Opened from a participant's "I'm ready to sign" request: whose details were filled in.
+  const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
 
   useEffect(() => {
     if (!getAgreementErmToken()) {
@@ -133,6 +136,22 @@ export default function NewConsultantApplicationPage() {
       return;
     }
     setChecked(true);
+    const participant = new URLSearchParams(window.location.search).get("participant");
+    if (!participant) return;
+    // Only the participant's own details; everything on the ERM's side stays for the ERM.
+    getParticipantAgreementRequest(participant)
+      .then((p) => {
+        setForm((s) => ({
+          ...s,
+          firstName: p.firstName || s.firstName,
+          middleName: p.middleName || s.middleName,
+          lastName: p.lastName || s.lastName,
+          consultantEmail: p.email || s.consultantEmail,
+          technologyTrack: p.technology || s.technologyTrack,
+        }));
+        setPrefilledFrom(p.participantId || p.fullName || p.email);
+      })
+      .catch(() => { /* not waiting any more: the ERM fills the form as usual */ });
   }, [router]);
 
   const setText = <K extends keyof FormState>(key: K) =>
@@ -271,6 +290,12 @@ export default function NewConsultantApplicationPage() {
               <AlertCircle size={14} className="mt-0.5 shrink-0" />
               <span>{error}</span>
             </div>
+          )}
+
+          {prefilledFrom && (
+            <p className="rounded-md border border-sage-navy/15 bg-sage-navy/5 px-3 py-2 text-xs text-sage-navy">
+              Participant details filled in from {prefilledFrom}&apos;s request. Please check them and fill in your side.
+            </p>
           )}
 
           <section className="space-y-3">

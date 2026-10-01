@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, ChevronRight, Sparkles, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
-import { getProfileCompletion, type ProfileCompletion } from "@/lib/api";
+import { getDocumentReviewState, getProfileCompletion, type ProfileCompletion } from "@/lib/api";
 
 /**
  * Sticky banner shown above the dashboard content when the
@@ -39,6 +39,8 @@ type Completable = ProfileCompletion & {
 export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
   const { user } = useAuth();
   const [data, setData] = useState<Completable | null>(null);
+  // Documents in but not yet checked by an ERM: the next step is waiting on them.
+  const [underReview, setUnderReview] = useState(false);
   const [dismissedUntil, setDismissedUntil] = useState<number>(0);
   const [celebrationShown, setCelebrationShown] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -58,6 +60,9 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
     getProfileCompletion()
       .then((res) => { if (!cancelled) setData(res as Completable); })
       .catch(() => { /* swallow -- banner just stays hidden */ });
+    getDocumentReviewState()
+      .then((r) => { if (!cancelled) setUnderReview(r.submitted && !r.verified); })
+      .catch(() => { /* not a participant, or offline: no hint */ });
     return () => { cancelled = true; };
   }, [user, user?.profileCompletionPct]);
 
@@ -127,8 +132,14 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
           </div>
           {nextStep && (
             <p className="text-[11px] text-amber-700 mt-1.5">
-              Next: <span className="font-semibold">{nextStep.title}</span>{" "}
-              ({nextStep.estimatedTime})
+              {nextStep.key === "PROGRAM_SELECTION" && underReview ? (
+                <>Your documents are <span className="font-semibold">under review</span>; the next step opens once they&apos;re verified</>
+              ) : (
+                <>
+                  Next: <span className="font-semibold">{nextStep.title}</span>{" "}
+                  ({nextStep.estimatedTime})
+                </>
+              )}
             </p>
           )}
         </div>

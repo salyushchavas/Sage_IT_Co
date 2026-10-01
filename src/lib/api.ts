@@ -825,6 +825,117 @@ export async function registerFromApplication(
   return wrapper.data;
 }
 
+// ─── An ERM checks the documents before the program step ────────────
+
+export interface DocumentReviewState {
+  /** The participant finished the documents step. */
+  submitted: boolean;
+  /** An ERM (or Operations) checked and approved them: the program step is open. */
+  verified: boolean;
+  sentBack: { documentId: number; documentType: DocumentType; label: string; reason: string | null; exemption: boolean }[];
+}
+
+export async function getDocumentReviewState(): Promise<DocumentReviewState> {
+  const wrapper = await apiFetch<ApiResponse<DocumentReviewState>>("/api/participants/documents/review-state");
+  return wrapper.data;
+}
+
+export interface VerificationRow {
+  userId: number;
+  fullName: string | null;
+  email: string | null;
+  participantId: string | null;
+  course: string | null;
+  submittedAt: string | null;
+  documentCount: number;
+  /** Documents sent back that still wait for the participant's new copy. */
+  sentBack: number;
+}
+
+export interface VerificationDocument {
+  id: number;
+  documentType: DocumentType;
+  label: string;
+  fileName: string | null;
+  fileSize: number | null;
+  reviewStatus: DocumentReviewStatus;
+  notApplicable: boolean;
+  exceptionReason: string | null;
+  reviewerNotes: string | null;
+  uploadedAt: string | null;
+}
+
+export interface VerificationDetail {
+  userId: number;
+  fullName: string | null;
+  email: string | null;
+  phone: string | null;
+  participantId: string | null;
+  course: string | null;
+  location: string | null;
+  verified: boolean;
+  documents: VerificationDocument[];
+  missing: string[];
+}
+
+/** WAITING (default): still to check. VERIFIED: confirmed, program not chosen yet. */
+export async function getVerificationQueue(status: "WAITING" | "VERIFIED" = "WAITING"): Promise<VerificationRow[]> {
+  const wrapper = await apiFetch<ApiResponse<VerificationRow[]>>(`/api/verifications?status=${status}`);
+  return wrapper.data ?? [];
+}
+
+export async function getVerificationDetail(userId: number): Promise<VerificationDetail> {
+  const wrapper = await apiFetch<ApiResponse<VerificationDetail>>(`/api/verifications/${userId}`);
+  return wrapper.data;
+}
+
+/** Confirms the documents; the participant is emailed and can choose their program. */
+export async function confirmParticipantDocuments(userId: number): Promise<{ message: string; emailSent: boolean }> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean }>>(`/api/verifications/${userId}/confirm`, {
+    method: "POST",
+  });
+  return { message: wrapper.message, emailSent: wrapper.data.emailSent };
+}
+
+/** Sends one document back with a reason (emailed, and shown on the participant's dashboard). */
+export async function sendDocumentBack(userId: number, documentId: number, reason: string): Promise<void> {
+  await apiFetch<ApiResponse<unknown>>(`/api/verifications/${userId}/documents/${documentId}/send-back`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+}
+
+// ─── The real agreement (the /agreements console) ───────────────────
+
+export interface AgreementRequestStatus {
+  consentSigned: boolean;
+  requested: boolean;
+  requestedAt: string | null;
+  /** The console agreement, once an ERM started it. */
+  agreement: {
+    step: number;
+    totalSteps: number;
+    stage: string;
+    yourTurn: boolean;
+    executed: boolean;
+    link: string;
+    updatedAt: string | null;
+  } | null;
+}
+
+export async function getAgreementRequestStatus(): Promise<AgreementRequestStatus> {
+  const wrapper = await apiFetch<ApiResponse<AgreementRequestStatus>>("/api/participants/agreement-request");
+  return wrapper.data;
+}
+
+/** "I'm ready to sign the agreement". */
+export async function requestAgreement(): Promise<AgreementRequestStatus> {
+  const wrapper = await apiFetch<ApiResponse<AgreementRequestStatus>>("/api/participants/agreement-request", {
+    method: "POST",
+  });
+  return wrapper.data;
+}
+
 export type ApplicationStatus = "PENDING" | "APPROVED" | "REGISTERED" | "DECLINED";
 
 /** One row of the staff applications screen (ERM, Operations, System admin). */
@@ -4691,6 +4802,31 @@ export async function createConsultantApplication(data: {
     "/api/agreement-erm/applications",
     { method: "POST", body: JSON.stringify(data) },
   );
+}
+
+/** A participant waiting for their agreement, with the details the create form fills in. */
+export interface ParticipantAgreementRequest {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  technology: string | null;
+  program: string | null;
+  targetJobTitle: string | null;
+  requestedAt: string | null;
+}
+
+/** Console: participants who said they're ready and have no open agreement yet. */
+export async function listParticipantAgreementRequests() {
+  return agreementErmFetch<ParticipantAgreementRequest[]>("/api/agreement-erm/participant-requests");
+}
+
+export async function getParticipantAgreementRequest(userId: number | string) {
+  return agreementErmFetch<ParticipantAgreementRequest>(`/api/agreement-erm/participant-requests/${userId}`);
 }
 
 export async function listConsultantApplications(

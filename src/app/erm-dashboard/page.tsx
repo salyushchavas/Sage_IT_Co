@@ -15,6 +15,7 @@ import {
   MessageSquare,
   Send,
   Settings,
+  ShieldCheck,
   Target,
   Users,
 } from "lucide-react";
@@ -25,6 +26,7 @@ import {
   type RoleDashboardTab,
 } from "@/components/dashboard/RoleDashboardShell";
 import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
+import { DocumentVerificationQueue } from "@/components/applications/DocumentVerificationQueue";
 import { useAuth } from "@/lib/auth-context";
 import {
   addErmNote,
@@ -50,11 +52,13 @@ import {
 } from "@/lib/api";
 
 /**
- * ERM dashboard. Nine tabs:
+ * ERM dashboard. Ten tabs:
  *
  *   home       -- assigned participant roster + drill-in detail panel
  *   applications -- website applications to confirm (roadmap step 1);
  *                 confirming emails the applicant a link to register
+ *   verify     -- submitted documents to check; confirming opens the
+ *                 participant's program step
  *   reports    -- weekly reports across all assigned participants,
  *                 with inline review (add notes + mark reviewed)
  *   comms      -- communication log per participant, free-text notes
@@ -69,6 +73,7 @@ import {
 type TabId =
   | "home"
   | "applications"
+  | "verify"
   | "reports"
   | "comms"
   | "interviews"
@@ -80,6 +85,7 @@ type TabId =
 const TABS: ReadonlyArray<RoleDashboardTab> = [
   { id: "home",       label: "My Participants",  Icon: Users },
   { id: "applications", label: "Applications",   Icon: Inbox },
+  { id: "verify",     label: "Verify Documents", Icon: ShieldCheck },
   { id: "reports",    label: "Weekly Reports",   Icon: ClipboardList },
   { id: "comms",      label: "Communications",   Icon: MessageSquare },
   { id: "interviews", label: "Interviews",       Icon: Target },
@@ -151,6 +157,7 @@ export default function ErmDashboardPage() {
       )}
       {active === "home" && <RosterTab roster={roster} />}
       {active === "applications" && <ApplicationsQueue />}
+      {active === "verify" && <DocumentVerificationQueue />}
       {active === "reports" && <ReportsTab />}
       {active === "comms" && <CommsTab roster={roster} />}
       {active === "interviews" && <InterviewsTab />}

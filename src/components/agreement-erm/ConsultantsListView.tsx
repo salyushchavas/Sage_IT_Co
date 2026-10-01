@@ -14,6 +14,7 @@ import {
   type ConsultantApplicationsPage,
 } from "@/lib/api";
 import AgreementStatusPill from "./AgreementStatusPill";
+import ParticipantRequestsPanel from "./ParticipantRequestsPanel";
 import { formatUsDate } from "@/lib/dates";
 import { computePendingAppendices } from "@/lib/pending-appendix";
 import {
@@ -133,6 +134,7 @@ export default function ConsultantsListView() {
 
   return (
     <div className="space-y-4">
+      <ParticipantRequestsPanel />
       <div className="flex items-start justify-between flex-wrap gap-3">
         <p className="text-sm text-gray-500 max-w-xl">
           Send, track, and sign consulting agreements. Each application

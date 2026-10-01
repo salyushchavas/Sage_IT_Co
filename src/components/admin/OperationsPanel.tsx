@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { InviteDialog } from "@/components/admin/tabs/AdminUsersTab";
 import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
+import { DocumentVerificationQueue } from "@/components/applications/DocumentVerificationQueue";
 import {
   AlertCircle,
   ClipboardList,
@@ -63,6 +64,7 @@ import {
  */
 type OpsTab =
   | "applications"
+  | "verify"
   | "enrollment"
   | "docReview"
   | "agreement"
@@ -73,6 +75,7 @@ type OpsTab =
 
 const SUB_TABS: { id: OpsTab; label: string; Icon: typeof Users }[] = [
   { id: "applications", label: "Applications",    Icon: UserCheck },
+  { id: "verify",      label: "Verify documents", Icon: FileText },
   { id: "enrollment",  label: "Enrollment queue", Icon: Inbox },
   { id: "docReview",   label: "Document review",  Icon: FileText },
   { id: "agreement",   label: "Agreement queue",  Icon: ShieldCheck },
@@ -123,6 +126,7 @@ export function OperationsPanel() {
         />
       )}
       {tab === "applications" && <ApplicationsQueue />}
+      {tab === "verify" && <DocumentVerificationQueue />}
       {tab === "enrollment" && <EnrollmentQueue />}
       {tab === "docReview" && <DocumentReview />}
       {tab === "agreement" && <AgreementQueue />}

@@ -2,16 +2,21 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { CheckCircle2, ChevronRight, Lock, Loader2, PartyPopper } from "lucide-react";
+import { Fragment, useEffect, useRef, useState } from "react";
+import { AlertCircle, CheckCircle2, ChevronRight, Clock, Lock, Loader2, PartyPopper } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 import {
+  getAgreementRequestStatus,
+  getDocumentReviewState,
   getProfileCompletion,
+  type AgreementRequestStatus,
+  type DocumentReviewState,
   type ProfileCompletion,
   type ProfileCompletionStep,
 } from "@/lib/api";
 import BasicInfoStep from "./BasicInfoStep";
+import MasterAgreementStep from "./MasterAgreementStep";
 
 /**
  * The "Complete Your Profile" tab body. Lists the six steps in order
@@ -42,6 +47,9 @@ export default function ProfileCompletionChecklist() {
   // that row into view + flash a "previous step completed" toast.
   const stepParam = searchParams.get("step");
   const [data, setData] = useState<ProfileCompletion | null>(null);
+  // Under review / verified / sent back, and the real agreement's state.
+  const [review, setReview] = useState<DocumentReviewState | null>(null);
+  const [agreement, setAgreement] = useState<AgreementRequestStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [toast, setToast] = useState<string | null>(null);
@@ -50,8 +58,14 @@ export default function ProfileCompletionChecklist() {
   const reload = async () => {
     setLoading(true);
     try {
-      const res = await getProfileCompletion();
+      const [res, rev, ag] = await Promise.all([
+        getProfileCompletion(),
+        getDocumentReviewState().catch(() => null),
+        getAgreementRequestStatus().catch(() => null),
+      ]);
       setData(res);
+      setReview(rev);
+      setAgreement(ag);
       await refreshUser();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't load progress");
@@ -103,6 +117,12 @@ export default function ProfileCompletionChecklist() {
 
   // Find the index of the first incomplete step -- that's the active row.
   const activeIdx = data.steps.findIndex((s) => !s.completed);
+  // The real agreement sits after the consent, so later steps number one higher.
+  const consentIdx = data.steps.findIndex((s) => s.key === "AGREEMENT");
+  const shownNumber = (idx: number) => idx + 1 + (consentIdx >= 0 && idx > consentIdx ? 1 : 0);
+  const sentBack = review?.sentBack ?? [];
+  // Documents in, program not chosen: the ERM is checking them first.
+  const underReview = review != null && review.submitted && !review.verified;
 
   return (
     <div className="space-y-4">
@@ -131,13 +151,36 @@ export default function ProfileCompletionChecklist() {
         </div>
       </header>
 
+      {sentBack.length > 0 && (
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4">
+          <p className="inline-flex items-center gap-2 text-sm font-semibold text-red-800">
+            <AlertCircle size={16} />
+            {sentBack.length === 1 ? "A document was sent back" : `${sentBack.length} documents were sent back`}
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-red-800">
+            {sentBack.map((d) => (
+              <li key={d.documentId}>
+                <span className="font-semibold">{d.label}:</span> {d.reason || "please upload a new copy."}
+              </li>
+            ))}
+          </ul>
+          <Link
+            href="/document-upload?from=profile"
+            className="mt-3 inline-flex items-center gap-1 bg-red-600 hover:bg-red-700 text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition cursor-pointer"
+          >
+            Fix documents <ChevronRight size={12} />
+          </Link>
+        </div>
+      )}
+
       <ol className="space-y-3">
         {data.steps.map((step, idx) => {
           const isCompleted = step.completed;
           const isActive = idx === activeIdx;
+          const waitingForErm = isActive && step.key === "PROGRAM_SELECTION" && underReview;
           return (
+            <Fragment key={step.key}>
             <li
-              key={step.key}
               id={`step-${step.key}`}
               className={
                 "rounded-xl border bg-white p-4 transition scroll-mt-24 " +
@@ -162,7 +205,7 @@ export default function ProfileCompletionChecklist() {
                   {isCompleted ? (
                     <CheckCircle2 size={14} />
                   ) : isActive ? (
-                    idx + 1
+                    shownNumber(idx)
                   ) : (
                     <Lock size={12} />
                   )}
@@ -170,7 +213,7 @@ export default function ProfileCompletionChecklist() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center justify-between gap-3 flex-wrap">
                     <p className="text-sm font-bold text-gray-900">
-                      Step {idx + 1}: {step.title}
+                      Step {shownNumber(idx)}: {step.title}
                     </p>
                     {!isCompleted && (
                       <span className="text-[11px] text-gray-500">
@@ -192,7 +235,21 @@ export default function ProfileCompletionChecklist() {
                     </div>
                   )}
 
-                  {isActive && step.key !== "BASIC_INFO" && (
+                  {waitingForErm && (
+                    <p className="mt-3 inline-flex items-start gap-2 text-xs text-sage-navy bg-sage-navy/5 border border-sage-navy/15 rounded-lg px-3 py-2">
+                      <Clock size={14} className="shrink-0 mt-px" />
+                      Your documents are under review. We&apos;ll email you as soon as they&apos;re verified; then you
+                      can choose your program.
+                    </p>
+                  )}
+
+                  {isActive && step.key === "PROGRAM_SELECTION" && review?.verified && (
+                    <p className="mt-3 inline-flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                      <CheckCircle2 size={14} /> Your documents are verified. You&apos;re ready for the next step.
+                    </p>
+                  )}
+
+                  {isActive && step.key !== "BASIC_INFO" && !waitingForErm && (
                     <Link
                       href={STANDALONE_HREF[step.key]}
                       className="mt-3 inline-flex items-center gap-1 bg-sage-navy hover:bg-sage-navy-deep text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition cursor-pointer"
@@ -209,6 +266,14 @@ export default function ProfileCompletionChecklist() {
                 </div>
               </div>
             </li>
+            {step.key === "AGREEMENT" && (
+              <MasterAgreementStep
+                number={shownNumber(idx) + 1}
+                state={agreement}
+                onChange={setAgreement}
+              />
+            )}
+            </Fragment>
           );
         })}
       </ol>

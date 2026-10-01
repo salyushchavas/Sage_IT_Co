@@ -11,6 +11,7 @@ import {
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
 import { useAuth } from "@/lib/auth-context";
 import {
+  getDocumentReviewState,
   getProgramSelection,
   saveProgramSelectionDraft,
   submitProgramSelection,
@@ -135,6 +136,14 @@ function ProgramSelectionPageInner() {
     let cancelled = false;
     (async () => {
       try {
+        // An ERM checks the documents first; until then the dashboard says they're under review.
+        // (Someone who already chose their program isn't held back.)
+        const review = user.programSelectionComplete ? null : await getDocumentReviewState().catch(() => null);
+        if (cancelled) return;
+        if (review && !review.verified) {
+          router.replace("/dashboard?tab=complete-profile");
+          return;
+        }
         // Pre-fill: prefer the saved program-selection row, then
         // fall back to enrollment values for skillset + availability.
         const existing = await getProgramSelection().catch(() => null);
