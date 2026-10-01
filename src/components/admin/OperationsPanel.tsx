@@ -398,7 +398,7 @@ function DocumentReview() {
                       {r.participantEmail ?? ""} ·{" "}
                       <span className="font-mono">{r.participantId ?? ""}</span>
                       {r.ssnLast4 && (
-                        <> · SSN last 4: <span className="font-mono">{r.ssnLast4}</span></>
+                        <> · SSN <span className="font-mono">XXX-XX-{r.ssnLast4}</span></>
                       )}
                     </p>
                   </div>

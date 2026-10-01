@@ -268,7 +268,7 @@ function DocumentUploadPageInner() {
       const saved = await saveSsnLast4(value);
       setSsn(saved);
       setSsnSaved(saved);
-      setSsnNote({ ok: true, text: saved ? "Saved." : "Removed." });
+      setSsnNote({ ok: true, text: saved ? `Saved as XXX-XX-${saved}, stored encrypted.` : "Removed." });
     } catch (err) {
       setSsnNote({ ok: false, text: err instanceof Error ? err.message : "Couldn't save." });
     } finally {
@@ -641,25 +641,36 @@ function DocumentUploadPageInner() {
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <label htmlFor="ssn-last4" className="text-sm font-semibold text-gray-900">
-                      SSN, last 4 digits
+                      Social Security Number (last 4 digits)
                     </label>
                     <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Optional</span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-0.5">
-                    Only the last 4 digits. Please don&apos;t upload your SSN card.
+                  <p id="ssn-hint" className="text-xs text-gray-500 mt-0.5">
+                    We only need the last 4 digits; the first five stay hidden. Please don&apos;t upload your SSN card.
                   </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <input
-                      id="ssn-last4"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="off"
-                      maxLength={4}
-                      value={ssn}
-                      onChange={(e) => { setSsn(e.target.value.replace(/\D/g, "").slice(0, 4)); setSsnNote(null); }}
-                      placeholder="1234"
-                      className="w-24 px-3 py-1.5 text-sm font-mono tracking-widest rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-300 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
-                    />
+                    {/* Shown the way a masked SSN reads (XXX-XX-1234); only the last 4 are typed. */}
+                    <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white transition focus-within:border-sage-navy focus-within:ring-1 focus-within:ring-sage-navy">
+                      <span
+                        aria-hidden="true"
+                        className="pl-3 py-1.5 font-mono text-sm tracking-[0.15em] text-gray-400 select-none"
+                      >
+                        XXX-XX-
+                      </span>
+                      <input
+                        id="ssn-last4"
+                        type="text"
+                        inputMode="numeric"
+                        autoComplete="off"
+                        maxLength={4}
+                        value={ssn}
+                        onChange={(e) => { setSsn(e.target.value.replace(/\D/g, "").slice(0, 4)); setSsnNote(null); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") handleSaveSsn(ssn); }}
+                        placeholder="____"
+                        aria-describedby="ssn-hint"
+                        className="w-[8ch] pr-3 py-1.5 bg-transparent font-mono text-sm tracking-[0.15em] text-gray-900 placeholder-gray-300 focus:outline-none"
+                      />
+                    </div>
                     <button
                       type="button"
                       onClick={() => handleSaveSsn(ssn)}
@@ -680,6 +691,11 @@ function DocumentUploadPageInner() {
                       </button>
                     )}
                   </div>
+                  {ssnSaved && !ssnNote && (
+                    <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-gray-500">
+                      <Lock size={11} /> On file as <span className="font-mono text-gray-700">XXX-XX-{ssnSaved}</span> (stored encrypted)
+                    </p>
+                  )}
                   {ssnNote && (
                     <p className={"mt-1.5 text-[11px] " + (ssnNote.ok ? "text-emerald-700" : "text-red-600")}>
                       {ssnNote.text}
