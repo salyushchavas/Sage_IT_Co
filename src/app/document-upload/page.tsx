@@ -1,12 +1,12 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  AlertCircle, CheckCircle2, FileText, Loader2, Lock, Save,
-  Trash2, Upload as UploadIcon, Eye,
+  AlertCircle, CheckCircle2, ChevronRight, Circle, Eye, FileText, Loader2, Lock,
+  RefreshCw, Save, ShieldCheck, Trash2, Upload as UploadIcon,
 } from "lucide-react";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
@@ -25,6 +25,7 @@ import {
   loginHere,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
+import { formatDateMedium } from "@/lib/datetime";
 
 /**
  * Step 5 — Secure document vault.
@@ -316,230 +317,180 @@ function DocumentUploadPageInner() {
 
   // ── Render ───────────────────────────────────────────────────
 
-  const renderSlot = useMemo(() => (slot: SlotConfig) => {
+  const missingNames = [
+    ...(photoIdSatisfied ? [] : [PHOTO_ID_LABEL]),
+    ...missingRequired.map((s) => s.label),
+  ];
+
+  /** One requirement's state, for its card and the checklist. */
+  const requirementState = (met: boolean, waiting: boolean): { label: string; tone: Tone } =>
+    met ? { label: "Complete", tone: "green" }
+      : waiting ? { label: "Awaiting approval", tone: "amber" }
+      : { label: "Required", tone: "neutral" };
+
+  const slotWaiting = (s: SlotConfig) =>
+    slotDocs(s.type).some((d) => d.reviewStatus === "EXCEPTION_REQUESTED");
+
+  /** The files (or "not applicable" marker), upload area and actions of one document type. */
+  const renderSlotBody = (slot: SlotConfig, opts: { allowNotApplicable: boolean }) => {
     const docs = slot.multiple ? slotDocs(slot.type) : (slotDoc(slot.type) ? [slotDoc(slot.type)!] : []);
-    // A "not applicable" marker: plain N/A (optional) or an exception
-    // request Operations decides (required).
     const marker = !slot.multiple && docs.length > 0 && docs[0].notApplicable ? docs[0] : null;
-    const isMarkedNA = marker !== null;
     const declined = marker?.reviewStatus === "EXCEPTION_DECLINED";
-    const filesOk = docs.length > 0 && !isMarkedNA && docs.every((d) => d.reviewStatus !== "REJECTED");
+    const files = marker ? [] : docs;
     const uploading = uploadingType === slot.type;
     const errorHere = uploadError && uploadError.type === slot.type ? uploadError.message : null;
+    const browse = () => fileInputs.current[slot.type]?.click();
+    const showDropZone = !uploading && ((files.length === 0 && !marker) || declined || slot.multiple);
 
     return (
-      <li key={slot.type} className="p-4 sm:p-5 first:pt-4 last:pb-4 border-b border-gray-100 last:border-b-0">
-        <div className="flex items-start gap-3">
-          <div className="shrink-0 mt-0.5">
-            {filesOk ? (
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700">
-                <CheckCircle2 size={14} />
+      <div className="space-y-2.5">
+        {files.map((d) => (
+          <div key={d.id} className="space-y-2">
+            <div className={
+              "flex items-center gap-3 rounded-lg border px-3 py-2.5 "
+              + (d.reviewStatus === "REJECTED" ? "border-red-200 bg-red-50/40" : "border-gray-200 bg-white")
+            }>
+              <span className="shrink-0 inline-flex items-center justify-center w-9 h-9 rounded-md bg-sage-navy/5 text-sage-navy">
+                <FileText size={16} />
               </span>
-            ) : isMarkedNA && !declined ? (
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-gray-200 text-gray-500 text-[10px] font-bold">
-                N/A
-              </span>
-            ) : (
-              <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white border border-gray-300 text-gray-400 text-[11px] font-bold">
-                {slot.required && !(slot.photoId && photoIdSatisfied) ? "!" : "○"}
-              </span>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-gray-900 truncate">{d.fileName ?? "Document"}</p>
+                <p className="text-xs text-gray-500">
+                  {formatBytes(d.fileSize)}{d.uploadedAt ? ` · Uploaded ${formatDateMedium(d.uploadedAt)}` : ""}
+                </p>
+              </div>
+              <Chip tone={DOC_STATUS[d.reviewStatus]?.tone ?? "neutral"}>
+                {DOC_STATUS[d.reviewStatus]?.label ?? d.reviewStatus}
+              </Chip>
+              <div className="flex items-center shrink-0">
+                <IconButton label="View" onClick={() => handleView(d)}><Eye size={15} /></IconButton>
+                {!slot.multiple && d.reviewStatus !== "APPROVED" && (
+                  <IconButton label="Replace" onClick={browse}><RefreshCw size={15} /></IconButton>
+                )}
+                {d.reviewStatus !== "APPROVED" && (
+                  <IconButton label="Remove" onClick={() => handleRemove(d)} danger><Trash2 size={15} /></IconButton>
+                )}
+              </div>
+            </div>
+            {d.reviewStatus === "REJECTED" && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                <AlertCircle size={14} className="shrink-0" />
+                <span className="flex-1 min-w-0">
+                  <strong>Sent back by our team{d.reviewerNotes ? ":" : "."}</strong>{" "}
+                  {d.reviewerNotes ?? "Please upload a new file."}
+                </span>
+                <button type="button" onClick={browse} className="font-semibold underline underline-offset-2 hover:text-red-900 cursor-pointer">
+                  Upload a new file
+                </button>
+              </div>
             )}
           </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-sm font-semibold text-gray-900">{slot.label}</p>
-              {slot.photoId ? (
-                <span className="text-[10px] font-bold uppercase tracking-wider text-sage-navy bg-sage-navy/10 px-1.5 py-0.5 rounded">One is enough</span>
-              ) : slot.required ? (
-                <span className="text-[10px] font-bold uppercase tracking-wider text-red-600 bg-red-50 px-1.5 py-0.5 rounded">Required</span>
-              ) : (
-                <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Optional</span>
+        ))}
+
+        {marker && (
+          <div className={
+            "rounded-lg border border-dashed px-3 py-2.5 text-sm "
+            + (declined ? "border-red-200 bg-red-50/40" : "border-gray-300 bg-gray-50")
+          }>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-medium text-gray-800">You told us this doesn&apos;t apply to you.</span>
+              <Chip tone={DOC_STATUS[marker.reviewStatus]?.tone ?? "neutral"}>
+                {DOC_STATUS[marker.reviewStatus]?.label ?? marker.reviewStatus}
+              </Chip>
+              {(marker.reviewStatus === "NOT_APPLICABLE" || marker.reviewStatus === "EXCEPTION_REQUESTED") && (
+                <button
+                  type="button"
+                  onClick={() => handleRemove(marker)}
+                  className="ml-auto text-xs font-semibold text-gray-600 hover:text-gray-900 underline underline-offset-2 cursor-pointer"
+                >
+                  Undo
+                </button>
               )}
             </div>
-            <p className="text-xs text-gray-500 mt-0.5">{slot.description}</p>
-
-            {/* Uploaded files list */}
-            {docs.length > 0 && !isMarkedNA && (
-              <div className="mt-2 space-y-1.5">
-                {docs.map((d) => (
-                  <div
-                    key={d.id}
-                    className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-xs ${
-                      d.reviewStatus === "REJECTED"
-                        ? "border-red-200 bg-red-50/50"
-                        : "border-gray-200 bg-gray-50/60"
-                    }`}
-                  >
-                    <FileText size={14} className="shrink-0 text-gray-500" />
-                    <span className="flex-1 min-w-0 truncate font-medium text-gray-800">
-                      {d.fileName ?? "Document"}
-                    </span>
-                    <span className="text-gray-500 shrink-0">{formatBytes(d.fileSize)}</span>
-                    {d.reviewStatus === "REJECTED" && (
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-red-700 bg-red-100 px-1.5 py-0.5 rounded">
-                        Rejected
-                      </span>
-                    )}
-                    {d.reviewStatus === "APPROVED" && (
-                      <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
-                        Approved
-                      </span>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => handleView(d)}
-                      className="text-sage-navy hover:text-sage-navy-deep cursor-pointer"
-                      aria-label="View"
-                    >
-                      <Eye size={14} />
-                    </button>
-                    {d.reviewStatus !== "APPROVED" && (
-                      <button
-                        type="button"
-                        onClick={() => handleRemove(d)}
-                        className="text-gray-400 hover:text-red-600 cursor-pointer"
-                        aria-label="Remove"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    )}
-                  </div>
-                ))}
-                {docs[0] && docs[0].reviewerNotes && docs[0].reviewStatus === "REJECTED" && (
-                  <p className="text-[11px] text-red-700 italic px-1">
-                    Operations note: {docs[0].reviewerNotes}
-                  </p>
-                )}
-              </div>
+            {marker.exceptionReason && (
+              <p className="mt-1 text-xs text-gray-600">Your reason: {marker.exceptionReason}</p>
             )}
-
-            {marker?.reviewStatus === "NOT_APPLICABLE" && (
-              <p className="mt-2 text-xs text-gray-500 italic">Marked Not Applicable.</p>
-            )}
-            {marker?.reviewStatus === "EXCEPTION_REQUESTED" && (
-              <div className="mt-2 space-y-0.5">
-                <p className="text-xs text-gray-500 italic">
-                  Marked Not Applicable. Waiting for Operations to approve.
-                </p>
-                {marker.exceptionReason && (
-                  <p className="text-[11px] text-gray-500 italic">Your reason: {marker.exceptionReason}</p>
-                )}
-              </div>
-            )}
-            {marker?.reviewStatus === "EXCEPTION_APPROVED" && (
-              <p className="mt-2 text-xs text-gray-500 italic">Not applicable, approved by Operations.</p>
+            {marker.reviewStatus === "EXCEPTION_REQUESTED" && (
+              <p className="mt-1 text-xs text-gray-500">Our team will review this and email you. You can upload the document instead at any time.</p>
             )}
             {declined && (
-              <p className="mt-2 text-[11px] text-red-700 italic">
-                Operations needs this document{marker?.reviewerNotes ? `: ${marker.reviewerNotes}` : "."}
-              </p>
-            )}
-
-            {/* Upload + N/A actions */}
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <input
-                ref={(el) => { fileInputs.current[slot.type] = el; }}
-                type="file"
-                accept="application/pdf,image/png,image/jpeg,image/jpg"
-                className="hidden"
-                onChange={(e) => handleFilePicked(slot.type, e.target.files?.[0])}
-              />
-              {(((docs.length === 0 || slot.multiple) && !isMarkedNA) || declined) && (
-                <button
-                  type="button"
-                  onClick={() => fileInputs.current[slot.type]?.click()}
-                  disabled={uploading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
-                >
-                  {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadIcon size={12} />}
-                  {uploading ? "Uploading…" : (docs.length > 0 ? "Add another" : "Upload")}
-                </button>
-              )}
-              {!slot.multiple && docs.length > 0 && !isMarkedNA && docs[0].reviewStatus !== "APPROVED" && (
-                <button
-                  type="button"
-                  onClick={() => fileInputs.current[slot.type]?.click()}
-                  disabled={uploading}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
-                >
-                  {uploading ? <Loader2 size={12} className="animate-spin" /> : <UploadIcon size={12} />}
-                  {docs[0].reviewStatus === "REJECTED" ? "Upload again" : "Replace"}
-                </button>
-              )}
-              {slot.allowNotApplicable && (!isMarkedNA || declined)
-                && !(slot.photoId && (photoIdSatisfied || docs.length > 0))
-                && docs[0]?.reviewStatus !== "APPROVED" && naFor !== slot.type && (
-                <button
-                  type="button"
-                  onClick={() => handleMarkNA(slot)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
-                >
-                  Not applicable
-                </button>
-              )}
-              {(marker?.reviewStatus === "NOT_APPLICABLE" || marker?.reviewStatus === "EXCEPTION_REQUESTED") && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    // Removing the N/A marker is just delete-the-row.
-                    const naRow = docs[0];
-                    if (naRow) handleRemove(naRow);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
-                >
-                  Undo N/A
-                </button>
-              )}
-            </div>
-
-            {naFor === slot.type && (
-              <div className="mt-2 space-y-1.5">
-                <label htmlFor={`na-reason-${slot.type}`} className="block text-[11px] text-gray-600">
-                  This document is required. Tell Operations why it doesn&apos;t apply to you; they&apos;ll review your request.
-                </label>
-                <textarea
-                  id={`na-reason-${slot.type}`}
-                  value={naReason}
-                  onChange={(e) => setNaReason(e.target.value)}
-                  rows={2}
-                  maxLength={1000}
-                  placeholder={slot.photoId
-                    ? "For example: I don't have a driver's license or a State ID yet."
-                    : "For example: I'm a US citizen, so I don't have a visa or work permit."}
-                  className="w-full px-3 py-2 text-xs rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-400 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy resize-none"
-                />
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => handleMarkNA(slot)}
-                    disabled={naBusy || naReason.trim().length < 5}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
-                  >
-                    {naBusy && <Loader2 size={12} className="animate-spin" />}
-                    Send to Operations
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setNaFor(null); setNaReason(""); }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {errorHere && (
-              <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-red-600">
-                <AlertCircle size={11} /> {errorHere}
+              <p className="mt-1 text-xs text-red-700">
+                We need this document{marker.reviewerNotes ? `: ${marker.reviewerNotes}` : "."} Please upload it below.
               </p>
             )}
           </div>
-        </div>
-      </li>
+        )}
+
+        {uploading && (
+          <div className="flex items-center gap-2.5 rounded-lg border border-sage-navy/20 bg-sage-navy/5 px-3 py-3 text-sm text-sage-navy">
+            <Loader2 size={16} className="animate-spin" /> Uploading and checking your file…
+          </div>
+        )}
+
+        {showDropZone && (
+          <DropZone
+            onBrowse={browse}
+            onFile={(f) => handleFilePicked(slot.type, f)}
+            label={slot.multiple ? (files.length > 0 ? "Add another file" : "Upload a file") : `Upload ${slot.label}`}
+            compact={files.length > 0}
+          />
+        )}
+
+        {opts.allowNotApplicable && naFor !== slot.type && (
+          <button
+            type="button"
+            onClick={() => handleMarkNA(slot)}
+            className="text-xs font-medium text-gray-500 hover:text-sage-navy underline underline-offset-2 cursor-pointer"
+          >
+            {slot.photoId ? "I don't have a driver's license or a State ID" : "I don't have this document"}
+          </button>
+        )}
+
+        {naFor === slot.type && (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+            <label htmlFor={`na-reason-${slot.type}`} className="block text-xs text-gray-700">
+              Tell us why. Our team reviews the request and emails you; this requirement counts as done once it&apos;s approved.
+            </label>
+            <textarea
+              id={`na-reason-${slot.type}`}
+              value={naReason}
+              onChange={(e) => setNaReason(e.target.value)}
+              rows={2}
+              maxLength={1000}
+              placeholder={slot.photoId
+                ? "For example: I don't have a driver's license or a State ID yet."
+                : "For example: I'm a US citizen, so I don't have a visa or work permit."}
+              className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 bg-white text-gray-900 placeholder-gray-400 transition focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy resize-none"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => handleMarkNA(slot)}
+                disabled={naBusy || naReason.trim().length < 5}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
+              >
+                {naBusy && <Loader2 size={12} className="animate-spin" />}
+                Send request
+              </button>
+              <button
+                type="button"
+                onClick={() => { setNaFor(null); setNaReason(""); }}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
+
+        {errorHere && (
+          <p className="inline-flex items-center gap-1.5 text-xs text-red-600">
+            <AlertCircle size={13} /> {errorHere}
+          </p>
+        )}
+      </div>
     );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documents, uploadingType, uploadError, naFor, naReason, naBusy, photoIdSatisfied]);
+  };
 
   if (authLoading || !gateChecked) {
     return (
@@ -563,97 +514,124 @@ function DocumentUploadPageInner() {
     );
   }
 
+  const [workAuthSlot, resumeSlot] = REQUIRED_SLOTS;
+  const photoState = requirementState(photoIdSatisfied, photoIdWaiting);
+  const workState = requirementState(requiredSatisfied(workAuthSlot), slotWaiting(workAuthSlot));
+  const resumeState = requirementState(requiredSatisfied(resumeSlot), slotWaiting(resumeSlot));
+  const photoHasAnything = PHOTO_ID_SLOTS.some((s) => slotDocs(s.type).length > 0);
+  const checklist: { label: string; state: { label: string; tone: Tone } }[] = [
+    { label: "Photo ID", state: photoState },
+    { label: "Work authorization", state: workState },
+    { label: "Resume", state: resumeState },
+  ];
+
   return (
-    <OnboardingLayout currentStep={5} contentMaxWidth="3xl">
-      <motion.section
-        initial={{ opacity: 0, y: 12 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.3 }}
-        className="bg-white rounded-2xl shadow-lg border border-gray-100 px-5 py-5 sm:px-7 sm:py-6"
-      >
-        <h1 className="font-serif text-xl sm:text-2xl font-bold text-gray-900">
-          Upload required documents
-        </h1>
-        <p className="text-gray-500 mt-1 text-sm">
-          Please upload the following documents to continue. All documents are stored
-          securely and encrypted.
-        </p>
+    <OnboardingLayout currentStep={5} contentMaxWidth="5xl">
+      {/* One hidden file picker per document type, in page order. */}
+      {SLOTS.map((slot) => (
+        <input
+          key={slot.type}
+          ref={(el) => { fileInputs.current[slot.type] = el; }}
+          type="file"
+          accept="application/pdf,image/png,image/jpeg,image/jpg"
+          className="hidden"
+          aria-label={`Choose a file for ${slot.label}`}
+          onChange={(e) => handleFilePicked(slot.type, e.target.files?.[0])}
+        />
+      ))}
 
-        {/* Progress summary */}
-        <div className="mt-4">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-gray-500">
-              <strong className="text-gray-800">{completedRequired}</strong> of{" "}
-              <strong className="text-gray-800">{requiredCount}</strong> required documents uploaded
-            </span>
-            <span className="font-mono text-sage-navy font-bold">{progressPct}%</span>
-          </div>
-          <div className="mt-1.5 h-2 w-full rounded-full bg-gray-100 overflow-hidden">
-            <div
-              className="h-full bg-sage-navy transition-all"
-              style={{ width: `${progressPct}%` }}
-            />
-          </div>
-        </div>
+      <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_17.5rem] items-start">
+        <motion.section
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.3 }}
+          className="min-w-0 bg-white rounded-2xl shadow-lg border border-gray-100"
+        >
+          <header className="px-5 sm:px-7 pt-6 pb-5 border-b border-gray-100">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-copper-deep">Documents</p>
+            <h1 className="font-serif text-2xl sm:text-[1.7rem] font-bold text-gray-900 mt-1">
+              Upload your documents
+            </h1>
+            <p className="text-sm text-gray-600 mt-1.5 max-w-2xl">
+              We use these to confirm your identity and that you can work in the US. Upload clear copies;
+              you can replace a file until our team approves it.
+            </p>
+            <div className="mt-4 lg:hidden">
+              <ProgressSummary done={completedRequired} total={requiredCount} pct={progressPct} />
+            </div>
+          </header>
 
-        {/* Photo ID: either one */}
-        <div className="mt-5">
-          <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
-            Photo ID
-          </p>
-          <p className="text-xs text-gray-500 mb-1.5">
-            Upload your driver&apos;s license or your State ID. One is enough; if you have both, you can upload both.
-          </p>
-          <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
-            {PHOTO_ID_SLOTS.map(renderSlot)}
-          </ul>
-        </div>
-
-        {/* Required slots */}
-        <div className="mt-5">
-          <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
-            Required documents
-          </p>
-          <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
-            {REQUIRED_SLOTS.map(renderSlot)}
-          </ul>
-        </div>
-
-        {/* Optional: SSN digits (typed) and extra files */}
-        <div className="mt-5">
-          <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold mb-1.5">
-            Optional
-          </p>
-          <ul className="rounded-xl border border-gray-200 bg-white divide-y divide-gray-100">
-            <li className="p-4 sm:p-5 first:pt-4 border-b border-gray-100">
-              <div className="flex items-start gap-3">
-                <div className="shrink-0 mt-0.5">
-                  {ssnSaved ? (
-                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-emerald-100 text-emerald-700">
-                      <CheckCircle2 size={14} />
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-white border border-gray-300 text-gray-400 text-[11px] font-bold">
-                      ○
-                    </span>
-                  )}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <label htmlFor="ssn-last4" className="text-sm font-semibold text-gray-900">
-                      Social Security Number (last 4 digits)
-                    </label>
-                    <span className="text-[10px] font-bold uppercase tracking-wider text-gray-500 bg-gray-100 px-1.5 py-0.5 rounded">Optional</span>
+          <div className="px-5 sm:px-7 py-6 space-y-8">
+            <div>
+              <SectionTitle title="Required documents" detail={`${completedRequired} of ${requiredCount} complete`} />
+              <ol className="space-y-4">
+                <RequirementCard
+                  index={1}
+                  title="Photo ID"
+                  description="Your driver's license or your State ID. One is enough; you can upload both."
+                  state={photoState}
+                >
+                  <div className="space-y-4">
+                    {PHOTO_ID_SLOTS.map((slot) => (
+                      <div key={slot.type} className="space-y-2">
+                        <p className="text-xs font-semibold text-gray-700">{slot.label}</p>
+                        {renderSlotBody(slot, { allowNotApplicable: false })}
+                      </div>
+                    ))}
                   </div>
-                  <p id="ssn-hint" className="text-xs text-gray-500 mt-0.5">
-                    We only need the last 4 digits; the first five stay hidden. Please don&apos;t upload your SSN card.
-                  </p>
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                  {!photoIdSatisfied && !photoHasAnything && naFor !== "DRIVERS_LICENSE" && (
+                    <button
+                      type="button"
+                      onClick={() => handleMarkNA(PHOTO_ID_SLOTS[0])}
+                      className="mt-3 text-xs font-medium text-gray-500 hover:text-sage-navy underline underline-offset-2 cursor-pointer"
+                    >
+                      I don&apos;t have a driver&apos;s license or a State ID
+                    </button>
+                  )}
+                </RequirementCard>
+
+                <RequirementCard
+                  index={2}
+                  title="Work authorization"
+                  description={workAuthSlot.description}
+                  state={workState}
+                >
+                  {renderSlotBody(workAuthSlot, { allowNotApplicable: !!workAuthSlot.allowNotApplicable
+                    && slotDocs(workAuthSlot.type).length === 0 })}
+                </RequirementCard>
+
+                <RequirementCard
+                  index={3}
+                  title="Resume"
+                  description={resumeSlot.description}
+                  state={resumeState}
+                >
+                  {renderSlotBody(resumeSlot, { allowNotApplicable: false })}
+                </RequirementCard>
+              </ol>
+            </div>
+
+            <div>
+              <SectionTitle title="Optional" />
+              <div className="space-y-4">
+                <div className="rounded-xl border border-gray-200 p-4 sm:p-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <label htmlFor="ssn-last4" className="text-sm font-semibold text-gray-900">
+                        Social Security Number (last 4 digits)
+                      </label>
+                      <p id="ssn-hint" className="text-xs text-gray-500 mt-0.5">
+                        We only need the last 4 digits; the first five stay hidden. Please don&apos;t upload your SSN card.
+                      </p>
+                    </div>
+                    <span className="shrink-0"><Chip tone={ssnSaved ? "green" : "neutral"}>{ssnSaved ? "Added" : "Optional"}</Chip></span>
+                  </div>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
                     {/* Shown the way a masked SSN reads (XXX-XX-1234); only the last 4 are typed. */}
                     <div className="inline-flex items-center rounded-lg border border-gray-200 bg-white transition focus-within:border-sage-navy focus-within:ring-1 focus-within:ring-sage-navy">
                       <span
                         aria-hidden="true"
-                        className="pl-3 py-1.5 font-mono text-sm tracking-[0.15em] text-gray-400 select-none"
+                        className="pl-3 py-2 font-mono text-sm tracking-[0.15em] text-gray-400 select-none"
                       >
                         XXX-XX-
                       </span>
@@ -668,14 +646,14 @@ function DocumentUploadPageInner() {
                         onKeyDown={(e) => { if (e.key === "Enter") handleSaveSsn(ssn); }}
                         placeholder="____"
                         aria-describedby="ssn-hint"
-                        className="w-[8ch] pr-3 py-1.5 bg-transparent font-mono text-sm tracking-[0.15em] text-gray-900 placeholder-gray-300 focus:outline-none"
+                        className="w-[8ch] pr-3 py-2 bg-transparent font-mono text-sm tracking-[0.15em] text-gray-900 placeholder-gray-300 focus:outline-none"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => handleSaveSsn(ssn)}
                       disabled={ssnBusy || ssn === ssnSaved}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed transition cursor-pointer"
                     >
                       {ssnBusy && <Loader2 size={12} className="animate-spin" />}
                       Save
@@ -685,92 +663,275 @@ function DocumentUploadPageInner() {
                         type="button"
                         onClick={() => handleSaveSsn("")}
                         disabled={ssnBusy}
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-transparent text-gray-500 hover:text-gray-800 hover:bg-gray-100 transition cursor-pointer"
+                        className="px-3 py-2 rounded-lg text-xs font-semibold text-gray-600 hover:text-gray-900 hover:bg-gray-100 transition cursor-pointer"
                       >
                         Remove
                       </button>
                     )}
                   </div>
                   {ssnSaved && !ssnNote && (
-                    <p className="mt-1.5 inline-flex items-center gap-1 text-[11px] text-gray-500">
-                      <Lock size={11} /> On file as <span className="font-mono text-gray-700">XXX-XX-{ssnSaved}</span> (stored encrypted)
+                    <p className="mt-2 inline-flex items-center gap-1.5 text-xs text-gray-500">
+                      <Lock size={12} /> On file as <span className="font-mono text-gray-700">XXX-XX-{ssnSaved}</span> (stored encrypted)
                     </p>
                   )}
                   {ssnNote && (
-                    <p className={"mt-1.5 text-[11px] " + (ssnNote.ok ? "text-emerald-700" : "text-red-600")}>
+                    <p className={"mt-2 text-xs " + (ssnNote.ok ? "text-emerald-700" : "text-red-600")}>
                       {ssnNote.text}
                     </p>
                   )}
                 </div>
-              </div>
-            </li>
-            {OPTIONAL_SLOTS.map(renderSlot)}
-          </ul>
-        </div>
 
-        {/* Missing list */}
-        {missingCount > 0 && (
-          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3">
-            <p className="text-xs font-semibold text-amber-800 inline-flex items-center gap-1.5">
-              <AlertCircle size={12} />
-              {missingCount} required {missingCount === 1 ? "document" : "documents"} still missing:
-            </p>
-            <ul className="mt-1 text-xs text-amber-900 list-disc list-inside">
-              {!photoIdSatisfied && (
-                <li>
-                  {PHOTO_ID_LABEL}
-                  {photoIdWaiting && " (not applicable: waiting for Operations)"}
-                </li>
+                {OPTIONAL_SLOTS.map((slot) => (
+                  <div key={slot.type} className="rounded-xl border border-gray-200 p-4 sm:p-5">
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-semibold text-gray-900">{slot.label}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{slot.description}</p>
+                      </div>
+                      <span className="shrink-0"><Chip tone="neutral">Optional</Chip></span>
+                    </div>
+                    {renderSlotBody(slot, { allowNotApplicable: false })}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {completeError && (
+              <p className="inline-flex items-center gap-1.5 text-sm text-red-600">
+                <AlertCircle size={14} /> {completeError}
+              </p>
+            )}
+          </div>
+
+          <footer className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 sm:px-7 py-4 border-t border-gray-100 bg-gray-50/70 rounded-b-2xl">
+            <p className="min-w-0 flex-1 text-xs text-gray-600">
+              {missingCount === 0 ? (
+                <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
+                  <CheckCircle2 size={14} /> All required documents are in.
+                </span>
+              ) : (
+                <>Still needed: <span className="font-semibold text-gray-800">{missingNames.join(", ")}</span></>
               )}
-              {missingRequired.map((s) => (
-                <li key={s.type}>
-                  {s.label}
-                  {slotDoc(s.type)?.reviewStatus === "EXCEPTION_REQUESTED" && " (not applicable: waiting for Operations)"}
+            </p>
+            <div className="flex flex-col-reverse sm:flex-row gap-2 shrink-0 whitespace-nowrap">
+              <button
+                type="button"
+                onClick={handleSaveLater}
+                disabled={refreshing || completing}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
+              >
+                <Save size={14} /> Save and finish later
+              </button>
+              <button
+                type="button"
+                onClick={handleContinue}
+                disabled={!canContinue}
+                className={
+                  "inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition "
+                  + (canContinue
+                    ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-sm cursor-pointer"
+                    : "bg-gray-200 text-gray-500 cursor-not-allowed")
+                }
+              >
+                {completing && <Loader2 size={14} className="animate-spin" />}
+                {completing ? "Submitting…" : "Continue to Program"}
+                {!completing && <ChevronRight size={15} />}
+              </button>
+            </div>
+          </footer>
+        </motion.section>
+
+        <aside className="space-y-4 lg:sticky lg:top-6">
+          <div className="hidden lg:block bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <p className="text-sm font-semibold text-gray-900">Your checklist</p>
+            <div className="mt-3">
+              <ProgressSummary done={completedRequired} total={requiredCount} pct={progressPct} />
+            </div>
+            <ul className="mt-4 space-y-2.5">
+              {checklist.map((c) => (
+                <li key={c.label} className="flex items-center justify-between gap-2 text-sm">
+                  <span className="inline-flex items-center gap-2 text-gray-700">
+                    {c.state.tone === "green"
+                      ? <CheckCircle2 size={16} className="text-emerald-600" />
+                      : <Circle size={16} className={c.state.tone === "amber" ? "text-amber-500" : "text-gray-300"} />}
+                    {c.label}
+                  </span>
+                  <span className={"text-[11px] font-medium " + (c.state.tone === "green" ? "text-emerald-700" : c.state.tone === "amber" ? "text-amber-700" : "text-gray-400")}>
+                    {c.state.tone === "green" ? "Done" : c.state.tone === "amber" ? "Waiting" : "To do"}
+                  </span>
                 </li>
               ))}
             </ul>
           </div>
-        )}
 
-        {completeError && (
-          <p className="mt-3 inline-flex items-center gap-1.5 text-sm text-red-600">
-            <AlertCircle size={14} /> {completeError}
-          </p>
-        )}
+          <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-5">
+            <p className="text-sm font-semibold text-gray-900">File guidelines</p>
+            <ul className="mt-3 space-y-2 text-xs text-gray-600">
+              <li className="flex gap-2"><FileText size={14} className="shrink-0 text-gray-400" /> PDF, JPG or PNG, up to 10 MB each</li>
+              <li className="flex gap-2"><Eye size={14} className="shrink-0 text-gray-400" /> All four corners visible and the text easy to read</li>
+              <li className="flex gap-2"><CheckCircle2 size={14} className="shrink-0 text-gray-400" /> IDs and permits must be current, not expired</li>
+            </ul>
+          </div>
 
-        {/* Action buttons */}
-        <div className="mt-5 flex flex-col sm:flex-row gap-2">
-          <button
-            type="button"
-            onClick={handleSaveLater}
-            disabled={refreshing || completing}
-            className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-semibold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 transition cursor-pointer"
-          >
-            <Save size={14} /> Save and continue later
-          </button>
-          <button
-            type="button"
-            onClick={handleContinue}
-            disabled={!canContinue}
-            className={
-              "flex-1 inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-sm font-bold transition "
-              + (canContinue
-                  ? "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-md hover:shadow-lg cursor-pointer"
-                  : "bg-gray-200 text-gray-500 cursor-not-allowed")
-            }
-          >
-            {completing && <Loader2 size={14} className="animate-spin" />}
-            {completing ? "Submitting…" : "Continue to Program →"}
-          </button>
-        </div>
-
-        <p className="mt-3 inline-flex items-start gap-1.5 text-[11px] text-gray-500">
-          <Lock size={11} className="mt-0.5 shrink-0" />
-          Your documents are encrypted and stored securely. Only authorized team members
-          can access them.
-        </p>
-      </motion.section>
+          <div className="rounded-2xl border border-sage-navy/10 bg-sage-navy/5 p-5">
+            <p className="inline-flex items-center gap-2 text-sm font-semibold text-sage-navy">
+              <ShieldCheck size={16} /> Your privacy
+            </p>
+            <p className="mt-2 text-xs text-gray-600 leading-relaxed">
+              Your files are encrypted and stored securely. Only authorized team members can open them,
+              and every view is recorded.
+            </p>
+          </div>
+        </aside>
+      </div>
     </OnboardingLayout>
+  );
+}
+
+// ── Presentational pieces ──────────────────────────────────────
+
+type Tone = "neutral" | "navy" | "green" | "amber" | "red";
+
+const TONE_CLASS: Record<Tone, string> = {
+  neutral: "bg-gray-100 text-gray-600 ring-gray-200",
+  navy: "bg-sage-navy/10 text-sage-navy ring-sage-navy/20",
+  green: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  amber: "bg-amber-50 text-amber-800 ring-amber-200",
+  red: "bg-red-50 text-red-700 ring-red-200",
+};
+
+/** What each review status reads as, for the participant. */
+const DOC_STATUS: Record<string, { label: string; tone: Tone }> = {
+  PENDING: { label: "In review", tone: "navy" },
+  APPROVED: { label: "Approved", tone: "green" },
+  REJECTED: { label: "Sent back", tone: "red" },
+  NOT_APPLICABLE: { label: "Not applicable", tone: "neutral" },
+  EXCEPTION_REQUESTED: { label: "Awaiting approval", tone: "amber" },
+  EXCEPTION_APPROVED: { label: "Exemption approved", tone: "green" },
+  EXCEPTION_DECLINED: { label: "Exemption declined", tone: "red" },
+};
+
+function Chip({ tone, children }: { tone: Tone; children: React.ReactNode }) {
+  return (
+    <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset ${TONE_CLASS[tone]}`}>
+      {children}
+    </span>
+  );
+}
+
+function SectionTitle({ title, detail }: { title: string; detail?: string }) {
+  return (
+    <div className="flex items-baseline justify-between gap-3 mb-3">
+      <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+      {detail && <span className="text-xs text-gray-500">{detail}</span>}
+    </div>
+  );
+}
+
+function RequirementCard({ index, title, description, state, children }: {
+  index: number;
+  title: string;
+  description: string;
+  state: { label: string; tone: Tone };
+  children: React.ReactNode;
+}) {
+  const done = state.tone === "green";
+  return (
+    <li className={"rounded-xl border p-4 sm:p-5 transition-colors " + (done ? "border-emerald-200 bg-emerald-50/30" : "border-gray-200 bg-white")}>
+      <div className="flex items-start gap-3 mb-4">
+        <span className={
+          "shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full text-xs font-bold "
+          + (done ? "bg-emerald-600 text-white" : "bg-sage-navy/10 text-sage-navy")
+        }>
+          {done ? <CheckCircle2 size={15} /> : index}
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <h3 className="min-w-0 text-sm font-semibold text-gray-900">{title}</h3>
+            <span className="shrink-0"><Chip tone={state.tone}>{state.label}</Chip></span>
+          </div>
+          <p className="text-xs text-gray-500 mt-0.5">{description}</p>
+        </div>
+      </div>
+      <div className="sm:pl-10">{children}</div>
+    </li>
+  );
+}
+
+function ProgressSummary({ done, total, pct }: { done: number; total: number; pct: number }) {
+  return (
+    <div>
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-gray-600"><strong className="text-gray-900">{done} of {total}</strong> required complete</span>
+        <span className="font-semibold text-sage-navy">{pct}%</span>
+      </div>
+      <div className="mt-1.5 grid gap-1" style={{ gridTemplateColumns: `repeat(${total}, minmax(0, 1fr))` }}>
+        {Array.from({ length: total }, (_, i) => (
+          <span key={i} className={"h-1.5 rounded-full " + (i < done ? "bg-sage-navy" : "bg-gray-200")} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function IconButton({ label, onClick, danger, children }: {
+  label: string;
+  onClick: () => void;
+  danger?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={label}
+      aria-label={label}
+      className={
+        "inline-flex items-center justify-center w-8 h-8 rounded-md transition cursor-pointer "
+        + (danger ? "text-gray-400 hover:text-red-600 hover:bg-red-50" : "text-gray-500 hover:text-sage-navy hover:bg-sage-navy/5")
+      }
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Click to browse, or drop a file onto it. */
+function DropZone({ onBrowse, onFile, label, compact }: {
+  onBrowse: () => void;
+  onFile: (file: File) => void;
+  label: string;
+  compact?: boolean;
+}) {
+  const [over, setOver] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onBrowse}
+      onDragOver={(e) => { e.preventDefault(); setOver(true); }}
+      onDragLeave={() => setOver(false)}
+      onDrop={(e) => {
+        e.preventDefault();
+        setOver(false);
+        const f = e.dataTransfer.files?.[0];
+        if (f) onFile(f);
+      }}
+      className={
+        "w-full rounded-lg border-2 border-dashed text-center transition cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-sage-navy/40 "
+        + (compact ? "px-4 py-3 " : "px-4 py-5 ")
+        + (over ? "border-sage-navy bg-sage-navy/5" : "border-gray-200 bg-gray-50/60 hover:border-sage-navy/50 hover:bg-sage-navy/[0.03]")
+      }
+    >
+      <span className={"flex items-center justify-center gap-3 " + (compact ? "" : "flex-col sm:flex-row")}>
+        <span className="inline-flex items-center justify-center w-9 h-9 rounded-full bg-white border border-gray-200 text-sage-navy">
+          <UploadIcon size={16} />
+        </span>
+        <span className="text-left">
+          <span className="block text-sm font-semibold text-sage-navy">{label}</span>
+          <span className="block text-xs text-gray-500">Drag a file here or click to browse · PDF, JPG or PNG, up to 10 MB</span>
+        </span>
+      </span>
+    </button>
   );
 }
 

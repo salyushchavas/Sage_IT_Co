@@ -34,7 +34,7 @@ export interface OnboardingLayoutProps {
   /** Page-specific content (the form card, etc.). */
   children: ReactNode;
   /** Max width of the inner content area. Defaults to {@code 2xl}. */
-  contentMaxWidth?: "xl" | "2xl" | "3xl";
+  contentMaxWidth?: "xl" | "2xl" | "3xl" | "5xl";
   /** Override the default 9-step lifecycle labels (used by the quick-signup 2-step flow). */
   steps?: ReadonlyArray<string>;
 }
@@ -43,6 +43,7 @@ const MAX_WIDTH_CLASS: Record<NonNullable<OnboardingLayoutProps["contentMaxWidth
   xl: "max-w-xl",
   "2xl": "max-w-2xl",
   "3xl": "max-w-3xl",
+  "5xl": "max-w-5xl",
 };
 
 export default function OnboardingLayout({
