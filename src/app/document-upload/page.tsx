@@ -74,7 +74,6 @@ const SLOTS: ReadonlyArray<SlotConfig> = [
 const PHOTO_ID_SLOTS = SLOTS.filter((s) => s.photoId);
 const REQUIRED_SLOTS = SLOTS.filter((s) => s.required && !s.photoId);
 const OPTIONAL_SLOTS = SLOTS.filter((s) => !s.required);
-const PHOTO_ID_LABEL = "Driver's License or State ID";
 
 function formatBytes(bytes: number | null | undefined): string {
   if (!bytes && bytes !== 0) return "—";
@@ -316,11 +315,6 @@ function DocumentUploadPageInner() {
   };
 
   // ── Render ───────────────────────────────────────────────────
-
-  const missingNames = [
-    ...(photoIdSatisfied ? [] : [PHOTO_ID_LABEL]),
-    ...missingRequired.map((s) => s.label),
-  ];
 
   /** One requirement's state, for its card and the checklist. */
   const requirementState = (met: boolean, waiting: boolean): { label: string; tone: Tone } =>
@@ -703,16 +697,12 @@ function DocumentUploadPageInner() {
             )}
           </div>
 
-          <footer className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 px-5 sm:px-7 py-4 border-t border-gray-100 bg-gray-50/70 rounded-b-2xl">
-            <p className="min-w-0 flex-1 text-xs text-gray-600">
-              {missingCount === 0 ? (
-                <span className="inline-flex items-center gap-1.5 text-emerald-700 font-medium">
-                  <CheckCircle2 size={14} /> All required documents are in.
-                </span>
-              ) : (
-                <>Still needed: <span className="font-semibold text-gray-800">{missingNames.join(", ")}</span></>
-              )}
-            </p>
+          <footer className="flex flex-col sm:flex-row sm:items-center sm:justify-end gap-3 px-5 sm:px-7 py-4 border-t border-gray-100 bg-gray-50/70 rounded-b-2xl">
+            {missingCount === 0 && (
+              <p className="sm:mr-auto inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700">
+                <CheckCircle2 size={14} /> All required documents are in.
+              </p>
+            )}
             <div className="flex flex-col-reverse sm:flex-row gap-2 shrink-0 whitespace-nowrap">
               <button
                 type="button"
