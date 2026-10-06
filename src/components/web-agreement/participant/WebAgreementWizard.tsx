@@ -3275,11 +3275,6 @@ function FieldInput({
   if (field.type === "file") {
     return null;
   }
-  // The number of cheques isn't typed: it follows the cheque list below
-  // (one to start, "Add another cheque" for more).
-  if (field.key === "securityCheckCount") {
-    return null;
-  }
   if (field.type === "textarea") {
     control = (
       <textarea
