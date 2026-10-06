@@ -25,7 +25,8 @@ import static org.mockito.Mockito.*;
 /**
  * The participant's side of the website agreement: they only ever reach
  * their own agreement, the console's status guards and revision scope
- * hold, submit stamps and emails the owner ERM, consent is recorded once,
+ * hold, submit stamps the signing record (no email is sent), consent is
+ * recorded once,
  * and uploads are checked like the console's.
  */
 class WebAgreementParticipantServiceTest {
@@ -42,8 +43,6 @@ class WebAgreementParticipantServiceTest {
     private final List<User> users = new ArrayList<>();
     private WebAgreementEventService events;
     private WebAgreementFileService files;
-    private EmailTemplateService emails;
-    private WebAgreementSettings settings;
     private WebAgreementParticipantService service;
     private MockHttpServletRequest request;
 
@@ -63,12 +62,8 @@ class WebAgreementParticipantServiceTest {
         when(userRepo.findAll()).thenAnswer(inv -> List.copyOf(users));
         events = mock(WebAgreementEventService.class);
         files = mock(WebAgreementFileService.class);
-        emails = mock(EmailTemplateService.class);
-        when(emails.sendWebAgreementSignedEmail(any(), any())).thenReturn(true);
-        settings = mock(WebAgreementSettings.class);
-        when(settings.emailsEnabled()).thenReturn(true);
         service = new WebAgreementParticipantService(repo, events, files, mock(WebAgreementRenderer.class),
-                mock(AgreementContentService.class), mock(AgreementDocumentService.class), emails, userRepo, settings);
+                mock(AgreementContentService.class), mock(AgreementDocumentService.class), userRepo);
 
         users.add(user(PAT, "pat@x.com", "PARTICIPANT", true));
         users.add(user(ERM, "erm@sage.test", "ERM", true));
@@ -205,43 +200,6 @@ class WebAgreementParticipantServiceTest {
         assertFalse(out.getConsultantCopyReleased());
         verify(events).append(eq(a.getId()), eq(WebAgreementEvent.EventType.SIGNED),
                 eq(WebAgreementEvent.ActorType.PARTICIPANT), eq(PAT), anyMap(), same(request));
-        User erm = users.get(1);
-        verify(emails).sendWebAgreementSignedEmail(a, erm);
-        verify(events).append(eq(a.getId()), eq(WebAgreementEvent.EventType.EMAIL_SENT),
-                eq(WebAgreementEvent.ActorType.SYSTEM), isNull(), anyMap(), isNull());
-    }
-
-    @Test
-    void anInactiveOwnerHandsTheReviewToAnOperationsAdmin() throws Exception {
-        agreement("SUBMITTED");
-        users.get(1).setIsActive(false);
-        User ops = user(30L, "ops@sage.test", "OPERATIONS_ADMIN", true);
-        users.add(user(31L, "sys@sage.test", "SYSTEM_ADMIN", true));
-        users.add(ops);
-        when(files.storeSignature(any(), any(), any())).thenReturn("sig");
-        service.submit(PAT, SIG, SIG, "Pat Lee", request);
-        verify(emails).sendWebAgreementSignedEmail(any(), eq(ops));
-    }
-
-    @Test
-    void withEmailsOffTheSubmitTellsNobody() throws Exception {
-        WebAgreement a = agreement("SUBMITTED");
-        when(settings.emailsEnabled()).thenReturn(false);
-        when(files.storeSignature(any(), any(), any())).thenReturn("sig");
-        service.submit(PAT, SIG, SIG, "Pat Lee", request);
-        assertEquals("VERIFIED", a.getStatus());
-        verifyNoInteractions(emails);
-        verify(events, never()).append(anyLong(), eq(WebAgreementEvent.EventType.EMAIL_SENT),
-                any(), any(), anyMap(), any());
-    }
-
-    @Test
-    void aFailedEmailNeverUndoesTheSubmit() throws Exception {
-        WebAgreement a = agreement("SUBMITTED");
-        when(files.storeSignature(any(), any(), any())).thenReturn("sig");
-        when(emails.sendWebAgreementSignedEmail(any(), any())).thenThrow(new RuntimeException("smtp down"));
-        service.submit(PAT, SIG, SIG, "Pat Lee", request);
-        assertEquals("VERIFIED", a.getStatus());
         verify(events, never()).append(anyLong(), eq(WebAgreementEvent.EventType.EMAIL_SENT),
                 any(), any(), anyMap(), any());
     }
@@ -259,7 +217,6 @@ class WebAgreementParticipantServiceTest {
         assertTrue(e.isMissingFinalSignature());
         assertEquals("SUBMITTED", a.getStatus());
         verify(files, never()).storeSignature(any(), any(), any());
-        verifyNoInteractions(emails);
     }
 
     @Test

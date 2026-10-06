@@ -59,9 +59,6 @@ import static com.spire.backend.service.WebAgreementRules.blankToNull;
 @Slf4j
 public class WebAgreementStaffService {
 
-    /** Thrown inside an email block so a failed email isn't logged as EMAIL_SENT. */
-    private static final String EMAIL_NOT_SENT = "the email wasn't sent (see the email log)";
-
     /** Website roles that work on agreements. */
     static final Set<String> STAFF = Set.of("ERM", "OPERATIONS_ADMIN", "SYSTEM_ADMIN");
 
@@ -73,10 +70,8 @@ public class WebAgreementStaffService {
     private final WebAgreementFileService fileService;
     private final WebAgreementRenderer renderer;
     private final MasterAgreementService masterAgreementService;
-    private final EmailTemplateService emailTemplateService;
     private final UserRepository userRepository;
     private final AgreementRequestRepository agreementRequestRepository;
-    private final WebAgreementSettings settings;
 
     /** Detaches list rows before their PII is removed (open-in-view is on). */
     @PersistenceContext
@@ -166,17 +161,14 @@ public class WebAgreementStaffService {
         public String customScopeNotes;
         public String portalAuthorizedActions;
         public String portalRevocationContact;
-        // Intro for the participant's email; blank means the default copy.
-        public String emailPretext;
     }
 
     /**
      * Starts an agreement (the console's createApplication). The participant
      * must exist, be a participant with an active account and have signed
      * the consent; refused (409) when they already have an open website
-     * agreement or an open console agreement for their email. The caller
-     * owns it; status SUBMITTED, effective today. The participant is emailed
-     * that it's ready to fill; a failed email never undoes the create.
+     * agreement. The caller owns it; status SUBMITTED, effective today. The
+     * participant finds it on their dashboard (no email is sent).
      */
     @Transactional
     public WebAgreement create(CreateBody body, Long callerId, HttpServletRequest request) {
@@ -251,7 +243,6 @@ public class WebAgreementStaffService {
                 .customScopeNotes(blankToNull(body.customScopeNotes))
                 .portalAuthorizedActions(blankToNull(body.portalAuthorizedActions))
                 .portalRevocationContact(blankToNull(body.portalRevocationContact))
-                .emailPretext(blankToNull(body.emailPretext))
                 // The effective date is the creation date.
                 .effectiveDate(LocalDateTime.now().toLocalDate())
                 .status(WebAgreement.Status.SUBMITTED.name())
@@ -266,17 +257,6 @@ public class WebAgreementStaffService {
                         "participantUserId", participant.getId()),
                 request);
 
-        if (settings.emailsEnabled()) {
-            try {
-                if (!emailTemplateService.sendWebAgreementReadyToFill(a)) {
-                    throw new IllegalStateException(EMAIL_NOT_SENT);
-                }
-                emailSent(a, "web_agreement_ready_to_fill", null);
-            } catch (Exception e) {
-                log.warn("Failed to send the ready-to-fill email for web agreement {}: {}",
-                        a.getApplicationId(), e.getMessage());
-            }
-        }
         return a;
     }
 
@@ -319,7 +299,6 @@ public class WebAgreementStaffService {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("application", decorateRevokeState(a));
         view.put("events", eventService.list(a.getId()));
-        view.put("emailsEnabled", settings.emailsEnabled());
         return view;
     }
 
@@ -340,7 +319,7 @@ public class WebAgreementStaffService {
         }
     }
 
-    // ── Cancel, resend, contact ──────────────────────────────────────
+    // ── Cancel, contact ──────────────────────────────────────────────
 
     /** Ends the agreement (anything but COMPLETED). No email, like the console. */
     @Transactional
@@ -364,42 +343,9 @@ public class WebAgreementStaffService {
     }
 
     /**
-     * Emails the participant again that their agreement is ready to fill.
-     * Only while they still need to complete it (SUBMITTED or
-     * REVISION_REQUESTED, else 409). A failed email is reported (409).
-     */
-    @Transactional
-    public void resend(String applicationId, Long callerId, HttpServletRequest request) {
-        WebAgreement a = requireAccess(applicationId, callerId);
-        String status = a.getStatus();
-        if (!WebAgreementRules.isParticipantWritable(status)) {
-            throw new IllegalStateException(
-                    "The invitation can only be resent while the consultant still "
-                            + "needs to complete the form (status=" + status + ").");
-        }
-        if (!settings.emailsEnabled()) {
-            throw new IllegalStateException(
-                    "Emails are switched off for website agreements for now, so there's nothing to resend.");
-        }
-        try {
-            if (!emailTemplateService.sendWebAgreementReadyToFill(a)) {
-                throw new IllegalStateException(EMAIL_NOT_SENT);
-            }
-        } catch (Exception e) {
-            throw new IllegalStateException("Couldn't resend invite: " + e.getMessage());
-        }
-        eventService.append(a.getId(),
-                WebAgreementEvent.EventType.INVITE_RESENT,
-                WebAgreementEvent.ActorType.ERM, callerId,
-                Map.of("to", a.getConsultantEmail()),
-                request);
-        emailSent(a, "invite_resend", request);
-    }
-
-    /**
-     * The owner fixes a wrong participant email / name (future emails and
-     * renders use it). Allowed in SUBMITTED, VERIFIED, REVISION_REQUESTED
-     * and COMPLETED; 409 otherwise. No email, no re-invite.
+     * The owner fixes a wrong participant email / name (the agreement and
+     * its renders use it). Allowed in SUBMITTED, VERIFIED, REVISION_REQUESTED
+     * and COMPLETED; 409 otherwise. No email is sent.
      */
     @Transactional
     public WebAgreement updateContact(String applicationId, String consultantEmail, String consultantName,
@@ -451,7 +397,7 @@ public class WebAgreementStaffService {
      * then open their section too: ACH debit → appendix2, rate card →
      * main-agreement, Phase-2 deliverables period → appendix1. The selected
      * sections' "I understand" ticks are re-armed, the old state is frozen
-     * for a take-back, and the participant is emailed.
+     * for a take-back; the participant sees the request on their dashboard.
      */
     @Transactional
     public WebAgreement requestRevision(String applicationId, JsonNode sections,
@@ -551,7 +497,7 @@ public class WebAgreementStaffService {
         }
         a.setRevisionSections(arr.toString());
 
-        // The summary drives the participant email and the wizard banner.
+        // The summary is the participant's wizard banner.
         String summary = WebAgreementRules.buildRevisionSummary(selectedKeys, notes);
         a.setCurrentRevisionRemarks(summary);
 
@@ -569,7 +515,6 @@ public class WebAgreementStaffService {
                 Map.of("selectedSections", selectedKeys,
                         "revisionCount", a.getRevisionCount()),
                 request);
-        notifyRevision(a, summary);
         return a;
     }
 
@@ -623,7 +568,6 @@ public class WebAgreementStaffService {
                 Map.of("signatureRevision", true,
                         "revisionCount", a.getRevisionCount()),
                 request);
-        notifyRevision(a, summary);
         return a;
     }
 
@@ -692,22 +636,7 @@ public class WebAgreementStaffService {
                         "documents", String.join(",", keys),
                         "revisionCount", a.getRevisionCount()),
                 request);
-        notifyRevision(a, summary);
         return a;
-    }
-
-    /** The "revision requested" email; a failure is logged, never undoing the request. */
-    private void notifyRevision(WebAgreement a, String summary) {
-        if (!settings.emailsEnabled()) return;
-        try {
-            if (!emailTemplateService.sendWebAgreementRevisionRequest(a, summary == null ? "" : summary)) {
-                throw new IllegalStateException(EMAIL_NOT_SENT);
-            }
-            emailSent(a, "web_agreement_revision_request", null);
-        } catch (Exception e) {
-            log.warn("Failed to notify the participant of a revision request for {}: {}",
-                    a.getApplicationId(), e.getMessage());
-        }
     }
 
     // ── Take back a change request sent by mistake ───────────────────
@@ -1002,17 +931,6 @@ public class WebAgreementStaffService {
                         "revertedErmCorrections", String.join(", ", revertedCorrections)),
                 request);
 
-        if (settings.emailsEnabled()) {
-            try {
-                if (!emailTemplateService.sendWebAgreementRevisionWithdrawn(a)) {
-                    throw new IllegalStateException(EMAIL_NOT_SENT);
-                }
-                emailSent(a, "web_agreement_revision_withdrawn", null);
-            } catch (Exception e) {
-                log.warn("Failed to notify the participant of a withdrawn revision for {}: {}",
-                        a.getApplicationId(), e.getMessage());
-            }
-        }
         return a;
     }
 
@@ -1068,17 +986,6 @@ public class WebAgreementStaffService {
                 Map.of("revisionCount", a.getRevisionCount() == null ? 0 : a.getRevisionCount()),
                 request);
 
-        if (settings.emailsEnabled()) {
-            try {
-                if (!emailTemplateService.sendWebAgreementVerifiedEmail(a)) {
-                    throw new IllegalStateException(EMAIL_NOT_SENT);
-                }
-                emailSent(a, "web_agreement_verified", null);
-            } catch (Exception e) {
-                log.warn("Couldn't tell the participant their web agreement {} is verified: {}",
-                        a.getApplicationId(), e.getMessage());
-            }
-        }
         return a;
     }
 
@@ -1121,16 +1028,6 @@ public class WebAgreementStaffService {
     }
 
     // ── Helpers ──────────────────────────────────────────────────────
-
-    /** Audits a participant email that went out (SYSTEM actor). */
-    private void emailSent(WebAgreement a, String template, HttpServletRequest request) {
-        eventService.append(a.getId(),
-                WebAgreementEvent.EventType.EMAIL_SENT,
-                WebAgreementEvent.ActorType.SYSTEM, null,
-                Map.of("template", template,
-                        "to", a.getConsultantEmail() == null ? "" : a.getConsultantEmail()),
-                request);
-    }
 
     private static void validateRequired(String field, String value) {
         if (value == null || value.isBlank()) {

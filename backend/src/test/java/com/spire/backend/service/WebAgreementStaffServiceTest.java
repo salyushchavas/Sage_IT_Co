@@ -58,13 +58,10 @@ class WebAgreementStaffServiceTest {
     private final List<WebAgreement> agreements = new ArrayList<>();
     private final List<WebAgreementEvent> events = new ArrayList<>();
     private final List<User> users = new ArrayList<>();
-    /** Website-agreement emails; on for most tests so the email paths stay covered. */
-    private boolean emailsOn = true;
     private final List<AgreementRequest> requests = new ArrayList<>();
     private final java.util.Set<Long> notAsked = new java.util.HashSet<>();
     private AgreementRequestRepository requestRepo;
     private final ObjectMapper mapper = new ObjectMapper();
-    private EmailTemplateService emails;
     private WebAgreementRenderer renderer;
     private WebAgreementRepository repo;
     private EntityManager entityManager;
@@ -146,19 +143,12 @@ class WebAgreementStaffServiceTest {
         ProgramSelectionRepository programs = mock(ProgramSelectionRepository.class);
         when(programs.findFirstByUserIdOrderBySelectionDateDesc(anyLong())).thenReturn(Optional.empty());
 
-        emails = mock(EmailTemplateService.class);
-        when(emails.sendWebAgreementReadyToFill(any())).thenReturn(true);
-        when(emails.sendWebAgreementRevisionRequest(any(), any())).thenReturn(true);
-        when(emails.sendWebAgreementRevisionWithdrawn(any())).thenReturn(true);
-        when(emails.sendWebAgreementVerifiedEmail(any())).thenReturn(true);
         renderer = mock(WebAgreementRenderer.class);
 
-        WebAgreementSettings settings = mock(WebAgreementSettings.class);
-        when(settings.emailsEnabled()).thenAnswer(inv -> emailsOn);
         MasterAgreementService master = new MasterAgreementService(requestRepo, repo, userRepo,
-                programs, emails, mock(RecordService.class), settings);
+                programs, mock(RecordService.class));
         service = new WebAgreementStaffService(repo, new WebAgreementEventService(eventRepo),
-                mock(WebAgreementFileService.class), renderer, master, emails, userRepo, requestRepo, settings);
+                mock(WebAgreementFileService.class), renderer, master, userRepo, requestRepo);
         entityManager = mock(EntityManager.class);
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
@@ -288,16 +278,7 @@ class WebAgreementStaffServiceTest {
         assertEquals("ERM", created.getActorType());
         assertEquals(ERM, created.getActorUserId(), "the real users.id, not a sentinel");
         assertEquals("203.0.113.9", created.getIpAddress());
-        verify(emails).sendWebAgreementReadyToFill(a);
-        assertEquals(1, eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).size());
-    }
-
-    @Test
-    void aFailedEmailNeverUndoesTheCreate() {
-        when(emails.sendWebAgreementReadyToFill(any())).thenReturn(false);
-        WebAgreement a = service.create(body().b, ERM, request);
-        assertEquals("SUBMITTED", a.getStatus());
-        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty());
+        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty(), "no email is sent");
     }
 
     @Test
@@ -338,7 +319,6 @@ class WebAgreementStaffServiceTest {
         pat.setAgreementComplete(false);
         assertThrows(IllegalStateException.class, () -> service.create(body().b, ERM, request));
         assertTrue(agreements.isEmpty());
-        verifyNoInteractions(emails);
     }
 
     @Test
@@ -348,7 +328,6 @@ class WebAgreementStaffServiceTest {
                 () -> service.create(body().b, ERM, request));
         assertTrue(e.getMessage().contains("inactive"));
         assertTrue(agreements.isEmpty());
-        verifyNoInteractions(emails);
     }
 
     @Test
@@ -370,7 +349,6 @@ class WebAgreementStaffServiceTest {
                 () -> service.create(body().b, ERM, request));
         assertTrue(e.getMessage().contains("asked"));
         assertTrue(agreements.isEmpty());
-        verifyNoInteractions(emails);
     }
 
     @Test
@@ -490,7 +468,7 @@ class WebAgreementStaffServiceTest {
         assertEquals("VERIFIED", out.getRevisionPrevStatus());
         assertNotNull(out.getRevisionUndoSnapshot());
         assertEquals(ERM, eventsOf(a, WebAgreementEvent.EventType.REVISION_REQUESTED).get(0).getActorUserId());
-        verify(emails).sendWebAgreementRevisionRequest(eq(a), eq(out.getCurrentRevisionRemarks()));
+        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty(), "no email is sent");
     }
 
     @Test
@@ -591,7 +569,7 @@ class WebAgreementStaffServiceTest {
         assertNull(out.getRevisionPrevStatus());
         WebAgreementEvent revoked = eventsOf(a, WebAgreementEvent.EventType.REVISION_REVOKED).get(0);
         assertTrue(revoked.getMetadata().contains("Rate amount 1"));
-        verify(emails).sendWebAgreementRevisionWithdrawn(a);
+        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty(), "no email is sent");
     }
 
     @Test
@@ -645,7 +623,7 @@ class WebAgreementStaffServiceTest {
         assertNotNull(shown.getRevisionRevokeBlockedReason());
     }
 
-    // ── Verify, cancel, resend, contact, preview ─────────────────────
+    // ── Verify, cancel, contact, preview ─────────────────────────────
 
     @Test
     void verifyIsAOneTimeStepOnASignedAgreement() {
@@ -660,7 +638,7 @@ class WebAgreementStaffServiceTest {
         assertNotNull(out.getConsultantCopyReleasedAt());
         assertEquals("20", out.getConsultantCopyReleasedBy());
         assertEquals(ERM, eventsOf(a, WebAgreementEvent.EventType.VERIFIED).get(0).getActorUserId());
-        verify(emails).sendWebAgreementVerifiedEmail(a);
+        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty(), "no email is sent");
 
         assertThrows(IllegalStateException.class, () -> service.verify(a.getApplicationId(), ERM, request));
     }
@@ -678,40 +656,6 @@ class WebAgreementStaffServiceTest {
         WebAgreement done = signed();
         done.setStatus("COMPLETED");
         assertThrows(IllegalStateException.class, () -> service.cancel(done.getApplicationId(), ERM, request));
-    }
-
-    @Test
-    void resendOnlyWhileTheParticipantIsFillingAndAFailureIsReported() {
-        WebAgreement a = signed();
-        assertThrows(IllegalStateException.class, () -> service.resend(a.getApplicationId(), ERM, request));
-
-        a.setStatus("SUBMITTED");
-        service.resend(a.getApplicationId(), ERM, request);
-        verify(emails).sendWebAgreementReadyToFill(a);
-        assertEquals(1, eventsOf(a, WebAgreementEvent.EventType.INVITE_RESENT).size());
-        assertEquals(1, eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).size());
-
-        when(emails.sendWebAgreementReadyToFill(any())).thenReturn(false);
-        IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.resend(a.getApplicationId(), ERM, request));
-        assertTrue(e.getMessage().startsWith("Couldn't resend invite"));
-    }
-
-    @Test
-    void withEmailsOffNothingIsSentAndThereIsNothingToResend() throws Exception {
-        emailsOn = false;
-        WebAgreement a = service.create(body().b, ERM, request);
-        IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.resend(a.getApplicationId(), ERM, request));
-        assertTrue(e.getMessage().contains("switched off"));
-        a.setStatus("VERIFIED");
-        service.requestRevision(a.getApplicationId(), sections("[{\"key\":\"appendix2\"}]"),
-                null, null, null, null, null, null, null, ERM, request);
-        service.revokeRevision(a.getApplicationId(), ERM, request);
-        service.verify(a.getApplicationId(), ERM, request);
-        verifyNoInteractions(emails);
-        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty());
-        assertEquals(false, service.detail(a.getApplicationId(), ERM).get("emailsEnabled"));
     }
 
     @Test

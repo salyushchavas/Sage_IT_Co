@@ -49,7 +49,7 @@ public class WebAgreement {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    /** UUID -- the only identifier used in ERM URLs and emails. */
+    /** UUID -- the only identifier used in ERM URLs. */
     @Column(name = "application_id", nullable = false, length = 64, unique = true)
     private String applicationId;
 
@@ -193,7 +193,7 @@ public class WebAgreement {
     @Column(name = "technology_track") private String technologyTrack;
     @Column(name = "custom_scope_notes", columnDefinition = "TEXT") private String customScopeNotes;
 
-    /** Optional ERM-authored intro for the "ready to fill" email. */
+    /** Kept from the console's data model; unused (the website agreement sends no email). */
     @Column(name = "email_pretext", columnDefinition = "TEXT") private String emailPretext;
 
     // ── Appendix 1: Phase 2 employment ───────────────────────────────

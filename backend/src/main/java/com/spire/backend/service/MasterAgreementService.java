@@ -11,7 +11,6 @@ import com.spire.backend.repository.UserRepository;
 import com.spire.backend.repository.WebAgreementRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -29,8 +28,7 @@ import java.util.stream.Collectors;
  * starts the agreement from the ERM dashboard's Agreements tab
  * ({@link WebAgreementStaffService}) and the participant fills and signs it
  * inside the website. It never reads or writes the office's agreements
- * console, and sends no emails until the two are merged
- * ({@link WebAgreementSettings}).
+ * console and sends no emails.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,12 +42,7 @@ public class MasterAgreementService {
     private final WebAgreementRepository webAgreementRepository;
     private final UserRepository userRepository;
     private final ProgramSelectionRepository programSelectionRepository;
-    private final EmailTemplateService emailTemplateService;
     private final RecordService recordService;
-    private final WebAgreementSettings settings;
-
-    @Value("${app.url:https://sageitco.com}")
-    private String appUrl;
 
     /** Where the agreement is, in its five steps. */
     public record Progress(int step, String stage, boolean yourTurn) {}
@@ -113,8 +106,7 @@ public class MasterAgreementService {
 
     /**
      * "I'm ready to sign the agreement": records it once. The participant then
-     * shows on the ERM dashboard's Agreements tab; the website ERMs are only
-     * emailed once website-agreement emails are switched on.
+     * shows on the ERM dashboard's Agreements tab (no email is sent).
      */
     @Transactional
     public Map<String, Object> request(Long userId) {
@@ -126,15 +118,6 @@ public class MasterAgreementService {
             requestRepository.save(AgreementRequest.builder().userId(userId).build());
             recordService.record(userId, "AGREEMENT_REQUESTED", RecordService.Category.ACCOUNT,
                     "Ready to sign the agreement", "The participant asked for their agreement", Map.of());
-            // Every active ERM (no ERM is assigned yet at this point), like the documents check.
-            for (User erm : settings.emailsEnabled() ? userRepository.findAll() : List.<User>of()) {
-                if (Boolean.FALSE.equals(erm.getIsActive()) || !"ERM".equals(roleOf(erm))) continue;
-                try {
-                    emailTemplateService.sendWebAgreementRequestedEmail(erm, user);
-                } catch (Exception e) {
-                    log.warn("Couldn't tell ERM {} about participant {}: {}", erm.getId(), userId, e.getMessage());
-                }
-            }
         }
         return status(userId);
     }
@@ -197,10 +180,6 @@ public class MasterAgreementService {
                 ps == null ? null : ps.getProgram(),
                 ps == null ? null : ps.getTargetJobTitle(),
                 requestedAt);
-    }
-
-    private static String roleOf(User u) {
-        return u.getRole() == null || u.getRole().getName() == null ? "" : u.getRole().getName().toUpperCase();
     }
 
     private User user(Long id) {

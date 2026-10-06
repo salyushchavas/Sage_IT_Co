@@ -12,7 +12,6 @@ import com.spire.backend.repository.UserRepository;
 import com.spire.backend.repository.WebAgreementRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.springframework.test.util.ReflectionTestUtils;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -29,17 +28,14 @@ import static org.mockito.Mockito.*;
  * The real agreement step: after the consent, "I'm ready to sign the
  * agreement"; the website ERMs start it from the participant's details and
  * the dashboard follows the website agreement. The office's agreements
- * console is never read, and no email goes out until website-agreement
- * emails are switched on.
+ * console is never read, and nothing is emailed.
  */
 class MasterAgreementTest {
 
     private final List<AgreementRequest> requests = new ArrayList<>();
     private final List<WebAgreement> webAgreements = new ArrayList<>();
     private final List<User> users = new ArrayList<>();
-    private EmailTemplateService emails;
     private MasterAgreementService service;
-    private boolean emailsOn;
     private User pat;
 
     @BeforeEach
@@ -79,12 +75,7 @@ class MasterAgreementTest {
         when(programs.findFirstByUserIdOrderBySelectionDateDesc(10L)).thenReturn(Optional.of(ProgramSelection.builder()
                 .userId(10L).program("Career Development Program").skillset("Cloud & DevOps")
                 .targetJobTitle("DevOps Engineer").build()));
-        emails = mock(EmailTemplateService.class);
-        WebAgreementSettings settings = mock(WebAgreementSettings.class);
-        when(settings.emailsEnabled()).thenAnswer(inv -> emailsOn);
-        service = new MasterAgreementService(requestRepo, webRepo, userRepo, programs, emails,
-                mock(RecordService.class), settings);
-        ReflectionTestUtils.setField(service, "appUrl", "https://portal.test");
+        service = new MasterAgreementService(requestRepo, webRepo, userRepo, programs, mock(RecordService.class));
     }
 
     private static User staff(long id, String role, boolean active) {
@@ -110,41 +101,15 @@ class MasterAgreementTest {
         pat.setAgreementComplete(false);
         assertThrows(IllegalStateException.class, () -> service.request(10L));
         assertTrue(requests.isEmpty());
-        verifyNoInteractions(emails);
     }
 
     @Test
-    void readyIsRecordedOnceAndNobodyIsEmailedWhileEmailsAreOff() {
+    void readyIsRecordedOnce() {
         Map<String, Object> s = service.request(10L);
         assertEquals(true, s.get("requested"));
         assertNull(s.get("agreement"));
         service.request(10L);
         assertEquals(1, requests.size(), "once");
-        verifyNoInteractions(emails);
-    }
-
-    @Test
-    void onceEmailsAreOnActiveWebsiteErmsAreTold() {
-        emailsOn = true;
-        service.request(10L);
-        verify(emails).sendWebAgreementRequestedEmail(argThat(u -> u.getId() == 20L), eq(pat));
-        verify(emails).sendWebAgreementRequestedEmail(argThat(u -> u.getId() == 21L), eq(pat));
-        // Not the inactive ERM, the admins or the participant; never the console's users.
-        verify(emails, times(2)).sendWebAgreementRequestedEmail(any(), any());
-        verify(emails, never()).sendAgreementRequestedEmail(any(), any(), any(), any());
-        service.request(10L);
-        assertEquals(1, requests.size(), "once");
-        verify(emails, times(2)).sendWebAgreementRequestedEmail(any(), any());
-    }
-
-    @Test
-    void oneErmsEmailFailingDoesNotStopTheOthers() {
-        emailsOn = true;
-        when(emails.sendWebAgreementRequestedEmail(argThat(u -> u != null && u.getId() == 20L), any()))
-                .thenThrow(new RuntimeException("smtp down"));
-        service.request(10L);
-        verify(emails).sendWebAgreementRequestedEmail(argThat(u -> u.getId() == 21L), eq(pat));
-        assertEquals(1, requests.size());
     }
 
     @Test

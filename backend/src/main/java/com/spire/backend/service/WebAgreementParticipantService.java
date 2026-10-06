@@ -36,19 +36,13 @@ import static com.spire.backend.service.WebAgreementRules.Doc;
  * is no link expiry, and every event carries their users.id.
  *
  * Status rules, revision scope, upload rules and the submit gate are the
- * console's ({@link WebAgreementRules}). On submit the owner ERM is emailed
- * (an active Operations / System admin when the owner can't be).
+ * console's ({@link WebAgreementRules}). Nothing is emailed: the owner ERM
+ * sees the signed agreement on their Agreements tab.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class WebAgreementParticipantService {
-
-    /** Thrown inside the email block so a failed email isn't logged as EMAIL_SENT. */
-    private static final String EMAIL_NOT_SENT = "the email wasn't sent (see the email log)";
-
-    /** Who gets the "signed" email when the owner ERM can't (first match wins). */
-    private static final List<String> FALLBACK_REVIEWER_ROLES = List.of("OPERATIONS_ADMIN", "SYSTEM_ADMIN");
 
     private final WebAgreementRepository agreementRepository;
     private final WebAgreementEventService eventService;
@@ -56,9 +50,7 @@ public class WebAgreementParticipantService {
     private final WebAgreementRenderer renderer;
     private final AgreementContentService agreementContentService;
     private final AgreementDocumentService agreementDocumentService;
-    private final EmailTemplateService emailTemplateService;
     private final UserRepository userRepository;
-    private final WebAgreementSettings settings;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -234,8 +226,8 @@ public class WebAgreementParticipantService {
      * primary signature may be reused when one is stored (a restricted
      * revision); the closing signature is always drawn again. Missing
      * content throws {@link IncompleteSubmissionException} (400 with the
-     * missing keys). The owner ERM is emailed; an email failure never undoes
-     * the submit.
+     * missing keys). No email is sent; the owner ERM sees it on their
+     * Agreements tab.
      */
     @Transactional
     public WebAgreement submit(Long userId,
@@ -318,51 +310,7 @@ public class WebAgreementParticipantService {
                         "ip", ip == null ? "" : ip),
                 request);
 
-        if (settings.emailsEnabled()) {
-            try {
-                User reviewer = reviewer(a);
-                if (!emailTemplateService.sendWebAgreementSignedEmail(a, reviewer)) {
-                    throw new IllegalStateException(EMAIL_NOT_SENT);
-                }
-                eventService.append(a.getId(),
-                        WebAgreementEvent.EventType.EMAIL_SENT,
-                        WebAgreementEvent.ActorType.SYSTEM, null,
-                        Map.of("template", "web_agreement_signed", "to", reviewer.getEmail()),
-                        null);
-            } catch (Exception e) {
-                log.warn("Failed to notify the ERM after web agreement submit for {}: {}",
-                        a.getApplicationId(), e.getMessage());
-            }
-        }
         return a;
-    }
-
-    /**
-     * Who reviews a signed agreement: the owner ERM while active; else the
-     * first active Operations admin, else System admin. Null when nobody.
-     */
-    private User reviewer(WebAgreement a) {
-        if (a.getOwnerUserId() != null) {
-            User owner = userRepository.findById(a.getOwnerUserId()).orElse(null);
-            if (canReceive(owner)) return owner;
-        }
-        List<User> everyone = userRepository.findAll();
-        for (String role : FALLBACK_REVIEWER_ROLES) {
-            for (User u : everyone) {
-                if (canReceive(u) && role.equals(roleOf(u))) return u;
-            }
-        }
-        return null;
-    }
-
-    private static boolean canReceive(User u) {
-        return u != null && !Boolean.FALSE.equals(u.getIsActive())
-                && u.getEmail() != null && !u.getEmail().isBlank();
-    }
-
-    private static String roleOf(User u) {
-        return u.getRole() == null || u.getRole().getName() == null
-                ? "" : u.getRole().getName().toUpperCase();
     }
 
     // ── Preview ──────────────────────────────────────────────────────

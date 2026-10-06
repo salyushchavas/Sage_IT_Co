@@ -26,7 +26,7 @@ public class WebAgreementEventService {
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
-    /** Appends one event. {@code request} may be null (system-side events such as EMAIL_SENT). */
+    /** Appends one event. {@code request} may be null (system-side events). */
     public WebAgreementEvent append(Long agreementId,
                                     WebAgreementEvent.EventType type,
                                     WebAgreementEvent.ActorType actorType,
