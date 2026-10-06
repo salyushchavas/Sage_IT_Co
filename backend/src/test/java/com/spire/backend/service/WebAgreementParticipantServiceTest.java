@@ -43,6 +43,7 @@ class WebAgreementParticipantServiceTest {
     private WebAgreementEventService events;
     private WebAgreementFileService files;
     private EmailTemplateService emails;
+    private WebAgreementSettings settings;
     private WebAgreementParticipantService service;
     private MockHttpServletRequest request;
 
@@ -64,8 +65,10 @@ class WebAgreementParticipantServiceTest {
         files = mock(WebAgreementFileService.class);
         emails = mock(EmailTemplateService.class);
         when(emails.sendWebAgreementSignedEmail(any(), any())).thenReturn(true);
+        settings = mock(WebAgreementSettings.class);
+        when(settings.emailsEnabled()).thenReturn(true);
         service = new WebAgreementParticipantService(repo, events, files, mock(WebAgreementRenderer.class),
-                mock(AgreementContentService.class), mock(AgreementDocumentService.class), emails, userRepo);
+                mock(AgreementContentService.class), mock(AgreementDocumentService.class), emails, userRepo, settings);
 
         users.add(user(PAT, "pat@x.com", "PARTICIPANT", true));
         users.add(user(ERM, "erm@sage.test", "ERM", true));
@@ -218,6 +221,18 @@ class WebAgreementParticipantServiceTest {
         when(files.storeSignature(any(), any(), any())).thenReturn("sig");
         service.submit(PAT, SIG, SIG, "Pat Lee", request);
         verify(emails).sendWebAgreementSignedEmail(any(), eq(ops));
+    }
+
+    @Test
+    void withEmailsOffTheSubmitTellsNobody() throws Exception {
+        WebAgreement a = agreement("SUBMITTED");
+        when(settings.emailsEnabled()).thenReturn(false);
+        when(files.storeSignature(any(), any(), any())).thenReturn("sig");
+        service.submit(PAT, SIG, SIG, "Pat Lee", request);
+        assertEquals("VERIFIED", a.getStatus());
+        verifyNoInteractions(emails);
+        verify(events, never()).append(anyLong(), eq(WebAgreementEvent.EventType.EMAIL_SENT),
+                any(), any(), anyMap(), any());
     }
 
     @Test

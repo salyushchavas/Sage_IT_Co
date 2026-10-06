@@ -1,13 +1,11 @@
 package com.spire.backend.service;
 
 import com.spire.backend.entity.AgreementRequest;
-import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ProgramSelection;
 import com.spire.backend.entity.User;
 import com.spire.backend.entity.WebAgreement;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.AgreementRequestRepository;
-import com.spire.backend.repository.ConsultantApplicationRepository;
 import com.spire.backend.repository.ProgramSelectionRepository;
 import com.spire.backend.repository.UserRepository;
 import com.spire.backend.repository.WebAgreementRepository;
@@ -25,35 +23,30 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
-import static com.spire.backend.entity.ConsultantApplication.Status;
-
 /**
  * The real agreement step for participants: after the program consent,
  * the participant clicks "I'm ready to sign the agreement"; a website ERM
  * starts the agreement from the ERM dashboard's Agreements tab
  * ({@link WebAgreementStaffService}) and the participant fills and signs it
- * inside the website. Agreements already started in the console are still
- * followed (read-only, by email) until they finish; the console itself is
- * unchanged.
+ * inside the website. It never reads or writes the office's agreements
+ * console, and sends no emails until the two are merged
+ * ({@link WebAgreementSettings}).
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class MasterAgreementService {
 
-    /** Console statuses that end an agreement without it being signed; a new one can be started. */
-    private static final Set<String> CLOSED = Set.of(Status.CANCELLED.name(), Status.EXPIRED.name());
-
     /** Where the participant fills and signs a website agreement. */
     static final String WEBSITE_LINK = "/dashboard/agreement";
 
     private final AgreementRequestRepository requestRepository;
-    private final ConsultantApplicationRepository applicationRepository;
     private final WebAgreementRepository webAgreementRepository;
     private final UserRepository userRepository;
     private final ProgramSelectionRepository programSelectionRepository;
     private final EmailTemplateService emailTemplateService;
     private final RecordService recordService;
+    private final WebAgreementSettings settings;
 
     @Value("${app.url:https://sageitco.com}")
     private String appUrl;
@@ -61,25 +54,11 @@ public class MasterAgreementService {
     /** Where the agreement is, in its five steps. */
     public record Progress(int step, String stage, boolean yourTurn) {}
 
-    /** The console's five-step pipeline, from the participant's side. */
-    static Progress progressOf(String status) {
-        if (status == null) return new Progress(1, "Sent to you", true);
-        return switch (Status.valueOf(status)) {
-            case DRAFT, SUBMITTED -> new Progress(1, "Ready for you to fill and sign", true);
-            case REVISION_REQUESTED -> new Progress(1, "Changes requested: please update and sign again", true);
-            case UPDATED, VERIFIED -> new Progress(2, "Signed by you; your ERM is checking it", false);
-            case AWAITING_APPROVALS, APPROVAL_REVISION_REQUESTED -> new Progress(3, "Internal approval", false);
-            case READY_TO_SIGN -> new Progress(4, "Waiting for the countersignature", false);
-            case SIGNED, COMPLETED -> new Progress(5, "Executed", false);
-            case CANCELLED, EXPIRED -> new Progress(0, "Closed", false);
-        };
-    }
-
     /**
      * The website agreement's steps, from the participant's side. VERIFIED
      * is split by the ERM's verify: signed and being checked (step 2), or
      * verified (step 3, internal approval comes next). The approval and
-     * countersign statuses aren't used yet; they read like the console's.
+     * countersign statuses aren't used yet.
      */
     static Progress websiteProgressOf(WebAgreement agreement) {
         String status = agreement.getStatus();
@@ -97,13 +76,6 @@ public class MasterAgreementService {
         };
     }
 
-    /** The participant's current agreement in the console, if one was started (newest open one). */
-    Optional<ConsultantApplication> consoleAgreementFor(String email) {
-        if (email == null || email.isBlank()) return Optional.empty();
-        return applicationRepository.findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(email.trim())
-                .stream().filter(a -> !CLOSED.contains(a.getStatus())).findFirst();
-    }
-
     /** The participant's current website agreement (newest live, non-cancelled one). */
     Optional<WebAgreement> websiteAgreementFor(Long userId) {
         if (userId == null) return Optional.empty();
@@ -111,11 +83,7 @@ public class MasterAgreementService {
                 .stream().filter(a -> !WebAgreement.Status.CANCELLED.name().equals(a.getStatus())).findFirst();
     }
 
-    /**
-     * What the participant's dashboard shows for the agreement step. An open
-     * console agreement is shown exactly as before (source CONSOLE); otherwise
-     * the open website agreement (source WEBSITE).
-     */
+    /** What the participant's dashboard shows for the agreement step (their website agreement). */
     @Transactional(readOnly = true)
     public Map<String, Object> status(Long userId) {
         User user = user(userId);
@@ -124,16 +92,9 @@ public class MasterAgreementService {
         Optional<AgreementRequest> request = requestRepository.findByUserId(userId);
         out.put("requested", request.isPresent());
         out.put("requestedAt", request.map(AgreementRequest::getRequestedAt).orElse(null));
-        Optional<ConsultantApplication> console = consoleAgreementFor(user.getEmail());
-        if (console.isPresent()) {
-            ConsultantApplication a = console.get();
-            out.put("agreement", agreementView(progressOf(a.getStatus()), "CONSOLE",
-                    appUrl + "/consultant/" + a.getApplicationId() + "/login", a.getUpdatedAt()));
-        } else {
-            out.put("agreement", websiteAgreementFor(userId)
-                    .map(a -> agreementView(websiteProgressOf(a), "WEBSITE", WEBSITE_LINK, a.getUpdatedAt()))
-                    .orElse(null));
-        }
+        out.put("agreement", websiteAgreementFor(userId)
+                .map(a -> agreementView(websiteProgressOf(a), "WEBSITE", WEBSITE_LINK, a.getUpdatedAt()))
+                .orElse(null));
         return out;
     }
 
@@ -150,7 +111,11 @@ public class MasterAgreementService {
         return ag;
     }
 
-    /** "I'm ready to sign the agreement": records it once and tells the website ERMs. */
+    /**
+     * "I'm ready to sign the agreement": records it once. The participant then
+     * shows on the ERM dashboard's Agreements tab; the website ERMs are only
+     * emailed once website-agreement emails are switched on.
+     */
     @Transactional
     public Map<String, Object> request(Long userId) {
         User user = user(userId);
@@ -162,7 +127,7 @@ public class MasterAgreementService {
             recordService.record(userId, "AGREEMENT_REQUESTED", RecordService.Category.ACCOUNT,
                     "Ready to sign the agreement", "The participant asked for their agreement", Map.of());
             // Every active ERM (no ERM is assigned yet at this point), like the documents check.
-            for (User erm : userRepository.findAll()) {
+            for (User erm : settings.emailsEnabled() ? userRepository.findAll() : List.<User>of()) {
                 if (Boolean.FALSE.equals(erm.getIsActive()) || !"ERM".equals(roleOf(erm))) continue;
                 try {
                     emailTemplateService.sendWebAgreementRequestedEmail(erm, user);
@@ -180,9 +145,8 @@ public class MasterAgreementService {
                            String targetJobTitle, LocalDateTime requestedAt) {}
 
     /**
-     * Participants who asked for their agreement and have no open one yet:
-     * no live, non-cancelled website agreement, and no open console agreement
-     * for their email (read-only).
+     * Participants who asked for their agreement and have no open one yet
+     * (no live, non-cancelled website agreement).
      */
     @Transactional(readOnly = true)
     public List<ReadyRow> readyForAgreement() {
@@ -199,7 +163,6 @@ public class MasterAgreementService {
                 .map(r -> userRepository.findById(r.getUserId()).map(u -> Map.entry(r, u)).orElse(null))
                 .filter(java.util.Objects::nonNull)
                 .filter(e -> !Boolean.FALSE.equals(e.getValue().getIsActive()))
-                .filter(e -> consoleAgreementFor(e.getValue().getEmail()).isEmpty())
                 .map(e -> readyRow(e.getValue(), e.getKey().getRequestedAt()))
                 .toList();
     }
@@ -216,7 +179,7 @@ public class MasterAgreementService {
         Optional<AgreementRequest> request = u == null ? Optional.empty() : requestRepository.findByUserId(userId);
         if (u == null || u.getParticipantId() == null || u.getParticipantId().isBlank()
                 || Boolean.FALSE.equals(u.getIsActive()) || request.isEmpty()
-                || websiteAgreementFor(userId).isPresent() || consoleAgreementFor(u.getEmail()).isPresent()) {
+                || websiteAgreementFor(userId).isPresent()) {
             throw new ResourceNotFoundException("This participant isn't waiting for an agreement.");
         }
         return readyRow(u, request.get().getRequestedAt());

@@ -76,6 +76,7 @@ public class WebAgreementStaffService {
     private final EmailTemplateService emailTemplateService;
     private final UserRepository userRepository;
     private final AgreementRequestRepository agreementRequestRepository;
+    private final WebAgreementSettings settings;
 
     /** Detaches list rows before their PII is removed (open-in-view is on). */
     @PersistenceContext
@@ -210,11 +211,6 @@ public class WebAgreementStaffService {
             throw new IllegalStateException("This participant already has an open agreement.");
         }
         String email = body.consultantEmail.trim().toLowerCase();
-        if (masterAgreementService.consoleAgreementFor(participant.getEmail()).isPresent()
-                || masterAgreementService.consoleAgreementFor(email).isPresent()) {
-            throw new IllegalStateException(
-                    "This participant already has an open agreement in the agreements console.");
-        }
 
         // Structured name; consultant_name is First + Middle? + Last.
         String fn = blankToNull(body.firstName);
@@ -270,14 +266,16 @@ public class WebAgreementStaffService {
                         "participantUserId", participant.getId()),
                 request);
 
-        try {
-            if (!emailTemplateService.sendWebAgreementReadyToFill(a)) {
-                throw new IllegalStateException(EMAIL_NOT_SENT);
+        if (settings.emailsEnabled()) {
+            try {
+                if (!emailTemplateService.sendWebAgreementReadyToFill(a)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
+                emailSent(a, "web_agreement_ready_to_fill", null);
+            } catch (Exception e) {
+                log.warn("Failed to send the ready-to-fill email for web agreement {}: {}",
+                        a.getApplicationId(), e.getMessage());
             }
-            emailSent(a, "web_agreement_ready_to_fill", null);
-        } catch (Exception e) {
-            log.warn("Failed to send the ready-to-fill email for web agreement {}: {}",
-                    a.getApplicationId(), e.getMessage());
         }
         return a;
     }
@@ -321,6 +319,7 @@ public class WebAgreementStaffService {
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("application", decorateRevokeState(a));
         view.put("events", eventService.list(a.getId()));
+        view.put("emailsEnabled", settings.emailsEnabled());
         return view;
     }
 
@@ -377,6 +376,10 @@ public class WebAgreementStaffService {
             throw new IllegalStateException(
                     "The invitation can only be resent while the consultant still "
                             + "needs to complete the form (status=" + status + ").");
+        }
+        if (!settings.emailsEnabled()) {
+            throw new IllegalStateException(
+                    "Emails are switched off for website agreements for now, so there's nothing to resend.");
         }
         try {
             if (!emailTemplateService.sendWebAgreementReadyToFill(a)) {
@@ -695,6 +698,7 @@ public class WebAgreementStaffService {
 
     /** The "revision requested" email; a failure is logged, never undoing the request. */
     private void notifyRevision(WebAgreement a, String summary) {
+        if (!settings.emailsEnabled()) return;
         try {
             if (!emailTemplateService.sendWebAgreementRevisionRequest(a, summary == null ? "" : summary)) {
                 throw new IllegalStateException(EMAIL_NOT_SENT);
@@ -998,14 +1002,16 @@ public class WebAgreementStaffService {
                         "revertedErmCorrections", String.join(", ", revertedCorrections)),
                 request);
 
-        try {
-            if (!emailTemplateService.sendWebAgreementRevisionWithdrawn(a)) {
-                throw new IllegalStateException(EMAIL_NOT_SENT);
+        if (settings.emailsEnabled()) {
+            try {
+                if (!emailTemplateService.sendWebAgreementRevisionWithdrawn(a)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
+                emailSent(a, "web_agreement_revision_withdrawn", null);
+            } catch (Exception e) {
+                log.warn("Failed to notify the participant of a withdrawn revision for {}: {}",
+                        a.getApplicationId(), e.getMessage());
             }
-            emailSent(a, "web_agreement_revision_withdrawn", null);
-        } catch (Exception e) {
-            log.warn("Failed to notify the participant of a withdrawn revision for {}: {}",
-                    a.getApplicationId(), e.getMessage());
         }
         return a;
     }
@@ -1062,14 +1068,16 @@ public class WebAgreementStaffService {
                 Map.of("revisionCount", a.getRevisionCount() == null ? 0 : a.getRevisionCount()),
                 request);
 
-        try {
-            if (!emailTemplateService.sendWebAgreementVerifiedEmail(a)) {
-                throw new IllegalStateException(EMAIL_NOT_SENT);
+        if (settings.emailsEnabled()) {
+            try {
+                if (!emailTemplateService.sendWebAgreementVerifiedEmail(a)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
+                emailSent(a, "web_agreement_verified", null);
+            } catch (Exception e) {
+                log.warn("Couldn't tell the participant their web agreement {} is verified: {}",
+                        a.getApplicationId(), e.getMessage());
             }
-            emailSent(a, "web_agreement_verified", null);
-        } catch (Exception e) {
-            log.warn("Couldn't tell the participant their web agreement {} is verified: {}",
-                    a.getApplicationId(), e.getMessage());
         }
         return a;
     }

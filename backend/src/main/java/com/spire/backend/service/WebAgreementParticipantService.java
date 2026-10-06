@@ -58,6 +58,7 @@ public class WebAgreementParticipantService {
     private final AgreementDocumentService agreementDocumentService;
     private final EmailTemplateService emailTemplateService;
     private final UserRepository userRepository;
+    private final WebAgreementSettings settings;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -317,19 +318,21 @@ public class WebAgreementParticipantService {
                         "ip", ip == null ? "" : ip),
                 request);
 
-        try {
-            User reviewer = reviewer(a);
-            if (!emailTemplateService.sendWebAgreementSignedEmail(a, reviewer)) {
-                throw new IllegalStateException(EMAIL_NOT_SENT);
+        if (settings.emailsEnabled()) {
+            try {
+                User reviewer = reviewer(a);
+                if (!emailTemplateService.sendWebAgreementSignedEmail(a, reviewer)) {
+                    throw new IllegalStateException(EMAIL_NOT_SENT);
+                }
+                eventService.append(a.getId(),
+                        WebAgreementEvent.EventType.EMAIL_SENT,
+                        WebAgreementEvent.ActorType.SYSTEM, null,
+                        Map.of("template", "web_agreement_signed", "to", reviewer.getEmail()),
+                        null);
+            } catch (Exception e) {
+                log.warn("Failed to notify the ERM after web agreement submit for {}: {}",
+                        a.getApplicationId(), e.getMessage());
             }
-            eventService.append(a.getId(),
-                    WebAgreementEvent.EventType.EMAIL_SENT,
-                    WebAgreementEvent.ActorType.SYSTEM, null,
-                    Map.of("template", "web_agreement_signed", "to", reviewer.getEmail()),
-                    null);
-        } catch (Exception e) {
-            log.warn("Failed to notify the ERM after web agreement submit for {}: {}",
-                    a.getApplicationId(), e.getMessage());
         }
         return a;
     }

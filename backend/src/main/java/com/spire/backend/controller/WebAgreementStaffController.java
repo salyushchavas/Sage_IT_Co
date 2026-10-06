@@ -7,6 +7,7 @@ import com.spire.backend.service.MasterAgreementService;
 import com.spire.backend.service.WebAgreementFileService;
 import com.spire.backend.service.WebAgreementRenderer;
 import com.spire.backend.service.WebAgreementRules;
+import com.spire.backend.service.WebAgreementSettings;
 import com.spire.backend.service.WebAgreementStaffService;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
@@ -47,6 +48,13 @@ public class WebAgreementStaffController {
     private static final String DOC_PATHS = "{doc:workauth|offer-letter|dl-doc|state-id-doc|ssn-doc}";
 
     private final WebAgreementStaffService staffService;
+    private final WebAgreementSettings settings;
+
+    /** What the screens need to know: whether website-agreement emails are on. */
+    @GetMapping("/settings")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> settings() {
+        return ResponseEntity.ok(ApiResponse.success(Map.of("emailsEnabled", settings.emailsEnabled())));
+    }
 
     // ── Participants ready for their agreement ───────────────────────
 

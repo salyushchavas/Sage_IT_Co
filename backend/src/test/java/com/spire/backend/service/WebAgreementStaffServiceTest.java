@@ -58,7 +58,8 @@ class WebAgreementStaffServiceTest {
     private final List<WebAgreement> agreements = new ArrayList<>();
     private final List<WebAgreementEvent> events = new ArrayList<>();
     private final List<User> users = new ArrayList<>();
-    private final List<ConsultantApplication> consoleAgreements = new ArrayList<>();
+    /** Website-agreement emails; on for most tests so the email paths stay covered. */
+    private boolean emailsOn = true;
     private final List<AgreementRequest> requests = new ArrayList<>();
     private final java.util.Set<Long> notAsked = new java.util.HashSet<>();
     private AgreementRequestRepository requestRepo;
@@ -133,10 +134,6 @@ class WebAgreementStaffServiceTest {
                             .toList();
                 });
 
-        ConsultantApplicationRepository consoleRepo = mock(ConsultantApplicationRepository.class);
-        when(consoleRepo.findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(anyString()))
-                .thenAnswer(inv -> consoleAgreements.stream()
-                        .filter(a -> a.getConsultantEmail().equalsIgnoreCase(inv.getArgument(0))).toList());
         AgreementRequestRepository requestRepo = mock(AgreementRequestRepository.class);
         when(requestRepo.findAllByOrderByRequestedAtAsc()).thenAnswer(inv -> List.copyOf(requests));
         when(requestRepo.findByUserId(anyLong())).thenAnswer(inv -> requests.stream()
@@ -156,10 +153,12 @@ class WebAgreementStaffServiceTest {
         when(emails.sendWebAgreementVerifiedEmail(any())).thenReturn(true);
         renderer = mock(WebAgreementRenderer.class);
 
-        MasterAgreementService master = new MasterAgreementService(requestRepo, consoleRepo, repo, userRepo,
-                programs, emails, mock(RecordService.class));
+        WebAgreementSettings settings = mock(WebAgreementSettings.class);
+        when(settings.emailsEnabled()).thenAnswer(inv -> emailsOn);
+        MasterAgreementService master = new MasterAgreementService(requestRepo, repo, userRepo,
+                programs, emails, mock(RecordService.class), settings);
         service = new WebAgreementStaffService(repo, new WebAgreementEventService(eventRepo),
-                mock(WebAgreementFileService.class), renderer, master, emails, userRepo, requestRepo);
+                mock(WebAgreementFileService.class), renderer, master, emails, userRepo, requestRepo, settings);
         entityManager = mock(EntityManager.class);
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
@@ -313,22 +312,10 @@ class WebAgreementStaffServiceTest {
     }
 
     @Test
-    void anOpenConsoleAgreementForTheirEmailIsRefused() {
-        ConsultantApplication console = ConsultantApplication.builder().applicationId("console-1")
-                .consultantEmail("pat.lee@x.com").status("SUBMITTED").ermUserId(0L).build();
-        consoleAgreements.add(console);
-        IllegalStateException e = assertThrows(IllegalStateException.class,
-                () -> service.create(body().b, ERM, request));
-        assertTrue(e.getMessage().contains("agreements console"));
-
-        // Also when the ERM typed a different address that the console has.
-        console.setConsultantEmail("pat.personal@x.com");
-        CreateBuilder typed = body();
-        typed.b.consultantEmail = "pat.personal@x.com";
-        assertThrows(IllegalStateException.class, () -> service.create(typed.b, ERM, request));
-
-        console.setStatus("CANCELLED");
-        assertDoesNotThrow(() -> service.create(typed.b, ERM, request));
+    void theOfficeConsoleIsNeverConsulted() {
+        // The website copy has no contact with the office's agreements console:
+        // creating needs only the website's own records.
+        assertDoesNotThrow(() -> service.create(body().b, ERM, request));
     }
 
     @Test
@@ -418,9 +405,8 @@ class WebAgreementStaffServiceTest {
         pat.setIsActive(false);
         assertThrows(ResourceNotFoundException.class, () -> service.request(ERM, PAT), "inactive");
         pat.setIsActive(true);
-        consoleAgreements.add(ConsultantApplication.builder().applicationId("console-1")
-                .consultantEmail("pat.lee@x.com").status("SUBMITTED").ermUserId(0L).build());
-        assertThrows(ResourceNotFoundException.class, () -> service.request(ERM, PAT), "open in the console");
+        service.create(body().b, ERM, request);
+        assertThrows(ResourceNotFoundException.class, () -> service.request(ERM, PAT), "already started");
     }
 
     // ── Who sees what ────────────────────────────────────────────────
@@ -709,6 +695,23 @@ class WebAgreementStaffServiceTest {
         IllegalStateException e = assertThrows(IllegalStateException.class,
                 () -> service.resend(a.getApplicationId(), ERM, request));
         assertTrue(e.getMessage().startsWith("Couldn't resend invite"));
+    }
+
+    @Test
+    void withEmailsOffNothingIsSentAndThereIsNothingToResend() throws Exception {
+        emailsOn = false;
+        WebAgreement a = service.create(body().b, ERM, request);
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> service.resend(a.getApplicationId(), ERM, request));
+        assertTrue(e.getMessage().contains("switched off"));
+        a.setStatus("VERIFIED");
+        service.requestRevision(a.getApplicationId(), sections("[{\"key\":\"appendix2\"}]"),
+                null, null, null, null, null, null, null, ERM, request);
+        service.revokeRevision(a.getApplicationId(), ERM, request);
+        service.verify(a.getApplicationId(), ERM, request);
+        verifyNoInteractions(emails);
+        assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty());
+        assertEquals(false, service.detail(a.getApplicationId(), ERM).get("emailsEnabled"));
     }
 
     @Test

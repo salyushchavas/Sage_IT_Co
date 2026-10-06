@@ -1,14 +1,12 @@
 package com.spire.backend.service;
 
 import com.spire.backend.entity.AgreementRequest;
-import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.ProgramSelection;
 import com.spire.backend.entity.Role;
 import com.spire.backend.entity.User;
 import com.spire.backend.entity.WebAgreement;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.AgreementRequestRepository;
-import com.spire.backend.repository.ConsultantApplicationRepository;
 import com.spire.backend.repository.ProgramSelectionRepository;
 import com.spire.backend.repository.UserRepository;
 import com.spire.backend.repository.WebAgreementRepository;
@@ -29,19 +27,19 @@ import static org.mockito.Mockito.*;
 
 /**
  * The real agreement step: after the consent, "I'm ready to sign the
- * agreement"; the website ERMs are told and start it from the participant's
- * details. The participant's dashboard follows an agreement already open in
- * the console (read-only, by email) exactly as before, otherwise the
- * website agreement.
+ * agreement"; the website ERMs start it from the participant's details and
+ * the dashboard follows the website agreement. The office's agreements
+ * console is never read, and no email goes out until website-agreement
+ * emails are switched on.
  */
 class MasterAgreementTest {
 
     private final List<AgreementRequest> requests = new ArrayList<>();
-    private final List<ConsultantApplication> agreements = new ArrayList<>();
     private final List<WebAgreement> webAgreements = new ArrayList<>();
     private final List<User> users = new ArrayList<>();
     private EmailTemplateService emails;
     private MasterAgreementService service;
+    private boolean emailsOn;
     private User pat;
 
     @BeforeEach
@@ -69,10 +67,6 @@ class MasterAgreementTest {
             requests.add(r);
             return r;
         });
-        ConsultantApplicationRepository appRepo = mock(ConsultantApplicationRepository.class);
-        when(appRepo.findByConsultantEmailIgnoreCaseAndDeletedFalseOrderByCreatedAtDesc(anyString()))
-                .thenAnswer(inv -> agreements.stream()
-                        .filter(a -> a.getConsultantEmail().equalsIgnoreCase(inv.getArgument(0))).toList());
         WebAgreementRepository webRepo = mock(WebAgreementRepository.class);
         when(webRepo.findByParticipantUserIdAndDeletedFalseOrderByCreatedAtDesc(anyLong()))
                 .thenAnswer(inv -> webAgreements.stream()
@@ -86,21 +80,16 @@ class MasterAgreementTest {
                 .userId(10L).program("Career Development Program").skillset("Cloud & DevOps")
                 .targetJobTitle("DevOps Engineer").build()));
         emails = mock(EmailTemplateService.class);
-        service = new MasterAgreementService(requestRepo, appRepo, webRepo, userRepo, programs, emails,
-                mock(RecordService.class));
+        WebAgreementSettings settings = mock(WebAgreementSettings.class);
+        when(settings.emailsEnabled()).thenAnswer(inv -> emailsOn);
+        service = new MasterAgreementService(requestRepo, webRepo, userRepo, programs, emails,
+                mock(RecordService.class), settings);
         ReflectionTestUtils.setField(service, "appUrl", "https://portal.test");
     }
 
     private static User staff(long id, String role, boolean active) {
         return User.builder().id(id).email("staff" + id + "@sage.test").fullName("Staff " + id)
                 .role(Role.builder().name(role).build()).isActive(active).build();
-    }
-
-    private ConsultantApplication agreement(String status) {
-        ConsultantApplication a = ConsultantApplication.builder().applicationId("app-" + agreements.size())
-                .consultantEmail("pat.lee@x.com").status(status).ermUserId(0L).build();
-        agreements.add(0, a);   // newest first, as the repository returns them
-        return a;
     }
 
     private WebAgreement webAgreement(String status) {
@@ -117,19 +106,6 @@ class MasterAgreementTest {
     }
 
     @Test
-    void theConsolesFiveStepsReadPlainlyForTheParticipant() {
-        assertEquals(1, MasterAgreementService.progressOf("SUBMITTED").step());
-        assertTrue(MasterAgreementService.progressOf("SUBMITTED").yourTurn());
-        assertTrue(MasterAgreementService.progressOf("REVISION_REQUESTED").yourTurn());
-        assertEquals(2, MasterAgreementService.progressOf("VERIFIED").step());
-        assertEquals(3, MasterAgreementService.progressOf("AWAITING_APPROVALS").step());
-        assertEquals(3, MasterAgreementService.progressOf("APPROVAL_REVISION_REQUESTED").step());
-        assertEquals(4, MasterAgreementService.progressOf("READY_TO_SIGN").step());
-        assertEquals(5, MasterAgreementService.progressOf("COMPLETED").step());
-        assertFalse(MasterAgreementService.progressOf("VERIFIED").yourTurn());
-    }
-
-    @Test
     void readyNeedsTheConsentFirst() {
         pat.setAgreementComplete(false);
         assertThrows(IllegalStateException.class, () -> service.request(10L));
@@ -138,10 +114,19 @@ class MasterAgreementTest {
     }
 
     @Test
-    void readyIsRecordedOnceAndActiveWebsiteErmsAreTold() {
+    void readyIsRecordedOnceAndNobodyIsEmailedWhileEmailsAreOff() {
         Map<String, Object> s = service.request(10L);
         assertEquals(true, s.get("requested"));
         assertNull(s.get("agreement"));
+        service.request(10L);
+        assertEquals(1, requests.size(), "once");
+        verifyNoInteractions(emails);
+    }
+
+    @Test
+    void onceEmailsAreOnActiveWebsiteErmsAreTold() {
+        emailsOn = true;
+        service.request(10L);
         verify(emails).sendWebAgreementRequestedEmail(argThat(u -> u.getId() == 20L), eq(pat));
         verify(emails).sendWebAgreementRequestedEmail(argThat(u -> u.getId() == 21L), eq(pat));
         // Not the inactive ERM, the admins or the participant; never the console's users.
@@ -154,6 +139,7 @@ class MasterAgreementTest {
 
     @Test
     void oneErmsEmailFailingDoesNotStopTheOthers() {
+        emailsOn = true;
         when(emails.sendWebAgreementRequestedEmail(argThat(u -> u != null && u.getId() == 20L), any()))
                 .thenThrow(new RuntimeException("smtp down"));
         service.request(10L);
@@ -182,7 +168,7 @@ class MasterAgreementTest {
     }
 
     @Test
-    void anOpenAgreementHereOrInTheConsoleTakesThemOffTheList() {
+    void anOpenWebsiteAgreementTakesThemOffTheList() {
         service.request(10L);
         WebAgreement web = webAgreement("SUBMITTED");
         assertTrue(service.readyForAgreement().isEmpty(), "started on the website");
@@ -190,32 +176,8 @@ class MasterAgreementTest {
         web.setStatus("CANCELLED");
         assertEquals(1, service.readyForAgreement().size(), "a cancelled one doesn't count");
 
-        ConsultantApplication console = agreement("VERIFIED");
-        assertTrue(service.readyForAgreement().isEmpty(), "open in the console");
-        console.setStatus("CANCELLED");
-        assertEquals(1, service.readyForAgreement().size());
-
         pat.setIsActive(false);
         assertTrue(service.readyForAgreement().isEmpty(), "inactive accounts aren't listed");
-    }
-
-    @Test
-    void theDashboardFollowsTheConsoleAgreement() {
-        service.request(10L);
-        ConsultantApplication a = agreement("SUBMITTED");
-        Map<String, Object> ag = shown();
-        assertEquals(1, ag.get("step"));
-        assertEquals(true, ag.get("yourTurn"));
-        assertEquals("CONSOLE", ag.get("source"));
-        assertEquals("https://portal.test/consultant/" + a.getApplicationId() + "/login", ag.get("link"));
-
-        a.setStatus("COMPLETED");
-        Map<String, Object> done = shown();
-        assertEquals(5, done.get("step"));
-        assertEquals(true, done.get("executed"));
-
-        a.setStatus("CANCELLED");
-        assertNull(service.status(10L).get("agreement"), "a cancelled one doesn't count");
     }
 
     @Test
@@ -248,13 +210,5 @@ class MasterAgreementTest {
 
         a.setStatus("CANCELLED");
         assertNull(service.status(10L).get("agreement"), "a cancelled one is no agreement");
-    }
-
-    @Test
-    void anOpenConsoleAgreementWinsOverAWebsiteOne() {
-        webAgreement("SUBMITTED");
-        agreement("VERIFIED");
-        assertEquals("CONSOLE", shown().get("source"));
-        assertEquals(2, shown().get("step"));
     }
 }
