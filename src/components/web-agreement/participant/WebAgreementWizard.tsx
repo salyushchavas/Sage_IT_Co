@@ -202,6 +202,55 @@ function buildInitialState(app: WebAgreement | null): FormState {
   };
 }
 
+// ── Where the participant left off (this device) ──────────────
+// The fields autosave to the server as they're typed. The step they were
+// on, the signatures they drew and the legal name they typed are kept here
+// until they submit, so closing and reopening the agreement continues
+// exactly there instead of asking them to draw again.
+interface ResumeDraft {
+  step: number;
+  signature: string | null;
+  finalSignature: string | null;
+  signedLegalName: string;
+}
+
+function draftKey(applicationId: string): string {
+  return `sage-web-agreement-draft:${applicationId}`;
+}
+
+function readDraft(applicationId: string): ResumeDraft | null {
+  try {
+    const raw = localStorage.getItem(draftKey(applicationId));
+    if (!raw) return null;
+    const d = JSON.parse(raw) as Partial<ResumeDraft>;
+    return {
+      step: Number.isInteger(d.step) ? (d.step as number) : 0,
+      signature: typeof d.signature === "string" && d.signature.startsWith("data:image/") ? d.signature : null,
+      finalSignature: typeof d.finalSignature === "string" && d.finalSignature.startsWith("data:image/")
+        ? d.finalSignature : null,
+      signedLegalName: typeof d.signedLegalName === "string" ? d.signedLegalName : "",
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDraft(applicationId: string, draft: ResumeDraft) {
+  try {
+    localStorage.setItem(draftKey(applicationId), JSON.stringify(draft));
+  } catch {
+    // Storage full or blocked: resuming just starts at the first unfinished step.
+  }
+}
+
+function clearDraft(applicationId: string) {
+  try {
+    localStorage.removeItem(draftKey(applicationId));
+  } catch {
+    // Nothing to clear.
+  }
+}
+
 // ── Section completeness ──────────────────────────────────────
 
 function isFieldValueValid(field: SectionField, value: string): boolean {
@@ -759,6 +808,13 @@ export default function WebAgreementWizard() {
         if (isPhase2Restricted(data)) {
           initial.signature = null;
         }
+        // Continue where they left off on this device (cleared on submit).
+        const draft = readDraft(data.applicationId);
+        if (draft) {
+          if (draft.signature) initial.signature = draft.signature;
+          if (draft.finalSignature) initial.finalSignature = draft.finalSignature;
+          if (draft.signedLegalName.trim()) initial.signedLegalName = draft.signedLegalName;
+        }
         setForm(initial);
         lastSavedRef.current = { ...initial };
         const entries = parseChequeList(data.cheques);
@@ -791,9 +847,11 @@ export default function WebAgreementWizard() {
         const loadedDl = Boolean(data.dlDocS3Key);
         const loadedStateId = Boolean(data.stateIdDocS3Key);
         const loadedSsn = Boolean(data.ssnDocS3Key);
-        setCurrentStep(firstIncompleteIndex(
+        const resumeAt = firstIncompleteIndex(
             loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer,
-            loadedDl, loadedStateId, loadedSsn));
+            loadedDl, loadedStateId, loadedSsn);
+        // The step they were on, unless it's past what they may open yet.
+        setCurrentStep(draft ? Math.max(0, Math.min(draft.step, resumeAt)) : resumeAt);
       })
       .catch((e) => {
         if (cancelled) return;
@@ -1363,16 +1421,24 @@ export default function WebAgreementWizard() {
   // on — off Review onto some earlier appendix the instant they hit
   // Submit. Re-anchor to the section they were actually looking at.
   const prevVisibleRef = useRef(visibleSections);
+  const anchorReadyRef = useRef(false);
   useEffect(() => {
     const prev = prevVisibleRef.current;
     prevVisibleRef.current = visibleSections;
+    // The list built when the agreement loads isn't a change mid-flow: the
+    // step was just set for it (resuming where they left off), and
+    // re-anchoring from the empty pre-load list would jump them elsewhere.
+    if (!anchorReadyRef.current) {
+      if (app && !loading) anchorReadyRef.current = true;
+      return;
+    }
     // Same list (a plain step change) — nothing to re-anchor.
     if (prev === visibleSections || prev.length === visibleSections.length) return;
     const wasOn = prev[currentStep]?.id;
     if (!wasOn) return;
     const moved = visibleSections.findIndex((s) => s.id === wasOn);
     if (moved >= 0 && moved !== currentStep) setCurrentStep(moved);
-  }, [visibleSections, currentStep]);
+  }, [visibleSections, currentStep, app, loading]);
 
   // Submit ─────────────────────────────────────────────────────
   const handleSubmit = useCallback(async () => {
@@ -1435,6 +1501,7 @@ export default function WebAgreementWizard() {
       // "sent for verification" status screen. Dropping the redirect
       // gives the consultant immediate, in-place feedback that the
       // submit landed.
+      clearDraft(updated.applicationId);
       setApp(updated);
       setSubmitting(false);
       return;
@@ -1516,6 +1583,54 @@ export default function WebAgreementWizard() {
   // cannot land on it, see it in the navigator, or have it count
   // toward "Section X of N".
   const section = visibleSections[currentStep];
+
+  // Appendix 5 starts at two cheques; the participant can choose one or add more.
+  useEffect(() => {
+    if (section?.id !== "appendix5") return;
+    if (!(form.fields["securityCheckCount"] ?? "").trim()) {
+      setField("securityCheckCount", String(DEFAULT_CHEQUE_COUNT));
+    }
+    // Only when the section opens; the participant changes it from there.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [section?.id]);
+
+  // Keep where they are on this device until they submit (see ResumeDraft).
+  useEffect(() => {
+    if (!app || loading || !isFillableStatus(app.status)) return;
+    writeDraft(app.applicationId, {
+      step: currentStep,
+      signature: form.signature,
+      finalSignature: form.finalSignature,
+      signedLegalName: form.signedLegalName,
+    });
+  }, [app, loading, currentStep, form.signature, form.finalSignature, form.signedLegalName]);
+
+  // Closing or leaving the tab sends any edit still waiting for the 1.5 s
+  // autosave (and a pending cheque number), so nothing typed is lost.
+  const formRef = useRef(form);
+  formRef.current = form;
+  useEffect(() => {
+    const flush = () => {
+      if (debounceRef.current) {
+        clearTimeout(debounceRef.current);
+        debounceRef.current = null;
+      }
+      const patch = computeDelta(formRef.current);
+      if (Object.keys(patch).length > 0) {
+        void saveWebAgreementFill(patch, undefined, { keepalive: true }).catch(() => {});
+      }
+      void flushChequeRef.current();
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") flush();
+    };
+    window.addEventListener("pagehide", flush);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [computeDelta]);
   const sectionStatus = useMemo(
     () =>
       visibleSections.map((s, i) => {
@@ -3084,6 +3199,40 @@ function DateMaskInput({
 
 // ── Field input ──────────────────────────────────────────────
 
+/** Appendix 5 starts at this many cheques; the participant can choose fewer or more. */
+const DEFAULT_CHEQUE_COUNT = 2;
+
+/**
+ * Number of security cheques: one, two or more, with buttons instead of a
+ * free number (a typed number used to allow up to 50 cheque rows).
+ */
+function ChequeCountInput({ value, onChange, disabled }: {
+  value: string;
+  onChange: (value: string) => void;
+  disabled: boolean;
+}) {
+  const count = parseChequeCount(value) || DEFAULT_CHEQUE_COUNT;
+  const set = (n: number) => onChange(String(Math.max(1, Math.min(50, n))));
+  const btn =
+    "inline-flex items-center justify-center h-9 w-9 shrink-0 rounded-md border border-stone-300 bg-white text-[16px] "
+    + "text-stone-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer";
+  return (
+    <div className="flex flex-wrap items-center gap-2 min-w-0">
+      <button type="button" className={btn} disabled={disabled || count <= 1} onClick={() => set(count - 1)}
+        aria-label="One cheque fewer" title="One cheque fewer">
+        −
+      </button>
+      <span className="min-w-[5.5rem] text-center text-[14px] text-stone-900 tabular-nums" aria-live="polite">
+        {count} {count === 1 ? "cheque" : "cheques"}
+      </span>
+      <button type="button" className={btn} disabled={disabled || count >= 50} onClick={() => set(count + 1)}
+        aria-label="Add a cheque" title="Add a cheque">
+        +
+      </button>
+    </div>
+  );
+}
+
 function FieldInput({
   field,
   effectivelyRequired,
@@ -3153,7 +3302,9 @@ function FieldInput({
   if (field.type === "file") {
     return null;
   }
-  if (field.type === "textarea") {
+  if (field.key === "securityCheckCount") {
+    control = <ChequeCountInput value={value} onChange={onChange} disabled={ro} />;
+  } else if (field.type === "textarea") {
     control = (
       <textarea
         rows={3}

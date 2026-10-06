@@ -6814,11 +6814,14 @@ export async function recordWebAgreementConsent(): Promise<WebAgreement> {
 export async function saveWebAgreementFill(
   patch: WebAgreementFillPayload,
   signal?: AbortSignal,
+  opts: { keepalive?: boolean } = {},
 ): Promise<WebAgreement> {
   return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENT_ME}/fill`, {
     method: "PUT",
     body: JSON.stringify(patch),
     signal,
+    // keepalive lets the last edits still reach the server while the tab closes.
+    keepalive: opts.keepalive,
   });
 }
 
