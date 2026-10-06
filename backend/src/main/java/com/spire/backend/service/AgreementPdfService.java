@@ -135,9 +135,9 @@ public class AgreementPdfService {
      * caller can either ship them unmodified or overlay them onto a
      * letterhead.
      *
-     * Margins are sized to fit the Spire letterhead: ~140pt top
+     * Margins are sized to fit the Sage IT Co letterhead: ~140pt top
      * clears the logo + corner accents; ~100pt bottom clears the
-     * address footer; 65pt sides clear the teal corner trim.
+     * address footer; 65pt sides clear the edge trim.
      * No header / footer painting happens here — the letterhead
      * provides all branding when overlaid, so a second header bar
      * would just stack on top of the real one.
