@@ -2,11 +2,8 @@ package com.spire.backend.service;
 
 import com.lowagie.text.*;
 import com.lowagie.text.pdf.PdfContentByte;
-import com.lowagie.text.pdf.PdfImportedPage;
 import com.lowagie.text.pdf.PdfPCell;
 import com.lowagie.text.pdf.PdfPTable;
-import com.lowagie.text.pdf.PdfReader;
-import com.lowagie.text.pdf.PdfStamper;
 import com.lowagie.text.pdf.PdfWriter;
 import com.spire.backend.config.BrandConfig;
 import com.spire.backend.entity.AgreementAcceptance;
@@ -15,7 +12,6 @@ import com.spire.backend.service.TermsContentService.Section;
 import com.spire.backend.service.TermsContentService.TermsDocument;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.core.io.ClassPathResource;
 import org.springframework.stereotype.Service;
 
 import java.awt.Color;
@@ -32,13 +28,9 @@ import java.io.ByteArrayOutputStream;
  *
  * Layout strategy:
  *   1. Build the body content as a borderless A4 PDF in memory.
- *   2. If a letterhead template exists at
- *      {@code resources/templates/letterhead.pdf}, overlay each body
- *      page onto a copy of the letterhead (page 1 → first letterhead
- *      page; subsequent body pages → letterhead page 1 reused).
- *   3. If no letterhead template ships, write the body PDF directly
- *      with a native teal header / footer so the document still looks
- *      branded.
+ *   2. Draw the Sage IT Co letterhead under every page
+ *      ({@link LetterheadService}, the brand.letterhead-path file).
+ *   3. If no letterhead ships, the body PDF is used as it is.
  *
  * Files land at {@code signed-agreements/{userId}-{ts}.pdf} relative
  * to the working directory; same convention as the certificates
@@ -57,7 +49,6 @@ public class AgreementPdfService {
     // brandPrimary() reads the live brand config so a re-deploy under
     // a different brand swaps the PDF colour without code changes.
     private static final Color BRAND_FALLBACK = new Color(27, 42, 92);   // #1B2A5C
-    private static final Color TEAL_DARK = new Color(19, 78, 74);        // #134E4A (deep accent)
     private static final Color INK = new Color(31, 41, 55);
     private static final Color MUTED = new Color(107, 114, 128);
     private static final Color LIGHT_BG = new Color(249, 250, 251);
@@ -74,13 +65,13 @@ public class AgreementPdfService {
         }
     }
 
-    private static final String LETTERHEAD_PATH = "templates/letterhead.pdf";
 
     /** Checklist 5.3: signing times in business time (US Central), with the zone. */
     @org.springframework.beans.factory.annotation.Value("${app.business-zone:America/Chicago}")
     private String businessZone;
 
     private final TermsContentService termsContentService;
+    private final LetterheadService letterheadService;
 
     /**
      * Renders the SIGNED PDF for a verified acceptance row. The caller
@@ -117,16 +108,7 @@ public class AgreementPdfService {
         TermsDocument doc = termsContentService.getTerms(row.getAgreementVersion());
         byte[] body = renderBody(row, doc, signed);
 
-        ClassPathResource letterhead = new ClassPathResource(LETTERHEAD_PATH);
-        if (letterhead.exists()) {
-            try (var lhStream = letterhead.getInputStream()) {
-                return overlayOnLetterhead(body, lhStream.readAllBytes());
-            } catch (Exception e) {
-                log.warn("Letterhead overlay failed, falling back to plain body: {}",
-                        e.getMessage());
-            }
-        }
-        return body;
+        return letterheadService.apply(body);
     }
 
     /**
@@ -158,7 +140,7 @@ public class AgreementPdfService {
             document.add(centered(signed ? "SIGNED AGREEMENT" : "AGREEMENT FOR REVIEW",
                     new Font(Font.HELVETICA, 11, Font.BOLD, signed ? MUTED : new Color(180, 83, 9)), 16));
             document.add(centered("Terms of Service",
-                    new Font(Font.TIMES_ROMAN, 24, Font.BOLD, TEAL_DARK), 8));
+                    new Font(Font.TIMES_ROMAN, 24, Font.BOLD, brandPrimary()), 8));
             document.add(centered(doc.version()
                             + (doc.effectiveDate() == null || doc.effectiveDate().isBlank()
                                     ? "" : "  •  effective " + doc.effectiveDate()),
@@ -175,7 +157,7 @@ public class AgreementPdfService {
             document.add(sectionHeader("Terms of Service " + doc.version()));
             for (Section s : doc.sections()) {
                 Paragraph title = new Paragraph(s.title(),
-                        new Font(Font.HELVETICA, 11.5f, Font.BOLD, TEAL_DARK));
+                        new Font(Font.HELVETICA, 11.5f, Font.BOLD, brandPrimary()));
                 title.setSpacingBefore(8);
                 title.setSpacingAfter(2);
                 document.add(title);
@@ -195,7 +177,7 @@ public class AgreementPdfService {
 
             document.add(spacer(8));
             document.add(centered("AGREEMENT ACCEPTANCE RECORD",
-                    new Font(Font.HELVETICA, 13, Font.BOLD, TEAL_DARK), 4));
+                    new Font(Font.HELVETICA, 13, Font.BOLD, brandPrimary()), 4));
             document.add(centered(
                     signed ? "Personalized signature page"
                            : "Personalized signature page  •  PENDING ACCEPTANCE",
@@ -271,27 +253,6 @@ public class AgreementPdfService {
      * for every body page — single-page letterheads are the common
      * case, so we don't try to multiplex multi-page letterheads.
      */
-    private byte[] overlayOnLetterhead(byte[] bodyBytes, byte[] letterheadBytes)
-            throws Exception {
-        PdfReader bodyReader = new PdfReader(bodyBytes);
-        ByteArrayOutputStream tmp = new ByteArrayOutputStream();
-        PdfStamper stamper = new PdfStamper(bodyReader, tmp);
-
-        PdfReader letterheadReader = new PdfReader(letterheadBytes);
-        PdfImportedPage letterheadPage = stamper.getImportedPage(letterheadReader, 1);
-
-        int pages = bodyReader.getNumberOfPages();
-        for (int i = 1; i <= pages; i++) {
-            PdfContentByte underContent = stamper.getUnderContent(i);
-            underContent.addTemplate(letterheadPage, 0, 0);
-        }
-        stamper.close();
-        bodyReader.close();
-        letterheadReader.close();
-
-        return tmp.toByteArray();
-    }
-
     // ─── Layout helpers ────────────────────────────────────────────
 
     private static Paragraph spacer(float leading) {

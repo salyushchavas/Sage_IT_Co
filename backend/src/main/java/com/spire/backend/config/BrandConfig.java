@@ -74,10 +74,18 @@ public class BrandConfig {
     @Value("${brand.primary-color-dark:#0F1F44}")
     private String primaryColorDark;
 
+    /** The logo's copper (rose-gold) accent: rules and frames on generated PDFs. */
+    @Value("${brand.accent-color:#C87D5C}")
+    private String accentColor;
+
+    @Value("${brand.accent-color-light:#E8A78D}")
+    private String accentColorLight;
+
     /**
      * Classpath path (relative to {@code src/main/resources/}) of the
-     * letterhead PDF overlaid on every generated agreement. Brand
-     * swaps drop in a different filename + set this env var.
+     * letterhead PDF drawn under every page the website generates (see
+     * LetterheadService). Brand swaps drop in a different filename + set
+     * this env var.
      */
     @Value("${brand.letterhead-path:sage_letterhead.pdf}")
     private String letterheadPath;

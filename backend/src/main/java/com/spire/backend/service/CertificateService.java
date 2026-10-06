@@ -36,9 +36,8 @@ public class CertificateService {
     // re-deploy under a different brand swaps the PDF colour without
     // code changes.
     private static final Color BRAND_FALLBACK = new Color(27, 42, 92);   // #1B2A5C
-    private static final Color TEAL_DARK = new Color(19, 78, 74);        // #134E4A (deep accent stripe)
-    private static final Color TEAL_LIGHT = new Color(94, 234, 212);     // #5EEAD4 (light accent stripe)
-    private static final Color GOLD_ACCENT = new Color(180, 142, 35);    // signature line color
+    private static final Color ACCENT_FALLBACK = new Color(200, 125, 92);        // #C87D5C (logo copper)
+    private static final Color ACCENT_LIGHT_FALLBACK = new Color(232, 167, 141); // #E8A78D
     private static final Color INK = new Color(31, 41, 55);              // dark body
     private static final Color MUTED = new Color(107, 114, 128);         // muted body
 
@@ -55,6 +54,26 @@ public class CertificateService {
             return new Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
         } catch (NumberFormatException e) {
             return BRAND_FALLBACK;
+        }
+    }
+
+    /** The logo's copper (frames, rules, the name underline). */
+    private Color brandAccent() {
+        return colorOf(brandConfig.getAccentColor(), ACCENT_FALLBACK);
+    }
+
+    private Color brandAccentLight() {
+        return colorOf(brandConfig.getAccentColorLight(), ACCENT_LIGHT_FALLBACK);
+    }
+
+    private static Color colorOf(String hex, Color fallback) {
+        if (hex == null || hex.isBlank()) return fallback;
+        String h = hex.startsWith("#") ? hex.substring(1) : hex;
+        try {
+            int rgb = Integer.parseInt(h, 16);
+            return new Color((rgb >> 16) & 0xFF, (rgb >> 8) & 0xFF, rgb & 0xFF);
+        } catch (NumberFormatException e) {
+            return fallback;
         }
     }
 
@@ -320,8 +339,8 @@ public class CertificateService {
             cb.rectangle(pad + 6, pad + 6, pageW - 2 * (pad + 6), pageH - 2 * (pad + 6));
             cb.stroke();
 
-            // ── Inner light teal frame ──────────────────────────────
-            cb.setColorStroke(TEAL_LIGHT);
+            // ── Inner light copper frame ────────────────────────────
+            cb.setColorStroke(brandAccentLight());
             cb.setLineWidth(0.5f);
             cb.rectangle(pad + 18, pad + 18, pageW - 2 * (pad + 18), pageH - 2 * (pad + 18));
             cb.stroke();
@@ -332,7 +351,7 @@ public class CertificateService {
             cb.moveTo(pageW / 2 - 80, pageH - 70);
             cb.lineTo(pageW / 2 + 80, pageH - 70);
             cb.stroke();
-            cb.setColorStroke(TEAL_LIGHT);
+            cb.setColorStroke(brandAccentLight());
             cb.setLineWidth(1f);
             cb.moveTo(pageW / 2 - 100, pageH - 75);
             cb.lineTo(pageW / 2 + 100, pageH - 75);
@@ -343,7 +362,7 @@ public class CertificateService {
             cb.moveTo(pageW / 2 - 80, 70);
             cb.lineTo(pageW / 2 + 80, 70);
             cb.stroke();
-            cb.setColorStroke(TEAL_LIGHT);
+            cb.setColorStroke(brandAccentLight());
             cb.setLineWidth(1f);
             cb.moveTo(pageW / 2 - 100, 65);
             cb.lineTo(pageW / 2 + 100, 65);
@@ -354,7 +373,7 @@ public class CertificateService {
             float sigW = 180;
             float leftSigX = pageW / 2 - 230;
             float rightSigX = pageW / 2 + 50;
-            cb.setColorStroke(GOLD_ACCENT);
+            cb.setColorStroke(brandAccent());
             cb.setLineWidth(0.8f);
             cb.moveTo(leftSigX, sigY);
             cb.lineTo(leftSigX + sigW, sigY);
@@ -364,7 +383,7 @@ public class CertificateService {
             cb.stroke();
 
             // ── Underline under the student name ────────────────────
-            cb.setColorStroke(TEAL_DARK);
+            cb.setColorStroke(brandAccent());
             cb.setLineWidth(1.2f);
             cb.moveTo(pageW / 2 - 160, pageH / 2 + 20);
             cb.lineTo(pageW / 2 + 160, pageH / 2 + 20);
@@ -374,7 +393,7 @@ public class CertificateService {
             doc.add(spacer(40));
 
             doc.add(centered(brandConfig.getName().toUpperCase(),
-                    new Font(Font.HELVETICA, 13, Font.BOLD, TEAL_DARK)));
+                    new Font(Font.HELVETICA, 13, Font.BOLD, brandColor)));
             doc.add(spacer(2));
             doc.add(centered(brandConfig.getTagline(),
                     new Font(Font.HELVETICA, 9, Font.ITALIC, MUTED)));
@@ -397,7 +416,7 @@ public class CertificateService {
 
             doc.add(spacer(12));
             doc.add(centered(courseTitle,
-                    new Font(Font.TIMES_ROMAN, 22, Font.BOLD, TEAL_DARK)));
+                    new Font(Font.TIMES_ROMAN, 22, Font.BOLD, brandColor)));
 
             doc.add(spacer(16));
             String dateStr = LocalDate.now().format(DateTimeFormatter.ofPattern("MMMM d, yyyy"));

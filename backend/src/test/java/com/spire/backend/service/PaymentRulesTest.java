@@ -102,8 +102,10 @@ class PaymentRulesTest {
                 ZoneId.of("America/Chicago")));
         WorkflowService workflow = new WorkflowService(users, mock(WorkflowStateRepository.class), mock(RecordService.class));
         service = new PaymentService(planRepo, invRepo, ledgerRepo, users, workflow, mock(RecordService.class), emails, clock);
-        pdf = new InvoicePdfService(mock(BrandConfig.class, inv -> inv.getMethod().getReturnType() == String.class ? "Sage IT Co" : null),
-                users, planRepo, invRepo, ledgerRepo);
+        BrandConfig brand = mock(BrandConfig.class, inv -> inv.getMethod().getName().equals("getLetterheadPath")
+                ? "sage_letterhead.pdf"
+                : inv.getMethod().getReturnType() == String.class ? "Sage IT Co" : null);
+        pdf = new InvoicePdfService(brand, users, planRepo, invRepo, ledgerRepo, new LetterheadService(brand));
     }
 
     private InvoicePdfService pdf;

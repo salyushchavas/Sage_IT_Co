@@ -49,6 +49,7 @@ public class InvoicePdfService {
     private final PaymentPlanRepository planRepository;
     private final InvoiceRepository invoiceRepository;
     private final PaymentLedgerRepository ledgerRepository;
+    private final LetterheadService letterheadService;
 
     /** The PDF as a download named after the invoice number. */
     public ResponseEntity<byte[]> response(Invoice invoice) {
@@ -70,7 +71,9 @@ public class InvoicePdfService {
 
         Color brand = brandColor();
         ByteArrayOutputStream out = new ByteArrayOutputStream();
-        Document doc = new Document(PageSize.LETTER, 54, 54, 54, 54);
+        // Margins clear the Sage IT Co letterhead drawn under each page:
+        // the logo and corners on top, the address band at the bottom.
+        Document doc = new Document(PageSize.LETTER, 65, 65, 130, 95);
         try {
             PdfWriter.getInstance(doc, out);
             doc.addTitle("Invoice " + invoice.getInvoiceNumber());
@@ -155,7 +158,7 @@ public class InvoicePdfService {
         } catch (DocumentException e) {
             throw new IllegalStateException("Couldn't create the invoice PDF: " + e.getMessage(), e);
         }
-        return out.toByteArray();
+        return letterheadService.apply(out.toByteArray());
     }
 
     /** "Installment 2 of 6 — plan PLAN-2026-00001". */

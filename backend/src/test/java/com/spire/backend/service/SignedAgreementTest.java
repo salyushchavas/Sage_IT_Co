@@ -86,7 +86,8 @@ class SignedAgreementTest {
     private AgreementPdfService pdfService() {
         com.spire.backend.config.BrandConfig brand = mock(com.spire.backend.config.BrandConfig.class);
         when(brand.getName()).thenReturn("Sage IT Co");
-        return new AgreementPdfService(brand, terms);
+        when(brand.getLetterheadPath()).thenReturn("sage_letterhead.pdf");
+        return new AgreementPdfService(brand, terms, new LetterheadService(brand));
     }
 
     private AgreementAcceptance signedRow() {
