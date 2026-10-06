@@ -5,6 +5,7 @@ import Link from "next/link";
 import { CheckCircle2, ChevronRight, Clock, Loader2, Lock } from "lucide-react";
 import { formatDateMedium } from "@/lib/datetime";
 import { requestAgreement, type AgreementRequestStatus } from "@/lib/api";
+import { agreementPartDone } from "@/lib/profile-progress";
 
 /**
  * The real agreement step, after the consent: the participant says "I'm
@@ -24,7 +25,8 @@ export default function MasterAgreementStep({ number, state, onChange }: {
   const consentSigned = state?.consentSigned ?? false;
   const ag = state?.agreement ?? null;
   const executed = ag?.executed ?? false;
-  const active = consentSigned && !executed;
+  const done = agreementPartDone(state);
+  const active = consentSigned && !done;
 
   const ready = async () => {
     setBusy(true);
@@ -43,7 +45,7 @@ export default function MasterAgreementStep({ number, state, onChange }: {
       id="step-MASTER_AGREEMENT"
       className={
         "rounded-xl border bg-white p-4 transition scroll-mt-24 "
-        + (executed
+        + (done
           ? "border-emerald-200 bg-emerald-50/40"
           : active
             ? "border-sage-navy shadow-md ring-2 ring-sage-navy/10"
@@ -53,9 +55,9 @@ export default function MasterAgreementStep({ number, state, onChange }: {
       <div className="flex items-start gap-3">
         <div className={
           "shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold "
-          + (executed ? "bg-emerald-600 text-white" : active ? "bg-sage-navy text-white" : "bg-gray-100 text-gray-400")
+          + (done ? "bg-emerald-600 text-white" : active ? "bg-sage-navy text-white" : "bg-gray-100 text-gray-400")
         }>
-          {executed ? <CheckCircle2 size={14} /> : active ? number : <Lock size={12} />}
+          {done ? <CheckCircle2 size={14} /> : active ? number : <Lock size={12} />}
         </div>
         <div className="flex-1 min-w-0">
           <p className="text-sm font-bold text-gray-900">Step {number}: Agreement</p>
@@ -90,7 +92,15 @@ export default function MasterAgreementStep({ number, state, onChange }: {
             </p>
           )}
 
-          {ag && (
+          {ag && done && (
+            // Like the other finished steps: "Completed", plus where it stands now.
+            <div className="mt-1.5 space-y-0.5">
+              <p className="text-[11px] text-emerald-700 font-semibold">Completed</p>
+              <p className="text-[11px] text-gray-500">{ag.stage}</p>
+            </div>
+          )}
+
+          {ag && !done && (
             <div className="mt-3 space-y-2">
               <div className="flex items-center gap-1" aria-hidden="true">
                 {Array.from({ length: ag.totalSteps }, (_, i) => (

@@ -24,15 +24,18 @@ import TeamTab from "@/components/dashboard/tabs/TeamTab";
 import { useAuth } from "@/lib/auth-context";
 import { homeForRole } from "@/lib/roles";
 import {
+  getAgreementRequestStatus,
   getOnboardingRoute,
   getParticipantDashboard,
   getParticipantTeam,
   getProfileCompletion,
   isDashboardStatus,
   type ParticipantDashboard as DashboardData,
+  type AgreementRequestStatus,
   type ParticipantTeam,
   type ProfileCompletion,
 } from "@/lib/api";
+import { shownProgress } from "@/lib/profile-progress";
 
 // Profile-gated tab metadata. The nine tabs listed here render
 // LockedTabView while pct < 100, and their real content (or a
@@ -106,6 +109,7 @@ function DashboardPageInner() {
   // Snapshots fetched once at the dashboard level so the sidebar
   // % badge + home tab + messages tab + team tab all share data.
   const [completion, setCompletion] = useState<ProfileCompletion | null>(null);
+  const [agreementState, setAgreementState] = useState<AgreementRequestStatus | null>(null);
   const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
   // A failed load shows why, with a retry (it used to spin for ever).
   const [loadError, setLoadError] = useState("");
@@ -173,6 +177,13 @@ function DashboardPageInner() {
       .catch(() => {
         /* badge / gate just stay hidden / locked */
       });
+    getAgreementRequestStatus()
+      .then((a) => {
+        if (!cancelled) setAgreementState(a);
+      })
+      .catch(() => {
+        /* the badge counts the agreement as not done */
+      });
     return () => {
       cancelled = true;
     };
@@ -207,13 +218,15 @@ function DashboardPageInner() {
     );
   }
 
-  // Sidebar badge: amber percentage chip while profile is incomplete.
+  // Sidebar badge: amber percentage chip while profile is incomplete. The
+  // number matches the checklist (profile steps plus the agreement row).
+  const shown = completion ? shownProgress(completion, agreementState) : null;
   const badges =
-    completion && completion.completionPercentage < 100
+    completion && shown && completion.completionPercentage < 100
       ? {
           "complete-profile": (
             <span className="inline-flex items-center px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-800 text-[10px] font-bold">
-              {completion.completionPercentage}%
+              {shown.pct}%
             </span>
           ),
         }

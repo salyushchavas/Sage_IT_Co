@@ -31,18 +31,29 @@ export function canOpenAdminPages(role: string | null | undefined): boolean {
   return ADMIN_PAGE_ROLES.includes((role ?? "").toUpperCase());
 }
 
-/** The role claim inside a sign-in token (JWT payload, base64url), or null. */
-export function roleFromToken(token: string | null | undefined): string | null {
+/** The claims inside a sign-in token (JWT payload, base64url), or null. */
+function tokenPayload(token: string | null | undefined): Record<string, unknown> | null {
   if (!token) return null;
   try {
     const part = token.split(".")[1] ?? "";
     const b64 = part.replace(/-/g, "+").replace(/_/g, "/");
     const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
-    const payload = JSON.parse(atob(padded)) as { role?: unknown };
-    return typeof payload.role === "string" ? payload.role.toUpperCase() : null;
+    return JSON.parse(atob(padded)) as Record<string, unknown>;
   } catch {
     return null;
   }
+}
+
+/** The role claim inside a sign-in token, or null. */
+export function roleFromToken(token: string | null | undefined): string | null {
+  const role = tokenPayload(token)?.role;
+  return typeof role === "string" ? role.toUpperCase() : null;
+}
+
+/** When the sign-in token stops working (ms since epoch), or null if unknown. */
+export function tokenExpiresAt(token: string | null | undefined): number | null {
+  const exp = tokenPayload(token)?.exp;
+  return typeof exp === "number" ? exp * 1000 : null;
 }
 
 /**

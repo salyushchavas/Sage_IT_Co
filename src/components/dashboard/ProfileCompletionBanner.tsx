@@ -5,7 +5,14 @@ import { useEffect, useState } from "react";
 import { CheckCircle2, ChevronRight, Sparkles, X } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
-import { getDocumentReviewState, getProfileCompletion, type ProfileCompletion } from "@/lib/api";
+import {
+  getAgreementRequestStatus,
+  getDocumentReviewState,
+  getProfileCompletion,
+  type AgreementRequestStatus,
+  type ProfileCompletion,
+} from "@/lib/api";
+import { shownProgress } from "@/lib/profile-progress";
 
 /**
  * Sticky banner shown above the dashboard content when the
@@ -41,6 +48,8 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
   const [data, setData] = useState<Completable | null>(null);
   // Documents in but not yet checked by an ERM: the next step is waiting on them.
   const [underReview, setUnderReview] = useState(false);
+  // The agreement row counts in the numbers shown, as on the checklist.
+  const [agreement, setAgreement] = useState<AgreementRequestStatus | null>(null);
   const [dismissedUntil, setDismissedUntil] = useState<number>(0);
   const [celebrationShown, setCelebrationShown] = useState(false);
   const [showCelebration, setShowCelebration] = useState(false);
@@ -63,6 +72,9 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
     getDocumentReviewState()
       .then((r) => { if (!cancelled) setUnderReview(r.submitted && !r.verified); })
       .catch(() => { /* not a participant, or offline: no hint */ });
+    getAgreementRequestStatus()
+      .then((a) => { if (!cancelled) setAgreement(a); })
+      .catch(() => { /* counted as not done */ });
     return () => { cancelled = true; };
   }, [user, user?.profileCompletionPct]);
 
@@ -119,7 +131,7 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
               Complete your profile to unlock the platform
             </p>
             <p className="text-[11px] text-amber-700">
-              {data.completedSteps} of {data.totalSteps} done · {data.completionPercentage}%
+              {shownProgress(data, agreement).done} of {shownProgress(data, agreement).total} done · {shownProgress(data, agreement).pct}%
             </p>
           </div>
         </div>
@@ -127,7 +139,7 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
           <div className="h-1.5 rounded-full bg-amber-100 overflow-hidden">
             <div
               className="h-full bg-amber-600 transition-all"
-              style={{ width: `${data.completionPercentage}%` }}
+              style={{ width: `${shownProgress(data, agreement).pct}%` }}
             />
           </div>
           {nextStep && (

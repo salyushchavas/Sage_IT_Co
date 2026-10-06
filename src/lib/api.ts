@@ -1,4 +1,4 @@
-import { clearAccessTokenCookie, homeForRole, setAccessTokenCookie } from "./roles";
+import { clearAccessTokenCookie, homeForRole, setAccessTokenCookie, tokenExpiresAt } from "./roles";
 
 const BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -82,6 +82,7 @@ export async function apiFetch<T = unknown>(
   endpoint: string,
   options: RequestInit = {}
 ): Promise<T> {
+  if (!SIGN_IN_CALL.test(endpoint)) await renewIfExpiring();
   const token =
     typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
 
@@ -158,6 +159,20 @@ export function loginHere(): string {
 
 // One renewal at a time: several calls failing together share it.
 let refreshing: Promise<boolean> | null = null;
+
+/**
+ * Renews the sign-in just before it runs out (or once it has), so calls
+ * go out with a working token instead of failing with 401 first and being
+ * retried (each such 401 still shows as an error in the browser console).
+ */
+async function renewIfExpiring(): Promise<void> {
+  if (typeof window === "undefined") return;
+  const token = localStorage.getItem("access_token");
+  const expiresAt = tokenExpiresAt(token);
+  if (!token || expiresAt === null || !localStorage.getItem("refresh_token")) return;
+  if (expiresAt - Date.now() > 30_000) return;
+  await tryRefresh();
+}
 
 async function tryRefresh(): Promise<boolean> {
   if (!refreshing) {
@@ -1372,6 +1387,7 @@ export async function viewParticipantDocument(documentId: number): Promise<void>
  * sign-in; an expired sign-in is renewed once and the request sent again.
  */
 async function authedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+  await renewIfExpiring();
   const call = () => {
     const token = typeof window === "undefined" ? null : localStorage.getItem("access_token");
     return fetch(`${API_BASE_URL}${path}`, {

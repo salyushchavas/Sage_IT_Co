@@ -17,6 +17,7 @@ import {
 } from "@/lib/api";
 import BasicInfoStep from "./BasicInfoStep";
 import MasterAgreementStep from "./MasterAgreementStep";
+import { shownProgress } from "@/lib/profile-progress";
 
 /**
  * The "Complete Your Profile" tab body. Lists the six steps in order
@@ -120,6 +121,8 @@ export default function ProfileCompletionChecklist() {
   // The real agreement sits after the consent, so later steps number one higher.
   const consentIdx = data.steps.findIndex((s) => s.key === "AGREEMENT");
   const shownNumber = (idx: number) => idx + 1 + (consentIdx >= 0 && idx > consentIdx ? 1 : 0);
+  // The header counts every row shown: the profile steps plus the agreement.
+  const { done: shownDone, total: shownTotal, pct: shownPct } = shownProgress(data, agreement);
   const sentBack = review?.sentBack ?? [];
   // Documents in, program not chosen: the ERM is checking them first.
   const underReview = review != null && review.submitted && !review.verified;
@@ -136,17 +139,17 @@ export default function ProfileCompletionChecklist() {
           Complete Your Profile
         </h2>
         <p className="text-sm text-gray-500 mt-1">
-          Finish these {data.totalSteps} steps to unlock course enrollment and your dedicated team.
+          Finish these {shownTotal} steps to unlock course enrollment and your dedicated team.
         </p>
         <div className="mt-3 flex items-center gap-3">
           <div className="flex-1 h-2 rounded-full bg-gray-200 overflow-hidden">
             <div
               className="h-full bg-sage-navy transition-all"
-              style={{ width: `${data.completionPercentage}%` }}
+              style={{ width: `${shownPct}%` }}
             />
           </div>
           <span className="text-xs font-bold text-sage-navy">
-            {data.completionPercentage}% · {data.completedSteps} of {data.totalSteps}
+            {shownPct}% · {shownDone} of {shownTotal}
           </span>
         </div>
       </header>
