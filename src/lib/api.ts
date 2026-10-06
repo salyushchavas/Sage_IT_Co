@@ -911,7 +911,7 @@ export interface AgreementRequestStatus {
   consentSigned: boolean;
   requested: boolean;
   requestedAt: string | null;
-  /** The console agreement, once an ERM started it. */
+  /** The agreement, once an ERM started it (in the console or on the website). */
   agreement: {
     step: number;
     totalSteps: number;
@@ -920,6 +920,8 @@ export interface AgreementRequestStatus {
     executed: boolean;
     link: string;
     updatedAt: string | null;
+    /** CONSOLE: the /consultant link (email code). WEBSITE: /dashboard/agreement. */
+    source: "CONSOLE" | "WEBSITE";
   } | null;
 }
 
@@ -4804,31 +4806,6 @@ export async function createConsultantApplication(data: {
   );
 }
 
-/** A participant waiting for their agreement, with the details the create form fills in. */
-export interface ParticipantAgreementRequest {
-  userId: number;
-  participantId: string | null;
-  fullName: string | null;
-  firstName: string;
-  middleName: string;
-  lastName: string;
-  email: string;
-  phone: string | null;
-  technology: string | null;
-  program: string | null;
-  targetJobTitle: string | null;
-  requestedAt: string | null;
-}
-
-/** Console: participants who said they're ready and have no open agreement yet. */
-export async function listParticipantAgreementRequests() {
-  return agreementErmFetch<ParticipantAgreementRequest[]>("/api/agreement-erm/participant-requests");
-}
-
-export async function getParticipantAgreementRequest(userId: number | string) {
-  return agreementErmFetch<ParticipantAgreementRequest>(`/api/agreement-erm/participant-requests/${userId}`);
-}
-
 export async function listConsultantApplications(
   params: { status?: string; page?: number; size?: number } = {},
 ) {
@@ -6296,4 +6273,750 @@ export async function changeMyPassword(currentPassword: string, newPassword: str
     localStorage.setItem("refresh_token", wrapper.data.refreshToken);
     setAccessTokenCookie(wrapper.data.accessToken);
   }
+}
+
+// ─── Website agreement ─────────────────────────────────────────────
+//
+// The website's own copy of the console agreement (/agreements and
+// /consultant/*). The participant fills and signs it at /dashboard/agreement
+// under their normal sign-in (no email code, no link expiry); an ERM runs it
+// from the ERM dashboard's Agreements tab. Same fields, wording and flow as the
+// console, on separate endpoints and tables, so nothing here touches it:
+//   participant  /api/participants/web-agreement/**
+//   staff        /api/web-agreements/**  (ERM; Operations and System admin see all)
+
+const WEB_AGREEMENT_ME = "/api/participants/web-agreement";
+const WEB_AGREEMENTS = "/api/web-agreements";
+
+/**
+ * Same names as the console. Live now: SUBMITTED (waiting for the
+ * participant), REVISION_REQUESTED, VERIFIED (participant signed;
+ * consultantCopyReleased says whether the ERM verified it) and CANCELLED.
+ * The approval / countersign states are defined for later and unused.
+ */
+export type WebAgreementStatus =
+  | "SUBMITTED"
+  | "REVISION_REQUESTED"
+  | "VERIFIED"
+  | "AWAITING_APPROVALS"
+  | "APPROVAL_REVISION_REQUESTED"
+  | "READY_TO_SIGN"
+  | "COMPLETED"
+  | "CANCELLED";
+
+/**
+ * One website agreement, as the backend serialises the WebAgreement entity.
+ * Field names match {@link ConsultantApplication} so copied console code maps
+ * 1:1; the console-only fields (OTP, access link, Cloudinary ids, legacy
+ * single-value columns) are gone and the two website user ids are added.
+ */
+export interface WebAgreement {
+  id: number;
+  applicationId: string;
+  /** users.id of the participant who fills and signs it. */
+  participantUserId: number;
+  /** users.id of the ERM who created it (owns it). */
+  ownerUserId: number;
+  /** The owner's name; filled on list rows. */
+  ownerName?: string | null;
+  consultantEmail: string;
+  consultantName: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  consultantPhone: string | null;
+  status: WebAgreementStatus;
+  createdAt: string;
+  updatedAt: string;
+  signedAt: string | null;
+  signedLegalName: string | null;
+  signedIp: string | null;
+  signedUserAgent: string | null;
+  // ERM-set at create: rate card, Phase 2 deliverables period.
+  ratePeriod1: string | null;
+  rateAmount1: string | null;
+  ratePeriod2: string | null;
+  rateAmount2: string | null;
+  phase2DeliverablePeriod?: string | null;
+  // Personal block.
+  primaryPhone: string | null;
+  workAuthorizationCategory: string | null;
+  // Custom value when workAuthorizationCategory === "Others".
+  workAuthorizationOther: string | null;
+  addressLine1: string | null;
+  addressLine2: string | null;
+  addressCity: string | null;
+  addressState: string | null;
+  addressZip: string | null;
+  effectiveDate: string | null; // ISO yyyy-MM-dd
+  // Exhibit A (ERM-set, read-only to the participant).
+  technologyTrack: string | null;
+  customScopeNotes: string | null;
+  /** The ERM's intro for the "ready to fill" email. */
+  emailPretext?: string | null;
+  // Appendix 1 -- employment
+  employerPayrollEntity: string | null;
+  implementationPartner: string | null;
+  endClient: string | null;
+  roleTitle: string | null;
+  verifiedStartDate: string | null;
+  payrollCycle: string | null;
+  // Uploaded documents. A non-empty *S3Key means "uploaded" (it holds the
+  // website document-storage path).
+  workAuthDocS3Key?: string | null;
+  workAuthDocContentType: string | null;
+  workAuthDocUploadedAt: string | null;
+  offerLetterS3Key?: string | null;
+  offerLetterContentType: string | null;
+  offerLetterUploadedAt: string | null;
+  dlDocS3Key?: string | null;
+  dlDocContentType: string | null;
+  dlDocUploadedAt: string | null;
+  stateIdDocS3Key?: string | null;
+  stateIdDocContentType: string | null;
+  stateIdDocUploadedAt: string | null;
+  ssnDocS3Key?: string | null;
+  ssnDocContentType: string | null;
+  ssnDocUploadedAt: string | null;
+  // Appendix 2 -- ACH
+  achAccountType: string | null;
+  achBankName: string | null;
+  achAccountHolderName: string | null;
+  achRoutingNumber: string | null;
+  achAccountNumber: string | null;
+  achNoticeEmail: string | null;
+  // ERM-set debit schedule (read-only to the participant).
+  achDebitDates: string | null;
+  achDebitAmounts: string | null;
+  // Appendix 3 -- background check (sensitive PII; stripped from list rows)
+  bgFullLegalName: string | null;
+  bgOtherNamesUsed: string | null;
+  bgCurrentAddress: string | null;
+  bgCurrentAddressLine1: string | null;
+  bgCurrentAddressLine2: string | null;
+  bgCurrentAddressCity: string | null;
+  bgCurrentAddressState: string | null;
+  bgCurrentAddressZip: string | null;
+  bgCurrentSameAsResidence: boolean | null;
+  bgDateOfBirth: string | null;
+  bgFullSsn: string | null;
+  bgDriverLicense: string | null;
+  bgStateId: string | null;
+  // Appendix 4 -- portal access: repeatable platform+username entries
+  // (JSON-in-TEXT); actions + revocation contact are ERM-set.
+  portalEntries: string | null;
+  portalAuthorizedActions: string | null;
+  portalEffectiveDate: string | null;
+  portalRevocationContact: string | null;
+  // Appendix 5 -- security cheque
+  securityCheckCount: string | null;
+  securityCheckNumbers: string | null;
+  securityCheckBank: string | null;
+  securityCheckHolderName: string | null;
+  securityCheckAmount: string | null;
+  securityCheckDates: string | null;
+  // ERM countersignature (later; null until then).
+  ermName: string | null;
+  ermTitle: string | null;
+  ermSignatureS3Key?: string | null;
+  signatureDate: string | null;
+  ermSignatureDate: string | null;
+  // Revision tracking
+  currentRevisionRemarks: string | null;
+  revisionCount: number | null;
+  // ERM section-picker revision scope (JSON array of {key,note});
+  // non-empty + REVISION_REQUESTED => the participant is restricted to these.
+  revisionSections: string | null;
+  // Can the ERM still take back the open change request? Resolved on the
+  // detail read only (see ConsultantApplication for the full story).
+  revisionRevocable?: boolean | null;
+  revisionRevokeBlockedReason?: string | null;
+  revisionConsultantActed?: boolean | null;
+  revisionRevokeReverts?: string[] | null;
+  revisionRequestedAt?: string | null;
+  // The status the row was revised FROM -- where a revoke puts it back.
+  revisionPrevStatus?: WebAgreementStatus | null;
+  revisionUndoSnapshot?: string | null;
+  // Phase 2 reopened-section scope (later).
+  phase2ReopenedSections?: string | null;
+  // Signing record (real client IP via X-Forwarded-For).
+  signingIp?: string | null;
+  signingAt?: string | null;
+  // Per-section affirmation flags.
+  affirmedMainAgreement?: boolean | null;
+  affirmedExhibitA?: boolean | null;
+  affirmedExhibitB?: boolean | null;
+  affirmedAppendix1?: boolean | null;
+  affirmedAppendix2?: boolean | null;
+  affirmedAppendix3?: boolean | null;
+  affirmedAppendix4?: boolean | null;
+  affirmedAppendix5?: boolean | null;
+  // Per-agreement requirement flags, set by the ERM at create.
+  requireAppendix1?: boolean | null;
+  requireAppendix2?: boolean | null;
+  requireAppendix3?: boolean | null;
+  requireAppendix4?: boolean | null;
+  requireAppendix5?: boolean | null;
+  requireSsn?: boolean | null;
+  // Stored signatures (primary + final). The images themselves are not in
+  // this JSON; a non-empty key means "signed".
+  signatureS3Key?: string | null;
+  finalSignatureS3Key?: string | null;
+  finalSignedAt?: string | null;
+  finalSigningIp?: string | null;
+  /** JSON map of section -> signature date. */
+  sectionSignatureDates?: string | null;
+  // Appendix 3 ID type toggle ("DL" | "STATE_ID").
+  idType?: string | null;
+  // 1 = pre-employment (default); 2 = post-offer (later).
+  phase?: number | null;
+  approvalVersionNumber?: number | null;
+  // Cheque index-0 mirror of the cheques JSON.
+  chequeS3Key?: string | null;
+  chequeUploadedAt?: string | null;
+  chequeContentType?: string | null;
+  // "Verified" by the ERM: VERIFIED + consultantCopyReleased. ReleasedBy is
+  // the ERM's users.id as text.
+  consultantCopyReleased?: boolean | null;
+  consultantCopyReleasedAt?: string | null;
+  consultantCopyReleasedBy?: string | null;
+  documentHash?: string | null;
+  // Generated PDFs (later).
+  s3Key?: string | null;
+  consultantPdfS3Key?: string | null;
+  phase1FinalPdfS3Key?: string | null;
+  // E-sign consent captured at the gate before the wizard.
+  consentGivenAt?: string | null;
+  consentIp?: string | null;
+  consentVersion?: string | null;
+  // Multi-cheque entries: JSON string, parse with parseChequeList (the
+  // entries carry no publicId, so it comes back "").
+  cheques?: string | null;
+  // DERIVED: the server's resolution of the submit gate, keyed
+  // appendix1..appendix5 / ssn / ssnDocRequired. On the participant read.
+  effectiveRequirements?: Record<string, boolean> | null;
+  deleted?: boolean | null;
+  deletedAt?: string | null;
+  deletedBy?: number | null;
+}
+
+export interface WebAgreementEvent {
+  id: number;
+  /** web_agreements.id */
+  agreementId: number;
+  eventType: string;
+  actorType: "ERM" | "PARTICIPANT" | "SYSTEM";
+  /** The real users.id; null for SYSTEM. */
+  actorUserId: number | null;
+  metadata: string | null;
+  ipAddress: string | null;
+  userAgent: string | null;
+  createdAt: string;
+}
+
+export interface WebAgreementDetail {
+  application: WebAgreement;
+  events: WebAgreementEvent[];
+}
+
+export interface WebAgreementPage {
+  content: WebAgreement[];
+  page: number;
+  size: number;
+  totalElements: number;
+  totalPages: number;
+  hasNext: boolean;
+}
+
+/** A participant who said they're ready and has no open agreement yet. */
+export interface WebAgreementReadyRow {
+  userId: number;
+  participantId: string | null;
+  fullName: string | null;
+  firstName: string;
+  middleName: string;
+  lastName: string;
+  email: string;
+  phone: string | null;
+  technology: string | null;
+  program: string | null;
+  targetJobTitle: string | null;
+  requestedAt: string | null;
+}
+
+/**
+ * Body of PUT /api/participants/web-agreement/fill: any subset; absent keys
+ * are left untouched. The console's fill fields minus the ERM-set ones
+ * (work authorization, track, scope, effective date, ACH debit schedule,
+ * portal actions / revocation contact), which the participant may not change.
+ */
+export interface WebAgreementFillPayload {
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  primaryPhone?: string;
+  addressLine1?: string;
+  addressLine2?: string;
+  addressCity?: string;
+  addressState?: string;
+  addressZip?: string;
+  employerPayrollEntity?: string;
+  implementationPartner?: string;
+  endClient?: string;
+  roleTitle?: string;
+  verifiedStartDate?: string;
+  payrollCycle?: string;
+  achAccountType?: string;
+  achBankName?: string;
+  achAccountHolderName?: string;
+  achRoutingNumber?: string;
+  achAccountNumber?: string;
+  achNoticeEmail?: string;
+  bgFullLegalName?: string;
+  bgOtherNamesUsed?: string;
+  bgCurrentAddress?: string;
+  bgCurrentAddressLine1?: string;
+  bgCurrentAddressLine2?: string;
+  bgCurrentAddressCity?: string;
+  bgCurrentAddressState?: string;
+  bgCurrentAddressZip?: string;
+  bgCurrentSameAsResidence?: boolean;
+  bgDateOfBirth?: string;
+  bgFullSsn?: string;
+  bgDriverLicense?: string;
+  bgStateId?: string;
+  portalEntries?: string;
+  portalEffectiveDate?: string;
+  securityCheckCount?: string;
+  securityCheckNumbers?: string;
+  securityCheckBank?: string;
+  securityCheckHolderName?: string;
+  securityCheckAmount?: string;
+  securityCheckDates?: string;
+  idType?: string;
+  affirmedMainAgreement?: boolean;
+  affirmedExhibitA?: boolean;
+  affirmedExhibitB?: boolean;
+  affirmedAppendix1?: boolean;
+  affirmedAppendix2?: boolean;
+  affirmedAppendix3?: boolean;
+  affirmedAppendix4?: boolean;
+  affirmedAppendix5?: boolean;
+}
+
+/** Body of POST /api/web-agreements: the console's create form plus who it is for. */
+export interface WebAgreementCreateBody {
+  /** users.id of the participant (from the ready list). */
+  participantUserId: number;
+  consultantEmail: string;
+  firstName?: string;
+  middleName?: string;
+  lastName?: string;
+  ratePeriod1?: string;
+  rateAmount1?: string;
+  ratePeriod2?: string;
+  rateAmount2?: string;
+  phase2DeliverablePeriod?: string;
+  // Stored as workAuthorizationCategory; "Others" uses visaStatusOther.
+  visaStatus?: string;
+  visaStatusOther?: string;
+  requireAppendix1?: boolean;
+  requireAppendix2?: boolean;
+  requireAppendix3?: boolean;
+  requireAppendix4?: boolean;
+  requireAppendix5?: boolean;
+  requireSsn?: boolean;
+  achDebitDates?: string;
+  achDebitAmounts?: string;
+  technologyTrack?: string;
+  customScopeNotes?: string;
+  portalAuthorizedActions?: string;
+  portalRevocationContact?: string;
+  /** Intro for the participant's email; blank means the default copy. */
+  emailPretext?: string;
+}
+
+/** The watermarked page images of the review step's preview. */
+export interface WebAgreementPreviewImages {
+  pages: string[];
+  pageCount: number;
+  viewerEmail: string;
+}
+
+/** The participant's single-file uploads (also their URL path). */
+export type WebAgreementDocKind =
+  | "workauth"
+  | "offer-letter"
+  | "dl-doc"
+  | "state-id-doc"
+  | "ssn-doc";
+
+/**
+ * A failed website-agreement call. Unlike apiFetch's plain Error it keeps the
+ * response's `data` (an incomplete submit sends {missingFields,
+ * missingAffirmations, missingSignature, missingFinalSignature} there, which
+ * the wizard's missing-items panel reads) and, for file and PDF calls, the
+ * server's X-Preview-Error diagnosis (kept off the message on a 5xx so server
+ * internals don't land on screen).
+ */
+export class WebAgreementApiError extends Error {
+  status: number;
+  data: unknown;
+  previewError: string | null;
+  constructor(message: string, status: number, data: unknown = null, previewError: string | null = null) {
+    super(message);
+    this.name = "WebAgreementApiError";
+    this.status = status;
+    this.data = data;
+    this.previewError = previewError;
+  }
+}
+
+/**
+ * Sends a website-agreement request under the website sign-in. Like apiFetch,
+ * an expired sign-in is renewed once and the request sent again; when it
+ * can't be renewed the session ends (to /login and back here).
+ */
+async function webAgreementSend(path: string, init: RequestInit = {}): Promise<Response> {
+  const res = await authedFetch(path, init);
+  if (res.status === 401) {
+    endSession();
+    throw new WebAgreementApiError("Your sign-in has expired. Please sign in again.", 401);
+  }
+  return res;
+}
+
+/** The ApiResponse body, or null when the body is empty or not JSON. */
+async function readWebAgreementBody<T>(res: Response): Promise<ApiResponse<T> | null> {
+  const text = await res.text().catch(() => "");
+  if (!text.trim()) return null;
+  try {
+    return JSON.parse(text) as ApiResponse<T>;
+  } catch {
+    return null;
+  }
+}
+
+/** Turns a failed response into a {@link WebAgreementApiError}. */
+async function webAgreementError(res: Response, fallback: string): Promise<WebAgreementApiError> {
+  const previewError = res.headers.get("X-Preview-Error");
+  const body = await readWebAgreementBody<unknown>(res);
+  // Staff onboarding: still on the temporary password (same as apiFetch).
+  if (res.status === 403 && body?.message === "PASSWORD_CHANGE_REQUIRED" && typeof window !== "undefined"
+      && window.location.pathname !== "/change-password") {
+    window.location.href = "/change-password";
+  }
+  let message = body?.message || "";
+  if (res.status === 413) {
+    message = "That file is too large to upload. Please use a smaller or more compressed photo.";
+  } else if (res.status === 429) {
+    message = "Too many requests. Try again in a minute.";
+  } else if (!message && previewError && res.status < 500) {
+    // A file route's refusal carries its reason on the header (no JSON body).
+    message = previewError;
+  }
+  return new WebAgreementApiError(message || `${fallback} (${res.status})`, res.status, body?.data ?? null, previewError);
+}
+
+/** JSON call; returns the whole ApiResponse. Errors keep `data` and `status`. */
+async function webAgreementJson<T>(path: string, init: RequestInit = {}): Promise<ApiResponse<T>> {
+  const res = await webAgreementSend(path, {
+    ...init,
+    headers: { "Content-Type": "application/json", ...(init.headers as Record<string, string> | undefined) },
+  });
+  if (!res.ok) throw await webAgreementError(res, "Request failed");
+  if (res.status === 204) return { success: true, message: "", data: undefined as T };
+  const body = await readWebAgreementBody<T>(res);
+  if (!body) {
+    throw new WebAgreementApiError(
+      `The server didn't respond properly (HTTP ${res.status}). Please try again in a moment.`, res.status);
+  }
+  if (!body.success) throw new WebAgreementApiError(body.message || `Request failed (${res.status})`, res.status, body.data ?? null);
+  return body;
+}
+
+/** JSON call; returns `data`. */
+async function webAgreementFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  return (await webAgreementJson<T>(path, init)).data;
+}
+
+/**
+ * Multipart upload of one file (field "file"). Large photos are shrunk first
+ * and the request gives up after 90 s, like the console's uploads.
+ */
+async function webAgreementUpload(path: string, file: File): Promise<WebAgreement> {
+  const form = new FormData();
+  form.append("file", await downscaleImageFile(file));
+  const controller = new AbortController();
+  const timeout =
+    typeof window !== "undefined"
+      ? window.setTimeout(() => controller.abort(), 90_000)
+      : undefined;
+  let res: Response;
+  try {
+    // No Content-Type header: the browser sets the multipart boundary.
+    res = await webAgreementSend(path, { method: "POST", body: form, signal: controller.signal });
+  } catch (e) {
+    if (e instanceof WebAgreementApiError) throw e;
+    if (e instanceof DOMException && e.name === "AbortError") {
+      throw new Error("The upload timed out. Check your connection and try again.");
+    }
+    throw new Error("Couldn't reach the server. Check your connection and try again.");
+  } finally {
+    if (timeout !== undefined && typeof window !== "undefined") {
+      window.clearTimeout(timeout);
+    }
+  }
+  if (!res.ok) throw await webAgreementError(res, "Upload failed");
+  const body = await readWebAgreementBody<WebAgreement>(res);
+  if (!body?.success) {
+    throw new WebAgreementApiError(body?.message || `Upload failed (${res.status}).`, res.status, body?.data ?? null);
+  }
+  return body.data;
+}
+
+/**
+ * A file or PDF as a Blob. A failure throws a {@link WebAgreementApiError}
+ * whose `previewError` holds the server's X-Preview-Error text (the preview
+ * render fails with 500 + that header when LibreOffice is missing).
+ */
+async function webAgreementBlob(path: string, fallback: string): Promise<Blob> {
+  const res = await webAgreementSend(path);
+  if (!res.ok) throw await webAgreementError(res, fallback);
+  return res.blob();
+}
+
+// ── Participant (/dashboard/agreement) ──────────────────────────
+
+/** The caller's open agreement (not cancelled), or null while the ERM prepares it. */
+export async function getMyWebAgreement(): Promise<WebAgreement | null> {
+  return (await webAgreementFetch<WebAgreement | null>(WEB_AGREEMENT_ME)) ?? null;
+}
+
+/** The real clauses per wizard section plus this agreement's non-editable values. */
+export async function getWebAgreementContent(): Promise<AgreementContent> {
+  return webAgreementFetch<AgreementContent>(`${WEB_AGREEMENT_ME}/content`);
+}
+
+/** The blank-form agreement PDF behind the wizard's "View full agreement". */
+export async function getWebAgreementTemplatePdfBlob(): Promise<Blob> {
+  return webAgreementBlob(`${WEB_AGREEMENT_ME}/template-pdf`, "Couldn't load the agreement");
+}
+
+/** Records the e-sign consent shown before the wizard. Idempotent. */
+export async function recordWebAgreementConsent(): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENT_ME}/consent`, { method: "POST" });
+}
+
+/**
+ * Partial save (autosave). The signal lets the caller cancel an in-flight
+ * save when a fresher one is ready (the abort rejects with the AbortError).
+ * 429 throws "Too many requests…": pause autosave and back off.
+ */
+export async function saveWebAgreementFill(
+  patch: WebAgreementFillPayload,
+  signal?: AbortSignal,
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENT_ME}/fill`, {
+    method: "PUT",
+    body: JSON.stringify(patch),
+    signal,
+  });
+}
+
+/**
+ * Signs and sends the agreement (status becomes VERIFIED). An incomplete
+ * agreement throws a WebAgreementApiError with status 400 and `data` =
+ * {missingFields, missingAffirmations, missingSignature, missingFinalSignature}.
+ */
+export async function submitWebAgreement(
+  signedLegalName: string,
+  signatureBase64: string,
+  finalSignatureBase64: string,
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENT_ME}/submit`, {
+    method: "POST",
+    body: JSON.stringify({ signedLegalName, signatureBase64, finalSignatureBase64 }),
+  });
+}
+
+/** The review step's preview: the agreement as watermarked page images. */
+export async function getWebAgreementPreviewImages(
+  primarySignatureBase64: string | null,
+): Promise<WebAgreementPreviewImages> {
+  return webAgreementFetch<WebAgreementPreviewImages>(`${WEB_AGREEMENT_ME}/preview-images`, {
+    method: "POST",
+    body: JSON.stringify({ primarySignatureBase64 }),
+  });
+}
+
+/** Uploads one of the participant's documents (image or PDF). */
+export async function uploadWebAgreementDoc(kind: WebAgreementDocKind, file: File): Promise<WebAgreement> {
+  return webAgreementUpload(`${WEB_AGREEMENT_ME}/${kind}`, file);
+}
+
+/** The participant's own uploaded document. */
+export async function fetchMyWebAgreementDocBlob(kind: WebAgreementDocKind): Promise<Blob> {
+  return webAgreementBlob(`${WEB_AGREEMENT_ME}/${kind}`, "Couldn't open the document");
+}
+
+/** Uploads the file for cheque #index (0-based). */
+export async function uploadWebAgreementChequeAt(index: number, file: File): Promise<WebAgreement> {
+  return webAgreementUpload(`${WEB_AGREEMENT_ME}/cheques/${index}`, file);
+}
+
+/** Saves cheque #index's number and date without touching its file. */
+export async function saveWebAgreementChequeMetadata(
+  index: number,
+  body: { number?: string; date?: string },
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENT_ME}/cheques/${index}`, {
+    method: "PUT",
+    body: JSON.stringify(body),
+  });
+}
+
+/** The participant's own cheque #index file. */
+export async function fetchMyWebAgreementChequeBlob(index: number): Promise<Blob> {
+  return webAgreementBlob(`${WEB_AGREEMENT_ME}/cheques/${index}`, "Couldn't fetch the cheque");
+}
+
+// ── Staff (ERM dashboard → Agreements) ──────────────────────────
+
+/** Participants ready for their agreement (they asked; nothing open yet). */
+export async function listWebAgreementRequests(): Promise<WebAgreementReadyRow[]> {
+  return (await webAgreementFetch<WebAgreementReadyRow[]>(`${WEB_AGREEMENTS}/requests`)) ?? [];
+}
+
+/** One ready participant, to prefill the create form. */
+export async function getWebAgreementRequest(userId: number | string): Promise<WebAgreementReadyRow> {
+  return webAgreementFetch<WebAgreementReadyRow>(`${WEB_AGREEMENTS}/requests/${encodeURIComponent(String(userId))}`);
+}
+
+/** Creates the agreement (SUBMITTED) and emails the participant that it's ready to fill. */
+export async function createWebAgreement(body: WebAgreementCreateBody): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(WEB_AGREEMENTS, { method: "POST", body: JSON.stringify(body) });
+}
+
+/** Newest first; an ERM sees their own, admins see all. Size is capped at 100. */
+export async function listWebAgreements(
+  params: { status?: string; page?: number; size?: number } = {},
+): Promise<WebAgreementPage> {
+  const qs = new URLSearchParams(
+    Object.entries(params)
+      .filter(([, v]) => v !== undefined && v !== null && v !== "")
+      .map(([k, v]) => [k, String(v)]),
+  ).toString();
+  return webAgreementFetch<WebAgreementPage>(`${WEB_AGREEMENTS}${qs ? `?${qs}` : ""}`);
+}
+
+export async function getWebAgreement(appId: string): Promise<WebAgreementDetail> {
+  return webAgreementFetch<WebAgreementDetail>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}`);
+}
+
+export async function cancelWebAgreement(appId: string): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/cancel`, { method: "POST" });
+}
+
+/** Emails the participant again that their agreement is ready to fill. */
+export async function resendWebAgreement(appId: string): Promise<{ message: string }> {
+  const body = await webAgreementJson<{ message?: string } | null>(
+    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/resend`,
+    { method: "POST" },
+  );
+  return { message: body.data?.message || body.message || "" };
+}
+
+/** Fixes the participant's email / name on the agreement. */
+export async function updateWebAgreementContact(
+  appId: string,
+  data: { consultantEmail: string; consultantName?: string },
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/contact`, {
+    method: "PATCH",
+    body: JSON.stringify(data),
+  });
+}
+
+/**
+ * Sends the agreement back for the picked sections. A changed ACH schedule,
+ * rate or deliverables period goes with it and opens its section too.
+ */
+export async function webAgreementRequestRevision(
+  appId: string,
+  sections: RevisionSectionSelection[],
+  ach?: { achDebitDates?: string; achDebitAmounts?: string },
+  rate?: {
+    ratePeriod1?: string;
+    rateAmount1?: string;
+    ratePeriod2?: string;
+    rateAmount2?: string;
+  },
+  deliverable?: { phase2DeliverablePeriod?: string },
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/request-revision`, {
+    method: "POST",
+    body: JSON.stringify({
+      sections,
+      ...(ach ?? {}),
+      ...(rate ?? {}),
+      ...(deliverable ?? {}),
+    }),
+  });
+}
+
+/** Signature-only revision: the participant re-draws both signatures. */
+export async function webAgreementRequestSignatureRevision(appId: string, note?: string): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(
+    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/request-signature-revision`,
+    { method: "POST", body: JSON.stringify({ note: note ?? "" }) },
+  );
+}
+
+/**
+ * Asks for fresh uploads of the given documents. Keys: doc:workauth,
+ * doc:offer-letter, doc:dl-doc, doc:state-id, doc:ssn-doc, doc:cheque.
+ */
+export async function webAgreementRequestDocumentRevision(
+  appId: string,
+  docKeys: string[],
+  note?: string,
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(
+    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/request-document-revision`,
+    { method: "POST", body: JSON.stringify({ docKeys, note: note ?? "" }) },
+  );
+}
+
+/** Takes back a change request; refused once the participant has acted on it. */
+export async function webAgreementRevokeRevision(appId: string): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/revoke-revision`, {
+    method: "POST",
+  });
+}
+
+/** The ERM verifies the signed agreement (VERIFIED, not yet verified) and the participant is emailed. */
+export async function verifyWebAgreement(appId: string): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/verify`, { method: "POST" });
+}
+
+/** The participant-signed agreement as a PDF (rendered on request, not stored). */
+export async function fetchWebAgreementPreviewPdfBlob(appId: string): Promise<Blob> {
+  return webAgreementBlob(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/preview-pdf`, "Couldn't render the preview");
+}
+
+/**
+ * One of the participant's uploads. docPath: "/workauth", "/offer-letter",
+ * "/dl-doc", "/state-id-doc", "/ssn-doc" or "/cheques/{index}".
+ */
+export async function fetchWebAgreementDocBlob(
+  appId: string,
+  docPath: string,
+  disposition: "inline" | "attachment" = "inline",
+): Promise<Blob> {
+  const path = docPath.startsWith("/") ? docPath : `/${docPath}`;
+  return webAgreementBlob(
+    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}${path}?disposition=${disposition}`,
+    "Couldn't open the document",
+  );
 }

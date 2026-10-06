@@ -8,6 +8,7 @@ import {
   CheckCircle2,
   ClipboardList,
   Download,
+  FileSignature,
   FileText,
   GraduationCap,
   Inbox,
@@ -27,6 +28,7 @@ import {
 } from "@/components/dashboard/RoleDashboardShell";
 import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
 import { DocumentVerificationQueue } from "@/components/applications/DocumentVerificationQueue";
+import { WebAgreementsPanel } from "@/components/web-agreement/erm/WebAgreementsPanel";
 import { useAuth } from "@/lib/auth-context";
 import {
   addErmNote,
@@ -52,13 +54,16 @@ import {
 } from "@/lib/api";
 
 /**
- * ERM dashboard. Ten tabs:
+ * ERM dashboard. Eleven tabs:
  *
  *   home       -- assigned participant roster + drill-in detail panel
  *   applications -- website applications to confirm (roadmap step 1);
  *                 confirming emails the applicant a link to register
  *   verify     -- submitted documents to check; confirming opens the
  *                 participant's program step
+ *   agreements -- participants ready for their agreement, the website
+ *                 agreements (create, review, verify); ?agreement=<id>
+ *                 opens one
  *   reports    -- weekly reports across all assigned participants,
  *                 with inline review (add notes + mark reviewed)
  *   comms      -- communication log per participant, free-text notes
@@ -74,6 +79,7 @@ type TabId =
   | "home"
   | "applications"
   | "verify"
+  | "agreements"
   | "reports"
   | "comms"
   | "interviews"
@@ -86,6 +92,7 @@ const TABS: ReadonlyArray<RoleDashboardTab> = [
   { id: "home",       label: "My Participants",  Icon: Users },
   { id: "applications", label: "Applications",   Icon: Inbox },
   { id: "verify",     label: "Verify Documents", Icon: ShieldCheck },
+  { id: "agreements", label: "Agreements",       Icon: FileSignature },
   { id: "reports",    label: "Weekly Reports",   Icon: ClipboardList },
   { id: "comms",      label: "Communications",   Icon: MessageSquare },
   { id: "interviews", label: "Interviews",       Icon: Target },
@@ -114,7 +121,18 @@ export default function ErmDashboardPage() {
       router.replace(loginHere());
       return;
     }
-    if ((user.role ?? "").toUpperCase() !== "ERM") {
+    const role = (user.role ?? "").toUpperCase();
+    // Agreement emails can reach an Operations / System admin (they created
+    // it, or stood in for an inactive owner): open the same Agreements tab
+    // on /operations, keeping ?agreement=<id>.
+    if (
+      (role === "OPERATIONS_ADMIN" || role === "SYSTEM_ADMIN") &&
+      new URLSearchParams(window.location.search).get("tab") === "agreements"
+    ) {
+      router.replace("/operations" + window.location.search);
+      return;
+    }
+    if (role !== "ERM") {
       router.replace("/dashboard");
       return;
     }
@@ -158,6 +176,7 @@ export default function ErmDashboardPage() {
       {active === "home" && <RosterTab roster={roster} />}
       {active === "applications" && <ApplicationsQueue />}
       {active === "verify" && <DocumentVerificationQueue />}
+      {active === "agreements" && <WebAgreementsPanel />}
       {active === "reports" && <ReportsTab />}
       {active === "comms" && <CommsTab roster={roster} />}
       {active === "interviews" && <InterviewsTab />}

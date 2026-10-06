@@ -1,15 +1,21 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { CheckCircle2, ChevronRight, Clock, Loader2, Lock } from "lucide-react";
 import { formatDateMedium } from "@/lib/datetime";
 import { requestAgreement, type AgreementRequestStatus } from "@/lib/api";
 
 /**
- * The real agreement step (the /agreements console), after the consent:
- * the participant says "I'm ready to sign the agreement", their ERM starts
- * it and fills their side, and the participant opens it from here (or the
- * email) to fill theirs. Shows where it is in the console's five steps.
+ * The real agreement step, after the consent: the participant says "I'm
+ * ready to sign the agreement", their ERM starts it and fills their side,
+ * and the participant opens it from here (or the email) to fill theirs.
+ * Shows where it is in the agreement's five steps.
+ *
+ * The agreement lives in one of two places (agreement.source): the
+ * website's own copy (WEBSITE), filled at /dashboard/agreement in this
+ * tab under the normal sign-in, or the /agreements console (CONSOLE),
+ * whose /consultant link signs in with an email code.
  */
 export default function MasterAgreementStep({ number, state, onChange }: {
   number: number;
@@ -98,7 +104,15 @@ export default function MasterAgreementStep({ number, state, onChange }: {
               <p className={"text-xs font-semibold " + (executed ? "text-emerald-700" : "text-gray-800")}>
                 Step {ag.step} of {ag.totalSteps}: {ag.stage}
               </p>
-              {ag.yourTurn && (
+              {ag.yourTurn && ag.source === "WEBSITE" && (
+                <Link
+                  href="/dashboard/agreement"
+                  className="inline-flex items-center gap-1 bg-sage-navy hover:bg-sage-navy-deep text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition cursor-pointer"
+                >
+                  Open your agreement <ChevronRight size={12} />
+                </Link>
+              )}
+              {ag.yourTurn && ag.source !== "WEBSITE" && (
                 <a
                   href={ag.link}
                   className="inline-flex items-center gap-1 bg-sage-navy hover:bg-sage-navy-deep text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition cursor-pointer"

@@ -1,83 +1,66 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import Link from "next/link";
-import { AlertCircle, Loader2, Plus, RefreshCw, Search } from "lucide-react";
+import { AlertCircle, Loader2, Search } from "lucide-react";
 
 import {
-  fetchMe,
-  listConsultantApplications,
-  resendConsultantInvite,
-  type ApprovalDecision,
-  type ConsultantApplication,
-  type ConsultantApplicationStatus,
-  type ConsultantApplicationsPage,
+  listWebAgreements,
+  type WebAgreement,
+  type WebAgreementPage,
+  type WebAgreementStatus,
 } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import AgreementStatusPill from "./AgreementStatusPill";
 import { formatUsDate } from "@/lib/dates";
 import { computePendingAppendices } from "@/lib/pending-appendix";
 import {
   AGREEMENT_STATUS_META,
-  APPROVAL_DECISION_META,
   LIVE_STATUSES,
-  TONE_CLASSES,
-} from "@/lib/agreement-status";
+} from "@/lib/web-agreement-status";
 
 /**
+ * The website agreement's copy of the console's agreements list
+ * (src/components/agreement-erm/ConsultantsListView.tsx), without the
+ * approval columns (Manager, Accounts, Sent on) and without the link-expiry
+ * resend: the participant signs in to the website, so there is no link to
+ * expire. Rows open the detail in place (onOpen) instead of navigating.
+ *
  * Chips are generated from the shared vocabulary, never written here, so a
- * chip caption can't drift from the pill on the row it selects — the old
- * hand-written list called VERIFIED "Verified" while the pill called the same
- * row "Signed by consultant".
- *
- * LIVE_STATUSES drops the retired values (DRAFT / UPDATED / SIGNED /
- * EXPIRED): no live code path can put a row in them, so those chips only ever
- * returned an empty table. That also preserves the Build Q rule — there is no
- * "Expired" chip because agreements never expire, only the consultant link
- * does, surfaced per-row as "Link expired · Resend".
- *
- * Filtering itself is unchanged: the id is still the raw enum sent to the API.
+ * chip caption can't drift from the pill on the row it selects. Filtering
+ * itself sends the raw enum to the API.
  */
-const FILTERS: ReadonlyArray<{ id: "ALL" | ConsultantApplicationStatus; label: string }> = [
+const FILTERS: ReadonlyArray<{ id: "ALL" | WebAgreementStatus; label: string }> = [
   { id: "ALL", label: "All" },
   ...LIVE_STATUSES.map((id) => ({ id, label: AGREEMENT_STATUS_META[id].label })),
 ];
 
 const PAGE_SIZE = 20;
 
-export default function ConsultantsListView() {
-  const [filter, setFilter] = useState<"ALL" | ConsultantApplicationStatus>("ALL");
+/** Roles that see every ERM's agreements (the console's super-admin). */
+const ADMIN_ROLES = new Set(["OPERATIONS_ADMIN", "SYSTEM_ADMIN"]);
+
+export default function WebAgreementsListView({
+  onOpen,
+}: {
+  onOpen: (applicationId: string) => void;
+}) {
+  const { user } = useAuth();
+  const [filter, setFilter] = useState<"ALL" | WebAgreementStatus>("ALL");
   const [page, setPage] = useState(0);
-  const [pageData, setPageData] = useState<ConsultantApplicationsPage | null>(null);
+  const [pageData, setPageData] = useState<WebAgreementPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
-  // Phase B — super-admin oversight: an "Owner" column + an owner
-  // filter, both shown only to the super-admin (an ERM's list is all
-  // theirs, so the column would be redundant).
-  const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  // Admin oversight: an "Owner" column + an owner filter, both shown only to
+  // Operations / System admins (an ERM's list is all theirs, so the column
+  // would be redundant).
+  const isAdmin = ADMIN_ROLES.has((user?.role ?? "").toUpperCase());
   const [ownerFilter, setOwnerFilter] = useState("ALL");
-  // Build Q — bumped after a "Resend link" so the list reloads and the
-  // refreshed inviteSentAt clears the "Link expired" indicator.
-  const [reloadKey, setReloadKey] = useState(0);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchMe()
-      .then((me) => {
-        if (!cancelled) setIsSuperAdmin(me.role === "SUPER_ADMIN");
-      })
-      .catch(() => {
-        /* non-fatal: column simply stays hidden */
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    listConsultantApplications({
+    listWebAgreements({
       status: filter === "ALL" ? undefined : filter,
       page,
       size: PAGE_SIZE,
@@ -90,7 +73,7 @@ export default function ConsultantsListView() {
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Couldn't load applications");
+          setError(e instanceof Error ? e.message : "Couldn't load agreements");
           setPageData(null);
         }
       })
@@ -100,10 +83,10 @@ export default function ConsultantsListView() {
     return () => {
       cancelled = true;
     };
-  }, [filter, page, reloadKey]);
+  }, [filter, page]);
 
-  // Distinct owner names in the current page, for the super-admin's
-  // "View" dropdown (client-side filter at this data volume).
+  // Distinct owner names in the current page, for the admin's owner
+  // dropdown (client-side filter at this data volume).
   const ownerOptions = useMemo<string[]>(() => {
     const names = new Set<string>();
     (pageData?.content ?? []).forEach((r) => {
@@ -112,9 +95,9 @@ export default function ConsultantsListView() {
     return Array.from(names).sort();
   }, [pageData]);
 
-  const filtered = useMemo<ConsultantApplication[]>(() => {
+  const filtered = useMemo<WebAgreement[]>(() => {
     let rows = pageData?.content ?? [];
-    if (isSuperAdmin && ownerFilter !== "ALL") {
+    if (isAdmin && ownerFilter !== "ALL") {
       rows = rows.filter((r) => (r.ownerName ?? "") === ownerFilter);
     }
     const q = search.trim().toLowerCase();
@@ -123,30 +106,14 @@ export default function ConsultantsListView() {
       [r.consultantEmail, r.consultantName ?? "", r.applicationId, r.ownerName ?? ""]
         .some((v) => v.toLowerCase().includes(q)),
     );
-  }, [pageData, search, isSuperAdmin, ownerFilter]);
+  }, [pageData, search, isAdmin, ownerFilter]);
 
-  // Build O/Q — base 7 cols (Consultant, App ID, Status, Manager, Accounts,
-  // Sent on, Created); super-admin adds the Owner column. Build Q removed
-  // the "Expires" column — agreements never expire (only the consultant
-  // link does, shown as the "Link expired · Resend" badge in Status).
-  const colCount = isSuperAdmin ? 9 : 8;
+  // Base 5 cols (Participant, Agreement ID, Status, Pending Appendix,
+  // Created); admins add the Owner column.
+  const colCount = isAdmin ? 6 : 5;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between flex-wrap gap-3">
-        <p className="text-sm text-gray-500 max-w-xl">
-          Send, track, and sign consulting agreements. Each application
-          invites the consultant via email to review and sign on a hidden
-          URL — the application ID acts as the credential.
-        </p>
-        <Link
-          href="/agreements/new"
-          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
-        >
-          <Plus size={12} /> New agreement
-        </Link>
-      </div>
-
       <div className="flex items-center justify-between flex-wrap gap-2">
         <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
           {FILTERS.map((f) => (
@@ -168,8 +135,8 @@ export default function ConsultantsListView() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-2">
-          {isSuperAdmin && ownerOptions.length > 0 && (
+        <div className="flex items-center gap-2 flex-wrap">
+          {isAdmin && ownerOptions.length > 0 && (
             <select
               value={ownerFilter}
               onChange={(e) => setOwnerFilter(e.target.value)}
@@ -194,7 +161,7 @@ export default function ConsultantsListView() {
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Search email, name, ID…"
-              className="pl-8 pr-3 py-1.5 text-xs rounded-md border border-gray-200 w-56 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+              className="pl-8 pr-3 py-1.5 text-xs rounded-md border border-gray-200 w-56 max-w-full focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
             />
           </div>
         </div>
@@ -206,18 +173,15 @@ export default function ConsultantsListView() {
         </p>
       )}
 
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>
-              <th className="text-left px-4 py-2">Consultant</th>
-              {isSuperAdmin && <th className="text-left px-4 py-2">Owner</th>}
-              <th className="text-left px-4 py-2">Application ID</th>
+              <th className="text-left px-4 py-2">Participant</th>
+              {isAdmin && <th className="text-left px-4 py-2">Owner</th>}
+              <th className="text-left px-4 py-2">Agreement ID</th>
               <th className="text-left px-4 py-2">Status</th>
               <th className="text-left px-4 py-2">Pending Appendix</th>
-              <th className="text-left px-4 py-2">Manager</th>
-              <th className="text-left px-4 py-2">Accounts</th>
-              <th className="text-left px-4 py-2">Sent on</th>
               <th className="text-left px-4 py-2">Created</th>
             </tr>
           </thead>
@@ -234,16 +198,17 @@ export default function ConsultantsListView() {
                   colSpan={colCount}
                   className="px-4 py-6 text-center text-sm text-gray-400 italic"
                 >
-                  No applications match this view.
+                  No agreements match this view.
                 </td>
               </tr>
             ) : (
               filtered.map((r) => (
                 <tr key={r.applicationId} className="hover:bg-gray-50">
                   <td className="px-4 py-2">
-                    <Link
-                      href={`/agreements/${r.applicationId}`}
-                      className="block"
+                    <button
+                      type="button"
+                      onClick={() => onOpen(r.applicationId)}
+                      className="block text-left cursor-pointer"
                     >
                       <div className="font-medium text-gray-900">
                         {r.consultantName || "—"}
@@ -251,58 +216,36 @@ export default function ConsultantsListView() {
                       <div className="text-[11px] text-gray-500">
                         {r.consultantEmail}
                       </div>
-                    </Link>
+                    </button>
                   </td>
-                  {isSuperAdmin && (
+                  {isAdmin && (
                     <td className="px-4 py-2 text-xs text-gray-700">
                       {r.ownerName || "—"}
                     </td>
                   )}
                   <td className="px-4 py-2 font-mono text-[11px] text-gray-700">
-                    <Link href={`/agreements/${r.applicationId}`}>
+                    <button
+                      type="button"
+                      onClick={() => onOpen(r.applicationId)}
+                      className="cursor-pointer hover:text-sage-navy"
+                    >
                       {r.applicationId.slice(0, 8)}…
-                    </Link>
+                    </button>
                   </td>
                   <td className="px-4 py-2">
-                    {/* List rows carry the three refining fields, so the pill
-                        can resolve the sub-state (e.g. "Signed — ready to
-                        route" vs "Signed — awaiting ERM review") instead of
-                        the coarse enum label. */}
+                    {/* List rows carry the refining fields, so the pill can
+                        resolve the sub-state ("Verified" vs "Signed by
+                        participant") instead of the coarse enum label. */}
                     <AgreementStatusPill
                       status={r.status}
                       context={{
                         consultantCopyReleased: r.consultantCopyReleased,
                         phase: r.phase,
-                        linkExpired: r.linkExpired,
                       }}
                     />
-                    {/* Build Q — derived "Link expired — resend"; the
-                        agreement is never hidden/expired by this. */}
-                    {r.linkExpired && (
-                      <div className="mt-1">
-                        <ResendLinkButton
-                          appId={r.applicationId}
-                          onResent={() => setReloadKey((k) => k + 1)}
-                        />
-                      </div>
-                    )}
                   </td>
                   <td className="px-4 py-2 align-top">
                     <PendingAppendixCell app={r} />
-                  </td>
-                  <td className="px-4 py-2">
-                    <ApprovalBadge status={r.managerStatus} />
-                  </td>
-                  <td className="px-4 py-2">
-                    {/* Phase 1 has no Accounts gate → N/A. */}
-                    {(r.phase ?? 1) >= 2 ? (
-                      <ApprovalBadge status={r.accountsStatus} />
-                    ) : (
-                      <span className="text-[11px] text-gray-400">N/A</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2 text-xs text-gray-500">
-                    {formatDate(r.sentForApprovalAt)}
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
                     {formatDate(r.createdAt)}
@@ -346,71 +289,15 @@ export default function ConsultantsListView() {
 }
 
 function formatDate(iso: string | null | undefined) {
-  // Build N — US MM-DD-YYYY (was en-IN DD-MM).
+  // US MM-DD-YYYY, like the rest of the agreement screens.
   return iso ? formatUsDate(iso) : "—";
-}
-
-// Build Q — inline "Link expired · Resend" affordance for the ERM list.
-// Issues a fresh 7-day consultant link (resets inviteSentAt, re-emails,
-// supersedes old OTPs) WITHOUT changing the agreement's state.
-function ResendLinkButton({
-  appId,
-  onResent,
-}: {
-  appId: string;
-  onResent: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(false);
-  const [err, setErr] = useState("");
-
-  const resend = async () => {
-    setBusy(true);
-    setErr("");
-    try {
-      await resendConsultantInvite(appId);
-      setDone(true);
-      // Let the parent reload so the refreshed inviteSentAt clears the badge.
-      setTimeout(onResent, 900);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't resend.");
-      setBusy(false);
-    }
-  };
-
-  if (done) {
-    return (
-      <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
-        Fresh link sent
-      </span>
-    );
-  }
-  return (
-    <span className="inline-flex flex-col gap-0.5">
-      <button
-        type="button"
-        onClick={resend}
-        disabled={busy}
-        title="Issue a fresh 7-day consultant link (the agreement is unchanged)"
-        className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50 cursor-pointer"
-      >
-        {busy ? (
-          <Loader2 size={10} className="animate-spin" />
-        ) : (
-          <RefreshCw size={10} />
-        )}
-        Link expired · Resend
-      </button>
-      {err && <span className="text-[10px] text-red-600">{err}</span>}
-    </span>
-  );
 }
 
 // "None" when all five appendices are sent + signed; otherwise a compact chip
 // summary ("N not sent" / "N awaiting") that expands to the per-appendix
-// detail. Build X — the full Appendix 1–5 set is considered; not-required
-// appendices appear as "Not sent".
-function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
+// detail. The full Appendix 1–5 set is considered; not-required appendices
+// appear as "Not sent".
+function PendingAppendixCell({ app }: { app: WebAgreement }) {
   const pending = computePendingAppendices(app);
   if (pending.length === 0) {
     return <span className="text-[11px] text-gray-400">None</span>;
@@ -452,34 +339,5 @@ function PendingAppendixCell({ app }: { app: ConsultantApplication }) {
         ))}
       </ul>
     </details>
-  );
-}
-
-// Build O — compact Manager/Accounts gate-status badge for the "All" list.
-// null status (never sent for that role) renders a neutral dash.
-//
-// Wording and colour come from APPROVAL_DECISION_META. This used to keep its
-// own map, which called a declined gate "Revision" in rose while the approval
-// board rendered directly above it on the same page called the same gate
-// "Declined" in red.
-function ApprovalBadge({ status }: { status: string | null | undefined }) {
-  if (!status) return <span className="text-[11px] text-gray-400">—</span>;
-  const m = APPROVAL_DECISION_META[status as ApprovalDecision];
-  if (!m) {
-    return (
-      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700">
-        {status}
-      </span>
-    );
-  }
-  return (
-    <span
-      className={
-        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold " +
-        TONE_CLASSES[m.tone]
-      }
-    >
-      {m.label}
-    </span>
   );
 }

@@ -1,22 +1,18 @@
 "use client";
 
 import { useEffect, useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
 import {
   AlertCircle,
   ArrowLeft,
-  FilePlus2,
   Loader2,
   Save,
 } from "lucide-react";
 
-import AgreementErmShell from "@/components/agreement-erm/AgreementErmShell";
 import {
-  createConsultantApplication,
-  getAgreementErmToken,
+  createWebAgreement,
+  getWebAgreementRequest,
 } from "@/lib/api";
-import { WORK_AUTHORIZATION_OPTIONS } from "@/lib/agreement-sections";
+import { WORK_AUTHORIZATION_OPTIONS } from "@/lib/web-agreement-sections";
 
 interface FormState {
   // Build W — structured name (First required, Middle optional, Last
@@ -32,12 +28,12 @@ interface FormState {
   // Appendix 1 Schedule 1 — ERM-set Phase 2 deliverables period (merged cell).
   phase2DeliverablePeriod: string;
   // F-4: ERM-set visa status, persisted on the workAuthCategory column.
-  // Locked + visible to the consultant on the cover step.
+  // Locked + visible to the participant on the cover step.
   visaStatus: string;
   // Build W — custom value, required only when visaStatus === "Others".
   visaStatusOther: string;
   // F-4: per-appendix requirement flags. The ERM ticks whichever
-  // appendices apply to THIS consultant; the wizard + submit gate use
+  // appendices apply to THIS participant; the wizard + submit gate use
   // them to decide required vs optional-skippable.
   requireAppendix1: boolean;
   requireAppendix2: boolean;
@@ -49,21 +45,21 @@ interface FormState {
   // AND Appendix 3 active).
   requireSsn: boolean;
   // Build Y — ERM-filled ACH debit schedule. Single free-text fields
-  // (e.g. "15th of every month" / "$416.67"); read-only to the consultant.
+  // (e.g. "15th of every month" / "$416.67"); read-only to the participant.
   achDebitDates: string;
   achDebitAmounts: string;
   // Build I — Service Track (ERM-set, locked). Technology/Skill Track is
-  // required to send; Custom Scope is optional. Read-only to the consultant.
+  // required to send; Custom Scope is optional. Read-only to the participant.
   technologyTrack: string;
   customScopeNotes: string;
-  // Build Z — ERM-set Appendix 4 fields (read-only to the consultant).
+  // Build Z — ERM-set Appendix 4 fields (read-only to the participant).
   // Authorized Actions carries a default bracketed string (editable);
   // Revocation Contact is free-text with no default.
   portalAuthorizedActions: string;
   portalRevocationContact: string;
   // Build O — optional ERM-authored invitation email message. Prefilled
-  // with the Sage IT Co default; becomes the intro of the consultant's
-  // invitation email. Blank → backend falls back to the default.
+  // with the Sage IT Co default; becomes the intro of the participant's
+  // "ready to fill" email. Blank → backend falls back to the default.
   emailPretext: string;
 }
 
@@ -79,7 +75,7 @@ const DEFAULT_PORTAL_AUTHORIZED_ACTIONS =
   "[Review / update profile / submit applications / respond to recruiters / schedule interviews / other limited actions]";
 
 // Build W — the eight ERM-selectable work-authorization options, shared
-// with the consultant read-only view via agreement-sections.
+// with the participant's read-only view via web-agreement-sections.
 const VISA_OPTIONS = WORK_AUTHORIZATION_OPTIONS;
 
 const EMPTY: FormState = {
@@ -110,30 +106,65 @@ const EMPTY: FormState = {
 };
 
 /**
- * Structured 6-field create form. Submits to
- * POST /api/agreement-erm/applications, which transitions the
- * application to SUBMITTED and fires the "complete your details"
- * email to the consultant.
+ * The website agreement's copy of the console's create form
+ * (src/app/agreements/new/page.tsx), as a component inside the ERM
+ * dashboard's Agreements tab. It always starts from a participant on the
+ * "ready for their agreement" list: their own details (name, email,
+ * technology) are filled in from their request; everything else is the
+ * ERM's side.
  *
- * The detail-page edit panel still uses the shared ConsultantForm
- * component (different concern: editing existing rows via the
- * legacy update endpoint). This page is intentionally inline so
- * the create + edit flows can diverge without coupling.
+ * Submits to POST /api/web-agreements, which creates the agreement as
+ * SUBMITTED and emails the participant that it's ready to fill on their
+ * dashboard. onCreated then opens the new agreement.
  */
-export default function NewConsultantApplicationPage() {
-  const router = useRouter();
-  const [checked, setChecked] = useState(false);
+export default function WebAgreementCreateForm({
+  participantUserId,
+  onCancel,
+  onCreated,
+}: {
+  /** users.id of the participant (from the ready list). */
+  participantUserId: number;
+  onCancel: () => void;
+  onCreated: (applicationId: string) => void;
+}) {
+  const [loading, setLoading] = useState(true);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // Whose request the participant details were filled in from.
+  const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!getAgreementErmToken()) {
-      router.replace("/agreements/login");
-      return;
-    }
-    setChecked(true);
-  }, [router]);
+    let cancelled = false;
+    setLoading(true);
+    // Only the participant's own details; everything on the ERM's side stays for the ERM.
+    getWebAgreementRequest(participantUserId)
+      .then((p) => {
+        if (cancelled) return;
+        setForm((s) => ({
+          ...s,
+          firstName: p.firstName || s.firstName,
+          middleName: p.middleName || s.middleName,
+          lastName: p.lastName || s.lastName,
+          consultantEmail: p.email || s.consultantEmail,
+          technologyTrack: p.technology || s.technologyTrack,
+        }));
+        setPrefilledFrom(p.participantId || p.fullName || p.email);
+      })
+      .catch((e) => {
+        // Not waiting any more (or already has an agreement): the server
+        // refuses the create too, so say why up front.
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Couldn't load this participant's request.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [participantUserId]);
 
   const setText = <K extends keyof FormState>(key: K) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) =>
@@ -208,13 +239,14 @@ export default function NewConsultantApplicationPage() {
       return;
     }
     if (!emailLooksValid) {
-      setError("Consultant email doesn't look right.");
+      setError("Participant email doesn't look right.");
       return;
     }
 
     setIsSubmitting(true);
     try {
-      const app = await createConsultantApplication({
+      const app = await createWebAgreement({
+        participantUserId,
         ...trimmedStrings,
         requireAppendix1: form.requireAppendix1,
         requireAppendix2: form.requireAppendix2,
@@ -225,43 +257,45 @@ export default function NewConsultantApplicationPage() {
         // Build Y — single ERM-filled debit date/amount free-text.
         achDebitDates: form.achDebitDates.trim(),
         achDebitAmounts: form.achDebitAmounts.trim(),
-        // Build Z — ERM-set Appendix 4 (read-only to the consultant).
+        // Build Z — ERM-set Appendix 4 (read-only to the participant).
         portalAuthorizedActions: form.portalAuthorizedActions.trim(),
         portalRevocationContact: form.portalRevocationContact.trim(),
       });
-      router.replace(`/agreements/${app.applicationId}`);
+      onCreated(app.applicationId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't create application.");
+      setError(err instanceof Error ? err.message : "Couldn't create the agreement.");
       setIsSubmitting(false);
     }
-    // Don't reset isSubmitting on success -- the router.replace will
-    // unmount the page; resetting would briefly re-enable the button
-    // and let the operator double-click.
+    // Don't reset isSubmitting on success -- onCreated swaps this form
+    // for the new agreement; resetting would briefly re-enable the
+    // button and let the operator double-click.
   };
 
-  if (!checked) {
+  if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50">
-        <Loader2 size={28} className="animate-spin text-sage-navy" />
+      <div className="text-center py-10">
+        <Loader2 size={20} className="animate-spin text-sage-navy inline" />
       </div>
     );
   }
 
   return (
-    <AgreementErmShell
-      title="New consultant agreement"
-      subtitle="Create a draft and email the invite to the consultant."
-      Icon={FilePlus2}
-      toolbar={
-        <Link
-          href="/agreements"
-          className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-sage-navy"
+    <div className="space-y-4">
+      <div>
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="inline-flex items-center gap-1 text-xs font-semibold text-gray-500 hover:text-sage-navy cursor-pointer disabled:opacity-50"
         >
-          <ArrowLeft size={12} /> Back
-        </Link>
-      }
-    >
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-6 max-w-3xl">
+          <ArrowLeft size={12} /> Back to agreements
+        </button>
+        <h1 className="mt-2 text-2xl font-bold text-gray-900">New agreement</h1>
+        <p className="text-sm text-gray-500">
+          Create the agreement and email the participant that it&apos;s ready to fill on their dashboard.
+        </p>
+      </div>
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 max-w-3xl">
         <form onSubmit={handleSubmit} className="space-y-6">
           {error && (
             <div
@@ -273,8 +307,14 @@ export default function NewConsultantApplicationPage() {
             </div>
           )}
 
+          {prefilledFrom && (
+            <p className="rounded-md border border-sage-navy/15 bg-sage-navy/5 px-3 py-2 text-xs text-sage-navy">
+              Participant details filled in from {prefilledFrom}&apos;s request. Please check them and fill in your side.
+            </p>
+          )}
+
           <section className="space-y-3">
-            <SectionHeader title="Consultant" />
+            <SectionHeader title="Participant" />
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="First name" required>
                 <input
@@ -304,7 +344,7 @@ export default function NewConsultantApplicationPage() {
                   onChange={setText("lastName")}
                   disabled={isSubmitting}
                   required
-                  placeholder="Consultant"
+                  placeholder="Doe"
                   className={inputClass}
                 />
               </Field>
@@ -316,7 +356,7 @@ export default function NewConsultantApplicationPage() {
                   disabled={isSubmitting}
                   required
                   autoComplete="off"
-                  placeholder="consultant@example.com"
+                  placeholder="participant@example.com"
                   className={inputClass}
                 />
               </Field>
@@ -353,7 +393,7 @@ export default function NewConsultantApplicationPage() {
                   />
                 )}
                 <p className="mt-1 text-[11px] text-gray-500">
-                  Locked on the consultant&apos;s view. They&apos;ll see
+                  Locked on the participant&apos;s view. They&apos;ll see
                   it but cannot change it.
                 </p>
               </Field>
@@ -364,7 +404,7 @@ export default function NewConsultantApplicationPage() {
             <SectionHeader title="Service track" />
             <p className="text-[11px] text-gray-500">
               Set the engagement scope. These render in Exhibit A and are
-              read-only to the consultant.
+              read-only to the participant.
             </p>
             <Field label="Technology / skill track" required>
               <input
@@ -392,8 +432,8 @@ export default function NewConsultantApplicationPage() {
           <section className="space-y-3">
             <SectionHeader title="Invitation email message (optional)" />
             <p className="text-[11px] text-gray-500">
-              This becomes the intro of the invitation email the consultant
-              receives. Edit it for this consultant, or leave the Sage IT Co
+              This becomes the intro of the invitation email the participant
+              receives. Edit it for this participant, or leave the Sage IT Co
               default. Clearing it falls back to the default.
             </p>
             <Field label="Email message / pre-text">
@@ -490,7 +530,7 @@ export default function NewConsultantApplicationPage() {
             <p className="text-[11px] text-gray-500">
               The single Month / Period value shown in Appendix 1&apos;s
               &ldquo;Schedule 1 – Phase 2 Monthly Deliverables&rdquo; table
-              (read-only to the consultant).
+              (read-only to the participant).
             </p>
             <Field label="Month / Period" required>
               <input
@@ -510,7 +550,7 @@ export default function NewConsultantApplicationPage() {
             <p className="text-[11px] text-gray-500">
               Pre-fill the Appendix 2 debit date(s) and amount(s).
               Free-text (e.g. &ldquo;15th of every month&rdquo;); read-only
-              to the consultant.
+              to the participant.
             </p>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               <Field label="Debit date(s)">
@@ -540,8 +580,8 @@ export default function NewConsultantApplicationPage() {
             <SectionHeader title="Appendix 4 — Portal access (optional)" />
             <p className="text-[11px] text-gray-500">
               Pre-fill the Appendix 4 Authorized Actions + Revocation Contact.
-              Read-only to the consultant. (Platform / Username and the Access
-              Effective Date are still filled by the consultant.)
+              Read-only to the participant. (Platform / Username and the Access
+              Effective Date are still filled by the participant.)
             </p>
             <Field label="Authorized actions">
               <textarea
@@ -566,9 +606,9 @@ export default function NewConsultantApplicationPage() {
           </section>
 
           <section className="space-y-3">
-            <SectionHeader title="Sections required for this consultant" />
+            <SectionHeader title="Sections required for this participant" />
             <p className="text-[11px] text-gray-500">
-              Tick the appendices THIS consultant must complete. Unchecked
+              Tick the appendices THIS participant must complete. Unchecked
               appendices are shown to them but skippable. Implementation
               partner is never required.
             </p>
@@ -610,7 +650,7 @@ export default function NewConsultantApplicationPage() {
                 disabled={isSubmitting || !form.requireAppendix3}
                 hint={
                   form.requireAppendix3
-                    ? "Consultant must enter their full SSN."
+                    ? "Participant must enter their full SSN."
                     : "Enable Appendix 3 first."
                 }
               />
@@ -620,7 +660,7 @@ export default function NewConsultantApplicationPage() {
           <div className="flex flex-col-reverse sm:flex-row sm:items-center sm:justify-end gap-2 pt-2 border-t border-gray-100">
             <button
               type="button"
-              onClick={() => router.push("/agreements")}
+              onClick={onCancel}
               disabled={isSubmitting}
               className="w-full sm:w-auto px-4 py-2 rounded-md text-xs font-semibold text-gray-600 hover:text-gray-900 cursor-pointer disabled:opacity-50"
             >
@@ -641,7 +681,7 @@ export default function NewConsultantApplicationPage() {
           </div>
         </form>
       </div>
-    </AgreementErmShell>
+    </div>
   );
 }
 

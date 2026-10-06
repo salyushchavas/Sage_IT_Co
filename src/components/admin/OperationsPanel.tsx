@@ -4,9 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { InviteDialog } from "@/components/admin/tabs/AdminUsersTab";
 import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
 import { DocumentVerificationQueue } from "@/components/applications/DocumentVerificationQueue";
+import { WebAgreementsPanel } from "@/components/web-agreement/erm/WebAgreementsPanel";
 import {
   AlertCircle,
   ClipboardList,
+  FileSignature,
   FileText,
   Inbox,
   Loader2,
@@ -54,6 +56,8 @@ import {
  *   docReview   -- document review: view, approve, send back with a
  *                  reason (emailed), decide "not applicable" requests
  *   agreement   -- agreement signing queue
+ *   agreements  -- the website agreements of every ERM (same screen as the
+ *                  ERM dashboard's Agreements tab); ?tab=agreements opens it
  *   assignments -- pending ERM / coach assignments + assign actions
  *   audit       -- user_records log with filters
  *   emails      -- every email sent or not (SENT / FAILED / SKIPPED)
@@ -68,6 +72,7 @@ type OpsTab =
   | "enrollment"
   | "docReview"
   | "agreement"
+  | "agreements"
   | "assignments"
   | "audit"
   | "emails"
@@ -79,6 +84,7 @@ const SUB_TABS: { id: OpsTab; label: string; Icon: typeof Users }[] = [
   { id: "enrollment",  label: "Enrollment queue", Icon: Inbox },
   { id: "docReview",   label: "Document review",  Icon: FileText },
   { id: "agreement",   label: "Agreement queue",  Icon: ShieldCheck },
+  { id: "agreements",  label: "Agreements",       Icon: FileSignature },
   { id: "assignments", label: "Assignments",      Icon: UserCog },
   { id: "audit",       label: "Audit trail",      Icon: ClipboardList },
   { id: "emails",      label: "Email log",        Icon: Mail },
@@ -89,6 +95,10 @@ export function OperationsPanel() {
   const [tab, setTab] = useState<OpsTab>("enrollment");
   const [inviting, setInviting] = useState(false);
   const [inviteNote, setInviteNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // ?tab=agreements (optionally &agreement=<id>) opens the website agreements.
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("tab") === "agreements") setTab("agreements");
+  }, []);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -130,6 +140,7 @@ export function OperationsPanel() {
       {tab === "enrollment" && <EnrollmentQueue />}
       {tab === "docReview" && <DocumentReview />}
       {tab === "agreement" && <AgreementQueue />}
+      {tab === "agreements" && <WebAgreementsPanel />}
       {tab === "assignments" && <AssignmentsPanel />}
       {tab === "audit" && <AuditPanel />}
       {tab === "emails" && <EmailLogPanel />}
