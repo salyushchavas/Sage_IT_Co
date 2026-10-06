@@ -122,9 +122,8 @@ export default function ErmDashboardPage() {
       return;
     }
     const role = (user.role ?? "").toUpperCase();
-    // Agreement emails can reach an Operations / System admin (they created
-    // it, or stood in for an inactive owner): open the same Agreements tab
-    // on /operations, keeping ?agreement=<id>.
+    // An Operations / System admin following an Agreements link: open the
+    // same Agreements tab on /operations, keeping ?agreement=<id>.
     if (
       (role === "OPERATIONS_ADMIN" || role === "SYSTEM_ADMIN") &&
       new URLSearchParams(window.location.search).get("tab") === "agreements"

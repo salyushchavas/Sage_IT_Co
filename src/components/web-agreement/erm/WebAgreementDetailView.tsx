@@ -13,7 +13,6 @@ import {
   FileText,
   Globe,
   Loader2,
-  Mail,
   MessageSquare,
   PenLine,
   Pencil,
@@ -30,7 +29,6 @@ import {
   fetchWebAgreementPreviewPdfBlob,
   parseChequeList,
   parsePortalEntries,
-  resendWebAgreement,
   updateWebAgreementContact,
   verifyWebAgreement,
   webAgreementRequestDocumentRevision,
@@ -52,7 +50,7 @@ import AgreementEventTimeline from "./AgreementEventTimeline";
  * The website agreement's copy of the console's ERM detail view
  * (src/components/agreement-erm/ConsultantDetailView.tsx), shown inside the
  * ERM dashboard's Agreements tab. It keeps the actions the website flow has
- * today: resend, cancel, edit contact, request revision (with the ERM's
+ * today: cancel, edit contact, request revision (with the ERM's
  * corrections), signature re-sign, document re-upload, take back a request
  * and Verify, plus the PDF preview, the documents, the signature record and
  * the activity log. Internal approval, the countersignature, Phase 2 and the
@@ -268,9 +266,6 @@ type ModalKind = null | "revision" | "signatureRevision" | "editContact";
 
 export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
-  // Website-agreement emails are off until it is merged with the real ERMs:
-  // no resend buttons, and nothing on screen says the participant was emailed.
-  const emailsOn = detail.emailsEnabled === true;
   const [modal, setModal] = useState<ModalKind>(null);
   // The per-document "Request re-upload" target (doc key + label), set from a
   // document card; null hides the modal.
@@ -279,7 +274,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     label: string;
   } | null>(null);
   const [busy, setBusy] = useState<
-    "resend" | "cancel" | "verify" | "revokeRevision" | null
+    "cancel" | "verify" | "revokeRevision" | null
   >(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
@@ -302,20 +297,6 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     return () => clearTimeout(t);
   }, [feedback]);
 
-  const handleResend = async () => {
-    setBusy("resend");
-    setError("");
-    try {
-      await resendWebAgreement(app.applicationId);
-      setFeedback(`Invitation re-sent to ${app.consultantEmail}.`);
-      await onRefresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't resend invite");
-    } finally {
-      setBusy(null);
-    }
-  };
-
   const handleCancel = async () => {
     if (!confirm("Cancel this agreement? The participant won't be able to sign.")) {
       return;
@@ -335,16 +316,13 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
 
   /**
    * The ERM checked the participant-signed agreement. Status stays VERIFIED;
-   * consultantCopyReleased turns it into "Verified" and the participant is
-   * emailed. Revisions stay possible afterwards (a resubmit clears it).
+   * consultantCopyReleased turns it into "Verified" on the participant's
+   * dashboard. Revisions stay possible afterwards (a resubmit clears it).
    */
   const handleVerify = async () => {
     if (!confirm(
-      "Verify this agreement?\n\n"
-      + (emailsOn
-        ? "The participant will be emailed that their agreement is verified. "
-        : "The participant will see it as verified on their dashboard. ")
-      + "You can still send it back for changes afterwards.",
+      "Verify this agreement?\n\nThe participant will see it as verified on their "
+      + "dashboard. You can still send it back for changes afterwards.",
     )) {
       return;
     }
@@ -352,9 +330,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     setError("");
     try {
       await verifyWebAgreement(app.applicationId);
-      setFeedback(emailsOn
-        ? "Agreement verified. The participant has been emailed."
-        : "Agreement verified. The participant sees it on their dashboard.");
+      setFeedback("Agreement verified. The participant sees it on their dashboard.");
       await onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't verify the agreement");
@@ -385,7 +361,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       !confirm(
         `Take back this change request?\n\nThe agreement returns to `
         + `“${landsOn}” with the participant's submission restored`
-        + (emailsOn ? `, and they'll be emailed that the request was withdrawn.` : ".")
+        + "."
         + alsoReverts,
       )
     ) {
@@ -398,7 +374,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       setFeedback(
         `Change request withdrawn. The agreement is back at “${landsOn}”`
         + (reverts.length ? `, ${reverts.join(", ")} reverted,` : "")
-        + (emailsOn ? " and the participant has been notified." : "."),
+        + ".",
       );
       await onRefresh();
     } catch (e) {
@@ -429,10 +405,8 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
         onRequestRevision={() => setModal("revision")}
         onRequestSignatureRevision={() => setModal("signatureRevision")}
         onVerify={handleVerify}
-        onResendInvite={emailsOn ? handleResend : undefined}
         onCancel={handleCancel}
         onRevokeRevision={handleRevokeRevision}
-        resendBusy={busy === "resend"}
         cancelBusy={busy === "cancel"}
         verifyBusy={busy === "verify"}
         revokeRevisionBusy={busy === "revokeRevision"}
@@ -442,8 +416,6 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       <ContactActionsBar
         status={status}
         onEditContact={() => setModal("editContact")}
-        onResend={emailsOn ? handleResend : undefined}
-        resendBusy={busy === "resend"}
       />
 
       <ErmFilledCard app={app} />
@@ -485,7 +457,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
-            setFeedback(`Revision requested. ${emailsOn ? "Participant notified." : "The participant sees it on their dashboard."}`);
+            setFeedback("Revision requested. The participant sees it on their dashboard.");
             await onRefresh();
           }}
         />
@@ -496,7 +468,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
-            setFeedback(`Signature re-sign requested. ${emailsOn ? "Participant notified." : "The participant sees it on their dashboard."}`);
+            setFeedback("Signature re-sign requested. The participant sees it on their dashboard.");
             await onRefresh();
           }}
         />
@@ -509,7 +481,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onClose={() => setDocRevisionTarget(null)}
           onDone={async () => {
             setDocRevisionTarget(null);
-            setFeedback(`Document re-upload requested. ${emailsOn ? "Participant notified." : "The participant sees it on their dashboard."}`);
+            setFeedback("Document re-upload requested. The participant sees it on their dashboard.");
             await onRefresh();
           }}
         />
@@ -517,10 +489,8 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       {modal === "editContact" && (
         <EditContactModal
           appId={app.applicationId}
-          status={status}
           defaultEmail={app.consultantEmail}
           defaultName={app.consultantName ?? ""}
-          canResendEmail={emailsOn}
           onClose={() => setModal(null)}
           onDone={async (msg) => {
             setModal(null);
@@ -535,30 +505,20 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
 
 // ── Contact actions ────────────────────────────────────────────
 //
-// Edit participant contact / resend the "ready to fill" email. The SUBMITTED
-// resend also lives in StateActionBar; this bar adds resend for
-// REVISION_REQUESTED and the edit escape hatch. Renders nothing when none
-// apply (CANCELLED). There is no "copy link": the participant opens the
-// agreement from their dashboard.
+// Edit participant contact. Renders nothing when it doesn't apply
+// (CANCELLED). No email is sent and there is no "copy link": the
+// participant opens the agreement from their dashboard.
 
 function ContactActionsBar({
   status,
   onEditContact,
-  onResend,
-  resendBusy,
 }: {
   status: WebAgreement["status"];
   onEditContact: () => void;
-  /** Absent while website-agreement emails are off. */
-  onResend?: () => void;
-  resendBusy: boolean;
 }) {
   const canEdit = ["SUBMITTED", "VERIFIED", "REVISION_REQUESTED", "COMPLETED"].includes(status);
-  // SUBMITTED resend is already in StateActionBar; surface it here for
-  // REVISION_REQUESTED so the action exists in both states.
-  const canResend = status === "REVISION_REQUESTED" && !!onResend;
 
-  if (!canEdit && !canResend) return null;
+  if (!canEdit) return null;
 
   return (
     <div className="flex items-center gap-2 flex-wrap">
@@ -571,17 +531,6 @@ function ContactActionsBar({
           <Pencil size={12} /> Edit participant contact
         </button>
       )}
-      {canResend && (
-        <button
-          type="button"
-          onClick={onResend}
-          disabled={resendBusy}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md text-[11px] font-semibold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 cursor-pointer disabled:opacity-50"
-        >
-          {resendBusy ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
-          Resend invitation
-        </button>
-      )}
     </div>
   );
 }
@@ -590,36 +539,29 @@ function ContactActionsBar({
 
 function EditContactModal({
   appId,
-  status,
   defaultEmail,
   defaultName,
-  canResendEmail,
   onClose,
   onDone,
 }: {
   appId: string;
-  status: WebAgreement["status"];
   defaultEmail: string;
   defaultName: string;
-  /** False while website-agreement emails are off. */
-  canResendEmail: boolean;
   onClose: () => void;
   onDone: (message: string) => Promise<void>;
 }) {
   const [email, setEmail] = useState(defaultEmail);
   const [name, setName] = useState(defaultName);
-  const [busy, setBusy] = useState<"save" | "saveResend" | null>(null);
+  const [busy, setBusy] = useState<"save" | null>(null);
   const [error, setError] = useState("");
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const canResend = canResendEmail && (status === "SUBMITTED" || status === "REVISION_REQUESTED");
-
-  const submit = async (alsoResend: boolean) => {
+  const submit = async () => {
     if (!emailValid) {
       setError("Enter a valid email address.");
       return;
     }
-    setBusy(alsoResend ? "saveResend" : "save");
+    setBusy("save");
     setError("");
     try {
       await updateWebAgreementContact(appId, {
@@ -632,19 +574,7 @@ function EditContactModal({
       setBusy(null);
       return;
     }
-    // Contact is saved. A subsequent resend failure must NOT hide that
-    // success or trap the user in an error modal — close with a note.
-    if (alsoResend) {
-      try {
-        await resendWebAgreement(appId);
-        await onDone(`Contact updated and invitation re-sent to ${email.trim()}.`);
-      } catch (e) {
-        const msg = e instanceof Error ? e.message : "resend failed";
-        await onDone(`Contact updated, but the invitation couldn't be re-sent (${msg}).`);
-      }
-    } else {
-      await onDone("Participant contact updated.");
-    }
+    await onDone("Participant contact updated.");
   };
 
   return (
@@ -662,20 +592,9 @@ function EditContactModal({
           >
             Cancel
           </button>
-          {canResend && (
-            <button
-              type="button"
-              onClick={() => submit(true)}
-              disabled={busy !== null || !emailValid}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5 cursor-pointer disabled:opacity-60"
-            >
-              {busy === "saveResend" ? <Loader2 size={12} className="animate-spin" /> : <Mail size={12} />}
-              Save &amp; resend invitation
-            </button>
-          )}
           <button
             type="button"
-            onClick={() => submit(false)}
+            onClick={() => submit()}
             disabled={busy !== null || !emailValid}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-60"
           >
@@ -686,9 +605,9 @@ function EditContactModal({
       }
     >
       <p className="text-xs text-gray-500 mb-3">
-        Fix a wrong email or name on the agreement. This updates where future
-        agreement emails go and the agreement PDF&apos;s contact field; it
-        doesn&apos;t change the participant&apos;s website sign-in.
+        Fix a wrong email or name on the agreement. This updates the
+        agreement PDF&apos;s contact field; it doesn&apos;t change the
+        participant&apos;s website sign-in.
       </p>
       <div className="space-y-3">
         <div>
@@ -797,8 +716,7 @@ function HeaderRow({ app }: { app: WebAgreement }) {
 /**
  * The way out of a change request sent by mistake. Undoes the whole round:
  * the agreement returns to the desk it was revised from, the participant's
- * submission (affirmations, signatures, documents) is restored, and they're
- * emailed that the request was withdrawn.
+ * submission (affirmations, signatures, documents) is restored.
  *
  * The server decides whether it is still possible, and says no when the
  * participant has already entered something this round (their answers would
@@ -878,10 +796,8 @@ function StateActionBar({
   onRequestRevision,
   onRequestSignatureRevision,
   onVerify,
-  onResendInvite,
   onCancel,
   onRevokeRevision,
-  resendBusy,
   cancelBusy,
   verifyBusy,
   revokeRevisionBusy,
@@ -892,11 +808,8 @@ function StateActionBar({
   onRequestRevision: () => void;
   onRequestSignatureRevision: () => void;
   onVerify: () => void;
-  /** Absent while website-agreement emails are off. */
-  onResendInvite?: () => void;
   onCancel: () => void;
   onRevokeRevision: () => void;
-  resendBusy: boolean;
   cancelBusy: boolean;
   verifyBusy: boolean;
   revokeRevisionBusy: boolean;
@@ -917,11 +830,6 @@ function StateActionBar({
         </p>
         {!isLocked && (
           <div className="flex items-center gap-2">
-            {onResendInvite && (
-              <SubtleButton onClick={onResendInvite} busy={resendBusy} icon={<Mail size={12} />}>
-                Resend invite
-              </SubtleButton>
-            )}
             <DangerButton onClick={onCancel} busy={cancelBusy} icon={<Ban size={12} />}>
               Cancel
             </DangerButton>
@@ -1049,30 +957,6 @@ function BarShell({
       </span>
       {children}
     </section>
-  );
-}
-
-function SubtleButton({
-  onClick,
-  busy,
-  icon,
-  children,
-}: {
-  onClick: () => void;
-  busy: boolean;
-  icon: ReactNode;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={busy}
-      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold border border-gray-200 bg-white hover:bg-gray-50 text-gray-700 disabled:opacity-50 cursor-pointer"
-    >
-      {busy ? <Loader2 size={12} className="animate-spin" /> : icon}
-      {children}
-    </button>
   );
 }
 

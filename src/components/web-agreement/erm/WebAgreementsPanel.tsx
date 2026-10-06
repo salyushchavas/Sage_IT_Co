@@ -20,7 +20,7 @@ import WebAgreementDetailView from "./WebAgreementDetailView";
  *
  * Moving between list, create form and detail is component state, so the
  * dashboard around it stays put. A link with ?tab=agreements&agreement=<id>
- * (the "participant signed" email) opens that agreement directly.
+ * opens that agreement directly.
  */
 type View =
   | { kind: "list" }

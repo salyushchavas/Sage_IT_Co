@@ -6352,7 +6352,7 @@ export interface WebAgreement {
   // Exhibit A (ERM-set, read-only to the participant).
   technologyTrack: string | null;
   customScopeNotes: string | null;
-  /** The ERM's intro for the "ready to fill" email. */
+  /** Kept from the console's data model; unused (no emails). */
   emailPretext?: string | null;
   // Appendix 1 -- employment
   employerPayrollEntity: string | null;
@@ -6517,8 +6517,6 @@ export interface WebAgreementEvent {
 export interface WebAgreementDetail {
   application: WebAgreement;
   events: WebAgreementEvent[];
-  /** Whether website-agreement emails are on (off until it is merged with the real ERMs). */
-  emailsEnabled?: boolean;
 }
 
 export interface WebAgreementPage {
@@ -6634,8 +6632,6 @@ export interface WebAgreementCreateBody {
   customScopeNotes?: string;
   portalAuthorizedActions?: string;
   portalRevocationContact?: string;
-  /** Intro for the participant's email; blank means the default copy. */
-  emailPretext?: string;
 }
 
 /** The watermarked page images of the review step's preview. */
@@ -6895,7 +6891,7 @@ export async function getWebAgreementRequest(userId: number | string): Promise<W
   return webAgreementFetch<WebAgreementReadyRow>(`${WEB_AGREEMENTS}/requests/${encodeURIComponent(String(userId))}`);
 }
 
-/** Creates the agreement (SUBMITTED) and emails the participant that it's ready to fill. */
+/** Creates the agreement (SUBMITTED); the participant finds it on their dashboard. */
 export async function createWebAgreement(body: WebAgreementCreateBody): Promise<WebAgreement> {
   return webAgreementFetch<WebAgreement>(WEB_AGREEMENTS, { method: "POST", body: JSON.stringify(body) });
 }
@@ -6912,26 +6908,12 @@ export async function listWebAgreements(
   return webAgreementFetch<WebAgreementPage>(`${WEB_AGREEMENTS}${qs ? `?${qs}` : ""}`);
 }
 
-/** Staff: the website agreement's switches (emails stay off until it is merged with the real ERMs). */
-export async function getWebAgreementSettings(): Promise<{ emailsEnabled: boolean }> {
-  return webAgreementFetch<{ emailsEnabled: boolean }>(`${WEB_AGREEMENTS}/settings`);
-}
-
 export async function getWebAgreement(appId: string): Promise<WebAgreementDetail> {
   return webAgreementFetch<WebAgreementDetail>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}`);
 }
 
 export async function cancelWebAgreement(appId: string): Promise<WebAgreement> {
   return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/cancel`, { method: "POST" });
-}
-
-/** Emails the participant again that their agreement is ready to fill. */
-export async function resendWebAgreement(appId: string): Promise<{ message: string }> {
-  const body = await webAgreementJson<{ message?: string } | null>(
-    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/resend`,
-    { method: "POST" },
-  );
-  return { message: body.data?.message || body.message || "" };
 }
 
 /** Fixes the participant's email / name on the agreement. */
@@ -7002,7 +6984,7 @@ export async function webAgreementRevokeRevision(appId: string): Promise<WebAgre
   });
 }
 
-/** The ERM verifies the signed agreement (VERIFIED, not yet verified) and the participant is emailed. */
+/** The ERM verifies the signed agreement (VERIFIED, not yet verified); the participant sees it on their dashboard. */
 export async function verifyWebAgreement(appId: string): Promise<WebAgreement> {
   return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/verify`, { method: "POST" });
 }

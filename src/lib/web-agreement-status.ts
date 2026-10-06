@@ -88,7 +88,7 @@ export const AGREEMENT_STATUS_META: Record<WebAgreementStatus, AgreementStatusMe
     // The state a row is BORN in: the ERM sent it, the participant hasn't
     // sent anything back yet.
     meaning:
-      "The ERM created the agreement and emailed the participant. The participant has not filled or signed it yet.",
+      "The ERM created the agreement; the participant fills it from their dashboard. They have not filled or signed it yet.",
     blockedOn: "Participant",
     nextAction: "Fill the agreement and sign.",
     stage: "with_participant",

@@ -11,7 +11,6 @@ import {
 import {
   createWebAgreement,
   getWebAgreementRequest,
-  getWebAgreementSettings,
 } from "@/lib/api";
 import { WORK_AUTHORIZATION_OPTIONS } from "@/lib/web-agreement-sections";
 
@@ -58,18 +57,7 @@ interface FormState {
   // Revocation Contact is free-text with no default.
   portalAuthorizedActions: string;
   portalRevocationContact: string;
-  // Build O — optional ERM-authored invitation email message. Prefilled
-  // with the Sage IT Co default; becomes the intro of the participant's
-  // "ready to fill" email. Blank → backend falls back to the default.
-  emailPretext: string;
 }
-
-// Build O — default invitation email pre-text. Matches the backend
-// fallback copy, so leaving it untouched (or clearing it) yields the
-// same message.
-const DEFAULT_EMAIL_PRETEXT =
-  "Sage IT Co has prepared your engagement agreement and needs you to " +
-  "complete a few details so the document can be finalized.";
 
 // Build Z — default Appendix 4 "Authorized actions" (ERM-set, editable).
 const DEFAULT_PORTAL_AUTHORIZED_ACTIONS =
@@ -103,7 +91,6 @@ const EMPTY: FormState = {
   customScopeNotes: "",
   portalAuthorizedActions: DEFAULT_PORTAL_AUTHORIZED_ACTIONS,
   portalRevocationContact: "",
-  emailPretext: DEFAULT_EMAIL_PRETEXT,
 };
 
 /**
@@ -115,8 +102,8 @@ const EMPTY: FormState = {
  * ERM's side.
  *
  * Submits to POST /api/web-agreements, which creates the agreement as
- * SUBMITTED and emails the participant that it's ready to fill on their
- * dashboard. onCreated then opens the new agreement.
+ * SUBMITTED; the participant fills it on their dashboard (no email).
+ * onCreated then opens the new agreement.
  */
 export default function WebAgreementCreateForm({
   participantUserId,
@@ -134,13 +121,6 @@ export default function WebAgreementCreateForm({
   const [error, setError] = useState("");
   // Whose request the participant details were filled in from.
   const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
-  // Website-agreement emails stay off until it is merged with the real ERMs;
-  // then the invitation email (and its message) apply again.
-  const [emailsOn, setEmailsOn] = useState(false);
-
-  useEffect(() => {
-    getWebAgreementSettings().then((x) => setEmailsOn(x.emailsEnabled)).catch(() => {});
-  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -207,8 +187,6 @@ export default function WebAgreementCreateForm({
     // Build I — Service Track (ERM-set). Track required, Scope optional.
     technologyTrack: form.technologyTrack.trim(),
     customScopeNotes: form.customScopeNotes.trim(),
-    // Build O — optional invitation email pre-text (blank → backend default).
-    emailPretext: form.emailPretext.trim(),
   };
 
   // Middle name + custom scope are optional; everything else is required.
@@ -300,9 +278,7 @@ export default function WebAgreementCreateForm({
         </button>
         <h1 className="mt-2 text-2xl font-bold text-gray-900">New agreement</h1>
         <p className="text-sm text-gray-500">
-          {emailsOn
-            ? "Create the agreement and email the participant that it's ready to fill on their dashboard."
-            : "Create the agreement; the participant fills and signs theirs on their dashboard."}
+          Create the agreement; the participant fills and signs theirs on their dashboard.
         </p>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 max-w-3xl">
@@ -438,27 +414,6 @@ export default function WebAgreementCreateForm({
               />
             </Field>
           </section>
-
-          {emailsOn && (
-          <section className="space-y-3">
-            <SectionHeader title="Invitation email message (optional)" />
-            <p className="text-[11px] text-gray-500">
-              This becomes the intro of the invitation email the participant
-              receives. Edit it for this participant, or leave the Sage IT Co
-              default. Clearing it falls back to the default.
-            </p>
-            <Field label="Email message / pre-text">
-              <textarea
-                value={form.emailPretext}
-                onChange={setText("emailPretext")}
-                disabled={isSubmitting}
-                rows={4}
-                placeholder={DEFAULT_EMAIL_PRETEXT}
-                className={inputClass + " min-h-[96px]"}
-              />
-            </Field>
-          </section>
-          )}
 
           <section className="space-y-3">
             <SectionHeader title="Phase 2 rate schedule" />
@@ -688,7 +643,7 @@ export default function WebAgreementCreateForm({
               ) : (
                 <Save size={12} />
               )}
-              {isSubmitting ? "Creating…" : emailsOn ? "Create + send invite" : "Create agreement"}
+              {isSubmitting ? "Creating…" : "Create agreement"}
             </button>
           </div>
         </form>

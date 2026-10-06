@@ -182,7 +182,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "First name",
         type: "text",
         required: true,
-        help: "Prefilled from your invitation; correct it here if the spelling is off.",
+        help: "Filled in by your ERM; correct it here if the spelling is off.",
       },
       {
         key: "middleName",
@@ -202,7 +202,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         type: "email",
         required: true,
         readOnly: true,
-        help: "Prefilled from your invitation. To change this, ask your Sage IT contact.",
+        help: "Filled in by your ERM. To change this, ask your Sage IT contact.",
       },
       {
         key: "primaryPhone",
