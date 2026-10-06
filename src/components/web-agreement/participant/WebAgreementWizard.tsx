@@ -1584,7 +1584,7 @@ export default function WebAgreementWizard() {
   // toward "Section X of N".
   const section = visibleSections[currentStep];
 
-  // Appendix 5 starts at two cheques; the participant can choose one or add more.
+  // Appendix 5 starts with one cheque; "Add another cheque" adds more.
   useEffect(() => {
     if (section?.id !== "appendix5") return;
     if (!(form.fields["securityCheckCount"] ?? "").trim()) {
@@ -3084,6 +3084,10 @@ function SectionStep({
             <div id="field-cheques">
               <ChequeListBlock
                 count={parseChequeCount(form.fields["securityCheckCount"])}
+                onAdd={() => onField("securityCheckCount",
+                  String(Math.min(50, parseChequeCount(form.fields["securityCheckCount"]) + 1)))}
+                onRemoveLast={() => onField("securityCheckCount",
+                  String(Math.max(1, parseChequeCount(form.fields["securityCheckCount"]) - 1)))}
                 entries={chequeEntries}
                 uploadingIndex={chequeUploadingIndex}
                 error={chequeUploadError}
@@ -3199,39 +3203,8 @@ function DateMaskInput({
 
 // ── Field input ──────────────────────────────────────────────
 
-/** Appendix 5 starts at this many cheques; the participant can choose fewer or more. */
-const DEFAULT_CHEQUE_COUNT = 2;
-
-/**
- * Number of security cheques: one, two or more, with buttons instead of a
- * free number (a typed number used to allow up to 50 cheque rows).
- */
-function ChequeCountInput({ value, onChange, disabled }: {
-  value: string;
-  onChange: (value: string) => void;
-  disabled: boolean;
-}) {
-  const count = parseChequeCount(value) || DEFAULT_CHEQUE_COUNT;
-  const set = (n: number) => onChange(String(Math.max(1, Math.min(50, n))));
-  const btn =
-    "inline-flex items-center justify-center h-9 w-9 shrink-0 rounded-md border border-stone-300 bg-white text-[16px] "
-    + "text-stone-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer";
-  return (
-    <div className="flex flex-wrap items-center gap-2 min-w-0">
-      <button type="button" className={btn} disabled={disabled || count <= 1} onClick={() => set(count - 1)}
-        aria-label="One cheque fewer" title="One cheque fewer">
-        −
-      </button>
-      <span className="min-w-[5.5rem] text-center text-[14px] text-stone-900 tabular-nums" aria-live="polite">
-        {count} {count === 1 ? "cheque" : "cheques"}
-      </span>
-      <button type="button" className={btn} disabled={disabled || count >= 50} onClick={() => set(count + 1)}
-        aria-label="Add a cheque" title="Add a cheque">
-        +
-      </button>
-    </div>
-  );
-}
+/** Appendix 5 starts with one cheque; "Add another cheque" adds more. */
+const DEFAULT_CHEQUE_COUNT = 1;
 
 function FieldInput({
   field,
@@ -3302,9 +3275,12 @@ function FieldInput({
   if (field.type === "file") {
     return null;
   }
+  // The number of cheques isn't typed: it follows the cheque list below
+  // (one to start, "Add another cheque" for more).
   if (field.key === "securityCheckCount") {
-    control = <ChequeCountInput value={value} onChange={onChange} disabled={ro} />;
-  } else if (field.type === "textarea") {
+    return null;
+  }
+  if (field.type === "textarea") {
     control = (
       <textarea
         rows={3}
@@ -4613,6 +4589,8 @@ function PortalEntriesBlock({
  */
 function ChequeListBlock({
   count,
+  onAdd,
+  onRemoveLast,
   entries,
   uploadingIndex,
   error,
@@ -4621,6 +4599,10 @@ function ChequeListBlock({
   needsAttention = false,
 }: {
   count: number;
+  /** "Add another cheque" (one more entry). */
+  onAdd: () => void;
+  /** Removes the last cheque (never the only one). */
+  onRemoveLast: () => void;
   entries: ChequeEntry[];
   uploadingIndex: number | null;
   error: string;
@@ -4657,13 +4639,13 @@ function ChequeListBlock({
   if (count <= 0) {
     return (
       <section className="rounded-2xl border border-stone-200 bg-stone-50/60 px-5 py-4 text-[12.5px] text-stone-600 space-y-2">
-        <span className="inline-flex items-start gap-2">
-          <AlertCircle size={13} className="mt-0.5 shrink-0" />
-          <span>
-            Enter the number of cheques above to add upload slots for each
-            one.
-          </span>
-        </span>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-sage-navy text-sage-navy bg-white hover:bg-sage-navy/5 cursor-pointer"
+        >
+          + Add a cheque
+        </button>
         {attentionBanner}
       </section>
     );
@@ -4721,17 +4703,28 @@ function ChequeListBlock({
                 : undefined
             }
           >
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
-              Cheque {i + 1}
-              {flagged && (
-                <span
-                  className="ml-2 normal-case tracking-normal font-medium"
-                  style={{ color: "var(--copper-deep)" }}
+            <div className="flex items-center justify-between gap-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-sage-navy">
+                Cheque {i + 1}
+                {flagged && (
+                  <span
+                    className="ml-2 normal-case tracking-normal font-medium"
+                    style={{ color: "var(--copper-deep)" }}
+                  >
+                    Needs attention
+                  </span>
+                )}
+              </p>
+              {i === count - 1 && count > 1 && (
+                <button
+                  type="button"
+                  onClick={onRemoveLast}
+                  className="text-[11px] font-semibold text-stone-500 hover:text-red-700 cursor-pointer"
                 >
-                  Needs attention
-                </span>
+                  Remove
+                </button>
               )}
-            </p>
+            </div>
             {/* Build W — cheque DATE field removed; only number + upload. */}
             <div className="grid grid-cols-1 gap-3">
               <label className="block text-[12px]">
@@ -4793,6 +4786,15 @@ function ChequeListBlock({
           </div>
         );
       })}
+      {count < 50 && (
+        <button
+          type="button"
+          onClick={onAdd}
+          className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-sage-navy text-sage-navy bg-white hover:bg-sage-navy/5 cursor-pointer"
+        >
+          + Add another cheque
+        </button>
+      )}
       {error && (
         <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
           <AlertCircle size={11} /> {error}
