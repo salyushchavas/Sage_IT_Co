@@ -8,13 +8,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
-import java.util.List;
 import java.util.Map;
 
 /**
- * The real agreement step (the /agreements console) for participants.
- * Participant side: see where it is, say "I'm ready". Console side
- * (console ERM token): who is waiting, and their details for the create form.
+ * The real agreement step for participants: see where it is, say "I'm
+ * ready". Website ERMs pick the request up from the ERM dashboard's
+ * Agreements tab ({@link WebAgreementStaffController}).
  */
 @RestController
 @RequiredArgsConstructor
@@ -33,18 +32,6 @@ public class MasterAgreementController {
     @PreAuthorize("isAuthenticated()")
     public ResponseEntity<ApiResponse<Map<String, Object>>> request(Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success("Request sent", masterAgreementService.request(userId(auth))));
-    }
-
-    @GetMapping("/api/agreement-erm/participant-requests")
-    @PreAuthorize("hasRole('AGREEMENT_ERM')")
-    public ResponseEntity<ApiResponse<List<MasterAgreementService.ConsoleRow>>> waiting() {
-        return ResponseEntity.ok(ApiResponse.success(masterAgreementService.waitingForConsole()));
-    }
-
-    @GetMapping("/api/agreement-erm/participant-requests/{userId}")
-    @PreAuthorize("hasRole('AGREEMENT_ERM')")
-    public ResponseEntity<ApiResponse<MasterAgreementService.ConsoleRow>> one(@PathVariable Long userId) {
-        return ResponseEntity.ok(ApiResponse.success(masterAgreementService.consoleRow(userId)));
     }
 
     private static Long userId(Authentication auth) {
