@@ -268,6 +268,9 @@ type ModalKind = null | "revision" | "signatureRevision" | "editContact";
 
 export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
+  // Website-agreement emails are off until it is merged with the real ERMs:
+  // no resend buttons, and nothing on screen says the participant was emailed.
+  const emailsOn = detail.emailsEnabled === true;
   const [modal, setModal] = useState<ModalKind>(null);
   // The per-document "Request re-upload" target (doc key + label), set from a
   // document card; null hides the modal.
@@ -337,8 +340,11 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
    */
   const handleVerify = async () => {
     if (!confirm(
-      "Verify this agreement?\n\nThe participant will be emailed that their "
-      + "agreement is verified. You can still send it back for changes afterwards.",
+      "Verify this agreement?\n\n"
+      + (emailsOn
+        ? "The participant will be emailed that their agreement is verified. "
+        : "The participant will see it as verified on their dashboard. ")
+      + "You can still send it back for changes afterwards.",
     )) {
       return;
     }
@@ -346,7 +352,9 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     setError("");
     try {
       await verifyWebAgreement(app.applicationId);
-      setFeedback("Agreement verified. The participant has been emailed.");
+      setFeedback(emailsOn
+        ? "Agreement verified. The participant has been emailed."
+        : "Agreement verified. The participant sees it on their dashboard.");
       await onRefresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't verify the agreement");
@@ -376,8 +384,9 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     if (
       !confirm(
         `Take back this change request?\n\nThe agreement returns to `
-        + `“${landsOn}” with the participant's submission restored, and they'll `
-        + `be emailed that the request was withdrawn.${alsoReverts}`,
+        + `“${landsOn}” with the participant's submission restored`
+        + (emailsOn ? `, and they'll be emailed that the request was withdrawn.` : ".")
+        + alsoReverts,
       )
     ) {
       return;
@@ -389,7 +398,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       setFeedback(
         `Change request withdrawn. The agreement is back at “${landsOn}”`
         + (reverts.length ? `, ${reverts.join(", ")} reverted,` : "")
-        + " and the participant has been notified.",
+        + (emailsOn ? " and the participant has been notified." : "."),
       );
       await onRefresh();
     } catch (e) {
@@ -420,7 +429,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
         onRequestRevision={() => setModal("revision")}
         onRequestSignatureRevision={() => setModal("signatureRevision")}
         onVerify={handleVerify}
-        onResendInvite={handleResend}
+        onResendInvite={emailsOn ? handleResend : undefined}
         onCancel={handleCancel}
         onRevokeRevision={handleRevokeRevision}
         resendBusy={busy === "resend"}
@@ -433,7 +442,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       <ContactActionsBar
         status={status}
         onEditContact={() => setModal("editContact")}
-        onResend={handleResend}
+        onResend={emailsOn ? handleResend : undefined}
         resendBusy={busy === "resend"}
       />
 
@@ -476,7 +485,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
-            setFeedback("Revision requested. Participant notified.");
+            setFeedback(`Revision requested. ${emailsOn ? "Participant notified." : "The participant sees it on their dashboard."}`);
             await onRefresh();
           }}
         />
@@ -487,7 +496,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onClose={() => setModal(null)}
           onDone={async () => {
             setModal(null);
-            setFeedback("Signature re-sign requested. Participant notified.");
+            setFeedback(`Signature re-sign requested. ${emailsOn ? "Participant notified." : "The participant sees it on their dashboard."}`);
             await onRefresh();
           }}
         />
@@ -500,7 +509,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onClose={() => setDocRevisionTarget(null)}
           onDone={async () => {
             setDocRevisionTarget(null);
-            setFeedback("Document re-upload requested. Participant notified.");
+            setFeedback(`Document re-upload requested. ${emailsOn ? "Participant notified." : "The participant sees it on their dashboard."}`);
             await onRefresh();
           }}
         />
@@ -511,6 +520,7 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           status={status}
           defaultEmail={app.consultantEmail}
           defaultName={app.consultantName ?? ""}
+          canResendEmail={emailsOn}
           onClose={() => setModal(null)}
           onDone={async (msg) => {
             setModal(null);
@@ -539,13 +549,14 @@ function ContactActionsBar({
 }: {
   status: WebAgreement["status"];
   onEditContact: () => void;
-  onResend: () => void;
+  /** Absent while website-agreement emails are off. */
+  onResend?: () => void;
   resendBusy: boolean;
 }) {
   const canEdit = ["SUBMITTED", "VERIFIED", "REVISION_REQUESTED", "COMPLETED"].includes(status);
   // SUBMITTED resend is already in StateActionBar; surface it here for
   // REVISION_REQUESTED so the action exists in both states.
-  const canResend = status === "REVISION_REQUESTED";
+  const canResend = status === "REVISION_REQUESTED" && !!onResend;
 
   if (!canEdit && !canResend) return null;
 
@@ -582,6 +593,7 @@ function EditContactModal({
   status,
   defaultEmail,
   defaultName,
+  canResendEmail,
   onClose,
   onDone,
 }: {
@@ -589,6 +601,8 @@ function EditContactModal({
   status: WebAgreement["status"];
   defaultEmail: string;
   defaultName: string;
+  /** False while website-agreement emails are off. */
+  canResendEmail: boolean;
   onClose: () => void;
   onDone: (message: string) => Promise<void>;
 }) {
@@ -598,7 +612,7 @@ function EditContactModal({
   const [error, setError] = useState("");
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
-  const canResend = status === "SUBMITTED" || status === "REVISION_REQUESTED";
+  const canResend = canResendEmail && (status === "SUBMITTED" || status === "REVISION_REQUESTED");
 
   const submit = async (alsoResend: boolean) => {
     if (!emailValid) {
@@ -878,7 +892,8 @@ function StateActionBar({
   onRequestRevision: () => void;
   onRequestSignatureRevision: () => void;
   onVerify: () => void;
-  onResendInvite: () => void;
+  /** Absent while website-agreement emails are off. */
+  onResendInvite?: () => void;
   onCancel: () => void;
   onRevokeRevision: () => void;
   resendBusy: boolean;
@@ -897,15 +912,16 @@ function StateActionBar({
     return (
       <BarShell badge={badge} tone="amber">
         <p className="text-xs text-gray-600 max-w-md">
-          The participant has the invite and fills the agreement from their
-          dashboard. We&apos;ll surface actions here once they submit a signed
-          draft.
+          The participant fills the agreement from their dashboard.
+          We&apos;ll surface actions here once they submit a signed draft.
         </p>
         {!isLocked && (
           <div className="flex items-center gap-2">
-            <SubtleButton onClick={onResendInvite} busy={resendBusy} icon={<Mail size={12} />}>
-              Resend invite
-            </SubtleButton>
+            {onResendInvite && (
+              <SubtleButton onClick={onResendInvite} busy={resendBusy} icon={<Mail size={12} />}>
+                Resend invite
+              </SubtleButton>
+            )}
             <DangerButton onClick={onCancel} busy={cancelBusy} icon={<Ban size={12} />}>
               Cancel
             </DangerButton>
@@ -928,7 +944,7 @@ function StateActionBar({
           </blockquote>
         )}
         <p className="text-[11px] text-gray-500">
-          The participant has been emailed your remarks and can re-submit.
+          The participant sees your remarks on their dashboard and can re-submit.
         </p>
         <RevokeRevisionAction
           app={app}

@@ -9,13 +9,9 @@ import { requestAgreement, type AgreementRequestStatus } from "@/lib/api";
 /**
  * The real agreement step, after the consent: the participant says "I'm
  * ready to sign the agreement", their ERM starts it and fills their side,
- * and the participant opens it from here (or the email) to fill theirs.
- * Shows where it is in the agreement's five steps.
- *
- * The agreement lives in one of two places (agreement.source): the
- * website's own copy (WEBSITE), filled at /dashboard/agreement in this
- * tab under the normal sign-in, or the /agreements console (CONSOLE),
- * whose /consultant link signs in with an email code.
+ * and the participant opens it from here to fill theirs at
+ * /dashboard/agreement (the website's own copy; it never touches the
+ * office's agreements console). Shows where it is in the five steps.
  */
 export default function MasterAgreementStep({ number, state, onChange }: {
   number: number;
@@ -89,7 +85,7 @@ export default function MasterAgreementStep({ number, state, onChange }: {
               <Clock size={14} className="shrink-0 mt-px" />
               <span>
                 Requested{state.requestedAt ? ` on ${formatDateMedium(state.requestedAt)}` : ""}. Your ERM is preparing
-                your agreement; we&apos;ll email you the link.
+                your agreement; it will show up here when it&apos;s ready.
               </span>
             </p>
           )}
@@ -104,21 +100,13 @@ export default function MasterAgreementStep({ number, state, onChange }: {
               <p className={"text-xs font-semibold " + (executed ? "text-emerald-700" : "text-gray-800")}>
                 Step {ag.step} of {ag.totalSteps}: {ag.stage}
               </p>
-              {ag.yourTurn && ag.source === "WEBSITE" && (
+              {ag.yourTurn && (
                 <Link
                   href="/dashboard/agreement"
                   className="inline-flex items-center gap-1 bg-sage-navy hover:bg-sage-navy-deep text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition cursor-pointer"
                 >
                   Open your agreement <ChevronRight size={12} />
                 </Link>
-              )}
-              {ag.yourTurn && ag.source !== "WEBSITE" && (
-                <a
-                  href={ag.link}
-                  className="inline-flex items-center gap-1 bg-sage-navy hover:bg-sage-navy-deep text-white text-xs font-bold px-4 py-2 rounded-lg shadow-sm transition cursor-pointer"
-                >
-                  Open your agreement <ChevronRight size={12} />
-                </a>
               )}
             </div>
           )}

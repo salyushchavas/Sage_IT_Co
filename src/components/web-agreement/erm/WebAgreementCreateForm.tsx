@@ -11,6 +11,7 @@ import {
 import {
   createWebAgreement,
   getWebAgreementRequest,
+  getWebAgreementSettings,
 } from "@/lib/api";
 import { WORK_AUTHORIZATION_OPTIONS } from "@/lib/web-agreement-sections";
 
@@ -133,6 +134,13 @@ export default function WebAgreementCreateForm({
   const [error, setError] = useState("");
   // Whose request the participant details were filled in from.
   const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
+  // Website-agreement emails stay off until it is merged with the real ERMs;
+  // then the invitation email (and its message) apply again.
+  const [emailsOn, setEmailsOn] = useState(false);
+
+  useEffect(() => {
+    getWebAgreementSettings().then((x) => setEmailsOn(x.emailsEnabled)).catch(() => {});
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -292,7 +300,9 @@ export default function WebAgreementCreateForm({
         </button>
         <h1 className="mt-2 text-2xl font-bold text-gray-900">New agreement</h1>
         <p className="text-sm text-gray-500">
-          Create the agreement and email the participant that it&apos;s ready to fill on their dashboard.
+          {emailsOn
+            ? "Create the agreement and email the participant that it's ready to fill on their dashboard."
+            : "Create the agreement; the participant fills and signs theirs on their dashboard."}
         </p>
       </div>
       <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 max-w-3xl">
@@ -429,6 +439,7 @@ export default function WebAgreementCreateForm({
             </Field>
           </section>
 
+          {emailsOn && (
           <section className="space-y-3">
             <SectionHeader title="Invitation email message (optional)" />
             <p className="text-[11px] text-gray-500">
@@ -447,6 +458,7 @@ export default function WebAgreementCreateForm({
               />
             </Field>
           </section>
+          )}
 
           <section className="space-y-3">
             <SectionHeader title="Phase 2 rate schedule" />
@@ -676,7 +688,7 @@ export default function WebAgreementCreateForm({
               ) : (
                 <Save size={12} />
               )}
-              {isSubmitting ? "Creating…" : "Create + send invite"}
+              {isSubmitting ? "Creating…" : emailsOn ? "Create + send invite" : "Create agreement"}
             </button>
           </div>
         </form>

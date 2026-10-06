@@ -6517,6 +6517,8 @@ export interface WebAgreementEvent {
 export interface WebAgreementDetail {
   application: WebAgreement;
   events: WebAgreementEvent[];
+  /** Whether website-agreement emails are on (off until it is merged with the real ERMs). */
+  emailsEnabled?: boolean;
 }
 
 export interface WebAgreementPage {
@@ -6908,6 +6910,11 @@ export async function listWebAgreements(
       .map(([k, v]) => [k, String(v)]),
   ).toString();
   return webAgreementFetch<WebAgreementPage>(`${WEB_AGREEMENTS}${qs ? `?${qs}` : ""}`);
+}
+
+/** Staff: the website agreement's switches (emails stay off until it is merged with the real ERMs). */
+export async function getWebAgreementSettings(): Promise<{ emailsEnabled: boolean }> {
+  return webAgreementFetch<{ emailsEnabled: boolean }>(`${WEB_AGREEMENTS}/settings`);
 }
 
 export async function getWebAgreement(appId: string): Promise<WebAgreementDetail> {

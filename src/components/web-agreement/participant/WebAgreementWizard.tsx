@@ -3586,7 +3586,7 @@ function ConsultantStatusScreen({
       : {
           eyebrow: "In preparation",
           title: "Your ERM is preparing your agreement.",
-          body: "Once your ERM has filled in their side and sent it, you'll get an email and can fill in and sign your part here. There's nothing else you need to do right now.",
+          body: "Once your ERM has filled in their side and sent it, it opens here and you can fill in and sign your part. There's nothing else you need to do right now.",
         };
   return (
     <main className="min-h-screen bg-stone-50">
