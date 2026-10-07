@@ -175,15 +175,28 @@ export default function AdminPage() {
           </div>
         </div>
 
-        {/* Mobile tab bar */}
-        <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#050510]/90 backdrop-blur-xl border-t border-zinc-200 px-4 py-2 flex gap-2">
+        {/* Mobile tab bar: fixed at the bottom, scrolls sideways inside
+            itself. The page keeps room for it at the end so the site footer
+            isn't hidden behind it. */}
+        <style>{`@media (max-width: 767px) { body { padding-bottom: 72px; } }`}</style>
+        <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t border-zinc-200 px-2 py-2 flex gap-1 overflow-x-auto">
           {tabs.map((t) => (
             <button key={t.key} onClick={() => setTab(t.key)}
-              className={cn("flex-1 flex flex-col items-center gap-1 py-2 rounded-xl text-xs", tab === t.key ? "text-[#1B2A5C]" : "text-zinc-500")}>
+              className={cn("shrink-0 min-w-[4.5rem] flex flex-col items-center gap-1 px-2 py-2 rounded-xl text-xs whitespace-nowrap", tab === t.key ? "text-[#1B2A5C] bg-[#1B2A5C]/10 font-semibold" : "text-zinc-500")}>
               {t.icon}<span>{t.label}</span>
             </button>
           ))}
-        </div>
+          {role === "SYSTEM_ADMIN" && (
+            <>
+              <Link href="/operations" className="shrink-0 min-w-[4.5rem] flex flex-col items-center gap-1 px-2 py-2 rounded-xl text-xs whitespace-nowrap text-zinc-500">
+                <ClipboardList className="w-4 h-4" /><span>Operations</span>
+              </Link>
+              <Link href="/finance-dashboard" className="shrink-0 min-w-[4.5rem] flex flex-col items-center gap-1 px-2 py-2 rounded-xl text-xs whitespace-nowrap text-zinc-500">
+                <DollarSign className="w-4 h-4" /><span>Finance</span>
+              </Link>
+            </>
+          )}
+        </nav>
 
         {/* Content */}
         <div className="flex-1 min-w-0">

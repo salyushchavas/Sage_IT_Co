@@ -11,8 +11,10 @@ import {
 } from "lucide-react";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import { PROFILE_STEPS } from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
 import {
+  dashboardRouteForRole,
   getProfileCompletion,
   listMyChecks,
   markCheckNotApplicable,
@@ -35,6 +37,13 @@ import {
 
 const ACCEPTED = "application/pdf,image/png,image/jpeg,image/jpg";
 const MAX_BYTES = 5 * 1024 * 1024;
+
+/** What Finance's review status reads as, for the participant. */
+const REVIEW_LABELS: Record<string, string> = {
+  PENDING: "In review",
+  APPROVED: "Approved",
+  REJECTED: "Sent back",
+};
 
 interface CheckDraft {
   id: string;
@@ -91,6 +100,11 @@ function CheckUploadPageInner() {
     }
     if (!user) return;
     if (finishingRef.current) return;
+    // Staff have no participant steps: their own dashboard, not the Apply form.
+    if (dashboardRouteForRole(user.role) !== "/dashboard") {
+      router.replace(dashboardRouteForRole(user.role));
+      return;
+    }
     if (!user.participantId) {
       router.replace("/enroll");
       return;
@@ -210,7 +224,7 @@ function CheckUploadPageInner() {
   }
   if (gateError) {
     return (
-      <OnboardingLayout currentStep={7} contentMaxWidth="xl">
+      <OnboardingLayout steps={PROFILE_STEPS} currentStep={7} contentMaxWidth="xl">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
@@ -226,7 +240,7 @@ function CheckUploadPageInner() {
   }
 
   return (
-    <OnboardingLayout currentStep={7} contentMaxWidth="3xl">
+    <OnboardingLayout steps={PROFILE_STEPS} currentStep={7} contentMaxWidth="3xl">
       <motion.section
         initial={{ opacity: 0, y: 8 }}
         animate={{ opacity: 1, y: 0 }}
@@ -325,7 +339,7 @@ function CheckUploadPageInner() {
                     <span className="font-medium text-gray-800">
                       Check #{c.checkNumber || c.id}
                     </span>
-                    <span className="text-gray-500 ml-auto">{c.reviewStatus}</span>
+                    <span className="text-gray-500 ml-auto">{REVIEW_LABELS[c.reviewStatus] ?? c.reviewStatus}</span>
                   </div>
                 ))}
                 {replaceId && (

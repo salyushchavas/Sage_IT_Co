@@ -11,8 +11,9 @@ import {
 import SignatureCanvas from "react-signature-canvas";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import { PROFILE_STEPS } from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
-import { getAcknowledgmentText, submitAcknowledgment, type AcknowledgmentText, loginHere } from "@/lib/api";
+import { dashboardRouteForRole, getAcknowledgmentText, submitAcknowledgment, type AcknowledgmentText, loginHere } from "@/lib/api";
 
 /**
  * Step 4 — Acknowledgment of Interest and Program Acceptance.
@@ -54,19 +55,24 @@ function AcknowledgmentPageInner() {
   // ── Gate state ────────────────────────────────────────────────
   const [gateChecked, setGateChecked] = useState(false);
   const [gateError, setGateError] = useState("");
+  // Set while finishing the step: refreshing the user re-runs the gate
+  // below, which must not replace the redirect to the next step.
+  const finishingRef = useRef(false);
 
   // ── The exact text, from the server (what is shown is what is recorded) ──
   const [ackText, setAckText] = useState<AcknowledgmentText>({
     ...DEFAULT_ACK_TEXT,
     clauses: [...DEFAULT_ACK_CLAUSES],
   });
+  // Loaded once the sign-in check below has passed (no request while signed out).
   useEffect(() => {
+    if (!gateChecked) return;
     let cancelled = false;
     getAcknowledgmentText()
       .then((text) => { if (!cancelled && text?.version) setAckText(text); })
       .catch(() => { /* keep the identical built-in copy */ });
     return () => { cancelled = true; };
-  }, []);
+  }, [gateChecked]);
 
   // ── Form state ────────────────────────────────────────────────
   const [hasScrolledToBottom, setHasScrolledToBottom] = useState(false);
@@ -104,6 +110,12 @@ function AcknowledgmentPageInner() {
       return;
     }
     if (!user) return;
+    if (finishingRef.current) return;
+    // Staff have no participant steps: their own dashboard, not the Apply form.
+    if (dashboardRouteForRole(user.role) !== "/dashboard") {
+      router.replace(dashboardRouteForRole(user.role));
+      return;
+    }
     if (user.acknowledgmentComplete) {
       router.replace("/dashboard?tab=complete-profile");
       return;
@@ -206,6 +218,7 @@ function AcknowledgmentPageInner() {
       // Refresh the auth context so the next page sees the freshly
       // flipped acknowledgmentComplete flag instead of bouncing
       // back here on its own guard.
+      finishingRef.current = true;
       await refreshUser();
       // Came from the dashboard checklist → return to it with the
       // next step highlighted. Direct deep links fall through to
@@ -234,7 +247,7 @@ function AcknowledgmentPageInner() {
 
   if (gateError) {
     return (
-      <OnboardingLayout currentStep={4} contentMaxWidth="xl">
+      <OnboardingLayout steps={PROFILE_STEPS} currentStep={2} contentMaxWidth="xl">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
@@ -247,7 +260,7 @@ function AcknowledgmentPageInner() {
   }
 
   return (
-    <OnboardingLayout currentStep={4} contentMaxWidth="2xl">
+    <OnboardingLayout steps={PROFILE_STEPS} currentStep={2} contentMaxWidth="2xl">
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

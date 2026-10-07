@@ -16,6 +16,7 @@ import { Pill, Spinner, moneyFmt } from "./FinanceParts";
 export function FinanceInvoicesTab({ readOnly = false }: { readOnly?: boolean }) {
   const [rows, setRows] = useState<FinanceInvoiceRow[]>([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [filter, setFilter] = useState("ALL");
@@ -38,20 +39,33 @@ export function FinanceInvoicesTab({ readOnly = false }: { readOnly?: boolean })
     setRows(await getFinanceInvoices(filter === "ALL" ? undefined : filter));
   };
 
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
+
   const runBulkGenerate = async () => {
+    if (!window.confirm("Issue all due invoices and email the participants?")) return;
     setBusy(true);
+    setError("");
+    setNotice("");
     try {
-      await bulkGenerateInvoices();
+      const r = await bulkGenerateInvoices();
+      setNotice(`Issued ${plural(r?.issued ?? 0, "invoice")}.`);
       await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't issue the due invoices");
     } finally {
       setBusy(false);
     }
   };
   const runMarkOverdue = async () => {
     setBusy(true);
+    setError("");
+    setNotice("");
     try {
-      await markOverdueInvoices();
+      const r = await markOverdueInvoices();
+      setNotice(`Marked ${r?.marked ?? 0} overdue.`);
       await refresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't mark the overdue invoices");
     } finally {
       setBusy(false);
     }
@@ -90,6 +104,7 @@ export function FinanceInvoicesTab({ readOnly = false }: { readOnly?: boolean })
         </div>
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}
+      {notice && <p className="text-sm text-emerald-700">{notice}</p>}
       <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
         {["ALL", "UNPAID", "PARTIAL", "PAID", "OVERDUE"].map((s) => (
           <button

@@ -8,7 +8,7 @@ import { CheckCircle2, Copy, Loader2, Mail } from "lucide-react";
 
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import { useAuth } from "@/lib/auth-context";
-import { getParticipantMe, loginHere } from "@/lib/api";
+import { dashboardRouteForRole, getParticipantMe, loginHere } from "@/lib/api";
 
 /**
  * Read-only participant-ID display. Not part of the active
@@ -16,7 +16,8 @@ import { getParticipantMe, loginHere } from "@/lib/api";
  * but stays reachable from the profile menu + sidebar so users can
  * look their ID up at any time.
  *
- * No completion-state guard — any signed-in user can view this.
+ * No completion-state guard — any signed-in participant can view this.
+ * Staff have no participant ID, so they go to their own dashboard.
  */
 export default function ParticipantIdPage() {
   const router = useRouter();
@@ -26,11 +27,16 @@ export default function ParticipantIdPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const role = user?.role;
 
   useEffect(() => {
     if (authLoading) return;
     if (!isAuthenticated) {
       router.replace(loginHere());
+      return;
+    }
+    if (dashboardRouteForRole(role) !== "/dashboard") {
+      router.replace(dashboardRouteForRole(role));
       return;
     }
     let cancelled = false;
@@ -46,7 +52,7 @@ export default function ParticipantIdPage() {
       })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
-  }, [authLoading, isAuthenticated, router]);
+  }, [authLoading, isAuthenticated, role, router]);
 
   const handleCopy = async () => {
     if (!participantId) return;

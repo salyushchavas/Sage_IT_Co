@@ -97,6 +97,41 @@ interface Props {
   dashboardData: DashboardData;
 }
 
+/** The starred job-submission fields, in form order. */
+const REQUIRED_JOB_FIELDS: ReadonlyArray<[keyof WeeklyReportJobSubmission, string]> = [
+  ["company", "Company"],
+  ["jobTitle", "Job title"],
+  ["technology", "Technology"],
+  ["portal", "Portal / source"],
+  ["submissionDate", "Submission date"],
+  ["status", "Status"],
+];
+
+/**
+ * What a submitted report is still missing: every job submission that has
+ * anything filled in needs all the starred fields. Empty rows are skipped
+ * (they aren't sent). Returns "" when nothing is missing.
+ */
+function missingJobFields(jobs: WeeklyReportJobSubmission[]): string {
+  const problems: string[] = [];
+  jobs.forEach((job, idx) => {
+    // The status select shows "Applied" when there's none (older drafts).
+    const filled = (key: keyof WeeklyReportJobSubmission) =>
+      !!String((key === "status" ? job.status ?? "Applied" : job[key]) ?? "").trim();
+    // The status always has a value (it starts as "Applied"), so it alone doesn't count as filled in.
+    const started = (Object.keys(job) as (keyof WeeklyReportJobSubmission)[])
+      .some((key) => key !== "status" && filled(key));
+    if (!started) return;
+    const missing = REQUIRED_JOB_FIELDS.filter(([key]) => !filled(key)).map(([, label]) => label);
+    if (missing.length > 0) {
+      problems.push(`submission ${idx + 1} needs ${missing.join(", ")}`);
+    }
+  });
+  if (problems.length === 0) return "";
+  const text = problems.join("; ");
+  return `Fill in the starred fields before submitting: ${text}.`;
+}
+
 export default function WeeklyReportTab({ dashboardData }: Props) {
   const [reports, setReports] = useState<WeeklyReportDTO[]>([]);
   const [form, setForm] = useState<WeeklyFormState>(blankForm());
@@ -231,9 +266,15 @@ export default function WeeklyReportTab({ dashboardData }: Props) {
   };
 
   const handleSubmit = async () => {
-    setSubmitting(true);
     setError("");
     setFeedback("");
+    // A draft can be saved half-filled; a submitted report can't.
+    const missing = missingJobFields(form.jobs);
+    if (missing) {
+      setError(missing);
+      return;
+    }
+    setSubmitting(true);
     try {
       await submitWeeklyReport(toRequest());
       setFeedback("Report submitted. Your ERM will review and respond.");

@@ -1,8 +1,10 @@
 "use client";
 
 import { Clock } from "lucide-react";
-import { formatUsDateTime } from "@/lib/dates";
+import { formatUsDateTimeCt } from "@/lib/datetime";
 import type { WebAgreementEvent } from "@/lib/api";
+import { AGREEMENT_SECTIONS } from "@/lib/web-agreement-sections";
+import { statusLabel } from "@/lib/web-agreement-status";
 
 /**
  * The website agreement's copy of the console's activity timeline
@@ -40,7 +42,7 @@ const EVENT_LABELS: Record<string, string> = {
 };
 
 const ACTOR_LABELS: Record<string, string> = {
-  ERM: "Operator",
+  ERM: "ERM",
   PARTICIPANT: "Participant",
   SYSTEM: "System",
 };
@@ -75,6 +77,7 @@ export default function AgreementEventTimeline({
             extra = null;
           }
         }
+        const details = extra ? describeMetadata(e.eventType, extra) : [];
         return (
           <li key={e.id} className="ml-3">
             <div className="absolute -left-[5px] mt-1.5 w-2.5 h-2.5 rounded-full bg-sage-navy" />
@@ -98,16 +101,128 @@ export default function AgreementEventTimeline({
             </div>
             <p className="text-[11px] text-gray-500 inline-flex items-center gap-1 mt-0.5">
               <Clock size={10} />
-              {formatUsDateTime(e.createdAt)}
+              {formatUsDateTimeCt(e.createdAt)}
             </p>
-            {extra && Object.keys(extra).length > 0 && (
-              <pre className="mt-1 text-[11px] text-gray-600 bg-gray-50 border border-gray-100 rounded-md px-2 py-1 whitespace-pre-wrap">
-                {JSON.stringify(extra, null, 2)}
-              </pre>
+            {details.length > 0 && (
+              <p className="mt-1 text-[11px] text-gray-600 bg-gray-50 border border-gray-100 rounded-md px-2 py-1 break-words">
+                {details.join(" · ")}
+              </p>
             )}
           </li>
         );
       })}
     </ol>
   );
+}
+
+// ── Event details ─────────────────────────────────────────────────
+//
+// The event's metadata as short readable facts. Only known keys are shown;
+// storage keys, internal ids and raw field names never are.
+
+const SECTION_TITLES: Record<string, string> = Object.fromEntries(
+  AGREEMENT_SECTIONS.map((s) => [s.id, s.title]),
+);
+
+const DOC_LABELS: Record<string, string> = {
+  "doc:workauth": "Work-authorization document",
+  "doc:offer-letter": "Offer letter",
+  "doc:dl-doc": "Driver's license",
+  "doc:state-id": "State ID",
+  "doc:ssn-doc": "SSN document",
+  "doc:cheque": "Security cheque(s)",
+};
+
+const REVOKED_KINDS: Record<string, string> = {
+  sections: "Section revision",
+  signature: "Signature re-sign",
+  documents: "Document re-upload",
+};
+
+function text(v: unknown): string {
+  return typeof v === "string" ? v.trim() : typeof v === "number" ? String(v) : "";
+}
+
+function fileKind(contentType: string): string {
+  const t = contentType.toLowerCase();
+  if (t === "application/pdf") return "PDF";
+  if (t.startsWith("image/")) return `${t.slice(6).toUpperCase()} image`;
+  return "File";
+}
+
+function fileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+}
+
+function describeMetadata(eventType: string, m: Record<string, unknown>): string[] {
+  const out: string[] = [];
+
+  // Uploads: which cheque, what kind of file, how big.
+  if (typeof m.index === "number") out.push(`Cheque #${m.index + 1}`);
+  const type = text(m.contentType);
+  if (type) {
+    out.push(
+      typeof m.bytes === "number" ? `${fileKind(type)}, ${fileSize(m.bytes)}` : fileKind(type),
+    );
+  }
+
+  // Created for; signed as.
+  if (text(m.consultantEmail)) out.push(`For ${text(m.consultantEmail)}`);
+  if (text(m.legalName)) out.push(`Signed as ${text(m.legalName)}`);
+
+  // Participant edits.
+  if (Array.isArray(m.fieldsTouched)) {
+    const n = m.fieldsTouched.length;
+    out.push(`${n} field${n === 1 ? "" : "s"} changed`);
+  }
+
+  // Status moves.
+  if (text(m.from) && text(m.to)) {
+    out.push(`${statusLabel(text(m.from))} → ${statusLabel(text(m.to))}`);
+  } else if (text(m.from)) {
+    out.push(`Was ${statusLabel(text(m.from))}`);
+  } else if (text(m.status)) {
+    out.push(`Status: ${statusLabel(text(m.status))}`);
+  }
+
+  // Contact fix.
+  if (text(m.oldEmail) !== text(m.newEmail) && text(m.newEmail)) {
+    out.push(`Email: ${text(m.oldEmail) || "—"} → ${text(m.newEmail)}`);
+  }
+  if (text(m.oldName) !== text(m.newName) && text(m.newName)) {
+    out.push(`Name: ${text(m.oldName) || "—"} → ${text(m.newName)}`);
+  }
+
+  // Change requests.
+  if (Array.isArray(m.selectedSections) && m.selectedSections.length > 0) {
+    out.push(
+      "Sections: "
+        + m.selectedSections.map((k) => SECTION_TITLES[text(k)] ?? "Other section").join(", "),
+    );
+  }
+  if (m.signatureRevision === true) out.push("Signature re-sign");
+  if (m.documentRevision === true && text(m.documents)) {
+    out.push(
+      "Documents: "
+        + text(m.documents).split(",").map((k) => DOC_LABELS[k.trim()] ?? "Other document").join(", "),
+    );
+  }
+  if (text(m.kind)) out.push(REVOKED_KINDS[text(m.kind)] ?? "Change request");
+  if (text(m.restoredTo)) out.push(`Back to ${statusLabel(text(m.restoredTo))}`);
+  if (text(m.revertedErmCorrections)) out.push(`Reverted: ${text(m.revertedErmCorrections)}`);
+  if (typeof m.rolledBackRound === "number") {
+    out.push(`Round ${m.rolledBackRound} rolled back`);
+  } else if (typeof m.revisionCount === "number" && m.revisionCount > 0) {
+    out.push(
+      eventType === "REVISION_REQUESTED"
+        ? `Round ${m.revisionCount}`
+        : `After ${m.revisionCount} revision round${m.revisionCount === 1 ? "" : "s"}`,
+    );
+  }
+
+  // The e-sign consent's version.
+  if (text(m.version)) out.push(`Consent version ${text(m.version)}`);
+
+  return out;
 }

@@ -35,8 +35,10 @@ export interface OnboardingLayoutProps {
   children: ReactNode;
   /** Max width of the inner content area. Defaults to {@code 2xl}. */
   contentMaxWidth?: "xl" | "2xl" | "3xl" | "5xl";
-  /** Override the default 9-step lifecycle labels (used by the quick-signup 2-step flow). */
+  /** Override the default 9-step lifecycle labels (the profile step pages pass PROFILE_STEPS). */
   steps?: ReadonlyArray<string>;
+  /** Later steps already done out of order (see OnboardingProgressBar). */
+  doneSteps?: ReadonlyArray<number>;
 }
 
 const MAX_WIDTH_CLASS: Record<NonNullable<OnboardingLayoutProps["contentMaxWidth"]>, string> = {
@@ -51,6 +53,7 @@ export default function OnboardingLayout({
   children,
   contentMaxWidth = "2xl",
   steps,
+  doneSteps,
 }: OnboardingLayoutProps) {
   return (
     <div className="min-h-screen flex flex-col bg-[#F8FAFC]">
@@ -76,7 +79,7 @@ export default function OnboardingLayout({
 
       <main className={`flex-1 w-full mx-auto px-4 sm:px-6 pb-6 ${MAX_WIDTH_CLASS[contentMaxWidth]}`}>
         <div className="mb-4">
-          <OnboardingProgressBar currentStep={currentStep} steps={steps} />
+          <OnboardingProgressBar currentStep={currentStep} steps={steps} doneSteps={doneSteps} />
         </div>
         {children}
       </main>

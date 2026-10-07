@@ -11,7 +11,9 @@ export default function PageTransition({ children }: { children: ReactNode }) {
       <motion.div
         key={pathname}
         initial={{ opacity: 0, y: 16, scale: 0.985, filter: "blur(8px)" }}
-        animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+        // filter "none" once settled: a leftover blur(0px) makes this wrapper
+        // the box every position:fixed child (dialogs, bottom bars) sits in.
+        animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)", transitionEnd: { filter: "none" } }}
         exit={{ opacity: 0, y: -10, scale: 0.99, filter: "blur(6px)" }}
         transition={{
           duration: 0.55,

@@ -30,6 +30,7 @@ import {
   getParticipantTeam,
   getProfileCompletion,
   isDashboardStatus,
+  loginHere,
   type ParticipantDashboard as DashboardData,
   type AgreementRequestStatus,
   type ParticipantTeam,
@@ -122,7 +123,8 @@ function DashboardPageInner() {
 
     (async () => {
       if (!user) {
-        router.replace("/login?redirect=/dashboard");
+        // Back to this page with its tab (?tab=payments) after signing in.
+        router.replace(loginHere());
         return;
       }
 

@@ -5,23 +5,27 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
 import {
-  AlertCircle, ArrowRight, CheckCircle2, Clock, Loader2, Mail,
+  AlertCircle, ArrowRight, CheckCircle2, ChevronRight, Clock, Loader2, Mail,
   RefreshCw, Users,
 } from "lucide-react";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import { PROFILE_STEPS } from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
 import {
+  getAgreementRequestStatus,
   getParticipantMe,
   getProgramSelection,
   getWelcomeStatus,
   refreshWelcomeStatus,
   statusAtLeast,
+  type AgreementRequestStatus,
   type ProgramSelectionDTO,
   type UserDTO,
   type WelcomeStatus,
   loginHere,
 } from "@/lib/api";
+import { agreementPartDone } from "@/lib/profile-progress";
 
 /**
  * Step 8 — Welcome / team assembly status.
@@ -37,6 +41,43 @@ import {
  */
 
 const POLL_INTERVAL_MS = 5_000;
+
+/** Step 6 (the agreement) on the profile checklist. */
+const AGREEMENT_STEP_HREF = "/dashboard?tab=complete-profile&step=MASTER_AGREEMENT";
+
+/**
+ * The agreement's row: where the real agreement (Step 6) stands, in the
+ * words Step 6 uses. Reaching this page only needs the consent and the
+ * check copies, so the agreement can be anywhere from not started to
+ * executed.
+ */
+function agreementRow(state: AgreementRequestStatus | null, known: boolean): {
+  done: boolean;
+  inProgress: boolean;
+  label: string;
+  action?: { href: string; label: string };
+} {
+  const ag = state?.agreement ?? null;
+  if (!known) {
+    return { done: false, inProgress: false, label: "Agreement: see Step 6 on your profile",
+      action: { href: AGREEMENT_STEP_HREF, label: "Open" } };
+  }
+  if (ag && (ag.executed || ag.step >= 3)) {
+    return { done: true, inProgress: false, label: "Agreement signed and verified" };
+  }
+  if (agreementPartDone(state)) {
+    return { done: false, inProgress: true, label: "Agreement signed; your ERM is checking it" };
+  }
+  if (ag?.yourTurn) {
+    return { done: false, inProgress: false, label: "Your agreement is waiting for you",
+      action: { href: ag.link, label: "Open your agreement" } };
+  }
+  if (state?.requested) {
+    return { done: false, inProgress: true, label: "Your ERM is preparing your agreement" };
+  }
+  return { done: false, inProgress: false, label: "Agreement: not started (Step 6 on your profile)",
+    action: { href: AGREEMENT_STEP_HREF, label: "Go to Step 6" } };
+}
 
 const COACH_LABELS = [
   "Career Coach",
@@ -54,6 +95,9 @@ export default function WelcomePage() {
   const [profile, setProfile] = useState<UserDTO | null>(null);
   const [program, setProgram] = useState<ProgramSelectionDTO | null>(null);
   const [status, setStatus] = useState<WelcomeStatus>({});
+  // The real agreement (Step 6); "known" stays false if it couldn't load.
+  const [agreement, setAgreement] = useState<AgreementRequestStatus | null>(null);
+  const [agreementKnown, setAgreementKnown] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
   // ── Gate + initial load ──────────────────────────────────────
@@ -82,12 +126,17 @@ export default function WelcomePage() {
           return;
         }
         setProfile(me);
-        const [progRes, statusRes] = await Promise.allSettled([
+        const [progRes, statusRes, agreementRes] = await Promise.allSettled([
           getProgramSelection(),
           getWelcomeStatus(),
+          getAgreementRequestStatus(),
         ]);
         if (progRes.status === "fulfilled") setProgram(progRes.value);
         if (statusRes.status === "fulfilled") setStatus(statusRes.value);
+        if (agreementRes.status === "fulfilled") {
+          setAgreement(agreementRes.value);
+          setAgreementKnown(true);
+        }
         setGateChecked(true);
       } catch (err) {
         if (!cancelled) {
@@ -120,6 +169,9 @@ export default function WelcomePage() {
 
   const handleRefresh = async () => {
     setRefreshing(true);
+    getAgreementRequestStatus()
+      .then((a) => { setAgreement(a); setAgreementKnown(true); })
+      .catch(() => { /* keep what's shown */ });
     try {
       const s = await refreshWelcomeStatus();
       setStatus(s);
@@ -138,9 +190,15 @@ export default function WelcomePage() {
       </div>
     );
   }
+  // Every profile step is done to reach this page; the agreement (Step 6)
+  // can still be open, and then the bar shows it as the step left.
+  const agreementDone = agreementPartDone(agreement);
+  const barStep = agreementDone ? PROFILE_STEPS.length + 1 : 6;
+  const barDoneSteps = agreementDone ? undefined : [7];
+
   if (gateError) {
     return (
-      <OnboardingLayout currentStep={8} contentMaxWidth="xl">
+      <OnboardingLayout steps={PROFILE_STEPS} currentStep={barStep} doneSteps={barDoneSteps} contentMaxWidth="xl">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
@@ -155,9 +213,10 @@ export default function WelcomePage() {
   const firstName = profile?.fullName?.split(" ")[0] ?? "there";
   const coaches = status.coaches ?? {};
   const dashboardReady = !!status.dashboardReady;
+  const agreementStatus = agreementRow(agreement, agreementKnown);
 
   return (
-    <OnboardingLayout currentStep={8} contentMaxWidth="3xl">
+    <OnboardingLayout steps={PROFILE_STEPS} currentStep={barStep} doneSteps={barDoneSteps} contentMaxWidth="3xl">
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
@@ -172,7 +231,7 @@ export default function WelcomePage() {
             Welcome to Sage IT Co, {firstName}!
           </h1>
           <p className="text-sm text-gray-500 mt-2 max-w-lg mx-auto">
-            Your agreement is signed and your enrollment is confirmed.
+            Your consent is signed and your enrollment is confirmed.
             We&apos;re setting up your team now.
           </p>
         </div>
@@ -183,9 +242,10 @@ export default function WelcomePage() {
             Your onboarding status
           </p>
           <ul className="rounded-xl border border-gray-200 bg-gray-50/40 divide-y divide-gray-100">
-            <StatusRow done label="Agreement signed and verified" />
+            <StatusRow done={agreementStatus.done} inProgress={agreementStatus.inProgress}
+              label={agreementStatus.label} action={agreementStatus.action} />
             <StatusRow done={!!status.agreementSentToErm}
-              label={status.agreementSentToErm ? "Signed agreement sent to your relationship manager" : "Sending your signed agreement to your relationship manager..."}
+              label={status.agreementSentToErm ? "Signed consent sent to your relationship manager" : "Sending your signed consent to your relationship manager..."}
               inProgress={!status.agreementSentToErm} />
             <StatusRow done={!!status.welcomeEmailSent} label="Welcome email sent" />
             <StatusRow done={!!status.coordinatorIntroSent} label="Program coordinator introduction sent" />
@@ -271,10 +331,12 @@ export default function WelcomePage() {
   );
 }
 
-function StatusRow({ done, inProgress, label }: {
+function StatusRow({ done, inProgress, label, action }: {
   done: boolean;
   inProgress?: boolean;
   label: string;
+  /** A link to where the participant acts on this row. */
+  action?: { href: string; label: string };
 }) {
   return (
     <li className="flex items-center gap-3 px-4 py-2.5 text-sm">
@@ -285,9 +347,17 @@ function StatusRow({ done, inProgress, label }: {
       ) : (
         <Clock size={16} className="text-gray-300 shrink-0" />
       )}
-      <span className={done ? "text-gray-800" : inProgress ? "text-sage-navy font-medium" : "text-gray-400"}>
+      <span className={"min-w-0 " + (done ? "text-gray-800" : inProgress ? "text-sage-navy font-medium" : "text-gray-400")}>
         {label}
       </span>
+      {action && (
+        <Link
+          href={action.href}
+          className="ml-auto shrink-0 inline-flex items-center gap-0.5 text-xs font-semibold text-sage-navy hover:underline"
+        >
+          {action.label} <ChevronRight size={12} />
+        </Link>
+      )}
     </li>
   );
 }

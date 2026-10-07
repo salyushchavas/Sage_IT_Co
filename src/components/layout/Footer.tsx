@@ -88,8 +88,16 @@ export default function Footer() {
               <span className="absolute -bottom-1 left-0 w-8 h-0.5 bg-gradient-to-r from-neon-blue to-neon-violet rounded-full" />
             </h2>
             <ul className="space-y-2 text-sm text-zinc-600">
-              <li>info@sageitco.com</li>
-              <li>+1 (469) 666-3661</li>
+              <li>
+                <a href="mailto:info@sageitco.com" className="hover:text-neon-blue transition-colors">
+                  info@sageitco.com
+                </a>
+              </li>
+              <li>
+                <a href="tel:+14696663661" className="hover:text-neon-blue transition-colors">
+                  +1 (469) 666-3661
+                </a>
+              </li>
               <li>
                 SAGEITCO LLC<br />
                 4400 State Hwy 121, Suite #324<br />

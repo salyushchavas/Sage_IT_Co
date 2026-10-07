@@ -5,6 +5,7 @@ import { InviteDialog } from "@/components/admin/tabs/AdminUsersTab";
 import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
 import { DocumentVerificationQueue } from "@/components/applications/DocumentVerificationQueue";
 import { WebAgreementsPanel } from "@/components/web-agreement/erm/WebAgreementsPanel";
+import { useUrlTab } from "@/components/dashboard/RoleDashboardShell";
 import {
   AlertCircle,
   ClipboardList,
@@ -90,15 +91,14 @@ const SUB_TABS: { id: OpsTab; label: string; Icon: typeof Users }[] = [
   { id: "emails",      label: "Email log",        Icon: Mail },
   { id: "exceptions",  label: "Exceptions",       Icon: AlertCircle },
 ];
+const SUB_TAB_IDS = SUB_TABS.map((s) => s.id);
 
 export function OperationsPanel() {
-  const [tab, setTab] = useState<OpsTab>("enrollment");
+  // The open sub-tab is in the URL (?tab=<id>): a refresh or Back keeps it;
+  // ?tab=agreements (optionally &agreement=<id>) opens the website agreements.
+  const [tab, setTab] = useUrlTab<OpsTab>(SUB_TAB_IDS, "enrollment");
   const [inviting, setInviting] = useState(false);
   const [inviteNote, setInviteNote] = useState<{ ok: boolean; text: string } | null>(null);
-  // ?tab=agreements (optionally &agreement=<id>) opens the website agreements.
-  useEffect(() => {
-    if (new URLSearchParams(window.location.search).get("tab") === "agreements") setTab("agreements");
-  }, []);
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center gap-1.5">
@@ -540,6 +540,11 @@ function AssignmentsPanel() {
   // Checklist 3.2: the chosen coach slot per participant; the coach list
   // only offers coaches of that type.
   const [slotFor, setSlotFor] = useState<Record<number, string>>({});
+  // The ERM picked for each participant: stays shown once assigned (the
+  // queue doesn't say who the current ERM is).
+  const [ermPick, setErmPick] = useState<Record<number, string>>({});
+  // "Assign" pressed with no coach chosen (per participant).
+  const [needCoach, setNeedCoach] = useState<number | null>(null);
 
   const refresh = async () => {
     const [q, s] = await Promise.all([getAssignmentQueue(), getStaffPool()]);
@@ -567,13 +572,30 @@ function AssignmentsPanel() {
     [staff],
   );
 
-  const handleErm = async (participantId: number, ermUserId: number) => {
+  const handleErm = async (
+    participantId: number,
+    ermUserId: number,
+    participantName: string,
+    hasErm: boolean,
+  ) => {
+    const erm = (staff?.erm ?? []).find((u) => u.id === ermUserId);
+    const ermName = erm ? `${erm.fullName} (${erm.email})` : "this ERM";
+    if (
+      !window.confirm(
+        hasErm
+          ? `${participantName} already has an ERM. Replace them with ${ermName}?`
+          : `Assign ${ermName} as ${participantName}'s ERM?`,
+      )
+    )
+      return;
     setBusy(participantId);
     setError("");
+    setErmPick((prev) => ({ ...prev, [participantId]: String(ermUserId) }));
     try {
       await assignErmToParticipant(participantId, ermUserId);
       await refresh();
     } catch (e) {
+      setErmPick((prev) => ({ ...prev, [participantId]: "" }));
       setError(e instanceof Error ? e.message : "Assign failed");
     } finally {
       setBusy(null);
@@ -644,10 +666,10 @@ function AssignmentsPanel() {
                     <div className="flex gap-1">
                       <select
                         className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-md border border-gray-200"
-                        defaultValue=""
+                        value={ermPick[uid] ?? ""}
                         onChange={(e) => {
                           const v = Number(e.target.value);
-                          if (v) handleErm(uid, v);
+                          if (v) handleErm(uid, v, String(r.fullName ?? "This participant"), Boolean(r.ermAssigned));
                         }}
                         disabled={busy === uid}
                       >
@@ -672,14 +694,15 @@ function AssignmentsPanel() {
                         id={`coach-pick-${uid}`}
                         className="flex-1 min-w-0 px-2 py-1.5 text-xs rounded-md border border-gray-200"
                         defaultValue=""
+                        onChange={() => setNeedCoach((n) => (n === uid ? null : n))}
                       >
                         <option value="">— Pick coach —</option>
                         {allCoaches
                           .filter((u) => (u.coachTypes ?? []).includes(slot))
                           .map((u) => (
                             <option key={u.id} value={u.id}>
-                              {u.fullName}
-                              {(u.coachSkills ?? []).length > 0 ? ` (${(u.coachSkills ?? []).join(", ")})` : ""}
+                              {u.fullName} ({u.email})
+                              {(u.coachSkills ?? []).length > 0 ? ` · ${(u.coachSkills ?? []).join(", ")}` : ""}
                             </option>
                           ))}
                       </select>
@@ -703,7 +726,11 @@ function AssignmentsPanel() {
                           const roleEl = document.getElementById(
                             `coach-role-${uid}`,
                           ) as HTMLSelectElement | null;
-                          if (!cidEl?.value) return;
+                          if (!cidEl?.value) {
+                            setNeedCoach(uid);
+                            return;
+                          }
+                          setNeedCoach(null);
                           handleCoach(
                             uid,
                             Number(cidEl.value),
@@ -716,6 +743,9 @@ function AssignmentsPanel() {
                         Assign
                       </button>
                     </div>
+                    {needCoach === uid && (
+                      <p className="mt-1 text-[11px] text-red-700">Choose a coach first.</p>
+                    )}
                   </div>
                 </div>
               </div>
@@ -830,22 +860,46 @@ function CoachProfilesEditor({
 
 /* ── Audit panel ─────────────────────────────────────────────── */
 
+/** The categories the server records (RecordService.Category). */
+const AUDIT_CATEGORIES = [
+  "ACCOUNT",
+  "SECURITY",
+  "DOCUMENT",
+  "PAYMENT",
+  "LEARNING",
+  "ASSESSMENT",
+  "MENTORSHIP",
+  "CERTIFICATE",
+];
+
 function AuditPanel() {
   const [rows, setRows] = useState<AuditRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [category, setCategory] = useState("");
   const [userId, setUserId] = useState("");
+  const [error, setError] = useState("");
 
-  const load = async () => {
+  const load = async (cat = category) => {
+    const id = userId.trim();
+    // A user ID is a whole number: "abc" used to be dropped silently.
+    if (id && !/^[1-9]\d*$/.test(id)) {
+      setError("Enter a numeric user ID.");
+      return;
+    }
     setLoading(true);
+    setError("");
     try {
       setRows(
         await getAuditTrail({
-          category: category || undefined,
-          userId: userId ? Number(userId) : undefined,
+          category: cat || undefined,
+          userId: id ? Number(id) : undefined,
           limit: 200,
         }),
       );
+    } catch (e) {
+      // Don't leave the old rows looking like the answer.
+      setRows([]);
+      setError(e instanceof Error ? e.message : "Couldn't load the audit trail");
     } finally {
       setLoading(false);
     }
@@ -864,19 +918,14 @@ function AuditPanel() {
           </label>
           <select
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
+            onChange={(e) => {
+              setCategory(e.target.value);
+              void load(e.target.value);
+            }}
             className="px-2 py-1.5 text-xs rounded-md border border-gray-200"
           >
             <option value="">All</option>
-            {[
-              "ACCOUNT",
-              "LEARNING",
-              "ASSESSMENT",
-              "MENTORSHIP",
-              "PAYMENT",
-              "CERTIFICATE",
-              "SECURITY",
-            ].map((c) => (
+            {AUDIT_CATEGORIES.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>
@@ -890,18 +939,27 @@ function AuditPanel() {
           <input
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void load();
+            }}
+            inputMode="numeric"
             className="px-2 py-1.5 text-xs rounded-md border border-gray-200 w-24"
             placeholder="optional"
           />
         </div>
         <button
-          onClick={load}
+          onClick={() => load()}
           disabled={loading}
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
         >
           {loading && <Loader2 size={12} className="animate-spin" />} Refresh
         </button>
       </div>
+      {error && (
+        <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
+          <AlertCircle size={14} /> {error}
+        </p>
+      )}
 
       <Table
         headers={["Time", "User", "Category", "Type", "Title"]}

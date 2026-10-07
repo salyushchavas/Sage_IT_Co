@@ -1,7 +1,7 @@
 "use client";
 
 import { ReactNode } from "react";
-import { Loader2, Plus } from "lucide-react";
+import { AlertCircle, Loader2, Plus } from "lucide-react";
 
 import type { CoachParticipantRow } from "@/lib/api";
 
@@ -16,6 +16,7 @@ export function CoachForm({
   submitLabel,
   saving,
   onSubmit,
+  error,
   children,
 }: {
   participantId: number | "";
@@ -24,6 +25,8 @@ export function CoachForm({
   submitLabel: string;
   saving: boolean;
   onSubmit: () => void;
+  /** Why the last save failed (the inputs are kept). */
+  error?: string;
   children: ReactNode;
 }) {
   return (
@@ -48,6 +51,11 @@ export function CoachForm({
         </select>
       </div>
       {children}
+      {error && (
+        <p className="flex items-start gap-1.5 text-sm text-red-700">
+          <AlertCircle size={14} className="mt-0.5 shrink-0" /> {error}
+        </p>
+      )}
       <div className="flex justify-end">
         <button
           type="button"
@@ -67,6 +75,17 @@ export function CoachForm({
   );
 }
 
+/** The participant's name for a list row (by user id). */
+export function participantName(
+  participants: CoachParticipantRow[],
+  userId: number,
+): string {
+  return (
+    participants.find((p) => p.userId === userId)?.fullName ??
+    `Participant #${userId}`
+  );
+}
+
 export function FormRow({ children }: { children: ReactNode }) {
   return (
     <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">{children}</div>
@@ -79,12 +98,18 @@ export function Field({
   value,
   onChange,
   rows,
+  min,
+  max,
+  step,
 }: {
   label: string;
   type?: "text" | "date" | "number" | "textarea";
   value: string;
   onChange: (v: string) => void;
   rows?: number;
+  min?: number | string;
+  max?: number | string;
+  step?: number;
 }) {
   return (
     <div>
@@ -102,6 +127,9 @@ export function Field({
         <input
           type={type}
           value={value}
+          min={min}
+          max={max}
+          step={step}
           onChange={(e) => onChange(e.target.value)}
           className="w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
         />
@@ -129,7 +157,7 @@ export function RecordsList<T>({
         items.map((it, idx) => (
           <div
             key={idx}
-            className="px-4 py-2.5 flex items-center gap-3 text-sm"
+            className="px-4 py-2.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm"
           >
             {renderRow(it)}
           </div>

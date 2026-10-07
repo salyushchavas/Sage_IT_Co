@@ -37,6 +37,10 @@ export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
       : 0;
   const coaches = team?.coaches ?? {};
   const coachEntries = Object.entries(coaches);
+  // Only the parts chosen so far (nothing before a program is picked).
+  const programDetail = [data.program?.skillset, data.program?.targetJobTitle]
+    .filter((v) => v?.trim())
+    .join(" · ");
 
 
   return (
@@ -167,9 +171,11 @@ export default function HomeTab({ data, team, userEmail, onJumpTo }: Props) {
           <p className="mt-1 text-sm font-bold text-gray-900 leading-tight">
             {data.program?.program ?? "—"}
           </p>
-          <p className="text-[11px] text-gray-500 mt-0.5">
-            {data.program?.skillset} · {data.program?.targetJobTitle}
-          </p>
+          {programDetail && (
+            <p className="text-[11px] text-gray-500 mt-0.5">
+              {programDetail}
+            </p>
+          )}
         </div>
       </div>
 

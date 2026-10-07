@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { AlertCircle, ChevronRight, Loader2, UserCheck } from "lucide-react";
 import { listWebAgreementRequests, type WebAgreementReadyRow } from "@/lib/api";
-import { formatUsDate } from "@/lib/dates";
+import { formatUsDayCt } from "@/lib/datetime";
 
 /**
  * Participants who signed their consent and said "I'm ready to sign the
@@ -63,7 +63,7 @@ export default function ParticipantRequestsPanel({
                   {r.email}
                   {r.participantId ? ` · ${r.participantId}` : ""}
                   {r.program ? ` · ${r.program}` : ""}
-                  {r.requestedAt ? ` · ready since ${formatUsDate(r.requestedAt)}` : ""}
+                  {r.requestedAt ? ` · ready since ${formatUsDayCt(r.requestedAt)}` : ""}
                 </p>
               </div>
               <button

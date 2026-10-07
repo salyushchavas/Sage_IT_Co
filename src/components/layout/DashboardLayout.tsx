@@ -3,7 +3,6 @@
 import { useState, type ComponentType, type ReactNode } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import {
   BookOpen,
   Briefcase,
@@ -71,15 +70,13 @@ export default function DashboardLayout({
   children,
   badges,
 }: DashboardLayoutProps) {
-  const router = useRouter();
   const { user, logout, isLoading } = useAuth();
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  // logout() goes to "/" itself (a full page load): a client-side
+  // router.replace here only raced it and logged aborted fetches.
   const handleSignOut = () => {
     logout();
-    // logout() already redirects to "/"; router.replace here is a
-    // belt-and-suspenders no-op if logout's redirect happens.
-    router.replace("/");
   };
 
   return (

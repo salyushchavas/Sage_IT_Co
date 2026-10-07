@@ -83,6 +83,9 @@ export const wordChild = {
     opacity: 1,
     y: 0,
     filter: "blur(0px)",
+    // A leftover filter (even blur(0px)) stops a parent's gradient text
+    // (bg-clip-text) from painting through the word: drop it once done.
+    transitionEnd: { filter: "none" },
     transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] as [number, number, number, number] },
   },
 };

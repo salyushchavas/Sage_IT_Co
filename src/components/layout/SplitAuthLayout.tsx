@@ -48,14 +48,17 @@ export default function SplitAuthLayout({
           className="relative z-10 inline-flex items-center gap-3 w-fit group"
           aria-label="Sage IT Co home"
         >
-          <Image
-            src="/sage_logo.png"
-            alt=""
-            width={48}
-            height={48}
-            priority
-            className="rounded-md object-contain transition-transform group-hover:scale-105"
-          />
+          {/* Light badge: the full-colour logo's navy parts vanish on the navy panel. */}
+          <span className="inline-flex shrink-0 bg-white rounded-lg p-1 shadow-sm transition-transform group-hover:scale-105">
+            <Image
+              src="/sage_logo.png"
+              alt=""
+              width={48}
+              height={48}
+              priority
+              className="rounded-md object-contain"
+            />
+          </span>
           <span className="text-xl md:text-2xl font-bold tracking-tight">
             Sage IT Co
           </span>

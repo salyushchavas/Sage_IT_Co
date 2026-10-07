@@ -38,10 +38,10 @@ const EXPERIENCE_OPTIONS = [
 ] as const;
 
 const schema = z.object({
-  location: z.string().optional(),
-  availability: z.enum(AVAILABILITY_OPTIONS),
-  selectedTechnology: z.enum(TECHNOLOGY_OPTIONS),
-  targetExperienceLevel: z.enum(EXPERIENCE_OPTIONS),
+  location: z.string().max(255, "Keep the location to 255 characters or fewer").optional(),
+  availability: z.enum(AVAILABILITY_OPTIONS, { message: "Choose your availability" }),
+  selectedTechnology: z.enum(TECHNOLOGY_OPTIONS, { message: "Choose your technology / skillset" }),
+  targetExperienceLevel: z.enum(EXPERIENCE_OPTIONS, { message: "Choose your experience level" }),
 });
 
 type Values = z.infer<typeof schema>;
@@ -103,9 +103,11 @@ export default function BasicInfoStep({ onComplete }: Props) {
             type="text"
             autoComplete="address-level2"
             {...register("location")}
-            className={INPUT_CLASS}
+            maxLength={255}
+            className={INPUT_CLASS + (errors.location ? " !border-red-500" : "")}
             placeholder="City, state, country"
           />
+          {errors.location && <p className="text-[11px] text-red-500 mt-1">{errors.location.message}</p>}
         </div>
         <div>
           <label className={LABEL_CLASS}>

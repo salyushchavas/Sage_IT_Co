@@ -253,11 +253,75 @@ function clearDraft(applicationId: string) {
 
 // ── Section completeness ──────────────────────────────────────
 
+/** Wizard inputs default to the 255-character column size. */
+const DEFAULT_FIELD_MAX_LENGTH = 255;
+
+/** The structured name parts that print as the contract's legal name. */
+const NAME_FIELD_KEYS: ReadonlySet<string> = new Set(["firstName", "middleName", "lastName"]);
+
+// The server's person-name rule (PersonNames / WebAgreementRules): letters,
+// marks, digits, spaces and . , ' ’ - only, starting with a letter or digit.
+// Built with the constructor so the "u" flag doesn't depend on the TS target.
+const PERSON_NAME_RE = new RegExp("^[\\p{L}\\p{M}\\p{N}][\\p{L}\\p{M}\\p{N} .,'’-]*$", "u");
+
+function isValidPersonName(value: string): boolean {
+  return PERSON_NAME_RE.test(value.trim());
+}
+
+/** Digits, spaces and + - . ( ) only, with 10 to 15 digits (area code included). */
+function isValidPhone(value: string): boolean {
+  const t = value.trim();
+  if (!/^[+0-9 ().-]+$/.test(t)) return false;
+  const digits = t.replace(/\D/g, "").length;
+  return digits >= 10 && digits <= 15;
+}
+
+/** An ISO yyyy-MM-dd string that is a real calendar date. */
+function isRealIsoDate(iso: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.trim());
+  if (!m) return false;
+  const y = Number(m[1]);
+  const mo = Number(m[2]);
+  const d = Number(m[3]);
+  const dt = new Date(y, mo - 1, d);
+  return dt.getFullYear() === y && dt.getMonth() === mo - 1 && dt.getDate() === d;
+}
+
+function isDateOfBirthField(field: SectionField): boolean {
+  return /dateofbirth/i.test(field.key);
+}
+
+/** A real date of birth in the past, at least 18 years ago (mirrors the submit gate). */
+function isAdultDateOfBirth(iso: string): boolean {
+  if (!isRealIsoDate(iso)) return false;
+  const [y, mo, d] = iso.trim().split("-").map(Number);
+  const eighteenth = new Date(y + 18, mo - 1, d);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return eighteenth.getTime() <= today.getTime();
+}
+
+/** "Number of cheques": digits only, at most 50 (the cheque list's cap). */
+function chequeCountInput(raw: string): string {
+  const digits = raw.replace(/\D/g, "");
+  if (!digits) return "";
+  return String(Math.min(50, parseInt(digits, 10)));
+}
+
 function isFieldValueValid(field: SectionField, value: string): boolean {
   const trimmed = value.trim();
   if (trimmed.length === 0) return false;
   if (field.type === "email") {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+  }
+  if (field.type === "tel") {
+    return isValidPhone(trimmed);
+  }
+  if (field.type === "date") {
+    return isDateOfBirthField(field) ? isAdultDateOfBirth(trimmed) : isRealIsoDate(trimmed);
+  }
+  if (NAME_FIELD_KEYS.has(field.key)) {
+    return isValidPersonName(trimmed);
   }
   // Build G strict formats. Matched against the digit-only form for
   // routing/account (the input auto-strips non-digits) and against the
@@ -406,8 +470,16 @@ function isSectionComplete(
     // section blueprints from older releases may still ship one;
     // defer to the per-cheque check below.
     if (field.type === "file") continue;
-    if (!isFieldRequired(field, section, form, reqs)) continue;
-    if (!isFieldValueValid(field, form.fields[field.key] ?? "")) {
+    const value = form.fields[field.key] ?? "";
+    if (!isFieldRequired(field, section, form, reqs)) {
+      // An optional name part (the middle name) may stay blank, but what's
+      // typed must still be a valid name: it never saves otherwise.
+      if (NAME_FIELD_KEYS.has(field.key) && value.trim() && !isValidPersonName(value)) {
+        return false;
+      }
+      continue;
+    }
+    if (!isFieldValueValid(field, value)) {
       return false;
     }
   }
@@ -488,6 +560,9 @@ function parseChequeCount(raw: string | undefined | null): number {
  * upload button, so the write wants to land before they do.
  */
 const CHEQUE_SAVE_DEBOUNCE_MS = 600;
+
+/** Longest cheque number the server stores (WebAgreementRules.CHEQUE_NUMBER_MAX). */
+const CHEQUE_NUMBER_MAX_LENGTH = 64;
 
 /** Build AP — one unfinished cheque. {@code index} is -1 for "no count set". */
 type ChequeGap = { index: number; label: string };
@@ -772,14 +847,6 @@ export default function WebAgreementWizard() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
-    // F-3 — load the real clauses once (non-fatal).
-    getWebAgreementContent()
-      .then((c) => {
-        if (!cancelled) setContent(c);
-      })
-      .catch(() => {
-        /* read pane falls back to the plain summary */
-      });
     getMyWebAgreement()
       .then((data) => {
         if (cancelled) return;
@@ -797,6 +864,15 @@ export default function WebAgreementWizard() {
         if (!isFillableStatus(data.status)) {
           return;
         }
+        // F-3 — load the real clauses once (non-fatal). Only now: the
+        // content endpoint 404s until the ERM has created the agreement.
+        getWebAgreementContent()
+          .then((c) => {
+            if (!cancelled) setContent(c);
+          })
+          .catch(() => {
+            /* read pane falls back to the plain summary */
+          });
         const initial = buildInitialState(data);
         // Build R — a Phase-2 fill makes the main-agreement step signable so
         // the consultant RE-DRAWS the primary. Legacy/migrated records keep a
@@ -907,6 +983,12 @@ export default function WebAgreementWizard() {
       for (const key of PERSISTED_FIELD_KEYS) {
         if (READ_ONLY_FIELD_KEYS.has(key)) continue;
         if (current.fields[key] !== snap.fields[key]) {
+          // A name with symbols the server refuses is held back (the field
+          // shows why), so it can't fail the save of everything else typed.
+          if (NAME_FIELD_KEYS.has(key) && current.fields[key].trim()
+              && !isValidPersonName(current.fields[key])) {
+            continue;
+          }
           if (restricted) {
             const secId = sectionIdForPersistedKey(key);
             if (!secId || !restrictedScopeSet.has(secId)) continue;
@@ -2308,7 +2390,9 @@ function Stepper({
     >
       <div className="max-w-[1320px] mx-auto px-5 sm:px-10 pt-3.5 pb-4">
         <div className="flex items-baseline justify-between gap-4">
-          <div className="relative shrink-0 min-w-0">
+          {/* min-w-0 + flex-1 lets the row shrink so a long title truncates
+              instead of pushing the page sideways on a phone or tablet. */}
+          <div className="relative min-w-0 flex-1">
             <button
               type="button"
               onClick={() => setMenuOpen((v) => !v)}
@@ -2430,9 +2514,9 @@ function Stepper({
           >
             {readPct >= 100 ? (
               <>
-                {/* Short on a phone so the header row doesn't scroll sideways. */}
-                <span className="sm:hidden">Fully read</span>
-                <span className="hidden sm:inline">Fully read, you can continue.</span>
+                {/* Short on phones and tablets so the header row doesn't scroll sideways. */}
+                <span className="lg:hidden">Fully read</span>
+                <span className="hidden lg:inline">Fully read, you can continue.</span>
               </>
             ) : `${Math.round(readPct)}% read`}
           </span>
@@ -3161,12 +3245,15 @@ function DateMaskInput({
   value,
   onChange,
   onBlur,
+  onUnfinishedChange,
   readOnly,
   className,
 }: {
   value: string;
   onChange: (iso: string) => void;
   onBlur: () => void;
+  /** True while the typed text isn't a complete, real MM-DD-YYYY date. */
+  onUnfinishedChange?: (unfinished: boolean) => void;
   readOnly?: boolean;
   className?: string;
 }) {
@@ -3178,8 +3265,9 @@ function DateMaskInput({
     if (value !== emittedRef.current) {
       emittedRef.current = value;
       setText(isoToUsInput(value));
+      onUnfinishedChange?.(false);
     }
-  }, [value]);
+  }, [value, onUnfinishedChange]);
   return (
     <input
       type="text"
@@ -3193,6 +3281,7 @@ function DateMaskInput({
         setText(masked);
         const iso = usInputToIso(masked);
         emittedRef.current = iso;
+        onUnfinishedChange?.(masked.length > 0 && iso === "");
         onChange(iso);
       }}
       onBlur={onBlur}
@@ -3241,8 +3330,17 @@ function FieldInput({
     field.key === "portalAuthorizedActions" ||
     field.key === "customScopeNotes";
 
-  const invalid =
-    touched && effectivelyRequired && !isFieldValueValid(field, value);
+  // A typed date that isn't complete or real (the mask emits "" for it).
+  const [dateUnfinished, setDateUnfinished] = useState(false);
+  const hasValue = value.trim().length > 0;
+  const valueValid = isFieldValueValid(field, value);
+  // Shown even on an optional field: a name with symbols, or a date that
+  // can't be read.
+  const formatInvalid = !ro && (
+    (NAME_FIELD_KEYS.has(field.key) && hasValue && !valueValid)
+    || (field.type === "date" && dateUnfinished)
+  );
+  const invalid = touched && ((effectivelyRequired && !valueValid) || formatInvalid);
   const errorMsg = invalid
     ? field.type === "email"
       ? "Enter a valid email address."
@@ -3256,8 +3354,20 @@ function FieldInput({
               ? "Enter a 5-digit ZIP (optionally ZIP+4)."
             : field.type === "id-type"
               ? "Pick one."
+            : field.type === "tel" && hasValue
+              ? "Enter a valid phone number, including the area code."
+            : field.type === "date" && (dateUnfinished || (hasValue && !isRealIsoDate(value)))
+              ? "Enter a valid date."
+            : field.type === "date" && hasValue && isDateOfBirthField(field)
+              ? "Date of birth must be a past date (18 or older)."
+            : NAME_FIELD_KEYS.has(field.key) && hasValue
+              ? "Use letters, spaces, apostrophes, hyphens and periods only."
               : "This field is required."
     : "";
+  // Typing stops at the field's column size, so one long value can't fail
+  // the autosave of everything else (the server refuses longer values).
+  const maxLength = field.maxLength ?? DEFAULT_FIELD_MAX_LENGTH;
+  const isChequeCount = field.key === "securityCheckCount";
 
   const baseInputClasses =
     "w-full px-3 py-2.5 text-[14px] rounded-md border bg-white text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper motion-safe:transition-colors " +
@@ -3284,6 +3394,7 @@ function FieldInput({
         onBlur={onBlur}
         placeholder={field.placeholder}
         readOnly={ro}
+        maxLength={ro ? undefined : maxLength}
         className={baseInputClasses + " min-h-[80px]"}
       />
     );
@@ -3349,6 +3460,7 @@ function FieldInput({
         value={value}
         onChange={onChange}
         onBlur={onBlur}
+        onUnfinishedChange={setDateUnfinished}
         readOnly={ro}
         className={baseInputClasses}
       />
@@ -3391,6 +3503,7 @@ function FieldInput({
           onBlur={onBlur}
           placeholder={ph}
           readOnly={ro}
+          maxLength={ro ? undefined : maxLength}
           className={baseInputClasses + " pr-9"}
         />
         <button
@@ -3413,11 +3526,15 @@ function FieldInput({
               ? "tel"
               : "text"
         }
+        // "Number of cheques" takes digits only, up to 50.
+        inputMode={isChequeCount ? "numeric" : undefined}
         value={value}
-        onChange={(e) => onChange(e.target.value)}
+        onChange={(e) =>
+          onChange(isChequeCount ? chequeCountInput(e.target.value) : e.target.value)}
         onBlur={onBlur}
         placeholder={field.placeholder}
         readOnly={ro}
+        maxLength={ro || isChequeCount ? undefined : maxLength}
         className={baseInputClasses}
       />
     );
@@ -4219,6 +4336,9 @@ function ConsultantImagesPreview({
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [reachedEnd, setReachedEnd] = useState(false);
+  // Bumped by "Try again" so a failed render can be fetched again; the
+  // read-to-end requirement still needs the pages.
+  const [retry, setRetry] = useState(0);
   const scrollerRef = useRef<HTMLDivElement | null>(null);
   const endSentinelRef = useRef<HTMLDivElement | null>(null);
 
@@ -4248,7 +4368,7 @@ function ConsultantImagesPreview({
     return () => {
       cancelled = true;
     };
-  }, [primarySignature]);
+  }, [primarySignature, retry]);
 
   // Build N — scroll-to-end detection. Three triggers fire onScrolledToEnd:
   //   1. The scroll handler when the scrollTop+clientHeight reaches the
@@ -4320,8 +4440,19 @@ function ConsultantImagesPreview({
           </div>
         )}
         {error && (
-          <div className="flex items-center justify-center text-xs text-red-700 py-12">
-            <AlertCircle size={14} className="mr-1.5" /> {error}
+          <div className="flex flex-col items-center justify-center gap-3 text-xs text-red-700 py-12 text-center">
+            <span className="inline-flex items-center">
+              <AlertCircle size={14} className="mr-1.5 shrink-0" /> {error}
+            </span>
+            <button
+              type="button"
+              onClick={() => setRetry((n) => n + 1)}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-semibold border border-stone-300 bg-white text-sage-navy hover:bg-stone-50 cursor-pointer disabled:opacity-60 disabled:cursor-wait"
+            >
+              {loading && <Loader2 size={12} className="animate-spin" />}
+              Try again
+            </button>
           </div>
         )}
         {pages && !error && (
@@ -4538,6 +4669,7 @@ function PortalEntriesBlock({
                 type="text"
                 value={row.platform}
                 onChange={(e) => update(i, "platform", e.target.value)}
+                maxLength={DEFAULT_FIELD_MAX_LENGTH}
                 placeholder="Platform (e.g. LinkedIn, Dice)"
                 className={inputClass}
               />
@@ -4545,6 +4677,7 @@ function PortalEntriesBlock({
                 type="text"
                 value={row.username}
                 onChange={(e) => update(i, "username", e.target.value)}
+                maxLength={DEFAULT_FIELD_MAX_LENGTH}
                 placeholder="Username / login ID"
                 className={inputClass}
               />
@@ -4669,7 +4802,7 @@ function ChequeListBlock({
         </h3>
         <p className="text-xs text-gray-700 mt-1 leading-relaxed max-w-[64ch]">
           Required to complete Appendix 5. For each cheque, enter the
-          cheque number and date, then upload a photo or PDF (≤10 MB).
+          cheque number and upload a copy (a photo or PDF, ≤10 MB).
           The files are stored privately and visible only to Sage IT.
         </p>
         {attentionBanner}
@@ -4732,6 +4865,7 @@ function ChequeListBlock({
                   onChange={(e) =>
                     onMetadataChange(i, { number: e.target.value })
                   }
+                  maxLength={CHEQUE_NUMBER_MAX_LENGTH}
                   placeholder="e.g. 1001"
                   className="mt-1 w-full px-3 py-2 text-[14px] rounded-md border border-stone-300 bg-white text-stone-900 focus:outline-none focus:ring-2 focus:ring-sage-copper/40 focus:border-sage-copper"
                 />
@@ -4781,7 +4915,7 @@ function ChequeListBlock({
           </div>
         );
       })}
-      {count < 50 && (
+      {count < 50 ? (
         <button
           type="button"
           onClick={onAdd}
@@ -4789,6 +4923,8 @@ function ChequeListBlock({
         >
           + Add another cheque
         </button>
+      ) : (
+        <p className="text-[11px] text-stone-500">Up to 50 cheques.</p>
       )}
       {error && (
         <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
@@ -5104,6 +5240,28 @@ function ReviewStep({
                 })}
               </dl>
             )}
+
+            {/* The platforms + usernames live outside section.fields. */}
+            {section.id === "appendix4" && (() => {
+              const entries = parsePortalEntries(form.fields["portalEntries"])
+                .filter((e) => e.platform.trim() || e.username.trim());
+              return (
+                <div className="mt-3">
+                  <p className="text-[11px] text-stone-500">Authorized platforms</p>
+                  {entries.length === 0 ? (
+                    <p className="text-[14px] text-stone-800 mt-0.5">None added</p>
+                  ) : (
+                    <ul className="mt-0.5 space-y-0.5">
+                      {entries.map((e, i) => (
+                        <li key={i} className="text-[14px] text-stone-800 break-words">
+                          {e.platform.trim() || "Not set"} / {e.username.trim() || "Not set"}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              );
+            })()}
 
             {section.id === "appendix5" && (() => {
               const required = parseChequeCount(form.fields["securityCheckCount"]);

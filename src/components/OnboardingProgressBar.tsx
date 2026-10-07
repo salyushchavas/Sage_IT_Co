@@ -35,11 +35,31 @@ const STEPS: ReadonlyArray<string> = [
   "Done",
 ];
 
+/**
+ * The participant's profile steps, numbered the way the "Complete Your
+ * Profile" checklist numbers them (Step 6, the agreement, comes after the
+ * consent). The step pages pass these instead of the old 9-step labels.
+ */
+export const PROFILE_STEPS: ReadonlyArray<string> = [
+  "About You",
+  "Acknowledgment",
+  "Documents",
+  "Program",
+  "Consent",
+  "Agreement",
+  "Check copies",
+];
+
 export interface OnboardingProgressBarProps {
-  /** 1-indexed step the user is currently on. Clamped to the steps array. */
+  /**
+   * 1-indexed step the user is currently on. Clamped to the steps array;
+   * a number past the last step shows every step as done.
+   */
   currentStep: number;
   /** Optional override — pass a shorter list (e.g. ["Sign Up", "Verify"]) to render a 2-step bar. */
   steps?: ReadonlyArray<string>;
+  /** Later steps already done out of order (e.g. the check copies while the agreement is still open). */
+  doneSteps?: ReadonlyArray<number>;
 }
 
 /**
@@ -93,8 +113,10 @@ export function stepFromStatus(status: string | null | undefined): number {
 export default function OnboardingProgressBar({
   currentStep,
   steps,
+  doneSteps,
 }: OnboardingProgressBarProps) {
   const STEPS_TO_RENDER = steps && steps.length > 0 ? steps : STEPS;
+  const allDone = currentStep > STEPS_TO_RENDER.length;
   const clamped = Math.max(1, Math.min(STEPS_TO_RENDER.length, currentStep));
   const activeLabel = STEPS_TO_RENDER[clamped - 1];
 
@@ -103,17 +125,23 @@ export default function OnboardingProgressBar({
       {/* Mobile-only compact summary. Phones can't fit 9 circles
           legibly so we collapse to one line. */}
       <div className="sm:hidden flex items-center justify-between gap-3">
-        <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[#1B2A5C] text-white text-xs font-bold animate-pulse">
-          {clamped}
-        </div>
+        {allDone ? (
+          <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-emerald-600 text-white">
+            <Check size={14} />
+          </div>
+        ) : (
+          <div className="inline-flex items-center justify-center w-8 h-8 rounded-full bg-[#1B2A5C] text-white text-xs font-bold animate-pulse">
+            {clamped}
+          </div>
+        )}
         <div className="flex-1 min-w-0">
           <p className="text-[11px] uppercase tracking-wider text-gray-500 font-semibold">
-            Step {clamped} of {STEPS_TO_RENDER.length}
+            {allDone ? `${STEPS_TO_RENDER.length} of ${STEPS_TO_RENDER.length} steps` : `Step ${clamped} of ${STEPS_TO_RENDER.length}`}
           </p>
-          <p className="text-sm font-bold text-[#1B2A5C] truncate">{activeLabel}</p>
+          <p className="text-sm font-bold text-[#1B2A5C] truncate">{allDone ? "All steps done" : activeLabel}</p>
         </div>
         <div className="text-xs text-gray-500 font-mono">
-          {clamped}/{STEPS_TO_RENDER.length}
+          {allDone ? STEPS_TO_RENDER.length : clamped}/{STEPS_TO_RENDER.length}
         </div>
       </div>
 
@@ -121,8 +149,8 @@ export default function OnboardingProgressBar({
       <ol className="hidden sm:flex items-start justify-between gap-1">
         {STEPS_TO_RENDER.map((label, idx) => {
           const stepNumber = idx + 1;
-          const isCompleted = stepNumber < clamped;
-          const isActive = stepNumber === clamped;
+          const isCompleted = allDone || stepNumber < clamped || !!doneSteps?.includes(stepNumber);
+          const isActive = !isCompleted && stepNumber === clamped;
 
           let circleClass = "border border-gray-300 bg-white text-gray-400";
           if (isCompleted) circleClass = "bg-emerald-600 border-emerald-600 text-white";
@@ -133,7 +161,7 @@ export default function OnboardingProgressBar({
           else if (isActive) labelClass = "text-[#1B2A5C] font-bold";
 
           // Connector lights up between any two completed-or-active steps.
-          const leftConnectorActive = idx > 0 && stepNumber <= clamped;
+          const leftConnectorActive = idx > 0 && (isCompleted || isActive);
           const rightConnectorActive = isCompleted; // line to the right is teal only if THIS step is done
 
           return (
@@ -176,7 +204,11 @@ export default function OnboardingProgressBar({
       </ol>
 
       <p className="hidden sm:block mt-2 text-[11px] text-gray-500 text-center">
-        Step {clamped} of {STEPS_TO_RENDER.length}: <span className="font-semibold text-gray-700">{activeLabel}</span>
+        {allDone ? (
+          <span className="font-semibold text-gray-700">All steps done</span>
+        ) : (
+          <>Step {clamped} of {STEPS_TO_RENDER.length}: <span className="font-semibold text-gray-700">{activeLabel}</span></>
+        )}
       </p>
     </div>
   );

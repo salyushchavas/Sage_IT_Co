@@ -13,6 +13,10 @@ import {
   type VerificationRow,
 } from "@/lib/api";
 
+/** Phones and tablets: the action column stays in view while the table scrolls. */
+const STICKY_ACTION =
+  "sticky right-0 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.15)] xl:shadow-none";
+
 const STATUS_LABEL: Record<string, string> = {
   PENDING: "Waiting",
   APPROVED: "Approved",
@@ -99,7 +103,8 @@ export function DocumentVerificationQueue() {
           <Loader2 size={20} className="animate-spin text-sage-navy inline" />
         </div>
       ) : (
-        <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto">
+        // container-type: the review panel below is sized to this box (cqw).
+        <div className="rounded-2xl border border-gray-100 bg-white overflow-x-auto [container-type:inline-size]">
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
               <tr>
@@ -107,7 +112,7 @@ export function DocumentVerificationQueue() {
                 <th className="text-left px-4 py-2">Course</th>
                 <th className="text-left px-4 py-2">Documents</th>
                 <th className="text-left px-4 py-2">Last upload</th>
-                <th className="text-right px-4 py-2">Action</th>
+                <th className={"text-right px-4 py-2 bg-gray-50 " + STICKY_ACTION}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -138,7 +143,7 @@ export function DocumentVerificationQueue() {
                       <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
                         {r.submittedAt ? formatDateTime(r.submittedAt) : "—"}
                       </td>
-                      <td className="px-4 py-2 text-right whitespace-nowrap">
+                      <td className={"px-4 py-2 text-right whitespace-nowrap bg-white " + STICKY_ACTION}>
                         <button
                           type="button"
                           onClick={() => { setOpenId(openId === r.userId ? null : r.userId); setNotice(null); }}
@@ -153,7 +158,10 @@ export function DocumentVerificationQueue() {
                     lines.push(
                       <tr key={`${r.userId}-detail`}>
                         <td colSpan={5} className="px-4 py-4 bg-gray-50/60">
-                          <ReviewPanel userId={r.userId} canConfirm={filter === "WAITING"} onDone={done} />
+                          {/* As wide as the visible box, not the table: its buttons stay in view on phones. */}
+                          <div className="sticky left-4 w-[calc(100cqw-2rem)]">
+                            <ReviewPanel userId={r.userId} canConfirm={filter === "WAITING"} onDone={done} />
+                          </div>
                         </td>
                       </tr>,
                     );

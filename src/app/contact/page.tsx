@@ -204,8 +204,7 @@ export default function ContactPage() {
               <GlassCard className="p-0 overflow-hidden h-56 sm:h-64">
                 <iframe
                   src="https://www.google.com/maps?q=4400+State+Hwy+121+Suite+324+Lewisville+TX+75056&hl=en&z=15&output=embed"
-                  width="100%"
-                  height="100%"
+                  className="block w-full h-56 sm:h-64"
                   style={{ border: 0 }}
                   allowFullScreen
                   loading="lazy"

@@ -11,10 +11,10 @@ import {
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import AgreementStatusPill from "./AgreementStatusPill";
-import { formatUsDate } from "@/lib/dates";
+import { formatUsDayCt } from "@/lib/datetime";
 import { computePendingAppendices } from "@/lib/pending-appendix";
 import {
-  AGREEMENT_STATUS_META,
+  describeStatus,
   LIVE_STATUSES,
 } from "@/lib/web-agreement-status";
 
@@ -27,12 +27,33 @@ import {
  *
  * Chips are generated from the shared vocabulary, never written here, so a
  * chip caption can't drift from the pill on the row it selects. Filtering
- * itself sends the raw enum to the API.
+ * itself sends the raw enum to the API; VERIFIED is split by the ERM's
+ * verification (released) into "Signed by participant" and "Verified",
+ * exactly as the row pills are.
  */
-const FILTERS: ReadonlyArray<{ id: "ALL" | WebAgreementStatus; label: string }> = [
+interface ListFilter {
+  id: string;
+  label: string;
+  status?: WebAgreementStatus;
+  released?: boolean;
+}
+
+const FILTERS: ReadonlyArray<ListFilter> = [
   { id: "ALL", label: "All" },
-  ...LIVE_STATUSES.map((id) => ({ id, label: AGREEMENT_STATUS_META[id].label })),
+  ...LIVE_STATUSES.flatMap((status): ListFilter[] =>
+    status === "VERIFIED"
+      ? [false, true].map((released) => ({
+          id: `${status}:${released ? "verified" : "signed"}`,
+          label: describeStatus(status, { consultantCopyReleased: released }).label,
+          status,
+          released,
+        }))
+      : [{ id: status, label: describeStatus(status).label, status }],
+  ),
 ];
+
+/** How long typing pauses before the search goes to the server. */
+const SEARCH_DEBOUNCE_MS = 300;
 
 const PAGE_SIZE = 20;
 
@@ -45,12 +66,15 @@ export default function WebAgreementsListView({
   onOpen: (applicationId: string) => void;
 }) {
   const { user } = useAuth();
-  const [filter, setFilter] = useState<"ALL" | WebAgreementStatus>("ALL");
+  const [filter, setFilter] = useState<ListFilter>(FILTERS[0]);
   const [page, setPage] = useState(0);
   const [pageData, setPageData] = useState<WebAgreementPage | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
+  // The search the list was loaded with (the box, once typing pauses). It
+  // searches every page on the server, not just the one on screen.
+  const [query, setQuery] = useState("");
   // Admin oversight: an "Owner" column + an owner filter, both shown only to
   // Operations / System admins (an ERM's list is all theirs, so the column
   // would be redundant).
@@ -58,10 +82,22 @@ export default function WebAgreementsListView({
   const [ownerFilter, setOwnerFilter] = useState("ALL");
 
   useEffect(() => {
+    const q = search.trim();
+    if (q === query) return;
+    const t = setTimeout(() => {
+      setQuery(q);
+      setPage(0);
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(t);
+  }, [search, query]);
+
+  useEffect(() => {
     let cancelled = false;
     setLoading(true);
     listWebAgreements({
-      status: filter === "ALL" ? undefined : filter,
+      status: filter.status,
+      released: filter.released,
+      q: query || undefined,
       page,
       size: PAGE_SIZE,
     })
@@ -83,7 +119,7 @@ export default function WebAgreementsListView({
     return () => {
       cancelled = true;
     };
-  }, [filter, page]);
+  }, [filter, page, query]);
 
   // Distinct owner names in the current page, for the admin's owner
   // dropdown (client-side filter at this data volume).
@@ -96,17 +132,12 @@ export default function WebAgreementsListView({
   }, [pageData]);
 
   const filtered = useMemo<WebAgreement[]>(() => {
-    let rows = pageData?.content ?? [];
+    const rows = pageData?.content ?? [];
     if (isAdmin && ownerFilter !== "ALL") {
-      rows = rows.filter((r) => (r.ownerName ?? "") === ownerFilter);
+      return rows.filter((r) => (r.ownerName ?? "") === ownerFilter);
     }
-    const q = search.trim().toLowerCase();
-    if (!q) return rows;
-    return rows.filter((r) =>
-      [r.consultantEmail, r.consultantName ?? "", r.applicationId, r.ownerName ?? ""]
-        .some((v) => v.toLowerCase().includes(q)),
-    );
-  }, [pageData, search, isAdmin, ownerFilter]);
+    return rows;
+  }, [pageData, isAdmin, ownerFilter]);
 
   // Base 5 cols (Participant, Agreement ID, Status, Pending Appendix,
   // Created); admins add the Owner column.
@@ -121,12 +152,12 @@ export default function WebAgreementsListView({
               key={f.id}
               type="button"
               onClick={() => {
-                setFilter(f.id);
+                setFilter(f);
                 setPage(0);
               }}
               className={
                 "px-2.5 py-1 rounded-md font-semibold cursor-pointer " +
-                (filter === f.id
+                (filter.id === f.id
                   ? "bg-sage-navy text-white"
                   : "text-gray-600 hover:text-sage-navy")
               }
@@ -180,7 +211,7 @@ export default function WebAgreementsListView({
               <th className="text-left px-4 py-2">Participant</th>
               {isAdmin && <th className="text-left px-4 py-2">Owner</th>}
               <th className="text-left px-4 py-2">Agreement ID</th>
-              <th className="text-left px-4 py-2">Status</th>
+              <th className="hidden sm:table-cell text-left px-4 py-2">Status</th>
               <th className="text-left px-4 py-2">Pending Appendix</th>
               <th className="text-left px-4 py-2">Created</th>
             </tr>
@@ -217,6 +248,16 @@ export default function WebAgreementsListView({
                         {r.consultantEmail}
                       </div>
                     </button>
+                    {/* Phones: the Status column is hidden, so the pill sits here. */}
+                    <div className="mt-1 sm:hidden">
+                      <AgreementStatusPill
+                        status={r.status}
+                        context={{
+                          consultantCopyReleased: r.consultantCopyReleased,
+                          phase: r.phase,
+                        }}
+                      />
+                    </div>
                   </td>
                   {isAdmin && (
                     <td className="px-4 py-2 text-xs text-gray-700">
@@ -232,7 +273,7 @@ export default function WebAgreementsListView({
                       {r.applicationId.slice(0, 8)}…
                     </button>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="hidden sm:table-cell px-4 py-2">
                     {/* List rows carry the refining fields, so the pill can
                         resolve the sub-state ("Verified" vs "Signed by
                         participant") instead of the coarse enum label. */}
@@ -289,8 +330,9 @@ export default function WebAgreementsListView({
 }
 
 function formatDate(iso: string | null | undefined) {
-  // US MM-DD-YYYY, like the rest of the agreement screens.
-  return iso ? formatUsDate(iso) : "—";
+  // US MM-DD-YYYY, like the rest of the agreement screens, on the business
+  // (CT) day the agreement was created.
+  return formatUsDayCt(iso);
 }
 
 // "None" when all five appendices are sent + signed; otherwise a compact chip

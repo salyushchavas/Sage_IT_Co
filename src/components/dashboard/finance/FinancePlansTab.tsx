@@ -253,7 +253,13 @@ function PlanDialog({
   useEffect(() => {
     const totalNum = Number(total);
     const n = Number(installments);
-    if (!total || !firstDue || !n || Number.isNaN(totalNum)) {
+    // 2.9 used to be sent and cut to 2 by the server.
+    if (installments.trim() && !Number.isInteger(n)) {
+      setPreview([]);
+      setPreviewError("Installments must be a whole number");
+      return;
+    }
+    if (!total || !firstDue || !installments.trim() || Number.isNaN(totalNum)) {
       setPreview([]);
       setPreviewError("");
       return;
@@ -273,10 +279,15 @@ function PlanDialog({
   }, [total, installments, firstDue]);
 
   const handleSubmit = async () => {
+    const n = Number(installments);
+    if (!Number.isInteger(n) || n < 1) {
+      setError("Installments must be a whole number");
+      return;
+    }
     setSaving(true);
     setError("");
     try {
-      const terms = { totalAmount: Number(total), installments: Number(installments), firstDueDate: firstDue };
+      const terms = { totalAmount: Number(total), installments: n, firstDueDate: firstDue };
       if (plan) await updateFinancePlan(plan.id, terms);
       else await createFinancePlan({ ...terms, participantId: Number(participantId) });
       await onSaved();
@@ -336,7 +347,17 @@ function PlanDialog({
             </div>
           )}
           <Field label="Total amount (USD)" type="number" value={total} onChange={setTotal} />
-          <Field label="Installments" type="number" value={installments} onChange={setInstallments} />
+          <div>
+            <label className="block text-[11px] font-medium text-gray-600 mb-0.5">Installments</label>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              value={installments}
+              onChange={(e) => setInstallments(e.target.value)}
+              className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
+            />
+          </div>
           <div>
             <label className="block text-[11px] font-medium text-gray-600 mb-0.5">First installment due date</label>
             <input

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -9,8 +9,10 @@ import {
 } from "lucide-react";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import { PROFILE_STEPS } from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
 import {
+  dashboardRouteForRole,
   getDocumentReviewState,
   getProgramSelection,
   saveProgramSelectionDraft,
@@ -95,6 +97,9 @@ function ProgramSelectionPageInner() {
 
   const [gateChecked, setGateChecked] = useState(false);
   const [gateError, setGateError] = useState("");
+  // Set while finishing the step: refreshing the user re-runs the gate
+  // below, which must not replace the redirect to the next step.
+  const finishingRef = useRef(false);
 
   // ── Form state ────────────────────────────────────────────────
   const [reviewed, setReviewed] = useState(false);
@@ -120,6 +125,12 @@ function ProgramSelectionPageInner() {
       return;
     }
     if (!user) return;
+    if (finishingRef.current) return;
+    // Staff have no participant steps: their own dashboard, not the Apply form.
+    if (dashboardRouteForRole(user.role) !== "/dashboard") {
+      router.replace(dashboardRouteForRole(user.role));
+      return;
+    }
     if (user.programSelectionComplete) {
       router.replace("/dashboard?tab=complete-profile");
       return;
@@ -247,6 +258,7 @@ function ProgramSelectionPageInner() {
         notes: notes.trim() || undefined,
       });
       void result;
+      finishingRef.current = true;
       await refreshUser();
       router.replace(
         fromProfile
@@ -271,7 +283,7 @@ function ProgramSelectionPageInner() {
 
   if (gateError) {
     return (
-      <OnboardingLayout currentStep={6} contentMaxWidth="xl">
+      <OnboardingLayout steps={PROFILE_STEPS} currentStep={4} contentMaxWidth="xl">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
@@ -284,7 +296,7 @@ function ProgramSelectionPageInner() {
   }
 
   return (
-    <OnboardingLayout currentStep={6} contentMaxWidth="3xl">
+    <OnboardingLayout steps={PROFILE_STEPS} currentStep={4} contentMaxWidth="3xl">
       <motion.section
         initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}

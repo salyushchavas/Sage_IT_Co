@@ -14,6 +14,7 @@ import {
   FormRow,
   RecordsList,
   TabLoading,
+  participantName,
 } from "./CoachFormParts";
 
 const FEEDBACK_TYPES = [
@@ -26,8 +27,10 @@ const FEEDBACK_TYPES = [
 
 export function CoachFeedbackTab({
   participants,
+  onSaved,
 }: {
   participants: CoachParticipantRow[];
+  onSaved?: () => void;
 }) {
   const [items, setItems] = useState<CoachingFeedbackDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -36,6 +39,7 @@ export function CoachFeedbackTab({
   const [content, setContent] = useState("");
   const [rating, setRating] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -52,7 +56,12 @@ export function CoachFeedbackTab({
   }, []);
 
   const handleSubmit = async () => {
-    if (!participantId || !content.trim()) return;
+    if (!participantId) return;
+    if (!content.trim()) {
+      setError("Write the feedback first.");
+      return;
+    }
+    setError("");
     setSaving(true);
     try {
       await createCoachFeedback({
@@ -64,6 +73,10 @@ export function CoachFeedbackTab({
       setItems(await listCoachFeedback());
       setContent("");
       setRating("");
+      onSaved?.();
+    } catch (e) {
+      // Keep what they typed; say why it wasn't saved.
+      setError(e instanceof Error ? e.message : "Couldn't save the feedback");
     } finally {
       setSaving(false);
     }
@@ -81,6 +94,7 @@ export function CoachFeedbackTab({
         submitLabel={saving ? "Saving..." : "Add feedback"}
         saving={saving}
         onSubmit={handleSubmit}
+        error={error}
       >
         <FormRow>
           <div>
@@ -104,6 +118,9 @@ export function CoachFeedbackTab({
             type="number"
             value={rating}
             onChange={setRating}
+            min={1}
+            max={5}
+            step={1}
           />
         </FormRow>
         <Field
@@ -123,7 +140,10 @@ export function CoachFeedbackTab({
             <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-gray-100 text-gray-700 w-24 shrink-0 text-center">
               {f.feedbackType}
             </span>
-            <span className="font-medium text-gray-900 truncate">
+            <span className="font-semibold text-gray-900 shrink-0 max-w-[10rem] truncate">
+              {participantName(participants, f.participantUserId)}
+            </span>
+            <span className="font-medium text-gray-900 truncate min-w-0 max-w-full">
               {f.content}
             </span>
             {f.rating && (

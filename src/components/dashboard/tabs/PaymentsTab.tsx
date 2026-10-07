@@ -18,7 +18,7 @@ import {
   type PaymentLedgerDTO,
   type PaymentSummary,
 } from "@/lib/api";
-import { formatDateMedium, formatDay } from "@/lib/datetime";
+import { businessToday, formatDateMedium, formatDay } from "@/lib/datetime";
 import { formatMoney } from "@/lib/money";
 
 const PAYMENT_PLAN_ACK_VERSION = "PPL-v1.0";
@@ -304,8 +304,17 @@ function CheckTrackingSection({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
+  // Dates are YYYY-MM-DD, so they compare as text. A check can't be mailed
+  // in the future, or arrive before it was mailed.
+  const today = businessToday();
+  const dateProblem =
+    mailedDate && mailedDate > today
+      ? "The mailed date can't be in the future."
+      : mailedDate && expectedDate && expectedDate < mailedDate
+        ? "The expected receipt date can't be before the mailed date."
+        : "";
   const canSubmit =
-    checkNumber.trim() && trackingId.trim() && mailedDate && !saving;
+    checkNumber.trim() && trackingId.trim() && mailedDate && !dateProblem && !saving;
 
   const handleSubmit = async () => {
     if (!canSubmit) return;
@@ -363,14 +372,21 @@ function CheckTrackingSection({
           type="date"
           value={mailedDate}
           onChange={setMailedDate}
+          max={today}
         />
         <Input
           label="Expected receipt"
           type="date"
           value={expectedDate}
           onChange={setExpectedDate}
+          min={mailedDate || undefined}
         />
       </div>
+      {dateProblem && (
+        <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
+          <AlertCircle size={14} /> {dateProblem}
+        </p>
+      )}
       {error && (
         <p className="inline-flex items-center gap-1.5 text-sm text-red-700">
           <AlertCircle size={14} /> {error}
@@ -659,11 +675,16 @@ function Input({
   value,
   onChange,
   type = "text",
+  min,
+  max,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   type?: string;
+  /** Earliest / latest date (YYYY-MM-DD) for a date input. */
+  min?: string;
+  max?: string;
 }) {
   return (
     <div>
@@ -674,6 +695,8 @@ function Input({
         type={type}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        min={min}
+        max={max}
         className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
       />
     </div>

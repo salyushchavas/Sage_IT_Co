@@ -12,6 +12,10 @@ import {
   type ApplicationStatus,
 } from "@/lib/api";
 
+/** Phones and tablets: the action column stays in view while the table scrolls. */
+const STICKY_ACTION =
+  "sticky right-0 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.15)] xl:shadow-none";
+
 const FILTERS: { id: ApplicationStatus; label: string; empty: string }[] = [
   { id: "PENDING",    label: "Waiting for you",  empty: "No applications are waiting." },
   { id: "APPROVED",   label: "Link sent",        empty: "Nobody is waiting to register." },
@@ -147,7 +151,7 @@ export function ApplicationsQueue() {
                 <th className="text-left px-4 py-2">Course</th>
                 <th className="text-left px-4 py-2">Applied</th>
                 <th className="text-left px-4 py-2">Status</th>
-                <th className="text-right px-4 py-2">Action</th>
+                <th className={"text-right px-4 py-2 bg-gray-50 " + STICKY_ACTION}>Action</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -175,7 +179,7 @@ export function ApplicationsQueue() {
                     <td className="px-4 py-2 text-xs text-gray-600">
                       <StatusNote row={r} />
                     </td>
-                    <td className="px-4 py-2 text-right whitespace-nowrap">
+                    <td className={"px-4 py-2 text-right whitespace-nowrap bg-white " + STICKY_ACTION}>
                       {(r.status === "PENDING" || r.status === "DECLINED") && (
                         <button
                           type="button"

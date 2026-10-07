@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
 
 import { getWebAgreement, type WebAgreementDetail } from "@/lib/api";
@@ -19,8 +19,9 @@ import WebAgreementDetailView from "./WebAgreementDetailView";
  * own; Operations / System admins see all).
  *
  * Moving between list, create form and detail is component state, so the
- * dashboard around it stays put. A link with ?tab=agreements&agreement=<id>
- * opens that agreement directly.
+ * dashboard around it stays put. The open agreement is also in the URL
+ * (?tab=agreements&agreement=<id>), so a refresh keeps it open, browser Back
+ * returns to the list, and the same link opens it directly.
  */
 type View =
   | { kind: "list" }
@@ -39,15 +40,26 @@ export function WebAgreementsPanel() {
 export default WebAgreementsPanel;
 
 function WebAgreementsPanelInner() {
+  const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
   const linked = searchParams.get("agreement");
   const [view, setView] = useState<View>(() =>
     linked ? { kind: "detail", applicationId: linked } : { kind: "list" },
   );
 
-  // A deep link opens that agreement (also when it changes while mounted).
+  // The URL leads: ?agreement=<id> shows that agreement (a link, a refresh,
+  // browser Forward); losing it (browser Back) returns to the list.
   useEffect(() => {
-    if (linked) setView({ kind: "detail", applicationId: linked });
+    if (linked) {
+      setView((v) =>
+        v.kind === "detail" && v.applicationId === linked
+          ? v
+          : { kind: "detail", applicationId: linked },
+      );
+    } else {
+      setView((v) => (v.kind === "detail" ? { kind: "list" } : v));
+    }
   }, [linked]);
 
   const go = (next: View) => {
@@ -55,17 +67,27 @@ function WebAgreementsPanelInner() {
     if (typeof window !== "undefined") window.scrollTo({ top: 0 });
   };
 
-  const backToList = () => {
-    // Drop the deep link so a reload shows the list, not the old agreement.
-    if (linked && typeof window !== "undefined") {
-      try {
-        const url = new URL(window.location.href);
-        url.searchParams.delete("agreement");
-        window.history.replaceState(window.history.state, "", url.toString());
-      } catch {
-        /* the list still opens */
-      }
+  /** This page's URL with the agreement set (and the Agreements tab), or without it. */
+  const urlFor = (applicationId: string | null) => {
+    const params = new URLSearchParams(searchParams.toString());
+    if (applicationId) {
+      params.set("tab", "agreements");
+      params.set("agreement", applicationId);
+    } else {
+      params.delete("agreement");
     }
+    const qs = params.toString();
+    return qs ? `${pathname}?${qs}` : pathname;
+  };
+
+  const openDetail = (applicationId: string) => {
+    router.push(urlFor(applicationId), { scroll: false });
+    go({ kind: "detail", applicationId });
+  };
+
+  const backToList = () => {
+    // Drop the agreement from the URL so a reload shows the list.
+    if (linked) router.push(urlFor(null), { scroll: false });
     go({ kind: "list" });
   };
 
@@ -74,7 +96,7 @@ function WebAgreementsPanelInner() {
       <WebAgreementCreateForm
         participantUserId={view.participantUserId}
         onCancel={backToList}
-        onCreated={(applicationId) => go({ kind: "detail", applicationId })}
+        onCreated={openDetail}
       />
     );
   }
@@ -102,7 +124,7 @@ function WebAgreementsPanelInner() {
         onStart={(participantUserId) => go({ kind: "new", participantUserId })}
       />
       <WebAgreementsListView
-        onOpen={(applicationId) => go({ kind: "detail", applicationId })}
+        onOpen={openDetail}
       />
     </div>
   );

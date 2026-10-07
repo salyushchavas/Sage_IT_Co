@@ -10,8 +10,10 @@ import {
 } from "lucide-react";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import { PROFILE_STEPS } from "@/components/OnboardingProgressBar";
 import {
   completeDocuments,
+  dashboardRouteForRole,
   deleteParticipantDocument,
   documentSatisfiesRequirement,
   getSsnLast4,
@@ -107,6 +109,9 @@ function DocumentUploadPageInner() {
   const [ssnBusy, setSsnBusy] = useState(false);
   const [ssnNote, setSsnNote] = useState<{ ok: boolean; text: string } | null>(null);
   const fileInputs = useRef<Partial<Record<DocumentType, HTMLInputElement | null>>>({});
+  // Set while finishing the step: refreshing the user re-runs the gate
+  // below, which must not replace the redirect to the next step.
+  const finishingRef = useRef(false);
 
   // ── Gate + load ───────────────────────────────────────────────
   // Phase 1C — gate on documentsComplete + participantId, not the
@@ -118,6 +123,12 @@ function DocumentUploadPageInner() {
       return;
     }
     if (!user) return;
+    if (finishingRef.current) return;
+    // Staff have no participant steps: their own dashboard, not the Apply form.
+    if (dashboardRouteForRole(user.role) !== "/dashboard") {
+      router.replace(dashboardRouteForRole(user.role));
+      return;
+    }
     if (!user.participantId) {
       router.replace("/enroll");
       return;
@@ -226,7 +237,10 @@ function DocumentUploadPageInner() {
   };
 
   const handleRemove = async (doc: ParticipantDocument) => {
-    if (!confirm(`Remove ${doc.fileName || "this document"}?`)) return;
+    const question = doc.notApplicable
+      ? "Withdraw your \"not applicable\" request?"
+      : `Remove ${doc.fileName || "this document"}?`;
+    if (!confirm(question)) return;
     try {
       await deleteParticipantDocument(doc.id);
       await refreshDocuments();
@@ -298,6 +312,7 @@ function DocumentUploadPageInner() {
     try {
       const res = await completeDocuments();
       if (res.success) {
+        finishingRef.current = true;
         await refreshUser();
         router.replace(
           fromProfile
@@ -334,7 +349,10 @@ function DocumentUploadPageInner() {
     const uploading = uploadingType === slot.type;
     const errorHere = uploadError && uploadError.type === slot.type ? uploadError.message : null;
     const browse = () => fileInputs.current[slot.type]?.click();
-    const showDropZone = !uploading && ((files.length === 0 && !marker) || declined || slot.multiple);
+    // A pending "not applicable" request can still be replaced by an upload
+    // (the upload takes the request's place).
+    const showDropZone = !uploading
+      && ((files.length === 0 && !marker) || declined || marker?.reviewStatus === "EXCEPTION_REQUESTED" || slot.multiple);
 
     return (
       <div className="space-y-2.5">
@@ -496,7 +514,7 @@ function DocumentUploadPageInner() {
 
   if (gateError) {
     return (
-      <OnboardingLayout currentStep={5} contentMaxWidth="xl">
+      <OnboardingLayout steps={PROFILE_STEPS} currentStep={3} contentMaxWidth="xl">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
@@ -520,7 +538,7 @@ function DocumentUploadPageInner() {
   ];
 
   return (
-    <OnboardingLayout currentStep={5} contentMaxWidth="5xl">
+    <OnboardingLayout steps={PROFILE_STEPS} currentStep={3} contentMaxWidth="5xl">
       {/* One hidden file picker per document type, in page order. */}
       {SLOTS.map((slot) => (
         <input

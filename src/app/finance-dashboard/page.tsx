@@ -15,6 +15,7 @@ import {
 
 import {
   RoleDashboardShell,
+  useUrlTab,
   type RoleDashboardTab,
 } from "@/components/dashboard/RoleDashboardShell";
 import { FinanceOverviewTab } from "@/components/dashboard/finance/FinanceOverviewTab";
@@ -27,6 +28,7 @@ import { FinanceExceptionsTab } from "@/components/dashboard/finance/FinanceExce
 import { useAuth } from "@/lib/auth-context";
 import {
   getFinanceChecks,
+  loginHere,
   type FinanceCheckRow,
 } from "@/lib/api";
 
@@ -60,11 +62,13 @@ const TABS: ReadonlyArray<RoleDashboardTab> = [
   { id: "tracking", label: "Check Tracking", Icon: Package },
   { id: "excepts", label: "Exceptions", Icon: AlertCircle },
 ];
+const TAB_IDS = TABS.map((t) => t.id);
 
 export default function FinanceDashboardPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
-  const [active, setActive] = useState<TabId>("home");
+  // The open tab is in the URL (?tab=<id>): a refresh or Back keeps it.
+  const [active, setActive] = useUrlTab<TabId>(TAB_IDS, "home");
   const [checks, setChecks] = useState<FinanceCheckRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -72,7 +76,7 @@ export default function FinanceDashboardPage() {
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      router.replace("/login?redirect=/finance-dashboard");
+      router.replace(loginHere());
       return;
     }
     const role = (user.role ?? "").toUpperCase();
@@ -124,12 +128,14 @@ export default function FinanceDashboardPage() {
   // Operations admins look; only Finance and the System Admin change money.
   const readOnly = !canSeeChecks;
   const tabs = canSeeChecks ? TABS : TABS.filter((t) => t.id !== "checks");
+  // ?tab=checks for someone who can't see checks opens the overview.
+  const shown: TabId = tabs.some((t) => t.id === active) ? active : "home";
 
   return (
     <RoleDashboardShell
       title="Finance"
       tabs={tabs}
-      active={active}
+      active={shown}
       onSelect={(id) => setActive(id as TabId)}
     >
       {error && (
@@ -137,18 +143,19 @@ export default function FinanceDashboardPage() {
           <AlertCircle size={14} /> {error}
         </p>
       )}
-      {active === "home" && <FinanceOverviewTab checks={checks} />}
+      {/* null: check copies aren't this role's (no "0 pending" tiles). */}
+      {shown === "home" && <FinanceOverviewTab checks={canSeeChecks ? checks : null} />}
       {readOnly && (
         <p className="mb-4 text-xs text-gray-500">View only: plans, invoices and payments are changed by Finance.</p>
       )}
-      {active === "plans" && <FinancePlansTab readOnly={readOnly} />}
-      {active === "invoices" && <FinanceInvoicesTab readOnly={readOnly} />}
-      {active === "payments" && <FinancePaymentsLedgerTab readOnly={readOnly} />}
-      {active === "checks" && canSeeChecks && (
+      {shown === "plans" && <FinancePlansTab readOnly={readOnly} />}
+      {shown === "invoices" && <FinanceInvoicesTab readOnly={readOnly} />}
+      {shown === "payments" && <FinancePaymentsLedgerTab readOnly={readOnly} />}
+      {shown === "checks" && canSeeChecks && (
         <FinanceChecksTab checks={checks} onRefresh={refreshChecks} />
       )}
-      {active === "tracking" && <FinanceTrackingTab readOnly={readOnly} />}
-      {active === "excepts" && <FinanceExceptionsTab />}
+      {shown === "tracking" && <FinanceTrackingTab readOnly={readOnly} />}
+      {shown === "excepts" && <FinanceExceptionsTab />}
     </RoleDashboardShell>
   );
 }

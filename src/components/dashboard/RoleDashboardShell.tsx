@@ -1,9 +1,9 @@
 "use client";
 
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useCallback, useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
-import { Menu, X, LucideIcon } from "lucide-react";
+import { ClipboardList, LayoutDashboard, Menu, X, LucideIcon } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
 
@@ -24,6 +24,39 @@ export interface RoleDashboardTab {
   Icon: LucideIcon;
 }
 
+/**
+ * The open tab, kept in the URL as ?tab=<id>: a refresh stays on it, Back
+ * goes to the previous tab, and a link can open one. `ids` must be a
+ * constant (module-level) list. Switching tabs keeps ?agreement=<id> only
+ * on the agreements tab and drops every other parameter.
+ */
+export function useUrlTab<T extends string>(
+  ids: ReadonlyArray<string>,
+  fallback: T,
+): [T, (id: T) => void] {
+  const [active, setActive] = useState<T>(fallback);
+  useEffect(() => {
+    const sync = () => {
+      const tab = new URLSearchParams(window.location.search).get("tab");
+      setActive(tab && ids.includes(tab) ? (tab as T) : fallback);
+    };
+    sync();
+    window.addEventListener("popstate", sync);
+    return () => window.removeEventListener("popstate", sync);
+  }, [ids, fallback]);
+  const select = useCallback((id: T) => {
+    setActive(id);
+    const current = new URLSearchParams(window.location.search);
+    const next = new URLSearchParams({ tab: id });
+    const agreement = current.get("agreement");
+    if (id === "agreements" && agreement) next.set("agreement", agreement);
+    if (current.toString() === next.toString()) return;
+    // Next.js keeps the page mounted for a native pushState (no reload).
+    window.history.pushState(null, "", `${window.location.pathname}?${next}`);
+  }, []);
+  return [active, select];
+}
+
 export function RoleDashboardShell({
   title,
   tabs,
@@ -39,6 +72,7 @@ export function RoleDashboardShell({
 }) {
   const { user, logout } = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isSystemAdmin = (user?.role ?? "").toUpperCase() === "SYSTEM_ADMIN";
   useEffect(() => {
     setDrawerOpen(false);
   }, [active]);
@@ -78,7 +112,11 @@ export function RoleDashboardShell({
           return (
             <button
               key={t.id}
-              onClick={() => onSelect(t.id)}
+              onClick={() => {
+                onSelect(t.id);
+                // Also when it's the tab already open.
+                setDrawerOpen(false);
+              }}
               className={
                 "w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition cursor-pointer " +
                 (isActive
@@ -91,6 +129,27 @@ export function RoleDashboardShell({
             </button>
           );
         })}
+        {isSystemAdmin && (
+          <div className="mt-3 pt-3 border-t border-gray-100 space-y-0.5">
+            <p className="px-3 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+              Also yours
+            </p>
+            <Link
+              href="/admin"
+              className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+            >
+              <LayoutDashboard size={14} />
+              <span className="truncate">Admin</span>
+            </Link>
+            <Link
+              href="/operations"
+              className="w-full inline-flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-100 hover:text-gray-900"
+            >
+              <ClipboardList size={14} />
+              <span className="truncate">Operations</span>
+            </Link>
+          </div>
+        )}
       </nav>
       <div className="p-3 border-t border-gray-100 flex items-center justify-between gap-2">
         <div className="min-w-0">

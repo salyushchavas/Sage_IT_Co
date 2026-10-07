@@ -85,7 +85,7 @@ function ResetForm() {
   return (
     <SplitAuthLayout
       heroTitle={"Almost done.\nSet your new password."}
-      heroSubtitle="Choose a strong password you'll remember. We'll sign you in next."
+      heroSubtitle="Choose a strong password you'll remember, then sign in with it."
       heroFooter="At least eight characters — mix letters, numbers, and a symbol."
     >
       <motion.div

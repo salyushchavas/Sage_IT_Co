@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import {
   Loader2, Download, Search, Calendar, AlertCircle, ShieldCheck,
   KeyRound, GraduationCap, ClipboardList, Users, CreditCard,
-  Award, Lock, Globe, Smartphone, Monitor,
+  Award, Lock, Globe, Smartphone, Monitor, FileText,
 } from "lucide-react";
 import {
   getUserRecords, getUserRecordsSummary, downloadUserRecordsCsv,
@@ -15,11 +15,12 @@ import { useToast } from "@/components/ui/Toast";
 import { cn } from "@/lib/utils";
 import { formatDateLong, formatTimeWithZone, dayKey as businessDayKey } from "@/lib/datetime";
 
-const CATEGORIES = ["ALL", "ACCOUNT", "LEARNING", "ASSESSMENT", "MENTORSHIP", "PAYMENT", "CERTIFICATE", "SECURITY"] as const;
+const CATEGORIES = ["ALL", "ACCOUNT", "DOCUMENT", "LEARNING", "ASSESSMENT", "MENTORSHIP", "PAYMENT", "CERTIFICATE", "SECURITY"] as const;
 type Category = typeof CATEGORIES[number];
 
 const CATEGORY_STYLE: Record<string, { bg: string; text: string; Icon: typeof KeyRound }> = {
   ACCOUNT: { bg: "bg-blue-100", text: "text-blue-700", Icon: KeyRound },
+  DOCUMENT: { bg: "bg-indigo-100", text: "text-indigo-700", Icon: FileText },
   LEARNING: { bg: "bg-teal-100", text: "text-teal-700", Icon: GraduationCap },
   ASSESSMENT: { bg: "bg-sage-copper/20", text: "text-sage-copper", Icon: ClipboardList },
   MENTORSHIP: { bg: "bg-emerald-100", text: "text-emerald-700", Icon: Users },

@@ -14,7 +14,7 @@ export function CoachParticipantsTab({
         Participants currently on your coaching list. Use the other tabs to log
         session notes, assign tasks, and record feedback.
       </p>
-      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-hidden">
+      <div className="bg-white rounded-2xl border border-gray-100 shadow-sm overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 text-[11px] uppercase tracking-wider font-semibold text-gray-500">
             <tr>

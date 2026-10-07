@@ -7,9 +7,11 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { CheckCircle2, Loader2 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 import OnboardingProgressBar from "@/components/OnboardingProgressBar";
-import { applyToProgram } from "@/lib/api";
+import { applyToProgram, dashboardRouteForRole } from "@/lib/api";
+import { useAuth } from "@/lib/auth-context";
 import { COURSE_OPTIONS } from "@/lib/course-tracks";
 
 const APPLY_STEPS = ["Apply", "Review", "Register"] as const;
@@ -30,8 +32,10 @@ const applySchema = z.object({
   email: z.string().email("Please enter a valid email address"),
   phone: z
     .string()
-    .min(7, "Phone number is required")
-    .regex(/^[+\d\s().-]{7,20}$/, "Use only digits, spaces, +, -, periods or parentheses")
+    .trim()
+    .min(1, "Phone number is required")
+    .regex(/^[+\d\s().-]+$/, "Use only digits, spaces, +, -, periods or parentheses")
+    .max(20, "Phone number is too long (at most 20 characters)")
     .refine((v) => v.replace(/\D/g, "").length >= 8, {
       message: "Enter a valid phone number, including the area code",
     }),
@@ -45,8 +49,15 @@ const INPUT_CLASS =
 const LABEL_CLASS = "block text-sm font-semibold text-gray-700 mb-1.5";
 
 export default function EnrollPage() {
+  const router = useRouter();
+  const { user, isAuthenticated, isLoading } = useAuth();
   const [error, setError] = useState("");
   const [sentTo, setSentTo] = useState<string | null>(null);
+
+  // Already signed in: the application is behind them, go to their home page.
+  useEffect(() => {
+    if (!isLoading && isAuthenticated && user) router.replace(dashboardRouteForRole(user.role));
+  }, [isLoading, isAuthenticated, user, router]);
 
   const {
     register,

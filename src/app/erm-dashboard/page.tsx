@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -24,6 +24,7 @@ import { formatDateMedium, formatDateTime, formatDay } from "@/lib/datetime";
 
 import {
   RoleDashboardShell,
+  useUrlTab,
   type RoleDashboardTab,
 } from "@/components/dashboard/RoleDashboardShell";
 import { ApplicationsQueue } from "@/components/applications/ApplicationsQueue";
@@ -101,16 +102,39 @@ const TABS: ReadonlyArray<RoleDashboardTab> = [
   { id: "coaches",    label: "Coaches",          Icon: GraduationCap },
   { id: "profile",    label: "Profile",          Icon: Settings },
 ];
+const TAB_IDS = TABS.map((t) => t.id);
+
+/** AGREEMENT_COMPLETED → "Agreement completed". */
+function humanize(value: string | null | undefined): string {
+  if (!value) return "—";
+  const t = value.replace(/_/g, " ").toLowerCase();
+  return t.charAt(0).toUpperCase() + t.slice(1);
+}
+
+/** Escape closes a dialog (while `open`). */
+function useEscape(open: boolean, onClose: () => void) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+}
+
+/** Phones and tablets: the action column stays in view while the table scrolls. */
+const STICKY_ACTION_TH =
+  "sticky right-0 bg-gray-50 shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.15)] xl:shadow-none";
+const STICKY_ACTION_TD =
+  "sticky right-0 bg-white shadow-[-6px_0_6px_-6px_rgba(0,0,0,0.15)] xl:shadow-none";
 
 export default function ErmDashboardPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
-  const [active, setActive] = useState<TabId>("home");
-  // ?tab=<id>: emails link straight to a tab (e.g. employment to verify).
-  useEffect(() => {
-    const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab && TABS.some((t) => t.id === tab)) setActive(tab as TabId);
-  }, []);
+  // ?tab=<id>: emails link straight to a tab (e.g. employment to verify);
+  // the open tab stays in the URL so a refresh or Back keeps it.
+  const [active, setActive] = useUrlTab<TabId>(TAB_IDS, "home");
   const [roster, setRoster] = useState<ErmRosterRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -172,7 +196,9 @@ export default function ErmDashboardPage() {
           <AlertCircle size={14} /> {error}
         </p>
       )}
-      {active === "home" && <RosterTab roster={roster} />}
+      {active === "home" && (
+        <RosterTab roster={roster} onOpenAgreements={() => setActive("agreements")} />
+      )}
       {active === "applications" && <ApplicationsQueue />}
       {active === "verify" && <DocumentVerificationQueue />}
       {active === "agreements" && <WebAgreementsPanel />}
@@ -195,10 +221,21 @@ export default function ErmDashboardPage() {
 
 /* ── Roster + detail ─────────────────────────────────────────── */
 
-function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
+function RosterTab({
+  roster,
+  onOpenAgreements,
+}: {
+  roster: ErmRosterRow[];
+  onOpenAgreements: () => void;
+}) {
   const [openId, setOpenId] = useState<number | null>(null);
   const [detail, setDetail] = useState<Record<string, unknown> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const closeDetail = useCallback(() => {
+    setOpenId(null);
+    setDetail(null);
+  }, []);
+  useEscape(openId !== null, closeDetail);
 
   const openParticipant = async (id: number) => {
     setOpenId(id);
@@ -261,8 +298,8 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
                   <td className="px-4 py-2 font-medium text-gray-900">
                     {r.fullName ?? "—"}
                     {r.agreementToReview && (
-                      <span className="ml-2 px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
-                        Agreement to review
+                      <span className="ml-2 inline-block whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
+                        Consent to review
                       </span>
                     )}
                   </td>
@@ -276,8 +313,8 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
                     {r.technology ?? "—"}
                   </td>
                   <td className="px-4 py-2">
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sage-navy/5 text-sage-navy">
-                      {r.currentStatus ?? "—"}
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sage-navy/5 text-sage-navy whitespace-nowrap">
+                      {humanize(r.currentStatus)}
                     </span>
                   </td>
                   <td className="px-4 py-2 text-xs text-gray-500">
@@ -295,12 +332,12 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
       {openId && (
         <div
           className="fixed inset-0 z-40 flex items-end sm:items-center justify-center bg-black/40 p-4"
-          onClick={() => {
-            setOpenId(null);
-            setDetail(null);
-          }}
+          onClick={closeDetail}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Participant details"
             className="bg-white rounded-2xl shadow-xl max-w-3xl w-full max-h-[85vh] overflow-y-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
@@ -314,11 +351,9 @@ function RosterTab({ roster }: { roster: ErmRosterRow[] }) {
             ) : (
               <DetailPanel
                 detail={detail}
-                onClose={() => {
-                  setOpenId(null);
-                  setDetail(null);
-                }}
+                onClose={closeDetail}
                 onChanged={() => openId && openParticipant(openId)}
+                onOpenAgreements={onOpenAgreements}
               />
             )}
           </div>
@@ -332,16 +367,21 @@ function DetailPanel({
   detail,
   onClose,
   onChanged,
+  onOpenAgreements,
 }: {
   detail: Record<string, unknown> | null;
   onClose: () => void;
   onChanged: () => void;
+  onOpenAgreements: () => void;
 }) {
   if (!detail)
     return (
       <p className="text-sm text-gray-500">Couldn&apos;t load details.</p>
     );
   const program = detail.program as Record<string, string | null> | undefined;
+  // The Terms-of-Service consent the participant signed before their
+  // agreement (AgreementAcceptance); the agreement itself is on the
+  // Agreements tab.
   const agreement = detail.agreement as Record<string, string | boolean> | undefined;
   const documents =
     (detail.documents as Array<Record<string, unknown>>) ?? [];
@@ -370,14 +410,14 @@ function DetailPanel({
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
-        <SmallStat label="Status" value={(detail.currentStatus as string) ?? "—"} />
+        <SmallStat label="Status" value={humanize(detail.currentStatus as string | null)} />
         <SmallStat label="Phone" value={(detail.phone as string) ?? "—"} />
         <SmallStat label="Program" value={program?.program ?? "—"} />
         <SmallStat label="Phase" value={program?.phase ?? "—"} />
         <SmallStat label="Skillset" value={program?.skillset ?? "—"} />
         <SmallStat label="Target role" value={program?.targetJobTitle ?? "—"} />
         <SmallStat label="Availability" value={program?.availability ?? "—"} />
-        <SmallStat label="Agreement" value={String(agreement?.status ?? "—")} />
+        <SmallStat label="Consent" value={humanize(agreement?.status ? String(agreement.status) : null)} />
       </div>
 
       {agreement?.signed === true && (
@@ -389,6 +429,21 @@ function DetailPanel({
           onChanged={onChanged}
         />
       )}
+
+      <DetailBlock title="Website agreement">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-gray-700">
+            Created, reviewed and verified on the Agreements tab.
+          </span>
+          <button
+            type="button"
+            onClick={onOpenAgreements}
+            className="font-semibold text-sage-navy hover:underline cursor-pointer"
+          >
+            Open Agreements →
+          </button>
+        </div>
+      </DetailBlock>
 
       <DetailBlock title={`Documents (${documents.length})`}>
         {documents.length === 0 ? (
@@ -436,7 +491,7 @@ function DetailPanel({
           <ul className="text-xs space-y-1">
             {coaches.map((c, idx) => (
               <li key={idx} className="flex items-center gap-2">
-                <span className="font-semibold">{c.coachRole}</span>
+                <span className="font-semibold">{humanize(c.coachRole)}</span>
                 <span className="text-gray-700">
                   — {c.name || "Unassigned"}
                 </span>
@@ -460,7 +515,7 @@ function DetailPanel({
 
 /**
  * Checklist 2.3 (roadmap step 10): the ERM opens the participant's signed
- * agreement and confirms they reviewed it.
+ * consent and confirms they reviewed it.
  */
 function SignedAgreementBlock({
   participantUserId,
@@ -495,7 +550,7 @@ function SignedAgreementBlock({
     }
   };
   return (
-    <DetailBlock title="Signed agreement">
+    <DetailBlock title="Signed consent">
       <div className="flex flex-wrap items-center gap-2 text-xs">
         <span className="text-gray-700">
           Signed {fmt(acceptedAt)}
@@ -509,7 +564,7 @@ function SignedAgreementBlock({
           className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 cursor-pointer"
         >
           {busy === "download" ? <Loader2 size={12} className="animate-spin" /> : <Download size={12} />}
-          Download
+          Download signed consent
         </button>
         {reviewedAt ? (
           <span className="inline-flex items-center gap-1 text-emerald-700 font-semibold">
@@ -611,6 +666,8 @@ function ReportsTab() {
   }, [reports, filter]);
 
   const open = reports.find((x) => x.id === openId) ?? null;
+  const closeReport = useCallback(() => setOpenId(null), []);
+  useEscape(open !== null, closeReport);
 
   const openReport = (id: number) => {
     const r = reports.find((x) => x.id === id);
@@ -645,7 +702,7 @@ function ReportsTab() {
     <div className="space-y-4">
       <div className="flex items-center justify-between flex-wrap gap-2">
         <h1 className="text-2xl font-bold text-gray-900">Weekly reports</h1>
-        <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
+        <div className="inline-flex flex-wrap rounded-lg border border-gray-200 bg-gray-50 p-1 text-xs">
           {["ALL", "NEEDS HELP", "SUBMITTED", "OVERDUE", "REVIEWED"].map((s) => (
             <button
               key={s}
@@ -724,9 +781,12 @@ function ReportsTab() {
       {open && (
         <div
           className="fixed inset-0 z-40 flex items-center justify-center bg-black/40 p-4"
-          onClick={() => setOpenId(null)}
+          onClick={closeReport}
         >
           <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Weekly report"
             className="bg-white rounded-2xl shadow-xl max-w-2xl w-full max-h-[85vh] overflow-y-auto p-5"
             onClick={(e) => e.stopPropagation()}
           >
@@ -1092,7 +1152,7 @@ function EmploymentTab() {
               <th className="text-left px-4 py-2">Start date</th>
               <th className="text-left px-4 py-2">Submitted</th>
               <th className="text-left px-4 py-2">Offer doc</th>
-              <th className="text-right px-4 py-2">Action</th>
+              <th className={"text-right px-4 py-2 " + STICKY_ACTION_TH}>Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -1145,7 +1205,7 @@ function EmploymentTab() {
                       <span className="text-xs text-gray-400">—</span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className={"px-4 py-2 text-right " + STICKY_ACTION_TD}>
                     {r.returned ? (
                       <div className="text-left sm:text-right">
                         <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700">
@@ -1313,7 +1373,7 @@ function Phase1Tab() {
               <th className="text-left px-4 py-2">Employment</th>
               <th className="text-left px-4 py-2">Accepted</th>
               <th className="text-left px-4 py-2">Version</th>
-              <th className="text-right px-4 py-2">Action</th>
+              <th className={"text-right px-4 py-2 " + STICKY_ACTION_TH}>Action</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -1351,7 +1411,7 @@ function Phase1Tab() {
                   <td className="px-4 py-2 font-mono text-xs text-gray-700">
                     {r.acknowledgmentVersion ?? "—"}
                   </td>
-                  <td className="px-4 py-2 text-right">
+                  <td className={"px-4 py-2 text-right " + STICKY_ACTION_TD}>
                     <button
                       onClick={() => approve(r.userId)}
                       disabled={busy === r.userId}

@@ -9,7 +9,8 @@ import {
 } from "@/lib/api";
 import { Stat, moneyFmt } from "./FinanceParts";
 
-export function FinanceOverviewTab({ checks }: { checks: FinanceCheckRow[] }) {
+/** checks: null for a role that doesn't review check copies (the check tiles are hidden). */
+export function FinanceOverviewTab({ checks }: { checks: FinanceCheckRow[] | null }) {
   const [summary, setSummary] = useState<FinanceDashboardSummary | null>(null);
   useEffect(() => {
     getFinanceDashboard()
@@ -17,9 +18,9 @@ export function FinanceOverviewTab({ checks }: { checks: FinanceCheckRow[] }) {
       .catch(() => {});
   }, []);
 
-  const pending = checks.filter((c) => c.reviewStatus === "PENDING").length;
-  const approved = checks.filter((c) => c.reviewStatus === "APPROVED").length;
-  const totalAmount = checks
+  const pending = (checks ?? []).filter((c) => c.reviewStatus === "PENDING").length;
+  const approved = (checks ?? []).filter((c) => c.reviewStatus === "APPROVED").length;
+  const totalAmount = (checks ?? [])
     .filter((c) => c.reviewStatus === "APPROVED" && c.amount != null)
     .reduce((sum, c) => sum + (Number(c.amount) || 0), 0);
 
@@ -44,15 +45,17 @@ export function FinanceOverviewTab({ checks }: { checks: FinanceCheckRow[] }) {
           accent="emerald"
         />
       </div>
-      <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-        <Stat
-          label="Checks pending review"
-          value={pending}
-          accent="amber"
-        />
-        <Stat label="Checks approved" value={approved} accent="emerald" />
-        <Stat label="Check total" value={moneyFmt(totalAmount)} />
-      </div>
+      {checks && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <Stat
+            label="Checks pending review"
+            value={pending}
+            accent="amber"
+          />
+          <Stat label="Checks approved" value={approved} accent="emerald" />
+          <Stat label="Check total" value={moneyFmt(totalAmount)} />
+        </div>
+      )}
     </div>
   );
 }

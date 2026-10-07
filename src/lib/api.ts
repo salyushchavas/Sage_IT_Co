@@ -95,7 +95,7 @@ export async function apiFetch<T = unknown>(
     headers["Authorization"] = `Bearer ${token}`;
   }
 
-  let res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+  let res = await reach(`${BASE_URL}${endpoint}`, { ...options, headers });
 
   // 401 means the sign-in is missing or has expired (a signed-in user who
   // isn't allowed gets 403). Renew it once with the refresh token and try
@@ -103,7 +103,7 @@ export async function apiFetch<T = unknown>(
   if (res.status === 401 && token && !SIGN_IN_CALL.test(endpoint)) {
     if (await tryRefresh()) {
       headers["Authorization"] = `Bearer ${localStorage.getItem("access_token")}`;
-      res = await fetch(`${BASE_URL}${endpoint}`, { ...options, headers });
+      res = await reach(`${BASE_URL}${endpoint}`, { ...options, headers });
     } else {
       endSession();
       throw new Error("Your sign-in has expired. Please sign in again.");
@@ -117,11 +117,28 @@ export async function apiFetch<T = unknown>(
         && window.location.pathname !== "/change-password") {
       window.location.href = "/change-password";
     }
+    if (!body.message && !body.detail && res.status >= 500) throw new Error(SERVER_DOWN_MESSAGE);
     throw new Error(body.message || body.detail || `API error ${res.status}`);
   }
 
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+/** Shown when the server can't be reached (offline, DNS, CORS, server down). */
+const UNREACHABLE_MESSAGE = "We can't reach the server right now. Please try again in a minute.";
+
+/** Shown for a 5xx that carries no message of its own (a proxy's 502 page, say). */
+const SERVER_DOWN_MESSAGE = "The server isn't responding right now. Please try again in a minute.";
+
+/** fetch, with the browser's "Failed to fetch" TypeError said in plain words. */
+async function reach(input: string, init: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (e) {
+    if (e instanceof TypeError) throw new Error(UNREACHABLE_MESSAGE);
+    throw e;
+  }
 }
 
 /** Calls where 401 means wrong details, not an expired sign-in: never renewed. */
@@ -1895,15 +1912,14 @@ export async function downloadSignedAgreementPdf(
   relativePath: string,
   filename = "Sage-Agreement.pdf",
 ): Promise<void> {
-  const token = typeof window === "undefined"
-    ? null
-    : localStorage.getItem("access_token");
-  const url = relativePath.startsWith("http")
-    ? relativePath
-    : `${API_BASE_URL}${relativePath}`;
-  const res = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  // authedFetch renews an expiring sign-in first (and retries once on 401);
+  // it takes the path on this API, so a full API URL is cut back to it. The
+  // sign-in is never sent to any other site.
+  const res = relativePath.startsWith(API_BASE_URL)
+    ? await authedFetch(relativePath.slice(API_BASE_URL.length))
+    : relativePath.startsWith("http")
+      ? await fetch(relativePath)
+      : await authedFetch(relativePath);
   if (!res.ok) {
     throw new Error(`Download failed (${res.status})`);
   }
@@ -3173,10 +3189,8 @@ export async function getRevenueTransactions(params?: {
  * match the brand.
  */
 export async function downloadAdminCsv(kind: "users" | "enrollments" | "sessions" | "revenue") {
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-  const res = await fetch(`${BASE_URL}/api/admin/export/${kind}`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  // authedFetch renews an expiring sign-in first (and retries once on 401).
+  const res = await authedFetch(`/api/admin/export/${kind}`);
   if (!res.ok) {
     throw new Error(`Export failed (${res.status})`);
   }
@@ -3949,10 +3963,8 @@ export async function getUserRecordsSummary(userId: number | string) {
  * browser download with a sage-branded filename.
  */
 export async function downloadUserRecordsCsv(userId: number | string, fileBaseName: string) {
-  const token = typeof window !== "undefined" ? localStorage.getItem("access_token") : null;
-  const res = await fetch(`${BASE_URL}/api/admin/users/${userId}/records/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
-  });
+  // authedFetch renews an expiring sign-in first (and retries once on 401).
+  const res = await authedFetch(`/api/admin/users/${userId}/records/download`);
   if (!res.ok) throw new Error(`Download failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -6692,7 +6704,13 @@ export class WebAgreementApiError extends Error {
  * can't be renewed the session ends (to /login and back here).
  */
 async function webAgreementSend(path: string, init: RequestInit = {}): Promise<Response> {
-  const res = await authedFetch(path, init);
+  let res: Response;
+  try {
+    res = await authedFetch(path, init);
+  } catch (e) {
+    if (e instanceof TypeError) throw new Error(UNREACHABLE_MESSAGE);
+    throw e;
+  }
   if (res.status === 401) {
     endSession();
     throw new WebAgreementApiError("Your sign-in has expired. Please sign in again.", 401);
@@ -6915,9 +6933,14 @@ export async function createWebAgreement(body: WebAgreementCreateBody): Promise<
   return webAgreementFetch<WebAgreement>(WEB_AGREEMENTS, { method: "POST", body: JSON.stringify(body) });
 }
 
-/** Newest first; an ERM sees their own, admins see all. Size is capped at 100. */
+/**
+ * Newest first; an ERM sees their own, admins see all. Size is capped at 100.
+ * q searches every page (participant email or name, agreement id); released
+ * (with status VERIFIED) splits "Signed by participant" (false) from
+ * "Verified" (true).
+ */
 export async function listWebAgreements(
-  params: { status?: string; page?: number; size?: number } = {},
+  params: { status?: string; q?: string; released?: boolean; page?: number; size?: number } = {},
 ): Promise<WebAgreementPage> {
   const qs = new URLSearchParams(
     Object.entries(params)

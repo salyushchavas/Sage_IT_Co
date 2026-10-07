@@ -40,11 +40,13 @@ import {
   type WebAgreement,
   type WebAgreementDetail,
 } from "@/lib/api";
-import { formatUsDate, formatUsDateTime } from "@/lib/dates";
+import { formatUsDate } from "@/lib/dates";
+import { formatUsDateTimeCt, formatUsDayCt } from "@/lib/datetime";
 import { AGREEMENT_SECTIONS } from "@/lib/web-agreement-sections";
 import { describeStatus, statusLabel, type StatusContext } from "@/lib/web-agreement-status";
 import AgreementStatusPill from "./AgreementStatusPill";
 import AgreementEventTimeline from "./AgreementEventTimeline";
+import { isPositiveMoney } from "./WebAgreementCreateForm";
 
 /**
  * The website agreement's copy of the console's ERM detail view
@@ -372,9 +374,10 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     try {
       await webAgreementRevokeRevision(app.applicationId);
       setFeedback(
-        `Change request withdrawn. The agreement is back at “${landsOn}”`
-        + (reverts.length ? `, ${reverts.join(", ")} reverted,` : "")
-        + ".",
+        `Change request withdrawn. The agreement is back at “${landsOn}”.`
+        + (reverts.length
+          ? ` ${capitalize(joinWithAnd(reverts))} ${reverts.length === 1 ? "was" : "were"} reverted.`
+          : ""),
       );
       await onRefresh();
     } catch (e) {
@@ -556,17 +559,21 @@ function EditContactModal({
   const [error, setError] = useState("");
 
   const emailValid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  // The agreement and its PDF need a name; repeated spaces collapse to one.
+  const cleanName = name.trim().replace(/\s+/g, " ");
+  const nameValid = cleanName.length > 0;
   const submit = async () => {
     if (!emailValid) {
       setError("Enter a valid email address.");
       return;
     }
+    if (!nameValid) return;
     setBusy("save");
     setError("");
     try {
       await updateWebAgreementContact(appId, {
         consultantEmail: email.trim(),
-        consultantName: name.trim(),
+        consultantName: cleanName,
       });
     } catch (e) {
       // The contact update itself failed — keep the modal open to retry.
@@ -595,7 +602,7 @@ function EditContactModal({
           <button
             type="button"
             onClick={() => submit()}
-            disabled={busy !== null || !emailValid}
+            disabled={busy !== null || !emailValid || !nameValid}
             className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer disabled:opacity-60"
           >
             {busy === "save" ? <Loader2 size={12} className="animate-spin" /> : <CheckCircle2 size={12} />}
@@ -625,15 +632,21 @@ function EditContactModal({
         </div>
         <div>
           <label className="block text-[11px] font-semibold text-gray-600 mb-1">
-            Participant name
+            Participant name <span className="text-red-500">*</span>
           </label>
           <input
             type="text"
             value={name}
             onChange={(e) => setName(e.target.value)}
             disabled={busy !== null}
+            aria-invalid={!nameValid}
             className="w-full px-3 py-2 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy disabled:bg-gray-50"
           />
+          {!nameValid && (
+            <p className="mt-1 text-[11px] text-red-600 inline-flex items-center gap-1">
+              <AlertCircle size={11} /> Name is required.
+            </p>
+          )}
         </div>
         {error && (
           <p className="text-[11px] text-red-600 inline-flex items-center gap-1">
@@ -652,8 +665,7 @@ function AccessRecord({ app }: { app: WebAgreement }) {
   if (!app.consentIp && !app.consentGivenAt && !app.signingIp && !app.signingAt) {
     return null;
   }
-  const fmt = (iso: string | null | undefined) =>
-    iso ? formatUsDateTime(iso) : "—";
+  const fmt = (iso: string | null | undefined) => formatUsDateTimeCt(iso);
   return (
     <div className="rounded-xl border border-gray-100 bg-gray-50/60 px-4 py-3">
       <p className="text-[11px] font-bold uppercase tracking-wider text-sage-navy inline-flex items-center gap-1.5">
@@ -1095,7 +1107,7 @@ function WorkAuthDocCard({
           <CheckCircle2 size={13} className="text-emerald-600" />
           Uploaded
           {app.workAuthDocUploadedAt
-            ? ` ${formatUsDate(app.workAuthDocUploadedAt)}`
+            ? ` ${formatUsDayCt(app.workAuthDocUploadedAt)}`
             : ""}
         </p>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -1131,7 +1143,7 @@ function OfferLetterCard({
           <CheckCircle2 size={13} className="text-emerald-600" />
           Uploaded
           {app.offerLetterUploadedAt
-            ? ` ${formatUsDate(app.offerLetterUploadedAt)}`
+            ? ` ${formatUsDayCt(app.offerLetterUploadedAt)}`
             : ""}
         </p>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -1175,7 +1187,7 @@ function UploadedDocCard({
       <div className="px-5 sm:px-6 py-4 flex items-center justify-between gap-3 flex-wrap">
         <p className="text-xs text-gray-500 inline-flex items-center gap-1.5">
           <CheckCircle2 size={13} className="text-emerald-600" />
-          Uploaded{uploadedAt ? ` ${formatUsDate(uploadedAt)}` : ""}
+          Uploaded{uploadedAt ? ` ${formatUsDayCt(uploadedAt)}` : ""}
         </p>
         <div className="flex items-center gap-2 flex-wrap justify-end">
           <DocViewButton applicationId={applicationId} docPath={docPath} />
@@ -1567,7 +1579,7 @@ function SecurityChequeCard({
               </div>
               {entry.uploadedAt && (entry.publicId || entry.s3Key) && (
                 <p className="text-[10px] text-gray-500">
-                  Uploaded {formatUsDateTime(entry.uploadedAt)}
+                  Uploaded {formatUsDateTimeCt(entry.uploadedAt)}
                 </p>
               )}
             </div>
@@ -1852,7 +1864,7 @@ function ModalShell({
           )}
         </header>
         <div className="px-5 sm:px-6 py-4">{children}</div>
-        <footer className="px-5 sm:px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-gray-50/50 rounded-b-2xl">
+        <footer className="sticky bottom-0 px-5 sm:px-6 py-4 border-t border-gray-100 flex items-center justify-end gap-2 bg-white rounded-b-2xl">
           {footer}
         </footer>
       </div>
@@ -2089,15 +2101,39 @@ function RequestRevisionModal({
   // When it changes the backend auto-scopes the main agreement (Section 11
   // carries the rate card) for the participant to re-review + re-sign.
   const rateChanged = ratePer1.trim() !== (ratePeriod1 ?? "").trim()
-    || rateAmt1.trim() !== (rateAmount1 ?? "").trim()
+    || !sameMoney(rateAmt1, rateAmount1)
     || ratePer2.trim() !== (ratePeriod2 ?? "").trim()
-    || rateAmt2.trim() !== (rateAmount2 ?? "").trim();
+    || !sameMoney(rateAmt2, rateAmount2);
   // Appendix 1 deliverables period changed vs stored. When it changes the
   // backend auto-scopes Appendix 1 for the participant to re-review + re-sign.
   const delivChanged =
     delivPeriod.trim() !== (phase2DeliverablePeriod ?? "").trim();
+  // The rate card and the deliverables period are required, as on the
+  // create form: a correction can change them, never clear them, and a
+  // changed amount must be a positive dollar amount (an amount left as it
+  // was is not re-checked).
+  const emptyRateFields = [
+    ["Rate period 1", ratePer1.trim()],
+    ["Amount 1", rateAmt1.replace(/\$/g, "").trim()],
+    ["Rate period 2", ratePer2.trim()],
+    ["Amount 2", rateAmt2.replace(/\$/g, "").trim()],
+  ].filter(([, v]) => !v).map(([label]) => label);
+  const badAmounts: string[] = [];
+  if (!sameMoney(rateAmt1, rateAmount1) && !isPositiveMoney(rateAmt1)) badAmounts.push("Amount 1");
+  if (!sameMoney(rateAmt2, rateAmount2) && !isPositiveMoney(rateAmt2)) badAmounts.push("Amount 2");
+  const rateError = emptyRateFields.length
+    ? `${joinWithAnd(emptyRateFields)} can't be empty.`
+    : badAmounts.length
+      ? `${joinWithAnd(badAmounts)} must be a dollar amount greater than zero, like 2,400 or 2400.50.`
+      : "";
+  const delivError = delivPeriod.trim() ? "" : "Month / Period can't be empty.";
+  const periodsMatch =
+    ratePer1.trim().length > 0
+    && ratePer2.trim().length > 0
+    && ratePer1.trim().toLowerCase() === ratePer2.trim().toLowerCase();
   const canSubmit =
-    (selectedIds.length > 0 || achChanged || rateChanged || delivChanged) && !busy;
+    (selectedIds.length > 0 || achChanged || rateChanged || delivChanged)
+    && !rateError && !delivError && !busy;
 
   const toggle = (id: string) =>
     setPicked((p) => ({ ...p, [id]: !p[id] }));
@@ -2167,7 +2203,7 @@ function RequestRevisionModal({
         Tick the missing/wrong section(s). A note is optional — you can send
         a revision with no typed text at all.
       </p>
-      <div className="space-y-2 max-h-[46vh] overflow-y-auto pr-1">
+      <div className="space-y-2 md:max-h-[46vh] md:overflow-y-auto md:pr-1">
         {REVISABLE_SECTIONS.map((s) => {
           const on = Boolean(picked[s.id]);
           return (
@@ -2272,7 +2308,7 @@ function RequestRevisionModal({
               value={rateAmt1}
               onChange={(e) => setRateAmt1(e.target.value.slice(0, 200))}
               disabled={busy}
-              placeholder="e.g. $40/hr"
+              placeholder="e.g. $2,400"
               className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
             />
           </label>
@@ -2294,11 +2330,23 @@ function RequestRevisionModal({
               value={rateAmt2}
               onChange={(e) => setRateAmt2(e.target.value.slice(0, 200))}
               disabled={busy}
-              placeholder="e.g. $55/hr"
+              placeholder="e.g. $1,920"
               className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
             />
           </label>
         </div>
+        {rateError && (
+          <p className="mt-2 text-[11px] text-red-600 inline-flex items-start gap-1">
+            <AlertCircle size={11} className="mt-0.5 shrink-0" /> {rateError}
+          </p>
+        )}
+        {!rateError && periodsMatch && (
+          <p className="mt-2 text-[11px] text-sage-copper-deep inline-flex items-start gap-1">
+            <AlertCircle size={11} className="mt-0.5 shrink-0" />
+            Heads up: both rate periods read the same. That&apos;s allowed
+            but usually a typo.
+          </p>
+        )}
         {rateChanged && (
           <p className="mt-2 text-[11px] text-sage-copper-deep">
             The main agreement will be added to the revision so the participant
@@ -2328,6 +2376,11 @@ function RequestRevisionModal({
             className="mt-1 w-full px-2.5 py-1.5 text-[13px] rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
           />
         </label>
+        {delivError && (
+          <p className="mt-2 text-[11px] text-red-600 inline-flex items-start gap-1">
+            <AlertCircle size={11} className="mt-0.5 shrink-0" /> {delivError}
+          </p>
+        )}
         {delivChanged && (
           <p className="mt-2 text-[11px] text-sage-copper-deep">
             Appendix 1 will be added to the revision so the participant re-reviews
@@ -2352,8 +2405,23 @@ function RequestRevisionModal({
 
 // ── Helpers ───────────────────────────────────────────────────
 
+/** The same dollar amount, "$" or not ("2,400" vs the stored "$2,400"). */
+function sameMoney(typed: string, stored: string | null | undefined): boolean {
+  const norm = (v: string) => v.replace(/\$/g, "").trim();
+  return norm(typed) === norm(stored ?? "");
+}
+
+/** "A", "A and B", "A, B and C". */
+function joinWithAnd(items: string[]): string {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} and ${items[items.length - 1]}`;
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
 function fmtDateTime(iso: string | null | undefined) {
-  if (!iso) return "—";
-  // Build W — MM-DD-YYYY (+ HH:mm) for consistency across the agreement.
-  return formatUsDateTime(iso) || "—";
+  // MM-DD-YYYY HH:mm in business time (CT), like the rest of the dashboard.
+  return formatUsDateTimeCt(iso);
 }

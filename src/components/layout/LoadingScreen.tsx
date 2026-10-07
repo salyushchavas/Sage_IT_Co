@@ -31,7 +31,6 @@ export default function LoadingScreen() {
                 alt="Sage IT Co"
                 fill
                 sizes="96px"
-                priority
                 className="object-contain drop-shadow-[0_0_25px_rgba(27,42,92,0.4)]"
               />
             </motion.div>

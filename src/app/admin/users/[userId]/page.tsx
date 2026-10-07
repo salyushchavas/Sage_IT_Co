@@ -47,8 +47,10 @@ interface UserProfile {
 const STAFF_ROLES = ["ERM", "COACH", "TECHNICAL_ADVISOR", "FINANCE", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"];
 
 const ROLE_OPTIONS = [
+  "PARTICIPANT",
   "STUDENT",
   "INSTRUCTOR",
+  "TRAINER",
   "ERM",
   "COACH",
   "TECHNICAL_ADVISOR",
@@ -128,6 +130,8 @@ export default function AdminUserDetailPage() {
 
   const handleRoleChange = async (newRole: string) => {
     if (!profile || newRole === profile.role) return;
+    // The select shows profile.role, so a cancel puts it back.
+    if (!window.confirm(`Change ${profile.fullName ?? profile.email}'s role from ${profile.role} to ${newRole}?`)) return;
     setBusy(true);
     try {
       await updateUserRoleAsAdmin(profile.id, newRole);
@@ -382,7 +386,8 @@ export default function AdminUserDetailPage() {
               disabled={busy || isMe}
               className="px-3 py-2 text-sm rounded-md border border-zinc-200 bg-white focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy disabled:opacity-60 cursor-pointer"
             >
-              {ROLE_OPTIONS.map((r) => (
+              {/* Always show their real role, even one not in the list. */}
+              {(ROLE_OPTIONS.includes(profile.role) ? ROLE_OPTIONS : [profile.role, ...ROLE_OPTIONS]).map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>
@@ -391,7 +396,7 @@ export default function AdminUserDetailPage() {
             <p className="text-xs text-zinc-500">
               {isMe
                 ? "You can't change your own role."
-                : "Saves immediately on selection."}
+                : "Asks you to confirm, then saves."}
             </p>
           </div>
         </div>

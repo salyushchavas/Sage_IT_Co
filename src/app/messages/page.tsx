@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { motion } from "framer-motion";
 import { Loader2, MessageSquare, ChevronRight } from "lucide-react";
-import { getMySalesInquiries, type SalesInquiry } from "@/lib/api";
+import { getMySalesInquiries, loginHere, type SalesInquiry } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import { cn } from "@/lib/utils";
 import { timeAgo } from "@/lib/datetime";
@@ -24,19 +25,27 @@ function relative(ts: string | null | undefined) {
 }
 
 export default function MessagesPage() {
+  const router = useRouter();
   const { user, isLoading: authLoading } = useAuth();
   const [inquiries, setInquiries] = useState<SalesInquiry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!user) return;
+    if (!user) {
+      // Signed out: go to sign-in like every other protected page.
+      if (!authLoading) {
+        setLoading(false);
+        router.replace(loginHere());
+      }
+      return;
+    }
     setLoading(true);
     getMySalesInquiries()
       .then((rows) => setInquiries(rows ?? []))
       .catch((err) => setError(err instanceof Error ? err.message : "Failed to load"))
       .finally(() => setLoading(false));
-  }, [user]);
+  }, [user, authLoading, router]);
 
   if (authLoading || loading) {
     return (

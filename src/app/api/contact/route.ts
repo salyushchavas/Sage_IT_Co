@@ -139,8 +139,8 @@ export async function POST(req: NextRequest) {
           </p>
 
           <p style="color: #a1a1aa; font-size: 14px; line-height: 1.7;">
-            In the meantime, feel free to explore our <a href="https://sageitco.com/services" style="color: #1B2A5C; text-decoration: none;">services</a>
-            or check out our <a href="https://sageitco.com/portfolio" style="color: #1B2A5C; text-decoration: none;">portfolio</a>.
+            In the meantime, feel free to explore our <a href="https://sageitco.com/resources" style="color: #1B2A5C; text-decoration: none;">resources</a>
+            or hear from our learners in our <a href="https://sageitco.com/testimonials" style="color: #1B2A5C; text-decoration: none;">testimonials</a>.
           </p>
 
           <div style="text-align: center; margin-top: 24px; padding-top: 16px; border-top: 1px solid #27272a;">

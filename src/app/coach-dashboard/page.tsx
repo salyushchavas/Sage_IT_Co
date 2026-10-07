@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   AlertCircle,
@@ -14,6 +15,7 @@ import {
 
 import {
   RoleDashboardShell,
+  useUrlTab,
   type RoleDashboardTab,
 } from "@/components/dashboard/RoleDashboardShell";
 import { CoachParticipantsTab } from "@/components/dashboard/coach/CoachParticipantsTab";
@@ -23,6 +25,7 @@ import { CoachFeedbackTab } from "@/components/dashboard/coach/CoachFeedbackTab"
 import { useAuth } from "@/lib/auth-context";
 import {
   getCoachParticipants,
+  loginHere,
   type CoachParticipantRow,
 } from "@/lib/api";
 
@@ -31,7 +34,7 @@ import {
 //   sessions  -- log session notes
 //   tasks     -- assign / track practice tasks
 //   feedback  -- submit qualitative feedback
-//   profile   -- pointer to the standard profile page
+//   profile   -- the coach's name, email and role, and Change password
 //
 // Backend service refuses cross-participant lookups, so a coach can't
 // pull data for someone not on their assignment list.
@@ -45,11 +48,13 @@ const TABS: ReadonlyArray<RoleDashboardTab> = [
   { id: "feedback", label: "Feedback", Icon: MessageSquare },
   { id: "profile", label: "Profile", Icon: Settings },
 ];
+const TAB_IDS = TABS.map((t) => t.id);
 
 export default function CoachDashboardPage() {
   const router = useRouter();
   const { user, isLoading } = useAuth();
-  const [active, setActive] = useState<TabId>("home");
+  // The open tab is in the URL (?tab=<id>): a refresh or Back keeps it.
+  const [active, setActive] = useUrlTab<TabId>(TAB_IDS, "home");
   const [participants, setParticipants] = useState<CoachParticipantRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -57,7 +62,7 @@ export default function CoachDashboardPage() {
   useEffect(() => {
     if (isLoading) return;
     if (!user) {
-      router.replace("/login?redirect=/coach-dashboard");
+      router.replace(loginHere());
       return;
     }
     const role = (user.role ?? "").toUpperCase();
@@ -86,6 +91,14 @@ export default function CoachDashboardPage() {
     };
   }, [isLoading, user, router]);
 
+  // After a session, task or feedback is saved: the counts on My
+  // participants (e.g. Sessions) come from this list.
+  const reloadParticipants = useCallback(() => {
+    getCoachParticipants()
+      .then(setParticipants)
+      .catch(() => {});
+  }, []);
+
   if (isLoading || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-50">
@@ -110,25 +123,43 @@ export default function CoachDashboardPage() {
         <CoachParticipantsTab participants={participants} />
       )}
       {active === "sessions" && (
-        <CoachSessionsTab participants={participants} />
+        <CoachSessionsTab participants={participants} onSaved={reloadParticipants} />
       )}
-      {active === "tasks" && <CoachTasksTab participants={participants} />}
+      {active === "tasks" && (
+        <CoachTasksTab participants={participants} onSaved={reloadParticipants} />
+      )}
       {active === "feedback" && (
-        <CoachFeedbackTab participants={participants} />
+        <CoachFeedbackTab participants={participants} onSaved={reloadParticipants} />
       )}
       {active === "profile" && (
         <div className="space-y-3">
           <h1 className="text-2xl font-bold text-gray-900">Profile</h1>
           <div className="rounded-2xl border border-dashed border-gray-200 bg-gray-50/60 p-6">
-            <p className="text-sm text-gray-700">
-              Edit your coach profile from the standard profile page.
+            <dl className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div className="min-w-0">
+                <dt className="text-[11px] uppercase tracking-wider font-semibold text-gray-500">Name</dt>
+                <dd className="text-gray-900 break-words">{user?.fullName || "—"}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-[11px] uppercase tracking-wider font-semibold text-gray-500">Email</dt>
+                <dd className="text-gray-900 break-all">{user?.email || "—"}</dd>
+              </div>
+              <div className="min-w-0">
+                <dt className="text-[11px] uppercase tracking-wider font-semibold text-gray-500">Role</dt>
+                <dd className="text-gray-900">
+                  {(user?.role ?? "").toUpperCase() === "TECHNICAL_ADVISOR" ? "Technical advisor" : "Coach"}
+                </dd>
+              </div>
+            </dl>
+            <p className="mt-4 text-sm text-gray-700">
+              Your coach type and technologies are set by Operations.
             </p>
-            <a
-              href="/profile"
+            <Link
+              href="/change-password"
               className="mt-3 inline-block text-sm font-semibold text-sage-navy hover:underline"
             >
-              Open profile →
-            </a>
+              Change password →
+            </Link>
           </div>
         </div>
       )}

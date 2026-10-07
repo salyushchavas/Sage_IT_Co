@@ -49,6 +49,19 @@ export default function Navbar() {
     setResourcesOpen(false);
   }, [pathname]);
 
+  // Escape closes whichever header menu is open.
+  useEffect(() => {
+    if (!resourcesOpen && !mobileOpen && !userMenuOpen) return;
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== "Escape") return;
+      setResourcesOpen(false);
+      setMobileOpen(false);
+      setUserMenuOpen(false);
+    }
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [resourcesOpen, mobileOpen, userMenuOpen]);
+
   const isAdmin = canOpenAdminPages(user?.role);
   // Courses and learning paths are reached through Resources.
   const resourcesActive = ["/resources", "/courses", "/categories"].some(
@@ -128,7 +141,10 @@ export default function Navbar() {
                         exit={{ opacity: 0, y: -8, scale: 0.96 }}
                         transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
                       >
-                        {resourceLinks.map((l, i) => (
+                        {[
+                          { label: "All resources", href: "/resources", desc: "Browse everything in one place" },
+                          ...resourceLinks,
+                        ].map((l, i) => (
                           <motion.div
                             key={l.href}
                             initial={{ opacity: 0, x: -8 }}
@@ -293,7 +309,14 @@ export default function Navbar() {
             exit={{ height: 0, opacity: 0 }}
             transition={{ duration: 0.3 }}
           >
-            <div className="px-4 sm:px-6 py-4 space-y-2 max-h-[calc(100vh-4rem)] overflow-y-auto">
+            <div
+              className="px-4 sm:px-6 py-4 space-y-2 max-h-[calc(100vh-4rem)] overflow-y-auto"
+              // Any link here closes the menu, also the page already open
+              // (no route change then, so the pathname effect can't).
+              onClick={(e) => {
+                if ((e.target as HTMLElement).closest("a")) setMobileOpen(false);
+              }}
+            >
               {navLinks.map((link) => (
                 <div key={link.href}>
                   <Link

@@ -11,8 +11,10 @@ import {
 import SignatureCanvas from "react-signature-canvas";
 
 import OnboardingLayout from "@/components/layouts/OnboardingLayout";
+import { PROFILE_STEPS } from "@/components/OnboardingProgressBar";
 import { useAuth } from "@/lib/auth-context";
 import {
+  dashboardRouteForRole,
   declineParticipantAgreement,
   getAgreementStatus,
   getProgramSelection,
@@ -43,6 +45,13 @@ const ACK_VERSION = "ACK-v1.0";
 const SVC_VERSION = "SVC-v1.0";
 const MAX_SIGNATURE_BYTES = 2 * 1024 * 1024;
 
+/** The phase as the program page words it (the API sends the code). */
+const PHASE_LABELS: Record<string, string> = {
+  PHASE_1_ONLY: "Phase 1 Only",
+  PHASE_1_AND_2: "Phase 1 + Phase 2",
+  PHASE_2_ONLY: "Phase 2 Only (returning participant)",
+};
+
 function AgreementPageInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -51,6 +60,9 @@ function AgreementPageInner() {
 
   const [gateChecked, setGateChecked] = useState(false);
   const [gateError, setGateError] = useState("");
+  // Set once signed: refreshing the user re-runs the gate below, which must
+  // not cut the "signed" message short or replace the redirect to Step 6.
+  const finishingRef = useRef(false);
 
   const [profile, setProfile] = useState<UserDTO | null>(null);
   const [program, setProgram] = useState<ProgramSelectionDTO | null>(null);
@@ -87,6 +99,12 @@ function AgreementPageInner() {
       return;
     }
     if (!user) return;
+    if (finishingRef.current) return;
+    // Staff have no participant steps: their own dashboard, not the Apply form.
+    if (dashboardRouteForRole(user.role) !== "/dashboard") {
+      router.replace(dashboardRouteForRole(user.role));
+      return;
+    }
     // Phase 1C — gate on agreementComplete + participantId.
     if (user.agreementComplete) {
       router.replace("/dashboard?tab=complete-profile");
@@ -196,18 +214,19 @@ function AgreementPageInner() {
         textFingerprint: terms?.fingerprint,
       });
       setSigned(true);
+      finishingRef.current = true;
       // Refresh the in-memory user so the auth context picks up
       // the new currentStatus (AGREEMENT_COMPLETED) before we
       // navigate. Without this, /dashboard's guard would see the
       // stale PROGRAM_SELECTED status on the next soft-navigation.
       await refreshUser();
-      // Back to the checklist with the next step (check upload)
-      // highlighted when the user came from there. Direct deep
-      // links land on the checklist without the step hash.
+      // Back to the checklist with the next step (Step 6, the
+      // agreement) highlighted when the user came from there. Direct
+      // deep links land on the checklist without the step hash.
       setTimeout(() => {
         router.push(
           fromProfile
-            ? "/dashboard?tab=complete-profile&step=CHECK_UPLOAD"
+            ? "/dashboard?tab=complete-profile&step=MASTER_AGREEMENT"
             : "/dashboard?tab=complete-profile",
         );
       }, 1200);
@@ -242,7 +261,7 @@ function AgreementPageInner() {
   }
   if (gateError) {
     return (
-      <OnboardingLayout currentStep={7} contentMaxWidth="xl">
+      <OnboardingLayout steps={PROFILE_STEPS} currentStep={5} contentMaxWidth="xl">
         <div className="bg-white rounded-2xl shadow-lg border border-gray-100 p-6 text-center">
           <AlertCircle size={20} className="text-red-600 inline-block mb-2" />
           <p className="text-sm text-red-700">{gateError}</p>
@@ -256,7 +275,7 @@ function AgreementPageInner() {
   }
 
   return (
-    <OnboardingLayout currentStep={7} contentMaxWidth="3xl">
+    <OnboardingLayout steps={PROFILE_STEPS} currentStep={5} contentMaxWidth="3xl">
       <AnimatePresence mode="wait">
         {!signed ? (
           <motion.section
@@ -268,12 +287,11 @@ function AgreementPageInner() {
             className="bg-white rounded-2xl shadow-lg border border-gray-100 px-5 py-5 sm:px-7 sm:py-6"
           >
             <h1 className="font-serif text-xl sm:text-2xl font-bold text-gray-900">
-              Review and sign your agreement
+              Review and sign your consent
             </h1>
             <p className="text-gray-500 mt-1 text-sm">
               Confirm your details, add your digital signature, then sign your
-              agreement. The next step is uploading check soft-copies (or marking
-              that step not applicable).
+              consent. Next: Step 6, your agreement.
             </p>
 
             <div className="mt-4 rounded-xl border border-gray-200 bg-gray-50/60 p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
@@ -282,7 +300,7 @@ function AgreementPageInner() {
               <SummaryRow label="Email" value={profile?.email} />
               <SummaryRow label="Phone" value={profile?.phone} />
               <SummaryRow label="Program" value={program?.program} />
-              <SummaryRow label="Phase" value={program?.phase} />
+              <SummaryRow label="Phase" value={program?.phase ? (PHASE_LABELS[program.phase] ?? program.phase) : null} />
               <SummaryRow label="Skillset" value={program?.skillset} />
               <SummaryRow label="Target role" value={program?.targetJobTitle} />
               <SummaryRow label="Availability" value={program?.availability} />
@@ -471,13 +489,13 @@ function AgreementPageInner() {
               }
             >
               {signing && <Loader2 size={14} className="animate-spin" />}
-              {signing ? "Signing…" : "Sign Agreement →"}
+              {signing ? "Signing…" : "Sign Consent →"}
             </button>
 
             {declined ? (
               <p className="mt-3 inline-flex items-start gap-1.5 text-[11px] text-amber-800 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
                 <AlertCircle size={12} className="mt-0.5 shrink-0" />
-                You declined this agreement. Operations will be in touch; you can still sign it here whenever you&apos;re ready.
+                You declined this consent. Operations will be in touch; you can still sign it here whenever you&apos;re ready.
               </p>
             ) : showDecline ? (
               <div className="mt-3 space-y-1.5">
@@ -500,7 +518,7 @@ function AgreementPageInner() {
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-white border border-gray-200 text-gray-700 hover:border-sage-navy hover:text-sage-navy disabled:opacity-60 disabled:cursor-not-allowed transition cursor-pointer"
                   >
                     {declining && <Loader2 size={12} className="animate-spin" />}
-                    Decline agreement
+                    Decline consent
                   </button>
                   <button
                     type="button"
@@ -531,10 +549,9 @@ function AgreementPageInner() {
             <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-emerald-100 text-emerald-700 mb-4">
               <CheckCircle2 size={26} />
             </div>
-            <h1 className="text-2xl font-bold text-gray-900">Agreement signed</h1>
+            <h1 className="text-2xl font-bold text-gray-900">Consent signed</h1>
             <p className="text-sm text-gray-600 mt-2 max-w-md mx-auto">
-              Your signed agreement has been emailed to you. Next: upload check
-              soft-copies (or mark this step not applicable).
+              Your signed copy has been emailed to you. Next: Step 6, your agreement.
             </p>
           </motion.section>
         )}

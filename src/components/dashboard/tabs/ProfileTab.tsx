@@ -10,6 +10,21 @@ import {
   type UserDTO,
 } from "@/lib/api";
 
+/** The workflow status in words (the API sends the code, e.g. DASHBOARD_ENABLED). */
+const STATUS_LABELS: Record<string, string> = {
+  DASHBOARD_ENABLED: "Active",
+  WEEKLY_REPORTING_ACTIVE: "Active, weekly reporting",
+};
+
+function statusText(code: string | null | undefined): string | null {
+  if (!code) return null;
+  if (STATUS_LABELS[code]) return STATUS_LABELS[code];
+  const words = code.toLowerCase().split("_").filter(Boolean)
+    .map((w) => (w === "erm" || w === "id" ? w.toUpperCase() : w));
+  const text = words.join(" ");
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 export default function ProfileTab() {
   const [profile, setProfile] = useState<UserDTO | null>(null);
   const [loading, setLoading] = useState(true);
@@ -97,7 +112,7 @@ export default function ProfileTab() {
                 : null
             }
           />
-          <ReadOnlyRow label="Status" value={profile?.currentStatus} mono />
+          <ReadOnlyRow label="Status" value={statusText(profile?.currentStatus)} />
           <ReadOnlyRow
             label="Selected technology"
             value={profile?.selectedTechnology}
@@ -107,13 +122,15 @@ export default function ProfileTab() {
 
       <Section title="Editable details">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <Input label="Full name" value={fullName} onChange={setFullName} />
-          <Input label="Phone" value={phone} onChange={setPhone} />
-          <Input label="Location" value={location} onChange={setLocation} />
+          {/* Limits match the database columns, so a long value can't fail the save. */}
+          <Input label="Full name" value={fullName} onChange={setFullName} maxLength={100} />
+          <Input label="Phone" value={phone} onChange={setPhone} maxLength={20} />
+          <Input label="Location" value={location} onChange={setLocation} maxLength={255} />
           <Input
             label="Availability"
             value={availability}
             onChange={setAvailability}
+            maxLength={100}
           />
           <div className="sm:col-span-2">
             <label className="block text-[11px] font-medium text-gray-600 mb-0.5">
@@ -123,6 +140,7 @@ export default function ProfileTab() {
               value={bio}
               onChange={(e) => setBio(e.target.value)}
               rows={3}
+              maxLength={500}
               className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
             />
           </div>
@@ -203,10 +221,12 @@ function Input({
   label,
   value,
   onChange,
+  maxLength,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  maxLength?: number;
 }) {
   return (
     <div>
@@ -217,6 +237,7 @@ function Input({
         type="text"
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        maxLength={maxLength}
         className="w-full px-3 py-1.5 text-sm rounded-md border border-gray-200 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy"
       />
     </div>

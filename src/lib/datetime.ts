@@ -181,6 +181,48 @@ export function formatDay(input: string | null | undefined): string {
   return d.toLocaleDateString(LOCALE, { timeZone: "UTC", day: "numeric", month: "short", year: "numeric" });
 }
 
+/** A moment's MM, DD, YYYY, HH (00-23) and mm in business time. */
+function usPartsInBusinessTime(d: Date): Record<"month" | "day" | "year" | "hour" | "minute", string> {
+  const parts = new Intl.DateTimeFormat(LOCALE, {
+    timeZone: BUSINESS_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).formatToParts(d);
+  const get = (t: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === t)?.value ?? "";
+  return { month: get("month"), day: get("day"), year: get("year"), hour: get("hour"), minute: get("minute") };
+}
+
+/**
+ * "10-06-2026 18:25 CT": a server timestamp in the agreement screens'
+ * MM-DD-YYYY HH:mm format, in business time (the same clock as the rest
+ * of the dashboard).
+ */
+export function formatUsDateTimeCt(input: DateLike): string {
+  const d = safeDate(input);
+  if (!d) return FALLBACK;
+  const p = usPartsInBusinessTime(d);
+  return `${p.month}-${p.day}-${p.year} ${p.hour}:${p.minute} ${ZONE_LABEL}`;
+}
+
+/**
+ * "10-06-2026": the business-time day a server timestamp falls on, as
+ * MM-DD-YYYY. A plain calendar date ("2026-10-06") is shown as that day.
+ */
+export function formatUsDayCt(input: DateLike): string {
+  if (typeof input === "string") {
+    const m = DATE_ONLY_RE.exec(input);
+    if (m) return `${m[2]}-${m[3]}-${m[1]}`;
+  }
+  const d = safeDate(input);
+  if (!d) return FALLBACK;
+  const p = usPartsInBusinessTime(d);
+  return `${p.month}-${p.day}-${p.year}`;
+}
+
 /** Today's business date as "YYYY-MM-DD" (for date inputs). */
 export function businessToday(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: BUSINESS_TIME_ZONE });

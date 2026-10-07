@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, Suspense } from "react";
+import { useEffect, useRef, useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { motion } from "framer-motion";
@@ -9,7 +9,7 @@ import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Loader2, Eye, EyeOff } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
-import { rememberSignUpPassword, safeRedirect } from "@/lib/api";
+import { dashboardRouteForRole, rememberSignUpPassword, safeRedirect } from "@/lib/api";
 import SplitAuthLayout from "@/components/layout/SplitAuthLayout";
 
 const schema = z.object({
@@ -25,7 +25,21 @@ function LoginForm() {
   // Only a page on this site (a link could otherwise send people elsewhere).
   const redirect = safeRedirect(searchParams.get("redirect"));
   const justReset = searchParams.get("reset") === "1";
-  const { login } = useAuth();
+  const { login, user, isAuthenticated, isLoading } = useAuth();
+  // Set while this form signs in: onSubmit chooses where to go then.
+  const signingIn = useRef(false);
+
+  // Already signed in (e.g. Back after signing in): skip the form and go
+  // to the page asked for, or this account's home page.
+  useEffect(() => {
+    if (isLoading || !isAuthenticated || !user || signingIn.current) return;
+    const asked = searchParams.get("redirect");
+    router.replace(
+      user.mustChangePassword
+        ? "/change-password"
+        : safeRedirect(asked, dashboardRouteForRole(user.role)),
+    );
+  }, [isLoading, isAuthenticated, user, searchParams, router]);
 
   const [showPassword, setShowPassword] = useState(false);
   const [apiError, setApiError] = useState("");
@@ -40,6 +54,7 @@ function LoginForm() {
   const onSubmit = async (data: FormData) => {
     setApiError("");
     setLoading(true);
+    signingIn.current = true;
     try {
       const me = await login(data.email, data.password);
       // Staff onboarding: a temporary password must be replaced first.
@@ -52,6 +67,7 @@ function LoginForm() {
         router.push(`/verify-email?email=${encodeURIComponent(data.email.trim())}&from=login`);
         return;
       }
+      signingIn.current = false;
       setApiError(message);
     } finally {
       setLoading(false);
@@ -62,7 +78,7 @@ function LoginForm() {
     <SplitAuthLayout
       heroTitle={"Welcome back.\nLet's pick up where you left off."}
       heroSubtitle="Sign in to continue your program — your mentors, courses, and assignments are waiting."
-      heroFooter="Need an account? Use the Create one link on the right."
+      heroFooter="New here? Use Apply for a course to get started."
     >
       <motion.div
         initial={{ opacity: 0, y: 16 }}

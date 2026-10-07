@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { useForm } from "react-hook-form";
 import { z } from "zod";
@@ -125,6 +126,15 @@ export default function ChangePasswordPage() {
           >
             {saving && <Loader2 size={16} className="animate-spin" />} Save and continue
           </button>
+          {/* A temporary password has to be changed first: no way around it. */}
+          {!firstTime && (
+            <Link
+              href={homeForRole(user?.role)}
+              className="block text-center text-sm font-semibold text-gray-500 hover:text-sage-navy"
+            >
+              Cancel
+            </Link>
+          )}
         </form>
       </motion.div>
     </SplitAuthLayout>

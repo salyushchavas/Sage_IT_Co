@@ -42,6 +42,36 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+/**
+ * The agreement keeps the drawn signatures and the typed legal name on
+ * this device until it is submitted (WebAgreementWizard's resume draft).
+ * They must not stay behind for the next person once the session ends.
+ */
+const AGREEMENT_DRAFT_PREFIX = "sage-web-agreement-draft:";
+
+/** Forget the sign-in on this device: tokens, the route-guard cookie, drafts. */
+function forgetSession() {
+  localStorage.removeItem("access_token");
+  localStorage.removeItem("refresh_token");
+  clearAccessTokenCookie();
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(AGREEMENT_DRAFT_PREFIX)) localStorage.removeItem(key);
+    }
+  } catch {
+    // Storage blocked: nothing more to clear.
+  }
+}
+
+/**
+ * Waits between tries to load the profile while the sign-in is still
+ * stored (1, 2, 4, 8, then 10 s: about 45 s in all). A server waking up
+ * (Railway cold start, a 502) or a dropped connection must not sign
+ * anyone out; pages keep their spinner meanwhile.
+ */
+const PROFILE_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 10000, 10000, 10000];
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -54,9 +84,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const clearAuth = useCallback(() => {
-    localStorage.removeItem("access_token");
-    localStorage.removeItem("refresh_token");
-    clearAccessTokenCookie();
+    forgetSession();
     setUser(null);
   }, []);
 
@@ -64,12 +92,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const init = async () => {
       const token = localStorage.getItem("access_token");
       if (!token) {
+        // Signed out, or the session ended (apiFetch's endSession): drop
+        // anything it left behind, such as an agreement draft.
+        forgetSession();
         setIsLoading(false);
         return;
       }
       try {
-        // A server waking up (Railway cold start, a 502) or a dropped
-        // connection must not sign anyone out: try a few times first.
+        // A server that can't be reached must not sign anyone out: keep
+        // trying for a while (see PROFILE_RETRY_DELAYS_MS) before giving up.
         let profile: Awaited<ReturnType<typeof getProfile>> | null = null;
         for (let attempt = 0; profile === null; attempt++) {
           try {
@@ -77,8 +108,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           } catch (e) {
             // A refused sign-in already ended the session (apiFetch
             // renews once, then clears the tokens): nothing to retry.
-            if (attempt >= 2 || !localStorage.getItem("access_token")) throw e;
-            await new Promise((r) => setTimeout(r, 1000 * (attempt + 1)));
+            if (attempt >= PROFILE_RETRY_DELAYS_MS.length || !localStorage.getItem("access_token")) {
+              throw e;
+            }
+            await new Promise((r) => setTimeout(r, PROFILE_RETRY_DELAYS_MS[attempt]));
           }
         }
         // A role changed since this token was issued: get a token with
@@ -118,9 +151,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(() => {
     apiLogout();
-    clearAuth();
-    window.location.href = "/";
-  }, [clearAuth]);
+    // The user stays set while the page unloads: clearing it first made the
+    // pages' guards jump to /login and refetch without a token, only for the
+    // navigation below to cut them off (console errors on every sign out).
+    forgetSession();
+    window.location.replace("/");
+  }, []);
 
   const setSession = useCallback((data: AuthResponse) => {
     storeTokens(data);

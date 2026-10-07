@@ -12,7 +12,7 @@ import {
   type AgreementRequestStatus,
   type ProfileCompletion,
 } from "@/lib/api";
-import { shownProgress } from "@/lib/profile-progress";
+import { agreementPartDone, shownProgress } from "@/lib/profile-progress";
 
 /**
  * Sticky banner shown above the dashboard content when the
@@ -113,6 +113,9 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
   }
 
   const nextStep = data.steps.find((s) => !s.completed);
+  // Step 6 (the agreement) comes before the check copies on the checklist,
+  // so while it's open it is what's next, not "Check Soft Copies".
+  const agreementNext = nextStep?.key === "CHECK_UPLOAD" && !agreementPartDone(agreement);
   const handleDismiss = () => {
     const until = Date.now() + 24 * 60 * 60 * 1000;
     localStorage.setItem(STORAGE_KEY, String(until));
@@ -121,8 +124,8 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
 
   return (
     <div className="mx-4 sm:mx-6 mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 shadow-sm">
-      <div className="flex items-start sm:items-center gap-3 flex-col sm:flex-row">
-        <div className="flex items-center gap-2 shrink-0">
+      <div className="flex items-start lg:items-center gap-3 flex-col lg:flex-row">
+        <div className="flex items-center gap-2 min-w-0">
           <span className="inline-flex items-center justify-center w-8 h-8 rounded-lg bg-amber-100 text-amber-700">
             <CheckCircle2 size={16} />
           </span>
@@ -146,6 +149,8 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
             <p className="text-[11px] text-amber-700 mt-1.5">
               {nextStep.key === "PROGRAM_SELECTION" && underReview ? (
                 <>Your documents are <span className="font-semibold">under review</span>; the next step opens once they&apos;re verified</>
+              ) : agreementNext ? (
+                <>Next: <span className="font-semibold">Agreement</span></>
               ) : (
                 <>
                   Next: <span className="font-semibold">{nextStep.title}</span>{" "}
@@ -155,7 +160,7 @@ export default function ProfileCompletionBanner({ onContinueSetup }: Props) {
             </p>
           )}
         </div>
-        <div className="flex items-center gap-2 shrink-0 self-end sm:self-auto">
+        <div className="flex items-center gap-2 shrink-0 self-end lg:self-auto">
           {onContinueSetup ? (
             <button
               type="button"

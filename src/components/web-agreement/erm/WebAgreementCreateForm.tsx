@@ -67,6 +67,20 @@ const DEFAULT_PORTAL_AUTHORIZED_ACTIONS =
 // with the participant's read-only view via web-agreement-sections.
 const VISA_OPTIONS = WORK_AUTHORIZATION_OPTIONS;
 
+/** A dollar amount without the "$": "2,400", "2400", "2,400.50". */
+const MONEY_RE = /^\d{1,3}(,\d{3})*(\.\d{1,2})?$|^\d+(\.\d{1,2})?$/;
+
+/**
+ * A positive dollar amount, with or without the "$" ("$2,400", "2400.50").
+ * The server applies the same rule to the rate amounts.
+ */
+export function isPositiveMoney(value: string): boolean {
+  const digits = value.replace(/\$/g, "").trim();
+  return MONEY_RE.test(digits) && Number(digits.replace(/,/g, "")) > 0;
+}
+
+const AMOUNT_RULE = "Enter a dollar amount greater than zero, like 2,400 or 2400.50.";
+
 const EMPTY: FormState = {
   firstName: "",
   middleName: "",
@@ -119,6 +133,9 @@ export default function WebAgreementCreateForm({
   const [form, setForm] = useState<FormState>(EMPTY);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");
+  // The participant's request couldn't be read (no longer waiting, or they
+  // already have an agreement): there is nothing to create.
+  const [loadError, setLoadError] = useState("");
   // Whose request the participant details were filled in from.
   const [prefilledFrom, setPrefilledFrom] = useState<string | null>(null);
 
@@ -143,7 +160,7 @@ export default function WebAgreementCreateForm({
         // Not waiting any more (or already has an agreement): the server
         // refuses the create too, so say why up front.
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Couldn't load this participant's request.");
+          setLoadError(e instanceof Error ? e.message : "Couldn't load this participant's request.");
         }
       })
       .finally(() => {
@@ -214,7 +231,11 @@ export default function WebAgreementCreateForm({
     trimmedStrings.ratePeriod2.length > 0 &&
     trimmedStrings.ratePeriod1.toLowerCase() === trimmedStrings.ratePeriod2.toLowerCase();
 
-  const canSubmit = allRequiredFilled && !isSubmitting;
+  // Rate amounts: a positive dollar amount (checked once something is typed).
+  const amount1Invalid = form.rateAmount1.trim().length > 0 && !isPositiveMoney(form.rateAmount1);
+  const amount2Invalid = form.rateAmount2.trim().length > 0 && !isPositiveMoney(form.rateAmount2);
+
+  const canSubmit = allRequiredFilled && !amount1Invalid && !amount2Invalid && !isSubmitting;
 
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -226,6 +247,10 @@ export default function WebAgreementCreateForm({
     }
     if (!emailLooksValid) {
       setError("Participant email doesn't look right.");
+      return;
+    }
+    if (amount1Invalid || amount2Invalid) {
+      setError(AMOUNT_RULE);
       return;
     }
 
@@ -261,6 +286,30 @@ export default function WebAgreementCreateForm({
     return (
       <div className="text-center py-10">
         <Loader2 size={20} className="animate-spin text-sage-navy inline" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="space-y-4">
+        <h1 className="text-2xl font-bold text-gray-900">New agreement</h1>
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4 sm:p-6 max-w-3xl space-y-4">
+          <div
+            role="alert"
+            className="rounded-md border border-red-200 bg-red-50 px-3 py-2 inline-flex items-start gap-2 text-sm text-red-700 w-full"
+          >
+            <AlertCircle size={14} className="mt-0.5 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer"
+          >
+            <ArrowLeft size={12} /> Back to the list
+          </button>
+        </div>
       </div>
     );
   }
@@ -445,10 +494,17 @@ export default function WebAgreementCreateForm({
                     }
                     disabled={isSubmitting}
                     required
+                    inputMode="decimal"
+                    aria-invalid={amount1Invalid}
                     placeholder="2,400"
                     className={inputClass + " pl-7"}
                   />
                 </div>
+                {amount1Invalid && (
+                  <p className="mt-1 text-[11px] text-red-600 inline-flex items-start gap-1">
+                    <AlertCircle size={11} className="mt-0.5 shrink-0" /> {AMOUNT_RULE}
+                  </p>
+                )}
               </Field>
               <Field label="Rate period 2" required>
                 <input
@@ -477,10 +533,17 @@ export default function WebAgreementCreateForm({
                     }
                     disabled={isSubmitting}
                     required
+                    inputMode="decimal"
+                    aria-invalid={amount2Invalid}
                     placeholder="1,920"
                     className={inputClass + " pl-7"}
                   />
                 </div>
+                {amount2Invalid && (
+                  <p className="mt-1 text-[11px] text-red-600 inline-flex items-start gap-1">
+                    <AlertCircle size={11} className="mt-0.5 shrink-0" /> {AMOUNT_RULE}
+                  </p>
+                )}
               </Field>
             </div>
             {periodsMatch && (

@@ -14,12 +14,16 @@ import {
   FormRow,
   RecordsList,
   TabLoading,
+  participantName,
 } from "./CoachFormParts";
 
 export function CoachSessionsTab({
   participants,
+  onSaved,
 }: {
   participants: CoachParticipantRow[];
+  /** After a save: the participants' session counts change. */
+  onSaved?: () => void;
 }) {
   const [sessions, setSessions] = useState<CoachingSessionDTO[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +34,7 @@ export function CoachSessionsTab({
   const [notes, setNotes] = useState("");
   const [nextSteps, setNextSteps] = useState("");
   const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -47,6 +52,7 @@ export function CoachSessionsTab({
 
   const handleSubmit = async () => {
     if (!participantId) return;
+    setError("");
     setSaving(true);
     try {
       await createCoachSession({
@@ -62,6 +68,10 @@ export function CoachSessionsTab({
       setNotes("");
       setNextSteps("");
       setDuration("");
+      onSaved?.();
+    } catch (e) {
+      // Keep what they typed; say why it wasn't saved.
+      setError(e instanceof Error ? e.message : "Couldn't save the session");
     } finally {
       setSaving(false);
     }
@@ -79,6 +89,7 @@ export function CoachSessionsTab({
         submitLabel={saving ? "Saving..." : "Log session"}
         saving={saving}
         onSubmit={handleSubmit}
+        error={error}
       >
         <FormRow>
           <Field label="Date" type="date" value={date} onChange={setDate} />
@@ -87,6 +98,9 @@ export function CoachSessionsTab({
             type="number"
             value={duration}
             onChange={setDuration}
+            min={0}
+            max={1440}
+            step={1}
           />
           <Field label="Topic" value={topic} onChange={setTopic} />
         </FormRow>
@@ -114,10 +128,13 @@ export function CoachSessionsTab({
             <span className="font-mono text-xs text-gray-700 w-32 shrink-0">
               {s.sessionDate ?? (s.createdAt ? s.createdAt.slice(0, 10) : "--")}
             </span>
-            <span className="font-medium text-gray-900 truncate">
+            <span className="font-semibold text-gray-900 shrink-0 max-w-[10rem] truncate">
+              {participantName(participants, s.participantUserId)}
+            </span>
+            <span className="font-medium text-gray-900 truncate min-w-0 max-w-full">
               {s.topic || "(no topic)"}
             </span>
-            <span className="text-xs text-gray-500 ml-auto truncate">
+            <span className="text-xs text-gray-500 ml-auto truncate max-w-full">
               {s.notes?.slice(0, 80) ?? ""}
             </span>
           </>

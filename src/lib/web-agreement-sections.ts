@@ -71,6 +71,11 @@ export interface SectionField {
   sensitive?: boolean;
   placeholder?: string;
   help?: string;
+  /**
+   * Most characters the participant can type (the column size; the server
+   * refuses anything longer). The wizard defaults to 255 when unset.
+   */
+  maxLength?: number;
   /** Some fields (e.g. consultantEmail, workAuthorizationCategory) are
    *  seeded by the ERM and stay read-only in the consultant's view;
    *  flagged so the wizard renders them as confirmations rather than
@@ -182,6 +187,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "First name",
         type: "text",
         required: true,
+        maxLength: 120,
         help: "Filled in by your ERM; correct it here if the spelling is off.",
       },
       {
@@ -189,12 +195,14 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "Middle name (optional)",
         type: "text",
         required: false,
+        maxLength: 120,
       },
       {
         key: "lastName",
         label: "Last name",
         type: "text",
         required: true,
+        maxLength: 120,
       },
       {
         key: "consultantEmail",
@@ -209,6 +217,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "Primary phone",
         type: "tel",
         required: true,
+        maxLength: 32,
         placeholder: "+1 555 555 5555",
       },
       {
@@ -241,6 +250,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "City",
         type: "text",
         required: true,
+        maxLength: 120,
         placeholder: "Austin",
       },
       {
@@ -255,6 +265,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "ZIP code",
         type: "text",
         required: true,
+        maxLength: 10,
         placeholder: "78701 or 78701-1234",
       },
       // Build I — work-authorization supporting document, sitting with the
@@ -514,6 +525,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "City",
         type: "text",
         required: true,
+        maxLength: 120,
       },
       {
         key: "bgCurrentAddressState",
@@ -527,6 +539,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         label: "ZIP code",
         type: "text",
         required: true,
+        maxLength: 10,
         placeholder: "78701 or 78701-1234",
       },
       {
@@ -655,6 +668,7 @@ export const AGREEMENT_SECTIONS: readonly AgreementSection[] = [
         type: "text",
         required: true,
         placeholder: "e.g. 2",
+        help: "Up to 50 cheques.",
       },
       {
         key: "securityCheckBank",
