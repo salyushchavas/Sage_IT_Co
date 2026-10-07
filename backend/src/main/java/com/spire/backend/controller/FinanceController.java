@@ -446,7 +446,9 @@ public class FinanceController {
         long totalPlans = planRepository.count();
         long activePlans = planRepository.findAll().stream()
                 .filter(p -> "ACTIVE".equals(p.getStatus())).count();
-        long unpaid = invoiceRepository.findByStatusOrderByDueDateAsc("UNPAID").size();
+        // Part-paid invoices still have a balance to collect, so they count as unpaid.
+        long unpaid = invoiceRepository.findByStatusOrderByDueDateAsc("UNPAID").size()
+                + invoiceRepository.findByStatusOrderByDueDateAsc("PARTIAL").size();
         long overdue = invoiceRepository.findByStatusOrderByDueDateAsc("OVERDUE").size();
         // Checklist 5.2: payments minus reversals (failed attempts and waivers aren't money in).
         java.math.BigDecimal collected = PaymentService.collected(ledgerRepository.findAll());

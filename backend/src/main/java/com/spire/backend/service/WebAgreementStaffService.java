@@ -22,6 +22,7 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -33,6 +34,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static com.spire.backend.service.WebAgreementRules.ChequeEntry;
@@ -64,6 +66,17 @@ public class WebAgreementStaffService {
 
     /** Website roles that see and act on every agreement (the console's super-admin). */
     static final Set<String> ADMINS = Set.of("OPERATIONS_ADMIN", "SYSTEM_ADMIN");
+
+    /** The create form's work-authorization choices (WORK_AUTHORIZATION_OPTIONS in src/lib/web-agreement-sections.ts). */
+    static final List<String> WORK_AUTHORIZATION_OPTIONS = List.of(
+            "H1B", "OPT-EAD", "STEM-OPT-EAD", "H4-EAD", "GC", "Citizen", "EAD", "Others");
+
+    /** The email check the create form and the contact fix use. */
+    static final String EMAIL_PATTERN = "^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$";
+
+    /** A money value without the "$": "2,400", "2400", "2,400.50". */
+    private static final Pattern MONEY_PATTERN =
+            Pattern.compile("^\\d{1,3}(,\\d{3})*(\\.\\d{1,2})?$|^\\d+(\\.\\d{1,2})?$");
 
     private final WebAgreementRepository agreementRepository;
     private final WebAgreementEventService eventService;
@@ -176,7 +189,28 @@ public class WebAgreementStaffService {
         if (body == null || body.participantUserId == null) {
             throw new IllegalArgumentException("participantUserId is required.");
         }
-        validateRequired("consultantEmail", body.consultantEmail);
+        // The create form's rules, so a call that skips the form can't store
+        // an agreement the form would refuse.
+        validateRequired("First name", body.firstName);
+        validateRequired("Last name", body.lastName);
+        validateRequired("Primary email", body.consultantEmail);
+        if (!body.consultantEmail.trim().matches(EMAIL_PATTERN)) {
+            throw new IllegalArgumentException("Primary email doesn't look right.");
+        }
+        validateRequired("Work authorization", body.visaStatus);
+        String workAuth = WORK_AUTHORIZATION_OPTIONS.stream()
+                .filter(o -> o.equalsIgnoreCase(body.visaStatus.trim()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException(
+                        "Work authorization must be one of: " + String.join(", ", WORK_AUTHORIZATION_OPTIONS) + "."));
+        if ("Others".equals(workAuth)) {
+            validateRequired("The other work authorization", body.visaStatusOther);
+        }
+        validateRequired("Technology / skill track", body.technologyTrack);
+        validateRequired("Rate period 1", body.ratePeriod1);
+        validateRequired("Amount 1", body.rateAmount1);
+        String amount1 = money("Amount 1", body.rateAmount1);
+        String amount2 = blankToNull(body.rateAmount2) == null ? null : money("Amount 2", body.rateAmount2);
         User participant = userRepository.findById(body.participantUserId)
                 .orElseThrow(() -> new ResourceNotFoundException("User", "id", body.participantUserId));
         if (participant.getParticipantId() == null || participant.getParticipantId().isBlank()) {
@@ -209,8 +243,8 @@ public class WebAgreementStaffService {
         String mn = blankToNull(body.middleName);
         String ln = blankToNull(body.lastName);
         // Work-authorization custom value only for "Others".
-        String cat = blankToNull(body.visaStatus);
-        String catOther = "Others".equalsIgnoreCase(cat == null ? "" : cat)
+        String cat = workAuth;
+        String catOther = "Others".equals(cat)
                 ? blankToNull(body.visaStatusOther)
                 : null;
 
@@ -223,10 +257,10 @@ public class WebAgreementStaffService {
                 .firstName(fn)
                 .middleName(mn)
                 .lastName(ln)
-                .ratePeriod1(body.ratePeriod1)
-                .rateAmount1(body.rateAmount1)
-                .ratePeriod2(body.ratePeriod2)
-                .rateAmount2(body.rateAmount2)
+                .ratePeriod1(blankToNull(body.ratePeriod1))
+                .rateAmount1(amount1)
+                .ratePeriod2(blankToNull(body.ratePeriod2))
+                .rateAmount2(amount2)
                 .phase2DeliverablePeriod(blankToNull(body.phase2DeliverablePeriod))
                 .workAuthorizationCategory(cat)
                 .workAuthorizationOther(catOther)
@@ -270,10 +304,33 @@ public class WebAgreementStaffService {
      */
     @Transactional(readOnly = true)
     public Page<WebAgreement> list(String status, Pageable pageable, Long callerId) {
+        return list(status, null, null, pageable, callerId);
+    }
+
+    /**
+     * The list with a search over every page (participant email or name, or
+     * the agreement id; case-insensitive) and, for VERIFIED, the ERM's
+     * verification: released=false is "signed by the participant", true is
+     * "verified". Same scoping as above.
+     */
+    @Transactional(readOnly = true)
+    public Page<WebAgreement> list(String status, String q, Boolean released, Pageable pageable, Long callerId) {
         User caller = requireStaff(callerId);
         boolean all = status == null || status.isBlank() || "ALL".equalsIgnoreCase(status);
+        String needle = blankToNull(q);
+        // The verification flag only splits a signed agreement.
+        Boolean releasedFilter = !all && WebAgreement.Status.VERIFIED.name().equals(status.trim())
+                ? released : null;
         Page<WebAgreement> page;
-        if (isAdmin(caller)) {
+        if (needle != null || releasedFilter != null) {
+            String pattern = needle == null ? null : "%" + escapeLike(needle.toLowerCase()) + "%";
+            page = agreementRepository.searchForStaff(
+                    isAdmin(caller) ? null : callerId,
+                    all ? null : status.trim(),
+                    releasedFilter,
+                    pattern,
+                    pageable);
+        } else if (isAdmin(caller)) {
             page = all
                     ? agreementRepository.findByDeletedFalse(pageable)
                     : agreementRepository.findByStatusAndDeletedFalse(status.trim(), pageable);
@@ -363,16 +420,21 @@ public class WebAgreementStaffService {
         }
         String newEmail = consultantEmail == null ? "" : consultantEmail.trim();
         if (newEmail.isBlank()
-                || !newEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) {
+                || !newEmail.matches(EMAIL_PATTERN)) {
             throw new IllegalArgumentException("A valid consultant email is required.");
         }
-        String newName = consultantName == null ? null : consultantName.trim();
+        // Not sent = unchanged; sent empty = refused (the agreement and its
+        // renders need a name). Repeated spaces collapse to one.
+        String newName = consultantName == null ? null : consultantName.trim().replaceAll("\\s+", " ");
+        if (newName != null && newName.isEmpty()) {
+            throw new IllegalArgumentException("Name is required.");
+        }
 
         String oldEmail = a.getConsultantEmail();
         String oldName = a.getConsultantName();
 
         a.setConsultantEmail(newEmail.toLowerCase());
-        if (newName != null && !newName.isBlank()) {
+        if (newName != null) {
             a.setConsultantName(newName);
             WebAgreementRules.syncNameParts(a, newName);
         }
@@ -413,6 +475,16 @@ public class WebAgreementStaffService {
                     "This application can't be sent back for revision "
                             + "(status=" + st + ").");
         }
+        // The rate card and the deliverables period are part of the signed
+        // agreement: a correction can change them, never clear them, and a
+        // changed amount must be a positive money value.
+        rejectBlankCorrection("Rate period 1", ratePeriod1);
+        rejectBlankCorrection("Amount 1", rateAmount1);
+        rejectBlankCorrection("Rate period 2", ratePeriod2);
+        rejectBlankCorrection("Amount 2", rateAmount2);
+        rejectBlankCorrection("Phase 2 deliverables period", phase2DeliverablePeriod);
+        rateAmount1 = amountCorrection("Amount 1", rateAmount1, a.getRateAmount1());
+        rateAmount2 = amountCorrection("Amount 2", rateAmount2, a.getRateAmount2());
         // Freeze the pre-request state BEFORE anything below re-arms an
         // affirmation or overwrites an ERM correction.
         captureRevisionUndo(a, "sections");
@@ -975,6 +1047,24 @@ public class WebAgreementStaffService {
         if (Boolean.TRUE.equals(a.getConsultantCopyReleased())) {
             throw new IllegalStateException("This agreement is already verified.");
         }
+        // The participant signed over the rate card and the deliverables
+        // period; an agreement without them can't be verified.
+        List<String> missing = new ArrayList<>();
+        if (blankToNull(a.getRatePeriod1()) == null) missing.add("Rate period 1");
+        if (blankToNull(a.getRateAmount1()) == null) missing.add("Amount 1");
+        if (blankToNull(a.getRatePeriod2()) == null) missing.add("Rate period 2");
+        if (blankToNull(a.getRateAmount2()) == null) missing.add("Amount 2");
+        if (blankToNull(a.getPhase2DeliverablePeriod()) == null) missing.add("Phase 2 deliverables period");
+        if (!missing.isEmpty()) {
+            String names = missing.size() == 1
+                    ? missing.get(0)
+                    : String.join(", ", missing.subList(0, missing.size() - 1))
+                            + " and " + missing.get(missing.size() - 1);
+            throw new IllegalStateException("This agreement can't be verified: "
+                    + names + (missing.size() == 1 ? " is" : " are")
+                    + " empty. Send it back with a revision request that fills "
+                    + (missing.size() == 1 ? "it" : "them") + " in.");
+        }
         a.setConsultantCopyReleased(true);
         a.setConsultantCopyReleasedAt(LocalDateTime.now());
         a.setConsultantCopyReleasedBy(String.valueOf(callerId));
@@ -1033,5 +1123,52 @@ public class WebAgreementStaffService {
         if (value == null || value.isBlank()) {
             throw new IllegalArgumentException(field + " is required.");
         }
+    }
+
+    /** A correction that was sent (not null) but is empty. */
+    private static void rejectBlankCorrection(String field, String value) {
+        if (value != null && value.isBlank()) {
+            throw new IllegalArgumentException(field + " can't be empty.");
+        }
+    }
+
+    /**
+     * A rate amount as stored: a positive money value ("2,400", "$2400.50")
+     * with the "$" in front ("$2,400"). 400 for anything else.
+     */
+    static String money(String field, String value) {
+        String digits = value == null ? "" : value.replace("$", "").trim();
+        boolean ok = MONEY_PATTERN.matcher(digits).matches();
+        if (ok) {
+            try {
+                ok = new BigDecimal(digits.replace(",", "")).signum() > 0;
+            } catch (NumberFormatException e) {
+                ok = false;
+            }
+        }
+        if (!ok) {
+            throw new IllegalArgumentException(field + " must be a dollar amount greater than zero, like 2,400 or 2400.50.");
+        }
+        return "$" + digits;
+    }
+
+    /**
+     * A sent amount correction: not sent stays null; the stored amount ("$"
+     * or not) is left as stored; anything else must be a money value.
+     */
+    private static String amountCorrection(String field, String sent, String stored) {
+        if (sent == null) return null;
+        String typed = sent.replace("$", "").trim();
+        if (typed.isEmpty()) {
+            throw new IllegalArgumentException(field + " can't be empty.");
+        }
+        String was = stored == null ? "" : stored.replace("$", "").trim();
+        if (typed.equals(was)) return stored;
+        return money(field, sent);
+    }
+
+    /** Escapes a LIKE needle for {@link WebAgreementRepository#searchForStaff} ('!' is the escape). */
+    private static String escapeLike(String s) {
+        return s.replace("!", "!!").replace("%", "!%").replace("_", "!_");
     }
 }

@@ -17,6 +17,9 @@ public interface ParticipantApplicationRepository extends JpaRepository<Particip
     /** The open application for an email (waiting for an ERM, or confirmed and not registered yet). */
     Optional<ParticipantApplication> findFirstByEmailAndStatusInOrderByCreatedAtDesc(String email, List<String> statuses);
 
+    /** Whether someone else (another email) has an open application with this phone number. */
+    boolean existsByPhoneNormalizedAndStatusInAndEmailNot(String phoneNormalized, List<String> statuses, String email);
+
     Optional<ParticipantApplication> findByRegistrationTokenHash(String registrationTokenHash);
 
     List<ParticipantApplication> findTop500ByStatusOrderByCreatedAtAsc(String status);

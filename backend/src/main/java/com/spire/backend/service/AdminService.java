@@ -117,7 +117,8 @@ public class AdminService {
         stats.put("totalInstructors", totalInstructors);
         stats.put("totalTrainers", totalTrainers);
         stats.put("totalAdmins", totalAdmins);
-        stats.put("totalCourses", totalCoursesOnly);
+        // The Courses tab lists courses and services together; the Overview counts the same.
+        stats.put("totalCourses", totalCoursesOnly + totalServices);
         stats.put("totalServices", totalServices);
         stats.put("totalEnrollments", enrollmentRepository.count());
         stats.put("totalCompletions", totalCompletions);

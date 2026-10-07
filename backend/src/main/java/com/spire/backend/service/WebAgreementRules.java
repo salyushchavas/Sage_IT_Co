@@ -419,6 +419,10 @@ public final class WebAgreementRules {
         addIfBlank(missing, "lastName", app.getLastName());
         addIfBlank(missing, "consultantEmail", app.getConsultantEmail());
         addIfBlank(missing, "primaryPhone", app.getPrimaryPhone());
+        // The wizard's phone rule: 10 to 15 digits, area code included.
+        if (nonBlank(app.getPrimaryPhone()) && !isValidPhone(app.getPrimaryPhone())) {
+            missing.add("primaryPhone");
+        }
         addIfBlank(missing, "addressLine1", app.getAddressLine1());
         addIfBlank(missing, "addressCity", app.getAddressCity());
         addIfBlank(missing, "addressState", app.getAddressState());
@@ -467,7 +471,8 @@ public final class WebAgreementRules {
                 addIfBlank(missing, "bgCurrentAddressState", app.getBgCurrentAddressState());
                 addIfBlank(missing, "bgCurrentAddressZip", app.getBgCurrentAddressZip());
             }
-            if (app.getBgDateOfBirth() == null) missing.add("bgDateOfBirth");
+            // A real past date of birth, 18 or older (the wizard's rule).
+            if (!isAdultDateOfBirth(app.getBgDateOfBirth())) missing.add("bgDateOfBirth");
             // A Driver's License AND/OR a State ID: at least one, and any ID
             // started (number OR document) must be complete (number + doc).
             boolean dlNum = nonBlank(app.getBgDriverLicense());
@@ -579,6 +584,118 @@ public final class WebAgreementRules {
 
     private static void addIfBlank(List<String> out, String key, String value) {
         if (value == null || value.trim().isEmpty()) out.add(key);
+    }
+
+    // ── Field formats (the wizard's rules, mirrored) ─────────────────
+
+    /** Digits, spaces and + - . ( ) only, with 10 to 15 digits (area code included). */
+    public static boolean isValidPhone(String raw) {
+        if (raw == null) return false;
+        String t = raw.trim();
+        if (!t.matches("[+0-9 ().-]+")) return false;
+        int digits = t.replaceAll("\\D", "").length();
+        return digits >= 10 && digits <= 15;
+    }
+
+    /** A date of birth in the past, at least 18 years ago. */
+    public static boolean isAdultDateOfBirth(java.time.LocalDate dob) {
+        return dob != null && !dob.plusYears(18).isAfter(java.time.LocalDate.now());
+    }
+
+    /**
+     * The person-name rule of {@link PersonNames}: letters, marks, digits,
+     * spaces and . , ' ’ - only, starting with a letter or digit. Without its
+     * two-character minimum, so a middle initial (and a name still being
+     * typed) passes.
+     */
+    private static final java.util.regex.Pattern PERSON_NAME =
+            java.util.regex.Pattern.compile("^[\\p{L}\\p{M}\\p{N}][\\p{L}\\p{M}\\p{N} .,'’-]*$");
+
+    /** Most characters of a structured name part (first_name/middle_name/last_name columns). */
+    public static final int NAME_PART_MAX = 120;
+
+    /** Most characters of the composed name (the consultant_name column). */
+    public static final int COMPOSED_NAME_MAX = 255;
+
+    /** Most characters of one cheque number (the wizard's input stops there too). */
+    public static final int CHEQUE_NUMBER_MAX = 64;
+
+    /** Most characters of a portal platform or username. */
+    public static final int PORTAL_ENTRY_MAX = 255;
+
+    /**
+     * The fill patch's hard limits, checked before anything is saved so one
+     * bad value is a 400 naming the field instead of a failed save: each text
+     * value fits its column (the wizard stops typing at the same size), the
+     * name parts that print as the legal name hold name characters only, and
+     * the cheque count is a whole number up to 50. Formats a value only
+     * reaches once fully typed (phone, ZIP, date of birth) are left to the
+     * submit gate, so the autosave of a half-typed value still works.
+     */
+    public static void validateFillPatch(WebAgreementFillPatch p) {
+        if (p == null) return;
+        personNamePart(p.firstName, "First name");
+        personNamePart(p.middleName, "Middle name");
+        personNamePart(p.lastName, "Last name");
+        maxLength(p.primaryPhone, "Primary phone", 32);
+        maxLength(p.addressLine1, "Address line 1", 255);
+        maxLength(p.addressLine2, "Address line 2", 255);
+        maxLength(p.addressCity, "City", 120);
+        maxLength(p.addressState, "State", 8);
+        maxLength(p.addressZip, "ZIP code", 10);
+        maxLength(p.employerPayrollEntity, "Employer (payroll entity)", 255);
+        maxLength(p.implementationPartner, "Implementation partner", 255);
+        maxLength(p.endClient, "End client", 255);
+        maxLength(p.roleTitle, "Role / position", 255);
+        maxLength(p.payrollCycle, "Payroll cycle", 255);
+        maxLength(p.achAccountType, "Account type", 255);
+        maxLength(p.achBankName, "Bank name", 255);
+        maxLength(p.achAccountHolderName, "Account holder name", 255);
+        maxLength(p.achRoutingNumber, "Routing number", 255);
+        maxLength(p.achAccountNumber, "Account number", 255);
+        maxLength(p.achNoticeEmail, "Email for advance notice", 255);
+        maxLength(p.bgFullLegalName, "Full legal name", 255);
+        maxLength(p.bgOtherNamesUsed, "Other names used", 255);
+        maxLength(p.bgCurrentAddressLine1, "Current address line 1", 255);
+        maxLength(p.bgCurrentAddressLine2, "Current address line 2", 255);
+        maxLength(p.bgCurrentAddressCity, "Current address city", 120);
+        maxLength(p.bgCurrentAddressState, "Current address state", 8);
+        maxLength(p.bgCurrentAddressZip, "Current address ZIP code", 10);
+        maxLength(p.bgFullSsn, "Social Security Number", 255);
+        maxLength(p.bgDriverLicense, "Driver's License number", 255);
+        maxLength(p.bgStateId, "State ID number", 255);
+        maxLength(p.securityCheckNumbers, "Cheque numbers", 255);
+        maxLength(p.securityCheckBank, "Issuing bank", 255);
+        maxLength(p.securityCheckHolderName, "Account holder name", 255);
+        maxLength(p.securityCheckAmount, "Amount secured", 255);
+        maxLength(p.securityCheckDates, "Cheque dates", 255);
+        maxLength(p.idType, "ID type", 16);
+        if (nonBlank(p.securityCheckCount)) {
+            String count = p.securityCheckCount.trim();
+            if (!count.matches("\\d{1,3}") || Integer.parseInt(count) > MAX_CHEQUE_INDEX) {
+                throw new IllegalArgumentException(
+                        "Number of cheques must be a whole number, up to " + MAX_CHEQUE_INDEX + ".");
+            }
+        }
+    }
+
+    /** 400 naming the field when {@code value} is longer than {@code max} characters. */
+    public static void maxLength(String value, String label, int max) {
+        if (value != null && value.length() > max) {
+            throw new IllegalArgumentException(
+                    label + " can be at most " + max + " characters.");
+        }
+    }
+
+    /** A name part: blank is allowed (middle, or cleared while typing); otherwise name characters only. */
+    static void personNamePart(String value, String label) {
+        if (value == null) return;
+        maxLength(value, label, NAME_PART_MAX);
+        String t = value.trim();
+        if (!t.isEmpty() && !PERSON_NAME.matcher(t).matches()) {
+            throw new IllegalArgumentException(
+                    label + " can use letters, spaces, apostrophes, hyphens and periods only.");
+        }
     }
 
     // ── Names and addresses ──────────────────────────────────────────
@@ -1097,7 +1214,9 @@ public final class WebAgreementRules {
      * workAuthorizationCategory, technologyTrack, customScopeNotes and
      * effectiveDate (sent anyway, they are ignored as unknown properties),
      * and the dropped legacy columns. Null means "not sent"; only non-null
-     * values are written, with no format checks (the submit gate checks).
+     * values are written. {@link #validateFillPatch} checks lengths, name
+     * characters and the cheque count first; other formats are the submit
+     * gate's.
      */
     public static class WebAgreementFillPatch {
         // Structured name (the participant may correct the spelling).

@@ -6,6 +6,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.util.Collection;
@@ -45,4 +47,28 @@ public interface WebAgreementRepository extends JpaRepository<WebAgreement, Long
     Page<WebAgreement> findByDeletedFalse(Pageable pageable);
 
     Page<WebAgreement> findByStatusAndDeletedFalse(String status, Pageable pageable);
+
+    /**
+     * The staff list with a search and the "verified by the ERM" split.
+     * Every filter is optional (null = any): ownerUserId scopes an ERM to
+     * their own rows (null for admins), released only applies to VERIFIED,
+     * and q is a lower-cased LIKE pattern (with '!' as its escape) matched
+     * against the participant's email and name and the agreement id.
+     */
+    @Query("""
+            SELECT a FROM WebAgreement a
+            WHERE a.deleted = false
+              AND (:ownerUserId IS NULL OR a.ownerUserId = :ownerUserId)
+              AND (:status IS NULL OR a.status = :status)
+              AND (:released IS NULL OR a.consultantCopyReleased = :released)
+              AND (:q IS NULL
+                   OR LOWER(a.consultantEmail) LIKE :q ESCAPE '!'
+                   OR LOWER(a.consultantName) LIKE :q ESCAPE '!'
+                   OR LOWER(a.applicationId) LIKE :q ESCAPE '!')
+            """)
+    Page<WebAgreement> searchForStaff(@Param("ownerUserId") Long ownerUserId,
+                                      @Param("status") String status,
+                                      @Param("released") Boolean released,
+                                      @Param("q") String q,
+                                      Pageable pageable);
 }

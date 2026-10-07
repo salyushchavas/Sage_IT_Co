@@ -59,6 +59,7 @@ public class AdminController {
     private final com.spire.backend.service.OperationsExceptionService operationsExceptionService;
     private final com.spire.backend.service.StaffOnboardingService staffOnboardingService;
     private final com.spire.backend.service.ParticipantApplicationService participantApplicationService;
+    private final com.spire.backend.service.ProfileCompletionService profileCompletionService;
 
     // CSV timestamps render in business time (checklist 5.3: US Central).
     // The DB stores LocalDateTime (timezone-naive, server-local = UTC on
@@ -554,21 +555,29 @@ public class AdminController {
     // ─── Phase 5B Operations tabs ───────────────────────────────────
 
     /**
-     * Participants stuck at DRAFT_STARTED or BASIC_INFO_SUBMITTED —
-     * Operations Admin's "Enrollment Queue" tab.
+     * Active participants who haven't finished their profile steps, with
+     * the step they're on — Operations Admin's "Enrollment Queue" tab.
+     * (Registering from a confirmed application starts past the old
+     * DRAFT_STARTED / BASIC_INFO_SUBMITTED statuses, so the status alone
+     * no longer tells who is stuck; staff accounts never belong here.)
      */
     @GetMapping("/operations/enrollment-queue")
     public ResponseEntity<ApiResponse<List<Map<String, Object>>>> enrollmentQueue() {
-        java.util.Set<String> incomplete = java.util.Set.of(
-                "DRAFT_STARTED", "BASIC_INFO_SUBMITTED", "EMAIL_VERIFICATION_PENDING");
         List<Map<String, Object>> rows = userRepository.findAll().stream()
-                .filter(u -> incomplete.contains(u.getCurrentStatus() == null ? "" : u.getCurrentStatus()))
+                .filter(u -> !Boolean.FALSE.equals(u.getIsActive()) && u.getRole() != null)
+                .filter(u -> {
+                    String role = u.getRole().getName() == null ? "" : u.getRole().getName().toUpperCase();
+                    return role.equals("PARTICIPANT") || role.equals("STUDENT");
+                })
+                .filter(u -> !com.spire.backend.service.ProfileCompletionService.allStepsComplete(u))
                 .map(u -> {
                     Map<String, Object> r = new java.util.LinkedHashMap<>();
                     r.put("userId", u.getId());
+                    r.put("participantId", u.getParticipantId());
                     r.put("fullName", u.getFullName());
                     r.put("email", u.getEmail());
                     r.put("currentStatus", u.getCurrentStatus());
+                    r.put("nextStep", profileCompletionService.nextStepKey(u));
                     r.put("createdAt", u.getCreatedAt());
                     r.put("emailVerified", Boolean.TRUE.equals(u.getEmailVerified()));
                     return r;

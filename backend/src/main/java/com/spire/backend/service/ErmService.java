@@ -52,6 +52,12 @@ public class ErmService {
     private final UserRecordRepository userRecordRepository;
     private final RecordService recordService;
 
+    /** Notes are stamped in business time (checklist 5.3), e.g. "Oct 6, 2026 6:29 PM CT". */
+    @org.springframework.beans.factory.annotation.Value("${app.business-zone:America/Chicago}")
+    private String businessZone;
+    private static final java.time.format.DateTimeFormatter NOTE_STAMP =
+            java.time.format.DateTimeFormatter.ofPattern("MMM d, yyyy h:mm a", java.util.Locale.US);
+
     /**
      * Roster — participants whose CURRENT ERM is this ERM (a participant
      * reassigned to someone else no longer shows here).
@@ -242,7 +248,8 @@ public class ErmService {
                 .findFirstByUserIdOrderByAssignedDateDesc(participantId)
                 .orElseThrow(() -> new ResourceNotFoundException(
                         "ErmAssignment", "userId", participantId));
-        String stamp = LocalDateTime.now().toString();
+        String stamp = java.time.ZonedDateTime.now(BusinessTime.zone(businessZone)).format(NOTE_STAMP)
+                + " " + BusinessTime.label(businessZone);
         String prefix = (escalation ? "[ESCALATION] " : "") + "[" + stamp + "] ";
         String existing = row.getCommunicationNotes();
         String updated = (existing == null || existing.isBlank())

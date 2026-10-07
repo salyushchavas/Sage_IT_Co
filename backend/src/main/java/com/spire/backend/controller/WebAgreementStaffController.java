@@ -74,10 +74,16 @@ public class WebAgreementStaffController {
                 .body(ApiResponse.success("Agreement created", created));
     }
 
-    /** Newest first; size capped at 100. */
+    /**
+     * Newest first; size capped at 100. q searches every page (participant
+     * email or name, agreement id); released splits VERIFIED into "signed by
+     * the participant" (false) and "verified" (true).
+     */
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponse<WebAgreement>>> list(
             @RequestParam(value = "status", required = false) String status,
+            @RequestParam(value = "q", required = false) String q,
+            @RequestParam(value = "released", required = false) Boolean released,
             @RequestParam(value = "page", defaultValue = "0") int page,
             @RequestParam(value = "size", defaultValue = "20") int size,
             Authentication auth) {
@@ -86,7 +92,7 @@ public class WebAgreementStaffController {
                 Math.min(100, Math.max(1, size)),
                 Sort.by(Sort.Direction.DESC, "createdAt"));
         return ResponseEntity.ok(ApiResponse.success(
-                PageResponse.from(staffService.list(status, pageable, userId(auth)))));
+                PageResponse.from(staffService.list(status, q, released, pageable, userId(auth)))));
     }
 
     /** {application, events}. */

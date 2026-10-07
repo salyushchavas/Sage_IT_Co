@@ -51,12 +51,19 @@ public class DocumentVerificationService {
                       String reviewStatus, boolean notApplicable, String exceptionReason,
                       String reviewerNotes, LocalDateTime uploadedAt) {}
 
-    /** Documents submitted, program not chosen yet. */
-    private static boolean atThisStep(User u) {
-        return !Boolean.FALSE.equals(u.getIsActive())
-                && u.getParticipantId() != null && !u.getParticipantId().isBlank()
-                && Boolean.TRUE.equals(u.getDocumentsComplete())
-                && !Boolean.TRUE.equals(u.getProgramSelectionComplete());
+    /**
+     * Documents submitted, program not chosen yet. A participant with a
+     * document sent back (which reopens the documents step) stays here too,
+     * under "Waiting" with the sent-back count, until the new copy is in.
+     */
+    private boolean atThisStep(User u) {
+        if (Boolean.FALSE.equals(u.getIsActive())
+                || u.getParticipantId() == null || u.getParticipantId().isBlank()
+                || Boolean.TRUE.equals(u.getProgramSelectionComplete())) {
+            return false;
+        }
+        if (Boolean.TRUE.equals(u.getDocumentsComplete())) return true;
+        return Boolean.TRUE.equals(u.getAcknowledgmentComplete()) && documentService.sentBackCount(u.getId()) > 0;
     }
 
     /** {@code status}: WAITING (default; still to check) or VERIFIED (confirmed, program not chosen yet). */
@@ -65,7 +72,7 @@ public class DocumentVerificationService {
         requireVerifier(callerId);
         boolean verified = "VERIFIED".equalsIgnoreCase(status);
         return userRepository.findAll().stream()
-                .filter(DocumentVerificationService::atThisStep)
+                .filter(this::atThisStep)
                 .filter(u -> documentService.documentsVerified(u.getId()) == verified)
                 .map(u -> {
                     List<ParticipantDocument> docs = documentRepository.findByUserIdOrderByUploadedAtDesc(u.getId());

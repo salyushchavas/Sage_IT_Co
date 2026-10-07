@@ -9,6 +9,7 @@ import com.spire.backend.repository.UserRecordRepository;
 import com.spire.backend.repository.UserRepository;
 import com.spire.backend.repository.WeeklyReportRepository;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -33,6 +34,7 @@ import java.util.Map;
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class ParticipantDashboardService {
 
     /** Names of the 20 lifecycle steps in display order. */
@@ -71,6 +73,10 @@ public class ParticipantDashboardService {
     private final BusinessClock clock;
     private final WeeklyReportService weeklyReportService;
     private final com.spire.backend.repository.EmploymentAcceptanceRepository employmentRepository;
+    // Read-only lookups for the next action. Neither depends on this
+    // service (only ParticipantController does), so there is no cycle.
+    private final DocumentService documentService;
+    private final MasterAgreementService masterAgreementService;
 
     @Transactional(readOnly = true)
     public Map<String, Object> snapshot(Long userId) {
@@ -180,7 +186,15 @@ public class ParticipantDashboardService {
      */
     record RoadmapFacts(boolean welcomeEmailed, boolean coordinatorEmailed, boolean hasErm, boolean hasCoach,
                         long reportsSubmitted, boolean hasInvoice, boolean hasPlan, boolean teamReady,
-                        boolean lastWeekOwed, boolean employmentReturned, boolean planAwaitingAcceptance) {
+                        boolean lastWeekOwed, boolean employmentReturned, boolean planAwaitingAcceptance,
+                        boolean documentsUnderReview, String agreementAction) {
+        RoadmapFacts(boolean welcomeEmailed, boolean coordinatorEmailed, boolean hasErm, boolean hasCoach,
+                     long reportsSubmitted, boolean hasInvoice, boolean hasPlan, boolean teamReady,
+                     boolean lastWeekOwed, boolean employmentReturned, boolean planAwaitingAcceptance) {
+            this(welcomeEmailed, coordinatorEmailed, hasErm, hasCoach, reportsSubmitted, hasInvoice, hasPlan,
+                    teamReady, lastWeekOwed, employmentReturned, planAwaitingAcceptance, false, null);
+        }
+
         RoadmapFacts(boolean welcomeEmailed, boolean coordinatorEmailed, boolean hasErm, boolean hasCoach,
                      long reportsSubmitted, boolean hasInvoice, boolean hasPlan, boolean teamReady) {
             this(welcomeEmailed, coordinatorEmailed, hasErm, hasCoach, reportsSubmitted, hasInvoice, hasPlan,
@@ -223,7 +237,30 @@ public class ParticipantDashboardService {
                 employmentRepository.findByUserIdOrderByAcceptanceDateDesc(u.getId()).stream().findFirst()
                         .map(e -> e.getReturnedAt() != null).orElse(false),
                 // A plan waiting for their acceptance, new or changed by Finance (checklist 5.1).
-                plan.map(p -> p.getAcceptedAt() == null && "PENDING".equals(p.getStatus())).orElse(false));
+                plan.map(p -> p.getAcceptedAt() == null && "PENDING".equals(p.getStatus())).orElse(false),
+                // Documents submitted and still with the ERM: the program step isn't open yet.
+                Boolean.TRUE.equals(u.getDocumentsComplete()) && !Boolean.TRUE.equals(u.getProgramSelectionComplete())
+                        && !documentService.documentsVerified(u.getId()),
+                agreementActionFor(u));
+    }
+
+    /**
+     * The Home card's line when the participant's website agreement waits
+     * for them (the same status /api/participants/agreement-request shows),
+     * or null when it doesn't.
+     */
+    private String agreementActionFor(User u) {
+        if (u.getParticipantId() == null || !ProfileCompletionService.allStepsComplete(u)) return null;
+        try {
+            Object agreement = masterAgreementService.status(u.getId()).get("agreement");
+            if (!(agreement instanceof Map<?, ?> ag) || !Boolean.TRUE.equals(ag.get("yourTurn"))) return null;
+            return String.valueOf(ag.get("stage")).toLowerCase(java.util.Locale.ROOT).contains("asked for changes")
+                    ? "Your ERM asked for changes to your agreement"
+                    : "Your agreement needs your action";
+        } catch (Exception e) {
+            log.warn("Couldn't read the agreement status for user {}: {}", u.getId(), e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -301,7 +338,7 @@ public class ParticipantDashboardService {
     }
 
     /** The next profile step's page while onboarding isn't finished. */
-    private static Map<String, String> onboardingActionFor(User user) {
+    private static Map<String, String> onboardingActionFor(User user, boolean documentsUnderReview) {
         Map<String, String> action = new LinkedHashMap<>();
         if (!Boolean.TRUE.equals(user.getBasicInfoComplete())) {
             action.put("label", "Tell us about yourself");
@@ -312,11 +349,15 @@ public class ParticipantDashboardService {
         } else if (!Boolean.TRUE.equals(user.getDocumentsComplete())) {
             action.put("label", "Upload your documents");
             action.put("href", "/document-upload");
+        } else if (!Boolean.TRUE.equals(user.getProgramSelectionComplete()) && documentsUnderReview) {
+            // The program step opens once an ERM has verified the documents.
+            action.put("label", "Your documents are under review");
+            action.put("href", "#complete-profile");
         } else if (!Boolean.TRUE.equals(user.getProgramSelectionComplete())) {
             action.put("label", "Choose your program");
             action.put("href", "/program-selection");
         } else if (!Boolean.TRUE.equals(user.getAgreementComplete())) {
-            action.put("label", "Sign your agreement");
+            action.put("label", "Sign your consent");
             action.put("href", "/agreement");
         } else {
             action.put("label", "Upload your check copies (or mark them not applicable)");
@@ -339,10 +380,13 @@ public class ParticipantDashboardService {
             return action;
         }
         if (user.getParticipantId() != null && !ProfileCompletionService.allStepsComplete(user)) {
-            return onboardingActionFor(user);
+            return onboardingActionFor(user, f.documentsUnderReview());
         }
         WorkflowService.Status s = statusOf(user);
-        if (!f.teamReady()) {
+        if (f.agreementAction() != null) {
+            action.put("label", f.agreementAction());
+            action.put("href", MasterAgreementService.WEBSITE_LINK);
+        } else if (!f.teamReady()) {
             action.put("label", "See your team being set up");
             action.put("href", "/welcome");
         } else if (f.planAwaitingAcceptance() && atLeast(s, WorkflowService.Status.PHASE_1_COMPLETED)) {

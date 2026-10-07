@@ -99,6 +99,13 @@ public class ParticipantApplicationService {
             throw new IllegalStateException("There's already an account with this email. Sign in instead.");
         }
         String phoneNormalized = PhoneNumbers.requireAvailable(userRepository, phone, null);
+        // Two open applications with one number would leave the second
+        // applicant unable to register once the first one has.
+        if (applicationRepository.existsByPhoneNormalizedAndStatusInAndEmailNot(phoneNormalized, OPEN, email)) {
+            throw new IllegalArgumentException(
+                    "This phone number is already used on another application. "
+                            + "Use a different number, or apply with the email you used before.");
+        }
 
         ParticipantApplication open = applicationRepository
                 .findFirstByEmailAndStatusInOrderByCreatedAtDesc(email, OPEN).orElse(null);
@@ -108,11 +115,19 @@ public class ParticipantApplicationService {
         }
         if (open != null) {
             // Applied again before anyone looked at it: the latest details count.
+            LocalDateTime lastSaved = open.getUpdatedAt() != null ? open.getUpdatedAt() : open.getCreatedAt();
             open.setFullName(name);
             open.setPhone(phone.trim());
             open.setPhoneNormalized(phoneNormalized);
             open.setSelectedTechnology(course);
-            return applicationRepository.save(open);
+            ParticipantApplication saved = applicationRepository.save(open);
+            // The page says a confirmation was sent: send it again, at most
+            // once a minute so a repeated click can't flood the inbox.
+            if (lastSaved == null
+                    || Duration.between(lastSaved, LocalDateTime.now()).getSeconds() >= RESEND_COOLDOWN_SECONDS) {
+                emailTemplateService.sendApplicationReceivedEmail(email, name, course);
+            }
+            return saved;
         }
 
         ParticipantApplication saved = applicationRepository.save(ParticipantApplication.builder()
@@ -295,14 +310,20 @@ public class ParticipantApplicationService {
         }
         ParticipantApplication a = applicationRepository
                 .findFirstByEmailAndStatusInOrderByCreatedAtDesc(email, OPEN)
-                .orElseGet(() -> ParticipantApplication.builder().email(email).source("INVITE").build());
-        a.setFullName(name);
+                .orElseGet(() -> ParticipantApplication.builder().email(email).fullName(name).source("INVITE").build());
+        // An open application keeps the name its applicant gave; a link sent
+        // moments ago isn't sent again (the same rule as "Send link again").
+        if (APPROVED.equals(a.getStatus()) && a.getRegistrationEmailSentAt() != null
+                && Duration.between(a.getRegistrationEmailSentAt(), LocalDateTime.now()).getSeconds()
+                        < RESEND_COOLDOWN_SECONDS) {
+            throw new IllegalStateException("A link was emailed less than a minute ago. Try again shortly.");
+        }
         a.setStatus(APPROVED);
         a.setReviewedBy(callerId);
         a.setReviewedAt(LocalDateTime.now());
         boolean sent = sendLink(a, true);
         recordService.record(callerId, "PARTICIPANT_INVITED", RecordService.Category.ACCOUNT,
-                "Invited a participant to register", name + " <" + email + ">",
+                "Invited a participant to register", a.getFullName() + " <" + email + ">",
                 Map.of("applicationId", a.getId(), "email", email, "emailSent", sent));
         return sent;
     }
@@ -339,8 +360,22 @@ public class ParticipantApplicationService {
         details.put("fullName", a.getFullName());
         details.put("email", a.getEmail());
         details.put("selectedTechnology", a.getSelectedTechnology() == null ? "" : a.getSelectedTechnology());
-        details.put("needsPhone", a.getPhone() == null || a.getPhone().isBlank());
+        details.put("needsPhone", needsPhone(a));
         return details;
+    }
+
+    /**
+     * The applicant types a phone number when they gave none (an invite) or
+     * when the one they gave now belongs to another account.
+     */
+    private boolean needsPhone(ParticipantApplication a) {
+        if (a.getPhone() == null || a.getPhone().isBlank()) return true;
+        try {
+            PhoneNumbers.requireAvailable(userRepository, a.getPhone(), null);
+            return false;
+        } catch (IllegalArgumentException e) {
+            return true;
+        }
     }
 
     /**
@@ -358,7 +393,8 @@ public class ParticipantApplicationService {
                 .findByRegistrationTokenHashForUpdate(AuthService.hashOtp(token.trim()))
                 .orElseThrow(() -> new IllegalArgumentException(LINK_GONE));
         requireUsable(a);
-        String usePhone = a.getPhone() == null || a.getPhone().isBlank() ? phone : a.getPhone();
+        boolean typedPhone = needsPhone(a);
+        String usePhone = typedPhone ? phone : a.getPhone();
         AuthResponse auth = authService.registerConfirmedParticipant(
                 a.getFullName(), a.getEmail(), usePhone, a.getSelectedTechnology(), password);
         a.setStatus(REGISTERED);
@@ -366,7 +402,10 @@ public class ParticipantApplicationService {
         a.setUserId(auth.getUser().getId());
         a.setRegistrationTokenHash(null);
         a.setRegistrationTokenExpiresAt(null);
-        if (a.getPhone() == null || a.getPhone().isBlank()) a.setPhone(usePhone == null ? null : usePhone.trim());
+        if (typedPhone && usePhone != null) {
+            a.setPhone(usePhone.trim());
+            a.setPhoneNormalized(PhoneNumbers.normalizeOrNull(usePhone));
+        }
         applicationRepository.save(a);
         recordService.record(auth.getUser().getId(), "APPLICATION_REGISTERED", RecordService.Category.ACCOUNT,
                 "Registered from a confirmed application",

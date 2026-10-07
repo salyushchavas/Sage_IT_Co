@@ -173,6 +173,9 @@ public class WebAgreementParticipantService {
                 }
             }
         }
+        // Lengths, name characters and the cheque count, before anything is
+        // written: a value that can't be stored is a 400 naming the field.
+        WebAgreementRules.validateFillPatch(patch);
         // Portal Access soft cap (10), so a direct API call can't store an unbounded list.
         if (patch.portalEntries != null && !patch.portalEntries.isBlank()) {
             try {
@@ -181,8 +184,28 @@ public class WebAgreementParticipantService {
                     throw new IllegalArgumentException(
                             "Portal access is limited to 10 entries.");
                 }
+                if (arr.isArray()) {
+                    for (JsonNode e : arr) {
+                        WebAgreementRules.maxLength(e.path("platform").asText(""),
+                                "Platform", WebAgreementRules.PORTAL_ENTRY_MAX);
+                        WebAgreementRules.maxLength(e.path("username").asText(""),
+                                "Username / login ID", WebAgreementRules.PORTAL_ENTRY_MAX);
+                    }
+                }
             } catch (com.fasterxml.jackson.core.JsonProcessingException ignored) {
                 // malformed JSON — stored as sent; the submit gate finds no complete entry
+            }
+        }
+        // The composed legal name has to fit its column too.
+        if (patch.firstName != null || patch.middleName != null || patch.lastName != null) {
+            String composed = WebAgreementRules.composeName(
+                    WebAgreementRules.blankToNull(patch.firstName != null ? patch.firstName : a.getFirstName()),
+                    WebAgreementRules.blankToNull(patch.middleName != null ? patch.middleName : a.getMiddleName()),
+                    WebAgreementRules.blankToNull(patch.lastName != null ? patch.lastName : a.getLastName()));
+            if (composed != null && composed.length() > WebAgreementRules.COMPOSED_NAME_MAX) {
+                throw new IllegalArgumentException(
+                        "First, middle and last name together can be at most "
+                                + WebAgreementRules.COMPOSED_NAME_MAX + " characters.");
             }
         }
         boolean changed = patch.applyTo(a);
@@ -441,6 +464,8 @@ public class WebAgreementParticipantService {
         ChequeEntry existing = WebAgreementRules.findEntry(entries, index);
         String number = patch == null || patch.number == null ? "" : patch.number.trim();
         String date = patch == null || patch.date == null ? "" : patch.date.trim();
+        WebAgreementRules.maxLength(number, "Cheque number", WebAgreementRules.CHEQUE_NUMBER_MAX);
+        WebAgreementRules.maxLength(date, "Cheque date", 32);
         WebAgreementRules.upsertEntry(entries, new ChequeEntry(
                 index,
                 number,

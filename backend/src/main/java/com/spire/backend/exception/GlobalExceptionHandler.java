@@ -147,6 +147,19 @@ public class GlobalExceptionHandler {
         log.error("Data integrity violation: {}", causeMsg);
         String lower = causeMsg == null ? "" : causeMsg.toLowerCase();
 
+        // A value longer than its column ("Data too long for column 'x'") —
+        // a 400: retrying the same text can never work, shortening it does.
+        if (lower.contains("data too long") || lower.contains("data truncation")) {
+            java.util.regex.Matcher column = java.util.regex.Pattern
+                    .compile("for column '([a-z0-9_]+)'").matcher(lower);
+            String field = column.find() ? " (" + column.group(1).replace('_', ' ').trim() + ")" : "";
+            // Other truncations ("Out of range value", "Incorrect ... value") aren't about length.
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error(lower.contains("data too long")
+                            ? "One of the values" + field + " is too long. Please shorten it and try again."
+                            : "One of the values" + field + " isn't valid. Please check it and try again."));
+        }
+
         // Duplicate / unique-constraint violation — return 409.
         if (lower.contains("duplicate") || lower.contains("unique constraint") || lower.contains("violates unique")) {
             return ResponseEntity.status(HttpStatus.CONFLICT)

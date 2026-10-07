@@ -553,7 +553,7 @@ public class DocumentService {
         if (sendBack) {
             if (countsTowardsRequired(doc.getDocumentType())) {
                 reopenIfIncomplete(owner, "documents_reopened_review",
-                        label + " sent back by Operations: " + reason);
+                        label + " sent back for a new copy: " + reason);
             }
             emailTemplateService.sendDocumentResubmitEmail(owner, label, reason,
                     EXCEPTION_DECLINED.equals(newStatus));

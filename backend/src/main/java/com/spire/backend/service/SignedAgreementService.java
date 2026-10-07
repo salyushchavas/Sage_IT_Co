@@ -116,6 +116,13 @@ public class SignedAgreementService {
                 .orElse(null);
         if (row == null) return false;
         if (erm.getId().equals(row.getErmRoutedTo()) && row.getErmRoutedAt() != null) return true;
+        if (erm.getId().equals(row.getErmReviewedBy())) {
+            // This ERM already opened and reviewed it: keep their review, no second email.
+            row.setErmRoutedTo(erm.getId());
+            row.setErmRoutedAt(java.time.LocalDateTime.now());
+            agreementRepository.save(row);
+            return true;
+        }
         String signedOn = row.getAcceptedAt() == null ? "" : row.getAcceptedAt().format(SIGNED_ON);
         boolean emailed = emailTemplateService.sendSignedAgreementToErmEmail(
                 erm, participant, row.getProgramSnapshot(), signedOn);
