@@ -7,6 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.spire.backend.entity.User;
 import com.spire.backend.entity.WebAgreement;
 import com.spire.backend.entity.WebAgreementEvent;
+import com.spire.backend.entity.WebAgreementVersion;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.AgreementRequestRepository;
 import com.spire.backend.repository.UserRepository;
@@ -18,7 +19,6 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
-import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -26,7 +26,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -35,7 +34,6 @@ import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.regex.Pattern;
-import java.util.stream.Collectors;
 
 import static com.spire.backend.service.WebAgreementRules.ChequeEntry;
 import static com.spire.backend.service.WebAgreementRules.Doc;
@@ -50,22 +48,18 @@ import static com.spire.backend.service.WebAgreementRules.blankToNull;
  * start an agreement; after that the agreement belongs to the ERM who
  * created it (ownerUserId). Another ERM gets "not found", exactly like the
  * console; admins see and act on every agreement. Every event carries the
- * real users.id of whoever acted.
+ * real users.id of whoever acted. The checks themselves live in
+ * {@link WebAgreementAccess}, shared with the approval services.
  *
- * The ERM's "Verify" is the console's consultant-version release without
- * the PDF: the status stays VERIFIED and consultantCopyReleased flips. The
- * approvals, countersignature and final PDF come later.
+ * The ERM's "Verify" is the console's "Approve consultant version": every
+ * click releases the next numbered version (V1, V2, …) with a Certificate
+ * of Completion, the status stays VERIFIED and consultantCopyReleased
+ * flips. Sending for approval is {@link WebAgreementApprovalService}.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class WebAgreementStaffService {
-
-    /** Website roles that work on agreements. */
-    static final Set<String> STAFF = Set.of("ERM", "OPERATIONS_ADMIN", "SYSTEM_ADMIN");
-
-    /** Website roles that see and act on every agreement (the console's super-admin). */
-    static final Set<String> ADMINS = Set.of("OPERATIONS_ADMIN", "SYSTEM_ADMIN");
 
     /** The create form's work-authorization choices (WORK_AUTHORIZATION_OPTIONS in src/lib/web-agreement-sections.ts). */
     static final List<String> WORK_AUTHORIZATION_OPTIONS = List.of(
@@ -85,6 +79,10 @@ public class WebAgreementStaffService {
     private final MasterAgreementService masterAgreementService;
     private final UserRepository userRepository;
     private final AgreementRequestRepository agreementRequestRepository;
+    private final WebAgreementAccess access;
+    private final WebAgreementVersionService versionService;
+    private final WebAgreementApprovalSummary approvalSummary;
+    private final WebAgreementApprovalService approvalService;
 
     /** Detaches list rows before their PII is removed (open-in-view is on). */
     @PersistenceContext
@@ -96,11 +94,7 @@ public class WebAgreementStaffService {
 
     /** The caller, when they are an ERM or an admin; 403 otherwise. */
     User requireStaff(Long callerId) {
-        User caller = callerId == null ? null : userRepository.findById(callerId).orElse(null);
-        if (caller == null || Boolean.FALSE.equals(caller.getIsActive()) || !STAFF.contains(roleOf(caller))) {
-            throw new AccessDeniedException("Only an ERM or an Operations admin can work on agreements.");
-        }
-        return caller;
+        return access.requireStaff(callerId);
     }
 
     /**
@@ -109,25 +103,7 @@ public class WebAgreementStaffService {
      * ERM can't learn that another ERM's agreement exists.
      */
     WebAgreement requireAccess(String applicationId, Long callerId) {
-        User caller = requireStaff(callerId);
-        WebAgreement a = agreementRepository.findByApplicationId(applicationId)
-                .orElseThrow(() -> new ResourceNotFoundException("Agreement not found."));
-        if (Boolean.TRUE.equals(a.getDeleted())) {
-            throw new ResourceNotFoundException("Agreement not found.");
-        }
-        if (!isAdmin(caller) && !callerId.equals(a.getOwnerUserId())) {
-            throw new ResourceNotFoundException("Agreement not found.");
-        }
-        return a;
-    }
-
-    private static boolean isAdmin(User u) {
-        return ADMINS.contains(roleOf(u));
-    }
-
-    private static String roleOf(User u) {
-        return u == null || u.getRole() == null || u.getRole().getName() == null
-                ? "" : u.getRole().getName().toUpperCase();
+        return access.requireAccess(applicationId, callerId);
     }
 
     // ── Participants ready for their agreement ───────────────────────
@@ -299,8 +275,9 @@ public class WebAgreementStaffService {
     /**
      * The agreements list, newest first (the pageable carries the sort). An
      * ERM sees only their own, admins see every one. The most sensitive PII
-     * is removed (the detail view still shows it) and the owner's name is
-     * filled for the admins' column.
+     * is removed (the detail view still shows it), the owner's name is
+     * filled for the admins' column, and each row carries the approval
+     * summary (latest Manager / Accounts gate, first sent for approval).
      */
     @Transactional(readOnly = true)
     public Page<WebAgreement> list(String status, Pageable pageable, Long callerId) {
@@ -325,12 +302,12 @@ public class WebAgreementStaffService {
         if (needle != null || releasedFilter != null) {
             String pattern = needle == null ? null : "%" + escapeLike(needle.toLowerCase()) + "%";
             page = agreementRepository.searchForStaff(
-                    isAdmin(caller) ? null : callerId,
+                    WebAgreementAccess.isAdmin(caller) ? null : callerId,
                     all ? null : status.trim(),
                     releasedFilter,
                     pattern,
                     pageable);
-        } else if (isAdmin(caller)) {
+        } else if (WebAgreementAccess.isAdmin(caller)) {
             page = all
                     ? agreementRepository.findByDeletedFalse(pageable)
                     : agreementRepository.findByStatusAndDeletedFalse(status.trim(), pageable);
@@ -339,41 +316,27 @@ public class WebAgreementStaffService {
                     ? agreementRepository.findByOwnerUserIdAndDeletedFalse(callerId, pageable)
                     : agreementRepository.findByOwnerUserIdAndStatusAndDeletedFalse(callerId, status.trim(), pageable);
         }
-        populateOwnerNames(page.getContent());
+        access.populateOwnerNames(page.getContent());
+        approvalSummary.populate(page.getContent());
         WebAgreementRules.stripSensitivePii(entityManager, page.getContent());
         return page;
     }
 
     /**
-     * One agreement with its timeline: {application, events}. Full detail
-     * (PII included) for the owner or an admin, with the take-back state of
-     * an open change request resolved.
+     * One agreement with its timeline and approver gates: {application,
+     * events, approvals (oldest first)}. Full detail (PII included) for the
+     * owner or an admin, with the take-back state of an open change request
+     * resolved.
      */
     @Transactional(readOnly = true)
     public Map<String, Object> detail(String applicationId, Long callerId) {
         WebAgreement a = requireAccess(applicationId, callerId);
-        populateOwnerNames(List.of(a));
+        access.populateOwnerNames(List.of(a));
         Map<String, Object> view = new LinkedHashMap<>();
         view.put("application", decorateRevokeState(a));
         view.put("events", eventService.list(a.getId()));
+        view.put("approvals", approvalService.listApprovals(a.getId()));
         return view;
-    }
-
-    /** The owning ERM's display name on each row (one query for the page). */
-    private void populateOwnerNames(List<WebAgreement> agreements) {
-        if (agreements == null || agreements.isEmpty()) return;
-        Set<Long> ownerIds = agreements.stream()
-                .map(WebAgreement::getOwnerUserId)
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
-        if (ownerIds.isEmpty()) return;
-        Map<Long, String> idToName = new HashMap<>();
-        for (User u : userRepository.findAllById(ownerIds)) {
-            idToName.put(u.getId(), u.getFullName());
-        }
-        for (WebAgreement a : agreements) {
-            if (a.getOwnerUserId() != null) a.setOwnerName(idToName.get(a.getOwnerUserId()));
-        }
     }
 
     // ── Cancel, contact ──────────────────────────────────────────────
@@ -1032,10 +995,17 @@ public class WebAgreementStaffService {
     // ── Verify ───────────────────────────────────────────────────────
 
     /**
-     * The ERM verifies the signed agreement (the console's consultant-version
-     * release, without the PDF): only from VERIFIED and not yet verified.
-     * The status stays VERIFIED; a change request is still possible
-     * afterwards, and a resubmit clears the verification again.
+     * The ERM verifies the signed agreement: the console's "Approve
+     * consultant version" (ermApproveConsultantVersion, one transaction)
+     * without the email. Only from VERIFIED, and every click releases the
+     * next version (V1, V2, …): the ERM preview render (participant
+     * signatures, main ERM signature blank, uploads appended) plus the
+     * Certificate of Completion, stored under the participant's folder.
+     * The agreement points at it, the status stays VERIFIED and the
+     * participant sees "Verified" on their dashboard. A change request is
+     * still possible afterwards, and a resubmit clears the verification, so
+     * the next Verify mints the next version. A render or storage failure
+     * is a 409 and changes nothing.
      */
     @Transactional
     public WebAgreement verify(String applicationId, Long callerId, HttpServletRequest request) {
@@ -1043,9 +1013,6 @@ public class WebAgreementStaffService {
         if (!WebAgreement.Status.VERIFIED.name().equals(a.getStatus())) {
             throw new IllegalStateException(
                     "Only VERIFIED applications can be verified (status=" + a.getStatus() + ").");
-        }
-        if (Boolean.TRUE.equals(a.getConsultantCopyReleased())) {
-            throw new IllegalStateException("This agreement is already verified.");
         }
         // The participant signed over the rate card and the deliverables
         // period; an agreement without them can't be verified.
@@ -1065,6 +1032,10 @@ public class WebAgreementStaffService {
                     + " empty. Send it back with a revision request that fills "
                     + (missing.size() == 1 ? "it" : "them") + " in.");
         }
+        // Render + certificate + store + the version row; sets
+        // consultantPdfS3Key and documentHash on the agreement.
+        WebAgreementVersionService.Release release = versionService.release(a);
+
         a.setConsultantCopyReleased(true);
         a.setConsultantCopyReleasedAt(LocalDateTime.now());
         a.setConsultantCopyReleasedBy(String.valueOf(callerId));
@@ -1073,29 +1044,63 @@ public class WebAgreementStaffService {
         eventService.append(a.getId(),
                 WebAgreementEvent.EventType.VERIFIED,
                 WebAgreementEvent.ActorType.ERM, callerId,
-                Map.of("revisionCount", a.getRevisionCount() == null ? 0 : a.getRevisionCount()),
+                Map.of("revisionCount", a.getRevisionCount() == null ? 0 : a.getRevisionCount(),
+                        "s3Key", release.storedKey(),
+                        "documentHash", release.sha256(),
+                        "version", String.valueOf(release.versionNumber()),
+                        "bytes", String.valueOf(release.bytes())),
                 request);
 
         return a;
     }
 
+    // ── Versions ─────────────────────────────────────────────────────
+
+    /** The verified versions (V1, V2, …), oldest first. Owner or admin. */
+    @Transactional(readOnly = true)
+    public List<WebAgreementVersion> versions(String applicationId, Long callerId) {
+        WebAgreement a = requireAccess(applicationId, callerId);
+        return versionService.list(a.getId());
+    }
+
+    /**
+     * Version {@code n}'s stored PDF, ready to stream (no re-render). 404
+     * when the version doesn't exist; null when its file is gone.
+     */
+    @Transactional(readOnly = true)
+    public WebAgreementFileService.Download versionPdf(String applicationId, int versionNumber, Long callerId) {
+        WebAgreement a = requireAccess(applicationId, callerId);
+        byte[] bytes = versionService.bytes(a.getId(), versionNumber);
+        if (bytes == null || bytes.length == 0) return null;
+        return new WebAgreementFileService.Download(bytes, "application/pdf",
+                "SageITCO-ConsultantVersion-V" + versionNumber + "_" + a.getApplicationId() + ".pdf");
+    }
+
     // ── Preview and documents ────────────────────────────────────────
+
+    /** The statuses the ERM preview is available in: signed, until countersigned. */
+    private static final Set<String> PREVIEWABLE = Set.of(
+            WebAgreement.Status.VERIFIED.name(),
+            WebAgreement.Status.AWAITING_APPROVALS.name(),
+            WebAgreement.Status.APPROVAL_REVISION_REQUESTED.name(),
+            WebAgreement.Status.READY_TO_SIGN.name());
 
     /**
      * The participant-signed agreement as a PDF with the uploaded documents
      * appended (ERM preview: no ERM signature). Rendered on request, never
-     * stored. Only once signed (VERIFIED, 409 otherwise); a render failure
-     * throws {@link WebAgreementRenderer.RenderException}.
+     * stored. Once signed and until countersigned (VERIFIED, the approval
+     * stages and READY_TO_SIGN; 409 otherwise); a render failure throws
+     * {@link WebAgreementRenderer.RenderException}.
      */
     public WebAgreementFileService.Download previewPdf(String applicationId, Long callerId) {
         WebAgreement a = requireAccess(applicationId, callerId);
-        if (!WebAgreement.Status.VERIFIED.name().equals(a.getStatus())) {
+        if (a.getStatus() == null || !PREVIEWABLE.contains(a.getStatus())) {
             throw new IllegalStateException(
                     "The preview is available once the consultant has signed (status="
                             + a.getStatus() + ").");
         }
-        byte[] bytes = renderer.renderPdf(a, true, null);
-        String filename = "preview-" + AgreementDocumentService.buildPdfFilename(renderer.toTransient(a));
+        byte[] bytes = renderer.renderErmPreviewPdf(a);
+        String filename = "preview-" + WebAgreementDocumentEngine.buildPdfFilename(a);
         return new WebAgreementFileService.Download(bytes, "application/pdf", filename);
     }
 

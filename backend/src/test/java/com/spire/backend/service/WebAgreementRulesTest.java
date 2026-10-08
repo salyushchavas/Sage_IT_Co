@@ -211,12 +211,14 @@ class WebAgreementRulesTest {
     }
 
     @Test
-    void revisionsCanOnlyBeRequestedFromVerifiedForNow() {
-        assertTrue(WebAgreementRules.isRevisionRequestable("VERIFIED"));
-        for (String s : List.of("SUBMITTED", "REVISION_REQUESTED", "AWAITING_APPROVALS", "READY_TO_SIGN",
-                "COMPLETED", "CANCELLED")) {
+    void revisionsCanBeRequestedOnceSignedAndThroughEveryApprovalStage() {
+        for (String s : List.of("VERIFIED", "AWAITING_APPROVALS", "APPROVAL_REVISION_REQUESTED", "READY_TO_SIGN")) {
+            assertTrue(WebAgreementRules.isRevisionRequestable(s), s);
+        }
+        for (String s : List.of("SUBMITTED", "REVISION_REQUESTED", "COMPLETED", "CANCELLED")) {
             assertFalse(WebAgreementRules.isRevisionRequestable(s), s);
         }
+        assertFalse(WebAgreementRules.isRevisionRequestable(null));
     }
 
     @Test

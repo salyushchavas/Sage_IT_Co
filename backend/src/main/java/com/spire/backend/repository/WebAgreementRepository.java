@@ -48,6 +48,19 @@ public interface WebAgreementRepository extends JpaRepository<WebAgreement, Long
 
     Page<WebAgreement> findByStatusAndDeletedFalse(String status, Pageable pageable);
 
+    // Approval board: agreements in the approval statuses, newest change first.
+    // Admins see every owner; an ERM sees their own.
+    List<WebAgreement> findByStatusInAndDeletedFalseOrderByUpdatedAtDesc(Collection<String> statuses);
+
+    List<WebAgreement> findByOwnerUserIdAndStatusInAndDeletedFalseOrderByUpdatedAtDesc(
+            Long ownerUserId, Collection<String> statuses);
+
+    /** Every live agreement in one status (the System Admin's regenerate / revoke tools). */
+    List<WebAgreement> findByStatusAndDeletedFalse(String status);
+
+    /** Live agreements an ERM owns (the user-delete guard). */
+    long countByOwnerUserIdAndDeletedFalse(Long ownerUserId);
+
     /**
      * The staff list with a search and the "verified by the ERM" split.
      * Every filter is optional (null = any): ownerUserId scopes an ERM to

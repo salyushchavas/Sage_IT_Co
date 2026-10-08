@@ -28,6 +28,12 @@ import java.util.regex.Pattern;
  * that account goes there too, since the company address may not be a
  * mailbox. At first sign-in they must choose their own password.
  *
+ * The agreement approvers (MANAGER, ACCOUNTS) follow the console instead
+ * (AgreementAdminController:142-189, 214-241): no email; the temporary
+ * password comes back once in the response, for the System Admin to share.
+ * ERM, MANAGER and ACCOUNTS accounts need a title (printed on agreements),
+ * kept in web_agreement_staff_titles.
+ *
  * Participants aren't created here: they apply, an ERM confirms, and they
  * register from the emailed link (ParticipantApplicationService, which
  * also holds Operations' "Invite a participant").
@@ -41,12 +47,26 @@ public class StaffOnboardingService {
     public static final Map<String, String> STAFF_ROLES = new LinkedHashMap<>();
     static {
         STAFF_ROLES.put("ERM", "ERM (relationship manager)");
+        // The console's labels (UserModals.tsx:315, 684-688).
+        STAFF_ROLES.put("MANAGER", "Manager — approval gate (Phase 1 + 2)");
+        STAFF_ROLES.put("ACCOUNTS", "Accounts — approval gate (Phase 2)");
         STAFF_ROLES.put("COACH", "Coach");
         STAFF_ROLES.put("TECHNICAL_ADVISOR", "Technical advisor");
         STAFF_ROLES.put("FINANCE", "Finance");
         STAFF_ROLES.put("OPERATIONS_ADMIN", "Operations admin");
         STAFF_ROLES.put("SYSTEM_ADMIN", "System admin");
     }
+
+    /** The console's account roles: a title is required when one is added (AgreementAdminController:160-162). */
+    static final Set<String> TITLE_REQUIRED_ROLES = Set.of("ERM", "MANAGER", "ACCOUNTS");
+    /**
+     * Roles the website offered before the title box. Its form sends no
+     * title at all (the new one always sends the field, blank or not), so
+     * such a request still adds the account without one, as it did then.
+     */
+    static final Set<String> ROLES_ADDED_BEFORE_TITLES = Set.of("ERM");
+    /** New roles that follow the console: the temporary password is shown once on screen, never emailed. */
+    static final Set<String> NO_EMAIL_ROLES = Set.of("MANAGER", "ACCOUNTS");
 
     private static final Pattern EMAIL = Pattern.compile("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$");
     /** No look-alike characters (0/O, 1/l/I). */
@@ -58,12 +78,19 @@ public class StaffOnboardingService {
     private final PasswordEncoder passwordEncoder;
     private final RecordService recordService;
     private final EmailTemplateService emailTemplateService;
+    private final WebAgreementStaffTitleService staffTitleService;
 
-    /** What happened: the account, and whether the login email went out (and where). */
-    public record Result(UserDTO user, boolean emailSent, String sentTo) {}
+    /**
+     * What happened: the account, and whether the login email went out (and
+     * where). For MANAGER and ACCOUNTS nothing is emailed: emailSent is
+     * false, sentTo null, and temporaryPassword holds the one-time password
+     * to show on screen (null for every other role).
+     */
+    public record Result(UserDTO user, boolean emailSent, String sentTo, String temporaryPassword) {}
 
     @Transactional
-    public Result createStaff(Long callerId, String fullName, String loginEmail, String personalEmail, String roleName) {
+    public Result createStaff(Long callerId, String fullName, String loginEmail, String personalEmail, String roleName,
+                              String title) {
         User caller = requireRole(callerId, Set.of("SYSTEM_ADMIN"), "Only a System Admin can add staff accounts.");
         String name = PersonNames.clean(fullName);
         String login = email(loginEmail, "company (login) email");
@@ -73,6 +100,9 @@ public class StaffOnboardingService {
         if (!STAFF_ROLES.containsKey(role)) {
             throw new IllegalArgumentException("Pick a staff role: " + String.join(", ", STAFF_ROLES.values()) + ".");
         }
+        boolean titleRequired = TITLE_REQUIRED_ROLES.contains(role)
+                && !(title == null && ROLES_ADDED_BEFORE_TITLES.contains(role));
+        String cleanTitle = WebAgreementStaffTitleService.clean(title, titleRequired);
         if (userRepository.existsByEmailIgnoreCase(login)) {
             throw new IllegalStateException("There's already an account with " + login + ".");
         }
@@ -97,14 +127,21 @@ public class StaffOnboardingService {
                 "Staff account created",
                 STAFF_ROLES.get(role) + " account created by " + caller.getFullName() + " (user #" + callerId + ")",
                 Map.of("role", role, "createdBy", callerId, "personalEmail", personal == null ? "" : personal));
+        if (!cleanTitle.isEmpty()) staffTitleService.setTitle(saved.getId(), cleanTitle, callerId);
+        if (NO_EMAIL_ROLES.contains(role)) {
+            log.info("Staff account {} ({}) created by user {}; password shown on screen, no email", saved.getId(), role, callerId);
+            return new Result(UserDTO.from(saved), false, null, temporary);
+        }
         boolean sent = emailTemplateService.sendStaffLoginEmail(saved, STAFF_ROLES.get(role), temporary, false);
         log.info("Staff account {} ({}) created by user {}; login email sent: {}", saved.getId(), role, callerId, sent);
-        return new Result(UserDTO.from(saved), sent, personal != null ? personal : login);
+        return new Result(UserDTO.from(saved), sent, personal != null ? personal : login, null);
     }
 
     /**
      * A new temporary password, emailed like the first one (e.g. they lost
      * it, or the first email didn't arrive). They must change it again.
+     * For MANAGER and ACCOUNTS it is the console's "Reset password": no
+     * email, the password comes back once in the result.
      */
     @Transactional
     public Result sendNewLoginDetails(Long callerId, Long userId) {
@@ -126,13 +163,21 @@ public class StaffOnboardingService {
         user.setMustChangePassword(true);
         user.endEarlierSessions();
         User saved = userRepository.save(user);
+        if (NO_EMAIL_ROLES.contains(role)) {
+            recordService.record(userId, "ACCOUNT_LOGIN_DETAILS_SENT", RecordService.Category.SECURITY,
+                    "Password reset",
+                    "A new temporary password was set by " + caller.getFullName() + " (user #" + callerId
+                            + ") and shown on screen; no email was sent",
+                    Map.of("sentBy", callerId));
+            return new Result(UserDTO.from(saved), false, null, temporary);
+        }
         recordService.record(userId, "ACCOUNT_LOGIN_DETAILS_SENT", RecordService.Category.SECURITY,
                 "New login details sent",
                 "A new temporary password was emailed by " + caller.getFullName() + " (user #" + callerId + ")",
                 Map.of("sentBy", callerId));
         boolean sent = emailTemplateService.sendStaffLoginEmail(saved, STAFF_ROLES.get(role), temporary, true);
         String to = saved.getPersonalEmail() != null ? saved.getPersonalEmail() : saved.getEmail();
-        return new Result(UserDTO.from(saved), sent, to);
+        return new Result(UserDTO.from(saved), sent, to, null);
     }
 
     /** "Kp7m-X2qd-9RtW-hn4c": four groups of four, no look-alike characters (about 94 bits). */

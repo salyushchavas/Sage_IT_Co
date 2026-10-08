@@ -3,7 +3,9 @@ package com.spire.backend.controller;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.spire.backend.dto.ApiResponse;
 import com.spire.backend.entity.WebAgreement;
+import com.spire.backend.entity.WebAgreementVersion;
 import com.spire.backend.service.MasterAgreementService;
+import com.spire.backend.service.WebAgreementApprovalService;
 import com.spire.backend.service.WebAgreementFileService;
 import com.spire.backend.service.WebAgreementRenderer;
 import com.spire.backend.service.WebAgreementRules;
@@ -29,9 +31,10 @@ import java.util.Map;
 /**
  * The staff side of the website agreement (the console's
  * /api/agreement-erm/** for website ERMs): the participants who are ready,
- * create, the list, the detail, and the review actions. Operations and
- * System admins see and act on every agreement; an ERM only on the ones they
- * created (anything else is "not found"). The service enforces that.
+ * create, the list, the detail, the review actions, the verified versions,
+ * sending for approval and the approval board. Operations and System admins
+ * see and act on every agreement; an ERM only on the ones they created
+ * (anything else is "not found"). The services enforce that.
  *
  * The preview needs LibreOffice; when it is missing (a dev laptop) it fails
  * with 500 and a short reason on {@code X-Preview-Error}, like the console.
@@ -47,6 +50,7 @@ public class WebAgreementStaffController {
     private static final String DOC_PATHS = "{doc:workauth|offer-letter|dl-doc|state-id-doc|ssn-doc}";
 
     private final WebAgreementStaffService staffService;
+    private final WebAgreementApprovalService approvalService;
 
     // ── Participants ready for their agreement ───────────────────────
 
@@ -95,7 +99,16 @@ public class WebAgreementStaffController {
                 PageResponse.from(staffService.list(status, q, released, pageable, userId(auth)))));
     }
 
-    /** {application, events}. */
+    /**
+     * The approval board: agreements in an approval stage, each as
+     * {application, approvals}. An ERM's own; every one for admins.
+     */
+    @GetMapping("/approval-board")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> approvalBoard(Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success(approvalService.approvalBoard(userId(auth))));
+    }
+
+    /** {application, events, approvals}. */
     @GetMapping("/{appId}")
     public ResponseEntity<ApiResponse<Map<String, Object>>> get(
             @PathVariable String appId, Authentication auth) {
@@ -176,12 +189,55 @@ public class WebAgreementStaffController {
                 "Change request withdrawn", staffService.decorateRevokeState(a)));
     }
 
-    /** The ERM verifies the signed agreement. */
+    /** The ERM verifies the signed agreement; every click releases the next version. */
     @PostMapping("/{appId}/verify")
     public ResponseEntity<ApiResponse<WebAgreement>> verify(
             @PathVariable String appId, Authentication auth, HttpServletRequest request) {
         return ResponseEntity.ok(ApiResponse.success(
                 "Verified", staffService.verify(appId, userId(auth), request)));
+    }
+
+    // ── Versions and sending for approval ────────────────────────────
+
+    /** The verified versions (V1, V2, …), oldest first. */
+    @GetMapping("/{appId}/versions")
+    public ResponseEntity<ApiResponse<List<WebAgreementVersion>>> versions(
+            @PathVariable String appId, Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success(staffService.versions(appId, userId(auth))));
+    }
+
+    /** One version's stored PDF (inline unless disposition=attachment, never cached). */
+    @GetMapping("/{appId}/versions/{versionNumber}/pdf")
+    public ResponseEntity<byte[]> versionPdf(
+            @PathVariable String appId,
+            @PathVariable int versionNumber,
+            @RequestParam(value = "disposition", required = false) String disposition,
+            Authentication auth) {
+        return stream(staffService.versionPdf(appId, versionNumber, userId(auth)), disposition);
+    }
+
+    /** The send pickers: {phase, managers, accounts} from the owning ERM's team. */
+    @GetMapping("/{appId}/eligible-approvers")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> eligibleApprovers(
+            @PathVariable String appId, Authentication auth) {
+        return ResponseEntity.ok(ApiResponse.success(
+                approvalService.eligibleApprovers(appId, userId(auth))));
+    }
+
+    /** Send for approval, and the re-send after an approver asked for a revision. */
+    @PostMapping("/{appId}/send-for-approval")
+    public ResponseEntity<ApiResponse<WebAgreement>> sendForApproval(
+            @PathVariable String appId,
+            @RequestBody(required = false) SendForApprovalBody body,
+            Authentication auth,
+            HttpServletRequest request) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "Sent for approval",
+                approvalService.sendForApproval(appId,
+                        body == null ? null : body.managerUserId,
+                        body == null ? null : body.accountsUserId,
+                        body == null ? null : body.versionNumber,
+                        userId(auth), request)));
     }
 
     // ── Preview and documents ────────────────────────────────────────
@@ -275,6 +331,15 @@ public class WebAgreementStaffController {
     public static class DocumentRevisionBody {
         public List<String> docKeys;
         public String note;
+    }
+
+    public static class SendForApprovalBody {
+        /** users.id of the chosen Manager (Phase 1 + 2). */
+        public Long managerUserId;
+        /** users.id of the chosen Accounts approver (Phase 2 only). */
+        public Long accountsUserId;
+        /** The version the approvers review; null = the latest. */
+        public Integer versionNumber;
     }
 
     public static class PageResponse<T> {

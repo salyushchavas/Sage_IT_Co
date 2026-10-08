@@ -19,9 +19,11 @@ import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Service
@@ -40,6 +42,9 @@ public class AdminService {
     private final RecordService recordService;
     private final AdminRevenueService adminRevenueService;
     private final com.spire.backend.repository.PaymentLedgerRepository paymentLedgerRepository;
+    private final WebAgreementRepository webAgreementRepository;
+    private final WebAgreementAssignmentService webAgreementAssignmentService;
+    private final WebAgreementStaffTitleService webAgreementStaffTitleService;
 
     /** Roles that may change other people's roles: System Admin, plus the legacy LMS admin. */
     private static final Set<String> ROLE_MANAGERS = Set.of("SYSTEM_ADMIN", "ADMIN");
@@ -51,7 +56,22 @@ public class AdminService {
      * participant's ID and SSN documents) or Finance (money writes).
      */
     static final Set<String> STAFF_ROLES = Set.of(
-            "SYSTEM_ADMIN", "ADMIN", "OPERATIONS_ADMIN", "FINANCE", "ERM", "COACH", "TECHNICAL_ADVISOR");
+            "SYSTEM_ADMIN", "ADMIN", "OPERATIONS_ADMIN", "FINANCE", "ERM", "COACH", "TECHNICAL_ADVISOR",
+            "MANAGER", "ACCOUNTS");
+    /**
+     * The agreement approvers: only a System Admin may deactivate, reactivate
+     * or delete them, as only the console's super-admin may
+     * (AgreementAdminController:191-212, 371-394).
+     */
+    private static final Set<String> APPROVER_ROLES = Set.of("MANAGER", "ACCOUNTS");
+    /**
+     * The website equivalents of the console's users. A role change to or
+     * from one of these ends the user's sessions (AgreementAdminController:360),
+     * and these are the accounts the user page's Details card edits.
+     */
+    static final Set<String> CONSOLE_ROLES = Set.of("ERM", "MANAGER", "ACCOUNTS", "OPERATIONS_ADMIN", "SYSTEM_ADMIN");
+    /** The console's email check for an edited login email (AgreementAdminController:286-289). */
+    private static final Pattern DETAILS_EMAIL = Pattern.compile("^[^\\s@]+@[^\\s@]+\\.[^\\s@]{2,}$");
     /** Accounts an Operations admin may deactivate, reactivate or delete. */
     private static final Set<String> PARTICIPANT_ROLES = Set.of("PARTICIPANT", "STUDENT");
 
@@ -69,13 +89,15 @@ public class AdminService {
     /**
      * Who may deactivate, reactivate or delete whom (roadmap §13): a System
      * Admin may manage anyone; the legacy LMS admin anyone but a top-level
-     * admin; an Operations admin only participant and student accounts.
+     * admin or an agreement approver (MANAGER, ACCOUNTS); an Operations admin
+     * only participant and student accounts.
      */
     private static void assertCanManageAccount(User caller, User target) {
         String callerRole = roleNameOf(caller);
         String targetRole = roleNameOf(target);
         if ("SYSTEM_ADMIN".equals(callerRole)) return;
-        if ("ADMIN".equals(callerRole) && !TOP_ADMIN_ROLES.contains(targetRole)) return;
+        if ("ADMIN".equals(callerRole) && !TOP_ADMIN_ROLES.contains(targetRole)
+                && !APPROVER_ROLES.contains(targetRole)) return;
         if (PARTICIPANT_ROLES.contains(targetRole)) return;
         throw new AccessDeniedException("Only a System Admin can change staff accounts.");
     }
@@ -295,6 +317,11 @@ public class AdminService {
      * may do this — an Operations admin could otherwise promote itself —
      * nobody may change their own role, and only a System Admin may grant
      * or remove a top-level admin role.
+     *
+     * When the role actually changes, the user's agreement team links and
+     * the pending approval gates routed to them no longer apply: they are
+     * purged (console AgreementAdminController:354-360). A change to or from
+     * one of the console's roles also ends the user's sessions.
      */
     @Transactional
     public UserDTO updateUserRole(Long userId, String roleName, Long callerId) {
@@ -331,6 +358,14 @@ public class AdminService {
             user.setInstructorApproved(false);
         }
 
+        String oldRoleName = roleNameOf(user);
+        if (!normalizedRole.equals(oldRoleName)) {
+            webAgreementAssignmentService.purgeUserLinks(userId, callerId);
+            if (CONSOLE_ROLES.contains(oldRoleName) || CONSOLE_ROLES.contains(normalizedRole)) {
+                user.endEarlierSessions();
+            }
+        }
+
         user.setRole(role);
         UserDTO saved = UserDTO.from(userRepository.save(user));
 
@@ -355,6 +390,11 @@ public class AdminService {
      *   - admins cannot soft-delete themselves (would lock them out)
      *   - admins cannot soft-delete other admins (admin role changes
      *     go through {@link #updateUserRole}, not deletion)
+     *   - a user who still owns website agreements is refused (disable
+     *     them instead), as the console refuses (AgreementAdminController:385-390)
+     *
+     * The user's agreement team links and routed pending gates are purged
+     * first, as the console's delete does.
      */
     @Transactional
     public UserDTO softDeleteUser(Long userId, Long currentAdminId) {
@@ -368,6 +408,12 @@ public class AdminService {
             throw new IllegalArgumentException("Admin accounts cannot be deactivated this way. Change their role first.");
         }
         assertCanManageAccount(requireCaller(currentAdminId), user);
+        long owned = webAgreementRepository.countByOwnerUserIdAndDeletedFalse(userId);
+        if (owned > 0) {
+            throw new IllegalStateException("This user owns " + owned + " agreement(s). Disable the user instead of "
+                    + "deleting — deleting would hide those agreements.");
+        }
+        webAgreementAssignmentService.purgeUserLinks(userId, currentAdminId);
 
         // Capture identifiers before scrubbing so the audit record
         // can name the original account, not the placeholder.
@@ -441,5 +487,86 @@ public class AdminService {
         }
 
         return saved;
+    }
+
+    // ── Staff details (the console's Edit details) ──────────────────
+
+    /** {fullName, email, title} of a staff account, for the Details card (System Admin only). */
+    @Transactional(readOnly = true)
+    public Map<String, String> getStaffDetails(Long userId, Long callerId) {
+        requireSystemAdmin(callerId);
+        return staffDetails(detailsTarget(userId));
+    }
+
+    /**
+     * Saves a staff account's name, agreement title and (optionally) login
+     * email, copying the console's Edit details (AgreementAdminController:253-301).
+     * Name and title are required; a blank or unchanged email is no change.
+     * A System Admin's login email can't be changed (the console blocks its
+     * super-admin's). Sessions already issued stay valid; a new email is used
+     * at the next sign-in. System Admin only, checked here because legacy
+     * ADMIN and Operations admins also reach /api/admin.
+     */
+    @Transactional
+    public Map<String, String> updateStaffDetails(Long userId, String fullName, String title, String email,
+                                                  Long callerId) {
+        requireSystemAdmin(callerId);
+        String name = fullName == null ? "" : fullName.trim();
+        String cleanTitle = title == null ? "" : title.trim();
+        if (name.isEmpty()) throw new IllegalArgumentException("Name is required.");
+        if (cleanTitle.isEmpty()) throw new IllegalArgumentException("Title is required.");
+        // users.full_name is 100 characters (the console allows 255).
+        if (name.length() > 100) throw new IllegalArgumentException("Name is too long (max 100 characters).");
+        cleanTitle = WebAgreementStaffTitleService.clean(cleanTitle, true);
+        User user = detailsTarget(userId);
+
+        String newEmail = email == null ? "" : email.trim().toLowerCase(Locale.ROOT);
+        if (!newEmail.isEmpty() && !newEmail.equalsIgnoreCase(user.getEmail())) {
+            if ("SYSTEM_ADMIN".equals(roleNameOf(user))) {
+                throw new IllegalStateException("A System Admin's login email can't be changed.");
+            }
+            if (newEmail.length() > 255 || !DETAILS_EMAIL.matcher(newEmail).matches()) {
+                throw new IllegalArgumentException("Enter a valid email address.");
+            }
+            if (userRepository.existsByEmailIgnoreCase(newEmail)) {
+                throw new IllegalStateException("Email already in use.");
+            }
+            user.setEmail(newEmail);
+        }
+        user.setFullName(name);
+        User saved = userRepository.save(user);
+        webAgreementStaffTitleService.setTitle(userId, cleanTitle, callerId);
+        return staffDetails(saved);
+    }
+
+    /** The account a Details card edits: 404 when unknown; 400 when it isn't one of the console's roles. */
+    private User detailsTarget(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User", "id", userId));
+        if (!CONSOLE_ROLES.contains(roleNameOf(user))) {
+            throw new IllegalArgumentException(
+                    "Details only apply to ERM, Manager, Accounts, Operations admin and System admin users.");
+        }
+        return user;
+    }
+
+    private Map<String, String> staffDetails(User user) {
+        Map<String, String> out = new LinkedHashMap<>();
+        out.put("fullName", user.getFullName() == null ? "" : user.getFullName());
+        out.put("email", user.getEmail() == null ? "" : user.getEmail());
+        out.put("title", webAgreementStaffTitleService.titleOf(user.getId()).orElse(""));
+        return out;
+    }
+
+    /**
+     * The caller, when they are an active System Admin; 403 otherwise
+     * (/api/admin also admits legacy ADMIN and Operations admins).
+     */
+    private User requireSystemAdmin(Long callerId) {
+        User caller = callerId == null ? null : userRepository.findById(callerId).orElse(null);
+        if (caller == null || Boolean.FALSE.equals(caller.getIsActive()) || !"SYSTEM_ADMIN".equals(roleNameOf(caller))) {
+            throw new AccessDeniedException("Only a System Admin can do this.");
+        }
+        return caller;
     }
 }

@@ -6,6 +6,7 @@ import com.spire.backend.entity.WebAgreement;
 import com.spire.backend.entity.WebAgreementEvent;
 import com.spire.backend.exception.IncompleteSubmissionException;
 import com.spire.backend.exception.ResourceNotFoundException;
+import com.spire.backend.exception.StorageUnavailableException;
 import com.spire.backend.repository.UserRepository;
 import com.spire.backend.repository.WebAgreementRepository;
 import org.junit.jupiter.api.BeforeEach;
@@ -43,6 +44,7 @@ class WebAgreementParticipantServiceTest {
     private final List<User> users = new ArrayList<>();
     private WebAgreementEventService events;
     private WebAgreementFileService files;
+    private WebAgreementRenderer renderer;
     private WebAgreementParticipantService service;
     private MockHttpServletRequest request;
 
@@ -62,8 +64,9 @@ class WebAgreementParticipantServiceTest {
         when(userRepo.findAll()).thenAnswer(inv -> List.copyOf(users));
         events = mock(WebAgreementEventService.class);
         files = mock(WebAgreementFileService.class);
-        service = new WebAgreementParticipantService(repo, events, files, mock(WebAgreementRenderer.class),
-                mock(AgreementContentService.class), mock(AgreementDocumentService.class), userRepo);
+        renderer = mock(WebAgreementRenderer.class);
+        service = new WebAgreementParticipantService(repo, events, files, renderer,
+                mock(WebAgreementContentService.class), userRepo);
 
         users.add(user(PAT, "pat@x.com", "PARTICIPANT", true));
         users.add(user(ERM, "erm@sage.test", "ERM", true));
@@ -90,6 +93,19 @@ class WebAgreementParticipantServiceTest {
     }
 
     // ── Only their own agreement ─────────────────────────────────────
+
+    @Test
+    void theTemplatePdfComesFromTheWebsitesOwnEngineAndBusyStaysA503() {
+        agreement("SUBMITTED");
+        byte[] pdf = {'%', 'P', 'D', 'F'};
+        when(renderer.renderBlankTemplatePdf()).thenReturn(pdf);
+        assertArrayEquals(pdf, service.templatePdf(PAT));
+
+        when(renderer.renderBlankTemplatePdf()).thenThrow(
+                new StorageUnavailableException(WebAgreementRenderer.BUSY_MESSAGE, null));
+        assertThrows(StorageUnavailableException.class, () -> service.templatePdf(PAT));
+        assertThrows(ResourceNotFoundException.class, () -> service.templatePdf(OTHER));
+    }
 
     @Test
     void someoneElseNeverReachesTheAgreement() {

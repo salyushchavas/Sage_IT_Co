@@ -11,13 +11,14 @@ import java.time.format.DateTimeFormatter;
 import java.util.Base64;
 
 /**
- * Files of a website agreement: the participant's uploads and the two
- * signature images. Everything goes through the website's
- * {@link DocumentStorageService} (S3 on live, the local disk on a laptop),
- * under the participant's own folder with a {@code web-agreement-} name, so
- * nothing ever lands under the console's {@code agreements/} prefix or goes
- * through the console's storage. The value it hands back is what the
- * agreement's *S3Key columns hold.
+ * Files of a website agreement: the participant's uploads, the signature
+ * images and the PDFs the website makes (verified versions, final PDFs).
+ * Everything goes through the website's {@link DocumentStorageService} (S3
+ * on live, the local disk on a laptop), under the participant's own folder
+ * with a {@code web-agreement-} name, so nothing ever lands under the
+ * console's {@code agreements/} prefix or goes through the console's
+ * storage. The value it hands back is what the agreement's *S3Key columns
+ * hold.
  *
  * Validation is the console's: 1 byte to 10 MB, a real picture
  * (jpeg/png/gif/webp/heic/heif, magic bytes checked) or a real PDF; SVG is
@@ -98,6 +99,20 @@ public class WebAgreementFileService {
             if (end > 5) mime = dataUrl.substring(5, end);
         }
         return storage.upload(agreement.getParticipantUserId(), fileName(role, "png"), bytes, mime).url();
+    }
+
+    /**
+     * Stores a PDF the website rendered (a verified version, a final PDF)
+     * for the agreement's participant and returns the value to keep on the
+     * row. {@code kind} names the file ("consultant-version-p1",
+     * "final-p2", …), so it lands as
+     * {@code web-agreement-{kind}-{yyyyMMdd-HHmmss}-{rand}.pdf}. Every call
+     * is a new file; an earlier one is never overwritten or deleted. Storage
+     * failures are thrown to the caller.
+     */
+    public String storePdf(WebAgreement agreement, String kind, byte[] bytes) {
+        return storage.upload(agreement.getParticipantUserId(), fileName(kind, "pdf"), bytes,
+                "application/pdf").url();
     }
 
     /**

@@ -27,8 +27,8 @@ import static org.mockito.Mockito.*;
 /**
  * The real agreement step: after the consent, "I'm ready to sign the
  * agreement"; the website ERMs start it from the participant's details and
- * the dashboard follows the website agreement. The office's agreements
- * console is never read, and nothing is emailed.
+ * the dashboard follows the website agreement, its phase included. The
+ * office's agreements console is never read, and nothing is emailed.
  */
 class MasterAgreementTest {
 
@@ -175,5 +175,31 @@ class MasterAgreementTest {
 
         a.setStatus("CANCELLED");
         assertNull(service.status(10L).get("agreement"), "a cancelled one is no agreement");
+    }
+
+    @Test
+    void theViewCarriesThePhaseForThePhase2Chip() {
+        service.request(10L);
+        WebAgreement a = webAgreement("COMPLETED");
+        assertEquals(1, shown().get("phase"), "a new agreement is Phase 1");
+        assertEquals(5, shown().get("step"));
+        assertEquals("Executed", shown().get("stage"));
+        assertEquals(true, shown().get("executed"));
+
+        a.setPhase(null);
+        assertEquals(1, shown().get("phase"), "unset counts as Phase 1");
+
+        // Advanced to Phase 2: back to the participant's turn, with the phase.
+        a.setPhase(2);
+        a.setStatus("SUBMITTED");
+        assertEquals(2, shown().get("phase"));
+        assertEquals(1, shown().get("step"));
+        assertEquals(true, shown().get("yourTurn"));
+        assertEquals(false, shown().get("executed"));
+
+        a.setStatus("READY_TO_SIGN");
+        assertEquals(4, shown().get("step"));
+        assertEquals("Waiting for the countersignature", shown().get("stage"));
+        assertEquals(2, shown().get("phase"));
     }
 }

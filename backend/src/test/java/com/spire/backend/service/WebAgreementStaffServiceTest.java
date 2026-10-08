@@ -3,18 +3,20 @@ package com.spire.backend.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.spire.backend.entity.AgreementRequest;
-import com.spire.backend.entity.ConsultantApplication;
 import com.spire.backend.entity.Role;
 import com.spire.backend.entity.User;
 import com.spire.backend.entity.WebAgreement;
+import com.spire.backend.entity.WebAgreementApproval;
 import com.spire.backend.entity.WebAgreementEvent;
+import com.spire.backend.entity.WebAgreementVersion;
 import com.spire.backend.exception.ResourceNotFoundException;
 import com.spire.backend.repository.AgreementRequestRepository;
-import com.spire.backend.repository.ConsultantApplicationRepository;
 import com.spire.backend.repository.ProgramSelectionRepository;
 import com.spire.backend.repository.UserRepository;
+import com.spire.backend.repository.WebAgreementApprovalRepository;
 import com.spire.backend.repository.WebAgreementEventRepository;
 import com.spire.backend.repository.WebAgreementRepository;
+import com.spire.backend.repository.WebAgreementVersionRepository;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -42,9 +44,10 @@ import static org.mockito.Mockito.*;
 /**
  * The staff side of the website agreement: who may start one and for whom,
  * ERMs only reach their own while admins reach all, lists carry no
- * sensitive PII, the three kinds of change request do what the console's
- * do, a request can be taken back until the participant acts on it, and
- * the ERM's verify is a one-time step on a signed agreement.
+ * sensitive PII but do carry the approval summary, the three kinds of
+ * change request do what the console's do (also during approval), a
+ * request can be taken back until the participant acts on it, and every
+ * Verify on a signed agreement releases the next numbered version.
  */
 class WebAgreementStaffServiceTest {
 
@@ -63,7 +66,13 @@ class WebAgreementStaffServiceTest {
     private AgreementRequestRepository requestRepo;
     private final ObjectMapper mapper = new ObjectMapper();
     private WebAgreementRenderer renderer;
+    private WebAgreementFileService fileService;
     private WebAgreementRepository repo;
+    /** web_agreement_approvals. */
+    private final List<WebAgreementApproval> gates = new ArrayList<>();
+    /** web_agreement_versions. */
+    private final List<WebAgreementVersion> versions = new ArrayList<>();
+    private final Map<String, byte[]> stored = new java.util.HashMap<>();
     private EntityManager entityManager;
     private WebAgreementStaffService service;
     private MockHttpServletRequest request;
@@ -143,12 +152,71 @@ class WebAgreementStaffServiceTest {
         ProgramSelectionRepository programs = mock(ProgramSelectionRepository.class);
         when(programs.findFirstByUserIdOrderBySelectionDateDesc(anyLong())).thenReturn(Optional.empty());
 
+        when(eventRepo.findByAgreementIdInAndEventType(any(), anyString())).thenAnswer(inv -> {
+            Collection<?> ids = inv.getArgument(0);
+            return events.stream().filter(e -> ids.contains(e.getAgreementId())
+                    && e.getEventType().equals(inv.getArgument(1))).toList();
+        });
+
+        // Verify's version: the ERM preview render + a certificate, stored
+        // through the (fake) website storage, one row per release.
         renderer = mock(WebAgreementRenderer.class);
+        when(renderer.renderErmPreviewPdf(any())).thenReturn("%PDF-1.7 body".getBytes());
+        WebAgreementCertificateService certificate = mock(WebAgreementCertificateService.class);
+        try {
+            when(certificate.appendCertificateAndStamp(any(), any())).thenAnswer(inv ->
+                    (new String(inv.<byte[]>getArgument(0)) + " + certificate").getBytes());
+        } catch (java.io.IOException e) {
+            throw new IllegalStateException(e);
+        }
+        fileService = mock(WebAgreementFileService.class);
+        when(fileService.storePdf(any(), anyString(), any())).thenAnswer(inv -> {
+            WebAgreement a = inv.getArgument(0);
+            String key = "participant-documents/" + a.getParticipantUserId() + "/web-agreement-"
+                    + inv.getArgument(1) + "-" + (stored.size() + 1) + ".pdf";
+            stored.put(key, inv.getArgument(2));
+            return key;
+        });
+        when(fileService.readBytes(anyString())).thenAnswer(inv -> stored.get(inv.<String>getArgument(0)));
+        WebAgreementVersionRepository versionRepo = mock(WebAgreementVersionRepository.class);
+        when(versionRepo.save(any())).thenAnswer(inv -> {
+            WebAgreementVersion v = inv.getArgument(0);
+            v.setId((long) versions.size() + 1);
+            v.setApprovedAt(LocalDateTime.now());
+            versions.add(v);
+            return v;
+        });
+        when(versionRepo.findTopByAgreementIdOrderByVersionNumberDesc(anyLong())).thenAnswer(inv -> versions.stream()
+                .filter(v -> v.getAgreementId().equals(inv.getArgument(0)))
+                .max(java.util.Comparator.comparing(WebAgreementVersion::getVersionNumber)));
+        when(versionRepo.findByAgreementIdAndVersionNumber(anyLong(), anyInt())).thenAnswer(inv -> versions.stream()
+                .filter(v -> v.getAgreementId().equals(inv.getArgument(0))
+                        && v.getVersionNumber().equals(inv.getArgument(1))).findFirst());
+        when(versionRepo.findByAgreementIdOrderByVersionNumberAsc(anyLong())).thenAnswer(inv -> versions.stream()
+                .filter(v -> v.getAgreementId().equals(inv.getArgument(0)))
+                .sorted(java.util.Comparator.comparing(WebAgreementVersion::getVersionNumber)).toList());
+        WebAgreementVersionService versionService =
+                new WebAgreementVersionService(renderer, certificate, fileService, versionRepo);
+
+        WebAgreementApprovalRepository gateRepo = mock(WebAgreementApprovalRepository.class);
+        when(gateRepo.findByAgreementIdOrderByCreatedAtAsc(anyLong())).thenAnswer(inv -> gates.stream()
+                .filter(g -> g.getAgreementId().equals(inv.getArgument(0)))
+                .sorted(java.util.Comparator.comparing(WebAgreementApproval::getCreatedAt)).toList());
+        when(gateRepo.findByAgreementIdIn(any())).thenAnswer(inv -> {
+            Collection<?> ids = inv.getArgument(0);
+            return gates.stream().filter(g -> ids.contains(g.getAgreementId())).toList();
+        });
+
+        WebAgreementEventService eventService = new WebAgreementEventService(eventRepo);
+        WebAgreementAccess access = new WebAgreementAccess(repo, userRepo);
+        WebAgreementApprovalService approvalService = new WebAgreementApprovalService(repo, gateRepo,
+                versionRepo, mock(WebAgreementAssignmentService.class), eventService, access);
 
         MasterAgreementService master = new MasterAgreementService(requestRepo, repo, userRepo,
                 programs, mock(RecordService.class));
-        service = new WebAgreementStaffService(repo, new WebAgreementEventService(eventRepo),
-                mock(WebAgreementFileService.class), renderer, master, userRepo, requestRepo);
+        service = new WebAgreementStaffService(repo, eventService, fileService, renderer, master, userRepo,
+                requestRepo, access, versionService, new WebAgreementApprovalSummary(gateRepo, eventRepo),
+                approvalService);
         entityManager = mock(EntityManager.class);
         ReflectionTestUtils.setField(service, "entityManager", entityManager);
 
@@ -626,10 +694,13 @@ class WebAgreementStaffServiceTest {
     // ── Verify, cancel, contact, preview ─────────────────────────────
 
     @Test
-    void verifyIsAOneTimeStepOnASignedAgreement() {
+    void everyVerifyReleasesTheNextNumberedVersion() throws Exception {
         WebAgreement a = signed();
         a.setStatus("SUBMITTED");
-        assertThrows(IllegalStateException.class, () -> service.verify(a.getApplicationId(), ERM, request));
+        IllegalStateException early = assertThrows(IllegalStateException.class,
+                () -> service.verify(a.getApplicationId(), ERM, request));
+        assertEquals("Only VERIFIED applications can be verified (status=SUBMITTED).", early.getMessage());
+        assertTrue(versions.isEmpty());
 
         a.setStatus("VERIFIED");
         WebAgreement out = service.verify(a.getApplicationId(), ERM, request);
@@ -637,10 +708,103 @@ class WebAgreementStaffServiceTest {
         assertTrue(out.getConsultantCopyReleased());
         assertNotNull(out.getConsultantCopyReleasedAt());
         assertEquals("20", out.getConsultantCopyReleasedBy());
-        assertEquals(ERM, eventsOf(a, WebAgreementEvent.EventType.VERIFIED).get(0).getActorUserId());
+        verify(renderer).renderErmPreviewPdf(a);
+
+        // V1: the ERM preview + certificate, stored under the participant's
+        // folder (never the console's agreements/ prefix), and the agreement
+        // points at it.
+        assertEquals(1, versions.size());
+        WebAgreementVersion v1 = versions.get(0);
+        assertEquals(1, v1.getVersionNumber());
+        assertEquals(a.getId(), v1.getAgreementId());
+        assertEquals(1, v1.getPhase());
+        assertEquals("participant-documents/10/web-agreement-consultant-version-p1-1.pdf", v1.getS3Key());
+        assertFalse(v1.getS3Key().startsWith("agreements/"));
+        assertEquals(v1.getS3Key(), out.getConsultantPdfS3Key());
+        assertEquals(WebAgreementCertificateService.sha256Hex("%PDF-1.7 body + certificate".getBytes()),
+                out.getDocumentHash());
+        assertEquals(out.getDocumentHash(), v1.getDocumentHash());
+
+        WebAgreementEvent verified = eventsOf(a, WebAgreementEvent.EventType.VERIFIED).get(0);
+        assertEquals(ERM, verified.getActorUserId());
+        JsonNode meta = mapper.readTree(verified.getMetadata());
+        assertEquals(0, meta.path("revisionCount").asInt());
+        assertEquals(v1.getS3Key(), meta.path("s3Key").asText());
+        assertEquals(out.getDocumentHash(), meta.path("documentHash").asText());
+        assertEquals("1", meta.path("version").asText());
+        assertEquals(String.valueOf("%PDF-1.7 body + certificate".length()), meta.path("bytes").asText());
         assertTrue(eventsOf(a, WebAgreementEvent.EventType.EMAIL_SENT).isEmpty(), "no email is sent");
 
-        assertThrows(IllegalStateException.class, () -> service.verify(a.getApplicationId(), ERM, request));
+        // A second click re-verifies: V2, the agreement now points at it.
+        WebAgreement again = service.verify(a.getApplicationId(), ERM, request);
+        assertEquals(2, versions.size());
+        assertEquals(2, versions.get(1).getVersionNumber());
+        assertEquals(versions.get(1).getS3Key(), again.getConsultantPdfS3Key());
+        assertNotEquals(v1.getS3Key(), again.getConsultantPdfS3Key(), "V1's file is kept as it was");
+        assertEquals("2", mapper.readTree(eventsOf(a, WebAgreementEvent.EventType.VERIFIED).get(1).getMetadata())
+                .path("version").asText());
+    }
+
+    @Test
+    void aVerifyThatCantRenderOrStoreChangesNothing() {
+        WebAgreement a = signed();
+        doThrow(new WebAgreementRenderer.RenderException(new RuntimeException("soffice not found")))
+                .when(renderer).renderErmPreviewPdf(a);
+        IllegalStateException render = assertThrows(IllegalStateException.class,
+                () -> service.verify(a.getApplicationId(), ERM, request));
+        assertEquals("Couldn't render consultant-version PDF: soffice not found", render.getMessage());
+
+        WebAgreement b = signed();
+        doThrow(new IllegalStateException("S3 down")).when(fileService).storePdf(eq(b), anyString(), any());
+        IllegalStateException store = assertThrows(IllegalStateException.class,
+                () -> service.verify(b.getApplicationId(), ERM, request));
+        assertEquals("Couldn't store consultant-version PDF: S3 down", store.getMessage());
+
+        for (WebAgreement x : List.of(a, b)) {
+            assertFalse(x.getConsultantCopyReleased());
+            assertNull(x.getConsultantPdfS3Key());
+            assertNull(x.getDocumentHash());
+            assertTrue(eventsOf(x, WebAgreementEvent.EventType.VERIFIED).isEmpty());
+        }
+        assertTrue(versions.isEmpty());
+        verify(repo, never()).save(any());
+    }
+
+    @Test
+    void verifyStillNeedsTheRateCardAndDeliverables() {
+        WebAgreement a = signed();
+        a.setRateAmount2(" ");
+        a.setPhase2DeliverablePeriod(null);
+        IllegalStateException e = assertThrows(IllegalStateException.class,
+                () -> service.verify(a.getApplicationId(), ERM, request));
+        assertTrue(e.getMessage().startsWith("This agreement can't be verified: Amount 2 and Phase 2 "
+                + "deliverables period are empty."));
+        verifyNoInteractions(renderer);
+        assertTrue(versions.isEmpty());
+    }
+
+    @Test
+    void theVersionsAreListedAndStreamedForTheOwnerOrAnAdminOnly() {
+        WebAgreement a = signed();
+        service.verify(a.getApplicationId(), ERM, request);
+        service.verify(a.getApplicationId(), ERM, request);
+
+        assertEquals(List.of(1, 2), service.versions(a.getApplicationId(), ERM).stream()
+                .map(WebAgreementVersion::getVersionNumber).toList());
+        assertEquals(2, service.versions(a.getApplicationId(), OPS).size());
+        assertThrows(ResourceNotFoundException.class, () -> service.versions(a.getApplicationId(), OTHER_ERM));
+        assertThrows(AccessDeniedException.class, () -> service.versions(a.getApplicationId(), COACH));
+
+        WebAgreementFileService.Download v2 = service.versionPdf(a.getApplicationId(), 2, SYS);
+        assertEquals("application/pdf", v2.contentType());
+        assertEquals("SageITCO-ConsultantVersion-V2_" + a.getApplicationId() + ".pdf", v2.filename());
+        assertEquals("%PDF-1.7 body + certificate", new String(v2.bytes()), "the stored bytes, no re-render");
+        verify(renderer, times(2)).renderErmPreviewPdf(a);
+
+        assertThrows(ResourceNotFoundException.class, () -> service.versionPdf(a.getApplicationId(), 3, ERM));
+        assertThrows(ResourceNotFoundException.class, () -> service.versionPdf(a.getApplicationId(), 1, OTHER_ERM));
+        stored.clear();
+        assertNull(service.versionPdf(a.getApplicationId(), 1, ERM), "file gone: the controller answers 404");
     }
 
     @Test
@@ -678,20 +842,108 @@ class WebAgreementStaffServiceTest {
     }
 
     @Test
-    void thePreviewIsOnlyForASignedAgreement() {
+    void thePreviewIsForASignedAgreementUntilItIsCountersigned() {
         WebAgreement a = signed();
-        a.setStatus("REVISION_REQUESTED");
-        assertThrows(IllegalStateException.class, () -> service.previewPdf(a.getApplicationId(), ERM));
+        for (String st : List.of("SUBMITTED", "REVISION_REQUESTED", "COMPLETED", "CANCELLED")) {
+            a.setStatus(st);
+            assertThrows(IllegalStateException.class, () -> service.previewPdf(a.getApplicationId(), ERM), st);
+        }
         verifyNoInteractions(renderer);
 
-        a.setStatus("VERIFIED");
         a.setSignedLegalName("Pat Lee");
-        when(renderer.renderPdf(a, true, null)).thenReturn("%PDF-1.7".getBytes());
-        when(renderer.toTransient(a)).thenReturn(ConsultantApplication.builder()
-                .applicationId("web-" + a.getApplicationId()).signedLegalName("Pat Lee").build());
-        WebAgreementFileService.Download pdf = service.previewPdf(a.getApplicationId(), ERM);
-        assertEquals("application/pdf", pdf.contentType());
-        assertTrue(pdf.filename().startsWith("preview-SageITCO-Agreement_"));
-        verify(renderer).renderPdf(a, true, null);
+        for (String st : List.of("VERIFIED", "AWAITING_APPROVALS", "APPROVAL_REVISION_REQUESTED", "READY_TO_SIGN")) {
+            a.setStatus(st);
+            WebAgreementFileService.Download pdf = service.previewPdf(a.getApplicationId(), ERM);
+            assertEquals("application/pdf", pdf.contentType(), st);
+            assertEquals("preview-SageITCO-Agreement_Pat-Lee.pdf", pdf.filename(), st);
+            assertEquals("%PDF-1.7 body", new String(pdf.bytes()), st);
+        }
+        verify(renderer, times(4)).renderErmPreviewPdf(a);
+    }
+
+    // ── During approval ──────────────────────────────────────────────
+
+    @Test
+    void everyKindOfChangeRequestCanBeSentFromEachApprovalStage() throws Exception {
+        for (String st : List.of("AWAITING_APPROVALS", "APPROVAL_REVISION_REQUESTED", "READY_TO_SIGN")) {
+            WebAgreement a = signed();
+            a.setStatus(st);
+            assertEquals("REVISION_REQUESTED", service.requestRevision(a.getApplicationId(),
+                    sections("[{\"key\":\"cover\"}]"), null, null, null, null, null, null, null,
+                    ERM, request).getStatus(), st);
+            assertEquals(st, a.getRevisionPrevStatus());
+
+            WebAgreement b = signed();
+            b.setStatus(st);
+            assertEquals("REVISION_REQUESTED",
+                    service.requestSignatureRevision(b.getApplicationId(), null, ERM, request).getStatus(), st);
+
+            WebAgreement c = signed();
+            c.setStatus(st);
+            assertEquals("REVISION_REQUESTED", service.requestDocumentRevision(c.getApplicationId(),
+                    List.of("doc:workauth"), null, ERM, request).getStatus(), st);
+        }
+    }
+
+    @Test
+    void aTakeBackDuringApprovalRestoresTheApprovalStageAndLeavesTheGatesAlone() throws Exception {
+        WebAgreement a = signed();
+        a.setStatus("AWAITING_APPROVALS");
+        a.setConsultantCopyReleased(true);
+        a.setApprovalVersionNumber(1);
+        WebAgreementApproval gate = WebAgreementApproval.builder().id(1L).agreementId(a.getId())
+                .role("MANAGER").status("PENDING").phase(1).round(1).approverUserId(50L)
+                .approverName("Mona One").createdAt(LocalDateTime.now()).build();
+        gates.add(gate);
+
+        service.requestRevision(a.getApplicationId(), sections("[{\"key\":\"exhibit-a\"}]"),
+                null, null, null, null, null, null, null, ERM, request);
+        assertEquals("REVISION_REQUESTED", a.getStatus());
+        assertEquals("PENDING", gate.getStatus(), "the open gate is not closed (L-D2)");
+
+        WebAgreement out = service.revokeRevision(a.getApplicationId(), ERM, request);
+        assertEquals("AWAITING_APPROVALS", out.getStatus());
+        assertEquals(1, out.getApprovalVersionNumber());
+        assertEquals("PENDING", gate.getStatus());
+        assertEquals("AWAITING_APPROVALS", mapper.readTree(
+                eventsOf(a, WebAgreementEvent.EventType.REVISION_REVOKED).get(0).getMetadata())
+                .path("restoredTo").asText());
+    }
+
+    @Test
+    void theListCarriesTheApprovalSummaryAndTheDetailCarriesTheGates() {
+        WebAgreement a = signed();
+        a.setStatus("APPROVAL_REVISION_REQUESTED");
+        WebAgreement quiet = signed();
+        LocalDateTime firstSent = LocalDateTime.of(2026, 10, 2, 9, 0);
+        events.add(WebAgreementEvent.builder().agreementId(a.getId())
+                .eventType(WebAgreementEvent.EventType.SENT_FOR_APPROVAL.name()).actorType("ERM")
+                .createdAt(firstSent).build());
+        events.add(WebAgreementEvent.builder().agreementId(a.getId())
+                .eventType(WebAgreementEvent.EventType.SENT_FOR_APPROVAL.name()).actorType("ERM")
+                .createdAt(firstSent.plusDays(2)).build());
+        WebAgreementApproval round1 = WebAgreementApproval.builder().id(1L).agreementId(a.getId())
+                .role("MANAGER").status("APPROVED").phase(1).round(1)
+                .createdAt(firstSent).build();
+        WebAgreementApproval round2 = WebAgreementApproval.builder().id(2L).agreementId(a.getId())
+                .role("MANAGER").status("REVISION_REQUESTED").phase(1).round(2)
+                .createdAt(firstSent.plusDays(2)).build();
+        gates.add(round2);
+        gates.add(round1);
+
+        service.list(null, PageRequest.of(0, 20), ERM);
+        assertEquals("REVISION_REQUESTED", a.getManagerStatus(), "the latest round");
+        assertNull(a.getAccountsStatus(), "no Accounts gate in Phase 1");
+        assertEquals(firstSent.toString(), a.getSentForApprovalAt(), "the first send");
+        assertNull(a.getBgFullSsn(), "still stripped");
+        assertNull(quiet.getManagerStatus());
+        assertNull(quiet.getSentForApprovalAt());
+
+        a.setBgFullSsn("123456789");
+        Map<String, Object> view = service.detail(a.getApplicationId(), ERM);
+        assertEquals(List.of("application", "events", "approvals"), List.copyOf(view.keySet()));
+        assertEquals(List.of(round1, round2), view.get("approvals"), "every gate, oldest first");
+        assertEquals("123456789", a.getBgFullSsn(), "the detail keeps the PII");
+        assertEquals(List.of(), service.detail(quiet.getApplicationId(), ERM).get("approvals"));
     }
 }

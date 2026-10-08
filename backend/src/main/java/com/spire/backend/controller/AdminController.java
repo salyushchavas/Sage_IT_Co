@@ -88,32 +88,77 @@ public class AdminController {
     // ─── Staff onboarding ────────────────────────────────────────────
 
     /**
-     * Adds a staff member (System Admin only): company login email, role and
-     * personal email. A temporary password is emailed to the personal email;
-     * they choose their own at first sign-in.
+     * Adds a staff member (System Admin only): company login email, role,
+     * personal email and title (required for ERM, MANAGER and ACCOUNTS; a
+     * body with no "title" key at all, from the form before the title box,
+     * still adds an ERM without one). A temporary password is emailed to the
+     * personal email; they choose their own at first sign-in. MANAGER and
+     * ACCOUNTS get no email: the response carries the temporary password
+     * once, as the console's create does.
      */
     @PostMapping("/users")
     public ResponseEntity<ApiResponse<Map<String, Object>>> createStaffUser(
             @RequestBody Map<String, String> body, Authentication authentication) {
         Long callerId = Long.parseLong(authentication.getPrincipal().toString());
         var result = staffOnboardingService.createStaff(callerId, body.get("fullName"), body.get("email"),
-                body.get("personalEmail"), body.get("role"));
+                body.get("personalEmail"), body.get("role"), body.get("title"));
+        if (result.temporaryPassword() != null) {
+            return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(ApiResponse.success(
+                    "Account created. Share the temporary password shown on screen.",
+                    Map.of("user", result.user(), "emailSent", false,
+                            "temporaryPassword", result.temporaryPassword())));
+        }
         return ResponseEntity.status(org.springframework.http.HttpStatus.CREATED).body(ApiResponse.success(
                 result.emailSent() ? "Account created; login details emailed to " + result.sentTo()
                         : "Account created, but the login email couldn't be sent. Use \"Send new login details\" once email works.",
                 Map.of("user", result.user(), "emailSent", result.emailSent(), "sentTo", result.sentTo())));
     }
 
-    /** A new temporary password for a staff member, emailed to them (System Admin only). */
+    /**
+     * A new temporary password for a staff member, emailed to them (System
+     * Admin only). MANAGER and ACCOUNTS: no email; the response carries the
+     * temporary password once (the console's "Reset password").
+     */
     @PostMapping("/users/{id}/send-login")
     public ResponseEntity<ApiResponse<Map<String, Object>>> sendNewLoginDetails(
             @PathVariable Long id, Authentication authentication) {
         Long callerId = Long.parseLong(authentication.getPrincipal().toString());
         var result = staffOnboardingService.sendNewLoginDetails(callerId, id);
+        if (result.temporaryPassword() != null) {
+            return ResponseEntity.ok(ApiResponse.success(
+                    "Password reset. Share the temporary password shown on screen.",
+                    Map.of("emailSent", false, "temporaryPassword", result.temporaryPassword())));
+        }
         return ResponseEntity.ok(ApiResponse.success(
                 result.emailSent() ? "New login details emailed to " + result.sentTo()
                         : "The new login details couldn't be emailed. Check the email log.",
                 Map.of("emailSent", result.emailSent(), "sentTo", result.sentTo())));
+    }
+
+    /**
+     * A staff member's name, login email and agreement title, for the user
+     * page's Details card (System Admin only, checked in the service).
+     */
+    @GetMapping("/users/{id}/details")
+    public ResponseEntity<ApiResponse<Map<String, String>>> getStaffDetails(
+            @PathVariable Long id, Authentication authentication) {
+        Long callerId = Long.parseLong(authentication.getPrincipal().toString());
+        return ResponseEntity.ok(ApiResponse.success(adminService.getStaffDetails(id, callerId)));
+    }
+
+    /**
+     * Saves the Details card (the console's Edit details): body {fullName,
+     * title, email}; a blank or unchanged email leaves the login email as it
+     * is. System Admin only, checked in the service.
+     */
+    @PatchMapping("/users/{id}/details")
+    public ResponseEntity<ApiResponse<Map<String, String>>> updateStaffDetails(
+            @PathVariable Long id, @RequestBody(required = false) Map<String, String> body,
+            Authentication authentication) {
+        Long callerId = Long.parseLong(authentication.getPrincipal().toString());
+        Map<String, String> b = body == null ? Map.of() : body;
+        return ResponseEntity.ok(ApiResponse.success("Details updated",
+                adminService.updateStaffDetails(id, b.get("fullName"), b.get("title"), b.get("email"), callerId)));
     }
 
     /** Invites someone as a participant: emails them a link to register (System Admin or Operations). */

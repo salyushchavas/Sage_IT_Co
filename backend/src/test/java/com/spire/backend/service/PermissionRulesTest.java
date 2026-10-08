@@ -104,7 +104,8 @@ class PermissionRulesTest {
         return new AdminService(userRepository, roles, mock(CourseRepository.class), mock(EnrollmentRepository.class),
                 mock(LessonRepository.class), mock(ProgressRepository.class), mock(CertificateRepository.class),
                 mock(SessionRequestRepository.class), mock(MentorAssignmentRepository.class), recordService,
-                mock(AdminRevenueService.class), mock(PaymentLedgerRepository.class));
+                mock(AdminRevenueService.class), mock(PaymentLedgerRepository.class), mock(WebAgreementRepository.class),
+                mock(WebAgreementAssignmentService.class), mock(WebAgreementStaffTitleService.class));
     }
 
     @Test

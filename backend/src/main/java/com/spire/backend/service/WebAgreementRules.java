@@ -27,9 +27,9 @@ import java.util.Set;
  * staff service, so the two sides can never disagree.
  *
  * Differences from the console, all forced by the dropped columns: no
- * Cloudinary ids (a document is present when its *S3Key is set), no legacy
- * {@code residenceAddress} / {@code portalPlatform} / {@code portalUsername},
- * and a revision can only be requested from VERIFIED for now.
+ * Cloudinary ids (a document is present when its *S3Key is set), and no
+ * legacy {@code residenceAddress} / {@code portalPlatform} /
+ * {@code portalUsername}.
  */
 @Slf4j
 public final class WebAgreementRules {
@@ -57,11 +57,16 @@ public final class WebAgreementRules {
 
     /**
      * The desks an ERM can send a change request from, and the set a revoke
-     * can restore a row to. VERIFIED only for now: the approval statuses the
-     * console also allows come later.
+     * can restore a row to: signed, and every approval stage up to the
+     * countersign. A request sent during approval leaves the open gates as
+     * they are; they drop out of the queues because the status is no longer
+     * AWAITING_APPROVALS, and a take-back brings them back.
      */
     public static boolean isRevisionRequestable(String status) {
-        return WebAgreement.Status.VERIFIED.name().equals(status);
+        return WebAgreement.Status.VERIFIED.name().equals(status)
+                || WebAgreement.Status.AWAITING_APPROVALS.name().equals(status)
+                || WebAgreement.Status.APPROVAL_REVISION_REQUESTED.name().equals(status)
+                || WebAgreement.Status.READY_TO_SIGN.name().equals(status);
     }
 
     // ── Section-picker revision support ──────────────────────────────

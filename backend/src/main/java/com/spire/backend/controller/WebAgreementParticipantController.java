@@ -1,7 +1,7 @@
 package com.spire.backend.controller;
 
-import com.spire.backend.dto.AgreementContent;
 import com.spire.backend.dto.ApiResponse;
+import com.spire.backend.dto.WebAgreementContent;
 import com.spire.backend.entity.WebAgreement;
 import com.spire.backend.service.WebAgreementFileService;
 import com.spire.backend.service.WebAgreementParticipantService;
@@ -50,7 +50,7 @@ public class WebAgreementParticipantController {
 
     /** The agreement clauses per wizard section + this agreement's fixed values. */
     @GetMapping("/content")
-    public ResponseEntity<ApiResponse<AgreementContent>> content(Authentication auth) {
+    public ResponseEntity<ApiResponse<WebAgreementContent>> content(Authentication auth) {
         return ResponseEntity.ok(ApiResponse.success(participantService.content(userId(auth))));
     }
 

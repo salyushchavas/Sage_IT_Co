@@ -50,8 +50,10 @@ public class MasterAgreementService {
     /**
      * The website agreement's steps, from the participant's side. VERIFIED
      * is split by the ERM's verify: signed and being checked (step 2), or
-     * verified (step 3, internal approval comes next). The approval and
-     * countersign statuses aren't used yet.
+     * verified (step 3, internal approval comes next). The approval stages
+     * stay on step 3, waiting for the countersignature is step 4 and the
+     * countersigned agreement step 5. A Phase 2 advance starts again at
+     * step 1 (the view carries the phase).
      */
     static Progress websiteProgressOf(WebAgreement agreement) {
         String status = agreement.getStatus();
@@ -86,18 +88,22 @@ public class MasterAgreementService {
         out.put("requested", request.isPresent());
         out.put("requestedAt", request.map(AgreementRequest::getRequestedAt).orElse(null));
         out.put("agreement", websiteAgreementFor(userId)
-                .map(a -> agreementView(websiteProgressOf(a), "WEBSITE", WEBSITE_LINK, a.getUpdatedAt()))
+                .map(a -> agreementView(websiteProgressOf(a), a.getPhase(), "WEBSITE", WEBSITE_LINK,
+                        a.getUpdatedAt()))
                 .orElse(null));
         return out;
     }
 
-    private static Map<String, Object> agreementView(Progress p, String source, String link, LocalDateTime updatedAt) {
+    /** {@code phase} is the agreement's coaching phase (1 when unset); the dashboard shows a "Phase 2" chip from it. */
+    private static Map<String, Object> agreementView(Progress p, Integer phase, String source, String link,
+                                                     LocalDateTime updatedAt) {
         Map<String, Object> ag = new LinkedHashMap<>();
         ag.put("step", p.step());
         ag.put("totalSteps", 5);
         ag.put("stage", p.stage());
         ag.put("yourTurn", p.yourTurn());
         ag.put("executed", p.step() == 5);
+        ag.put("phase", phase == null ? 1 : phase);
         ag.put("link", link);
         ag.put("updatedAt", updatedAt);
         ag.put("source", source);

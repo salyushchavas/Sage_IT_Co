@@ -80,9 +80,19 @@ public class WebAgreementEvent {
         CONSULTANT_CONTACT_UPDATED,
         EMAIL_SENT,
         // The ERM verified the signed agreement (the console's
-        // CONSULTANT_VERSION_APPROVED, without the PDF release).
+        // CONSULTANT_VERSION_APPROVED).
         VERIFIED,
-        INVITE_RESENT
+        INVITE_RESENT,
+        // Approval chain, countersign, Phase 2 and the System Admin's tools
+        // (same names as the console).
+        SENT_FOR_APPROVAL,
+        APPROVAL_APPROVED,
+        APPROVAL_REVISION_REQUESTED,
+        APPROVED_AND_SIGNED,
+        PDF_GENERATED,
+        ADVANCED_TO_PHASE_2,
+        ERM_SIGNATURE_REVOKED,
+        APPLICATION_ARCHIVED
     }
 
     public enum ActorType {

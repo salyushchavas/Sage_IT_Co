@@ -18,7 +18,7 @@ import java.time.LocalDateTime;
  * touches the console's rows.
  *
  * Field and column names are IDENTICAL to {@link ConsultantApplication} so
- * the copied wizard, rules and renderer adapter map 1:1. Console-only columns
+ * the copied wizard, rules and document engine map 1:1. Console-only columns
  * (email-code login, access link, Cloudinary ids and URLs, legacy duplicates)
  * are left out. Every *S3Key column is TEXT: it holds the value
  * {@code DocumentStorageService} returned, and TEXT keeps the row inside
@@ -29,8 +29,16 @@ import java.time.LocalDateTime;
  *   SUBMITTED (waiting for the participant) -> VERIFIED (signed; the ERM
  *   checks it, consultantCopyReleased=true once the ERM verifies)
  *   VERIFIED -> REVISION_REQUESTED -> (participant re-signs) -> VERIFIED
+ *   VERIFIED (verified) --(ERM sends for approval)--> AWAITING_APPROVALS
+ *   AWAITING_APPROVALS --(every required approver approves)--> READY_TO_SIGN
+ *   AWAITING_APPROVALS --(an approver asks for a revision)--> APPROVAL_REVISION_REQUESTED
+ *   APPROVAL_REVISION_REQUESTED --(ERM re-sends)--> AWAITING_APPROVALS
+ *   READY_TO_SIGN --(ERM countersigns)--> COMPLETED
+ *   COMPLETED (Phase 1) --(ERM advances to Phase 2)--> SUBMITTED, phase 2
  *
- * Off-ramp: CANCELLED (ERM). The approval statuses are defined for later.
+ * Off-ramp: CANCELLED (ERM). The approver gates live in
+ * {@link WebAgreementApproval}, the verified versions in
+ * {@link WebAgreementVersion}.
  */
 @Entity
 @Table(name = "web_agreements", indexes = {
@@ -67,6 +75,23 @@ public class WebAgreement {
      */
     @Transient
     private String ownerName;
+
+    /**
+     * Approval summary for the list views, filled by
+     * {@code WebAgreementApprovalSummary} (never persisted).
+     * {@code managerStatus} / {@code accountsStatus} carry the latest gate
+     * decision per role (PENDING / APPROVED / REVISION_REQUESTED), or null
+     * when no gate exists for that role (Phase 1 has no Accounts gate, so
+     * the UI shows "N/A"). {@code sentForApprovalAt} is the ISO time of the
+     * first SENT_FOR_APPROVAL event, or null if it was never sent. Null on
+     * detail responses.
+     */
+    @Transient
+    private String managerStatus;
+    @Transient
+    private String accountsStatus;
+    @Transient
+    private String sentForApprovalAt;
 
     /**
      * The server's resolved answer to "which sections does the submit gate
@@ -271,7 +296,7 @@ public class WebAgreement {
     @Column(name = "cheques", columnDefinition = "TEXT")
     private String cheques;
 
-    // ── ERM countersignature (later) ─────────────────────────────────
+    // ── ERM countersignature ─────────────────────────────────────────
 
     @Column(name = "erm_name") private String ermName;
     @Column(name = "erm_title") private String ermTitle;
@@ -320,11 +345,11 @@ public class WebAgreement {
     @Column(name = "revision_undo_snapshot", columnDefinition = "TEXT")
     private String revisionUndoSnapshot;
 
-    /** Phase 2 reopened-section scope (later). */
+    /** Phase 2 reopened-section scope, JSON {@code [{"key":"appendix3"}]}; set when the ERM advances to Phase 2. */
     @Column(name = "phase2_reopened_sections", columnDefinition = "TEXT")
     private String phase2ReopenedSections;
 
-    // ── Final PDFs and approval round (later) ────────────────────────
+    // ── Final PDFs and the version sent for approval ─────────────────
 
     @Column(name = "s3_key", columnDefinition = "TEXT")
     private String s3Key;
@@ -468,7 +493,7 @@ public class WebAgreement {
     @Builder.Default
     private Boolean requireSsn = false;
 
-    // ── Two-phase coaching (later) ───────────────────────────────────
+    // ── Two-phase coaching ───────────────────────────────────────────
 
     @Column(name = "phase")
     @Builder.Default
@@ -490,7 +515,7 @@ public class WebAgreement {
     @Column(name = "consultant_copy_released_by", length = 36)
     private String consultantCopyReleasedBy;
 
-    /** SHA-256 (hex) of a released PDF (later). */
+    /** SHA-256 (hex) of the latest verified version's PDF. */
     @Column(name = "document_hash", length = 128)
     private String documentHash;
 
@@ -511,7 +536,7 @@ public class WebAgreement {
         SUBMITTED,
         REVISION_REQUESTED,
         VERIFIED,
-        // Later — the role-based approval gate and countersign.
+        // The role-based approval gate and countersign.
         AWAITING_APPROVALS,
         APPROVAL_REVISION_REQUESTED,
         READY_TO_SIGN,

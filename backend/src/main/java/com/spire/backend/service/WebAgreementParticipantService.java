@@ -2,7 +2,7 @@ package com.spire.backend.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.spire.backend.dto.AgreementContent;
+import com.spire.backend.dto.WebAgreementContent;
 import com.spire.backend.entity.User;
 import com.spire.backend.entity.WebAgreement;
 import com.spire.backend.entity.WebAgreementEvent;
@@ -48,8 +48,7 @@ public class WebAgreementParticipantService {
     private final WebAgreementEventService eventService;
     private final WebAgreementFileService fileService;
     private final WebAgreementRenderer renderer;
-    private final AgreementContentService agreementContentService;
-    private final AgreementDocumentService agreementDocumentService;
+    private final WebAgreementContentService contentService;
     private final UserRepository userRepository;
 
     private final ObjectMapper objectMapper = new ObjectMapper();
@@ -98,23 +97,20 @@ public class WebAgreementParticipantService {
 
     /** The clauses per wizard section (same docx as the console) + this agreement's fixed values. */
     @Transactional(readOnly = true)
-    public AgreementContent content(Long userId) {
+    public WebAgreementContent content(Long userId) {
         WebAgreement a = requireMine(userId);
-        return new AgreementContent(agreementContentService.getSections(), renderer.contentValues(a));
+        return new WebAgreementContent(contentService.getSections(), renderer.contentValues(a));
     }
 
     /**
-     * The blank template PDF ("View full agreement"), cached by the console's
-     * renderer after the first render. A render failure (no LibreOffice)
-     * throws {@link WebAgreementRenderer.RenderException}.
+     * The blank template PDF ("View full agreement"), cached by the
+     * website's own engine after the first render. A render failure (no
+     * LibreOffice) throws {@link WebAgreementRenderer.RenderException}; a
+     * busy engine is the 503 StorageUnavailableException.
      */
     public byte[] templatePdf(Long userId) {
         requireMine(userId);
-        try {
-            return agreementDocumentService.getBlankPreviewPdfBytes();
-        } catch (Exception e) {
-            throw new WebAgreementRenderer.RenderException(e);
-        }
+        return renderer.renderBlankTemplatePdf();
     }
 
     // ── Consent ──────────────────────────────────────────────────────

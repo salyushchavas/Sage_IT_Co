@@ -21,7 +21,10 @@ class RoleAuthoritiesTest {
 
     @Test
     void everyOtherRoleKeepsOnlyItsOwnAuthority() {
-        for (String role : List.of("ADMIN", "OPERATIONS_ADMIN", "ERM", "COACH", "FINANCE", "PARTICIPANT", "INSTRUCTOR")) {
+        // MANAGER and ACCOUNTS (the agreement approvers) are website roles too:
+        // ROLE_MANAGER / ROLE_ACCOUNTS never match the console's ROLE_AGREEMENT_*.
+        for (String role : List.of("ADMIN", "OPERATIONS_ADMIN", "ERM", "COACH", "FINANCE", "PARTICIPANT", "INSTRUCTOR",
+                "MANAGER", "ACCOUNTS")) {
             assertEquals(List.of(new SimpleGrantedAuthority("ROLE_" + role)), JwtAuthFilter.authoritiesFor(role), role);
         }
     }

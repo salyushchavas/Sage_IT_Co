@@ -83,7 +83,9 @@ class UsDollarsAndTimeTest {
         AdminService admin = new AdminService(mock(UserRepository.class), mock(RoleRepository.class),
                 mock(CourseRepository.class), mock(EnrollmentRepository.class), mock(LessonRepository.class),
                 mock(ProgressRepository.class), mock(CertificateRepository.class), mock(SessionRequestRepository.class),
-                mock(MentorAssignmentRepository.class), mock(RecordService.class), courses, ledger);
+                mock(MentorAssignmentRepository.class), mock(RecordService.class), courses, ledger,
+                mock(WebAgreementRepository.class), mock(WebAgreementAssignmentService.class),
+                mock(WebAgreementStaffTitleService.class));
         assertEquals(0, new BigDecimal("130.00").compareTo((BigDecimal) admin.getAnalytics().get("totalRevenue")),
                 "course payments + program payments − reversals; failed attempts aren't money");
     }

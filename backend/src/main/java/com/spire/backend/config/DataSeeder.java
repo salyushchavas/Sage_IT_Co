@@ -154,6 +154,8 @@ public class DataSeeder implements CommandLineRunner {
         String[] phase1aRoles = {
                 "PARTICIPANT", "ERM", "COACH", "TECHNICAL_ADVISOR",
                 "OPERATIONS_ADMIN", "FINANCE", "SYSTEM_ADMIN",
+                // The agreement approval gates (the console's MANAGER / ACCOUNTS).
+                "MANAGER", "ACCOUNTS",
         };
         for (String name : phase1aRoles) {
             roleRepository.findByName(name).orElseGet(() ->
