@@ -14,6 +14,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -220,10 +221,16 @@ public class WebAgreementExecutionService {
      * signature and legal name, every other affirmation, the stored PDFs,
      * the ERM's countersign date and the verification.
      *
-     * The participant may then write only the promoted appendices (the SSN
-     * is never in that scope). The agreement goes back to SUBMITTED in Phase
-     * 2; the event also records the two signature files the advance let go
-     * of. No email: the participant's dashboard turns to their step.
+     * The participant may then write only the promoted appendices (the
+     * "ssn" key is never in that scope). One difference from the console,
+     * the owner's decision of 8 Oct 2026 (spec L-H1): when the submit gate
+     * would ask for the SSN and Appendix 3 is not promoted, Appendix 3 is
+     * reopened too, with every earlier answer kept, so the participant can
+     * enter it; the SSN stays required. The console leaves it locked and the
+     * agreement can only be cancelled. The agreement goes back to SUBMITTED
+     * in Phase 2; the event also records the two signature files the advance
+     * let go of and whether Appendix 3 was reopened for the SSN. No email:
+     * the participant's dashboard turns to their step.
      */
     @Transactional
     public WebAgreement advanceToPhase2(String applicationId, Phase2Promotion promotion,
@@ -269,6 +276,13 @@ public class WebAgreementExecutionService {
         if (p5) { a.setRequireAppendix5(true); promoted.add("appendix5"); }
         if (pSsn) { a.setRequireSsn(true); promoted.add("ssn"); }
 
+        // Website only (owner, 8 Oct 2026): a required SSN the participant
+        // hasn't given (blank, or not letters and digits) is never out of
+        // reach. Appendix 3, where it is entered, reopens like a promoted
+        // appendix; its requirement flag is left as it is.
+        boolean appendix3ReopenedForSsn = !p3
+                && WebAgreementRules.collectMissingConsultantFields(a).contains("bgFullSsn");
+
         // Phase 1 stays as signed: the primary signature, the legal name and
         // every affirmation of a section not reopened are kept. The
         // participant re-signs the closing block and re-affirms only the
@@ -279,12 +293,17 @@ public class WebAgreementExecutionService {
         a.setFinalSigningIp(null);
         if (p1) a.setAffirmedAppendix1(false);
         if (p2) a.setAffirmedAppendix2(false);
-        if (p3) a.setAffirmedAppendix3(false);
+        if (p3 || appendix3ReopenedForSsn) a.setAffirmedAppendix3(false);
         if (p4) a.setAffirmedAppendix4(false);
         if (p5) a.setAffirmedAppendix5(false);
 
         // What the participant may write in Phase 2 (appendix keys only).
-        a.setPhase2ReopenedSections(sectionScopeJson(promoted));
+        List<String> reopened = new ArrayList<>(promoted);
+        if (appendix3ReopenedForSsn) {
+            reopened.add("appendix3");
+            Collections.sort(reopened);
+        }
+        a.setPhase2ReopenedSections(sectionScopeJson(reopened));
 
         // The Phase 1 countersignature goes; the Phase 2 countersign makes a
         // new one. The ERM's date and the stored PDFs stay.
@@ -303,6 +322,7 @@ public class WebAgreementExecutionService {
                 WebAgreementEvent.ActorType.ERM, callerId,
                 Map.of("ermUserId", callerId,
                         "promoted", promoted,
+                        "appendix3ReopenedForSsn", appendix3ReopenedForSsn,
                         "clearedErmSignatureKey", clearedErmSignatureKey == null ? "" : clearedErmSignatureKey,
                         "clearedFinalSignatureKey", clearedFinalSignatureKey == null ? "" : clearedFinalSignatureKey),
                 request);

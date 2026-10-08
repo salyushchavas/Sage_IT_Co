@@ -318,7 +318,110 @@ class WebAgreementRulesTest {
         assertNull(a.getBgDateOfBirth());
     }
 
-    private static WebAgreement appendix3Complete() {
+    // ── The website's own formats, only where they can be fixed ──────
+
+    /** Saved before the 7 Oct rules: a 7-digit phone and an under-18 date of birth. */
+    private static WebAgreement oldFormatPhoneAndDob() {
+        WebAgreement a = appendix3Complete();
+        a.setPrimaryPhone("555-1234");
+        a.setBgDateOfBirth(LocalDate.now().minusYears(16));
+        return a;
+    }
+
+    /** A Phase-2 fill whose reopened scope is {@code scopeJson}. */
+    private static WebAgreement inPhase2(WebAgreement a, String scopeJson) {
+        a.setPhase(2);
+        a.setStatus(WebAgreement.Status.SUBMITTED.name());
+        a.setPhase2ReopenedSections(scopeJson);
+        return a;
+    }
+
+    /** A change-request round on {@code scopeJson}. */
+    private static WebAgreement inRevision(WebAgreement a, String scopeJson) {
+        a.setStatus(WebAgreement.Status.REVISION_REQUESTED.name());
+        a.setRevisionSections(scopeJson);
+        return a;
+    }
+
+    @Test
+    void aFirstFillStillGetsThePhoneAndAgeRules() {
+        WebAgreement a = oldFormatPhoneAndDob();
+        assertEquals(List.of("primaryPhone", "bgDateOfBirth"), WebAgreementRules.collectMissingConsultantFields(a));
+        a.setPrimaryPhone("(555) 201-3344");
+        a.setBgDateOfBirth(LocalDate.of(1990, 1, 1));
+        assertEquals(List.of(), WebAgreementRules.collectMissingConsultantFields(a));
+    }
+
+    @Test
+    void phase2NeverAsksForAFormatTheParticipantCantReach() {
+        // The owner's case: Appendix 3 required in Phase 1, so nothing of it
+        // is reopened; the cover never is.
+        WebAgreement a = inPhase2(oldFormatPhoneAndDob(), "[]");
+        assertEquals(List.of(), WebAgreementRules.collectMissingConsultantFields(a));
+        a.setPrimaryPhone("(555) 201-3344 x12");
+        a.setBgDateOfBirth(LocalDate.now().plusYears(1));
+        assertEquals(List.of(), WebAgreementRules.collectMissingConsultantFields(a));
+
+        // Other appendices reopened: still nothing about the phone or the age.
+        WebAgreement b = inPhase2(oldFormatPhoneAndDob(), "[{\"key\":\"appendix4\"}]");
+        b.setPortalEntries("[{\"platform\":\"LinkedIn\",\"username\":\"pat\"}]");
+        b.setPortalEffectiveDate(LocalDate.of(2026, 10, 1));
+        assertEquals(List.of(), WebAgreementRules.collectMissingConsultantFields(b));
+
+        // The console's checks stay: a blank phone or no date of birth at all.
+        a.setPrimaryPhone("  ");
+        a.setBgDateOfBirth(null);
+        assertEquals(List.of("primaryPhone", "bgDateOfBirth"), WebAgreementRules.collectMissingConsultantFields(a));
+    }
+
+    @Test
+    void phase2StillChecksTheAgeInAReopenedAppendix3() {
+        WebAgreement a = inPhase2(oldFormatPhoneAndDob(), "[{\"key\":\"appendix3\"}]");
+        assertEquals(List.of("bgDateOfBirth"), WebAgreementRules.collectMissingConsultantFields(a),
+                "the date of birth can be fixed there; the cover phone can't");
+        a.setBgDateOfBirth(LocalDate.of(1990, 1, 1));
+        assertEquals(List.of(), WebAgreementRules.collectMissingConsultantFields(a));
+    }
+
+    @Test
+    void aChangeRequestChecksTheFormatsOnlyInItsOwnSections() {
+        String[][] rounds = {
+                {"[{\"key\":\"exhibit-a\"}]", ""},
+                {"[{\"key\":\"signature\"}]", ""},
+                {"[{\"key\":\"doc:workauth\"}]", ""},
+                {"[{\"key\":\"doc:dl-doc\"}]", ""},
+                {"[{\"key\":\"cover\"}]", "primaryPhone"},
+                {"[{\"key\":\"appendix3\"}]", "bgDateOfBirth"},
+                {"[{\"key\":\"cover\"},{\"key\":\"appendix3\"}]", "primaryPhone,bgDateOfBirth"},
+        };
+        for (String[] round : rounds) {
+            WebAgreement a = inRevision(oldFormatPhoneAndDob(), round[0]);
+            List<String> expected = round[1].isEmpty() ? List.of() : List.of(round[1].split(","));
+            assertEquals(expected, WebAgreementRules.collectMissingConsultantFields(a), round[0]);
+        }
+    }
+
+    @Test
+    void theConsolesZipRuleIsKeptInEveryRound() {
+        // The ZIP format is the console's own submit check (not a website
+        // addition), so it stays everywhere, like the console.
+        WebAgreement a = inPhase2(appendix3Complete(), "[]");
+        a.setAddressZip("7870");
+        assertEquals(List.of("addressZip"), WebAgreementRules.collectMissingConsultantFields(a));
+    }
+
+    @Test
+    void theWriteScopeDecidesWhichSectionsAreWritable() {
+        WebAgreement a = appendix3Complete();
+        assertTrue(WebAgreementRules.isSectionWritable(a, "cover"), "a first fill is unrestricted");
+        inPhase2(a, "[{\"key\":\"appendix3\"}]");
+        assertTrue(WebAgreementRules.isSectionWritable(a, "appendix3"));
+        assertFalse(WebAgreementRules.isSectionWritable(a, "cover"));
+        inRevision(a, "[{\"key\":\"doc:workauth\"}]");
+        assertFalse(WebAgreementRules.isSectionWritable(a, "cover"), "a document round opens no fields");
+    }
+
+    static WebAgreement appendix3Complete() {
         WebAgreement a = complete();
         a.setRequireAppendix3(true);
         a.setBgFullLegalName("Pat Lee");

@@ -67,7 +67,9 @@ import static org.mockito.Mockito.*;
  * Phase 2) and stays COMPLETED when that fails; the ERM's download streams
  * the stored PDF with no status check; the advance reopens an executed
  * Phase 1 agreement, clearing and keeping exactly what the console does,
- * the SSN trap included. Only the owner or an admin; no email.
+ * except that a required SSN not given yet reopens Appendix 3 (the owner's
+ * decision of 8 Oct 2026; the console traps it). Only the owner or an
+ * admin; no email.
  */
 class WebAgreementExecutionServiceTest {
 
@@ -669,9 +671,10 @@ class WebAgreementExecutionServiceTest {
         assertEquals(ERM, e.getActorUserId());
         assertEquals("203.0.113.9", e.getIpAddress());
         JsonNode m = meta(e);
-        assertEquals(new TreeSet<>(List.of("ermUserId", "promoted", "clearedErmSignatureKey",
-                "clearedFinalSignatureKey")), new TreeSet<>(iterable(m)));
+        assertEquals(new TreeSet<>(List.of("ermUserId", "promoted", "appendix3ReopenedForSsn",
+                "clearedErmSignatureKey", "clearedFinalSignatureKey")), new TreeSet<>(iterable(m)));
         assertEquals(ERM, m.path("ermUserId").asLong());
+        assertFalse(m.path("appendix3ReopenedForSsn").asBoolean(true), "the SSN is on file");
         assertEquals(ermSig, m.path("clearedErmSignatureKey").asText());
         assertEquals(finalSig, m.path("clearedFinalSignatureKey").asText());
         assertEquals(1, events.size(), "no email event");
@@ -687,9 +690,8 @@ class WebAgreementExecutionServiceTest {
         assertEquals("", mb.path("clearedFinalSignatureKey").asText());
     }
 
-    @Test
-    void theSsnTrapIsTheConsolesBehaviour() {
-        // Phase 1: Appendix 3 required and filled, the SSN not required and blank.
+    /** Phase 1: Appendix 3 required, filled and affirmed; the SSN not required and blank. */
+    private WebAgreement executedWithAppendix3AndNoSsn() {
         WebAgreement a = executed();
         a.setRequireAppendix1(false);
         a.setRequireAppendix3(true);
@@ -701,6 +703,13 @@ class WebAgreementExecutionServiceTest {
         a.setBgDateOfBirth(LocalDate.of(1990, 1, 1));
         a.setBgDriverLicense("D1234");
         a.setDlDocS3Key("s3:participant-documents/10/web-agreement-dl.pdf");
+        return a;
+    }
+
+    @Test
+    void aRequiredSsnNotGivenYetReopensAppendix3() throws Exception {
+        // The console's trap (spec L-H1) is not kept: owner, 8 Oct 2026.
+        WebAgreement a = executedWithAppendix3AndNoSsn();
 
         // The modal's default ticks: every optional section, the SSN included.
         WebAgreementExecutionService.Phase2Promotion body = asTheModalSends(a);
@@ -709,13 +718,77 @@ class WebAgreementExecutionServiceTest {
         service.advanceToPhase2(a.getApplicationId(), body, ERM, request);
 
         assertTrue(a.getRequireSsn(), "the SSN is now required");
+        assertTrue(a.getRequireAppendix3());
         Set<String> scope = WebAgreementRules.consultantWriteScope(a).orElseThrow();
-        assertFalse(scope.contains("appendix3"), "but Appendix 3 is not reopened");
+        assertTrue(scope.contains("appendix3"), "Appendix 3 reopens so the SSN can be entered");
         assertFalse(scope.contains("ssn"));
-        assertEquals("appendix3", WebAgreementRules.FIELD_SECTION.get("bgFullSsn"),
-                "so the SSN field is locked for the participant");
+        assertEquals("[{\"key\":\"appendix1\"},{\"key\":\"appendix2\"},{\"key\":\"appendix3\"},"
+                + "{\"key\":\"appendix4\"},{\"key\":\"appendix5\"}]", a.getPhase2ReopenedSections());
+        assertFalse(affirmed(a, 3), "re-affirmed like every reopened appendix");
+        assertEquals("Pat Q Lee", a.getBgFullLegalName(), "the earlier answers stay");
+        assertEquals("D1234", a.getBgDriverLicense());
+        assertEquals(LocalDate.of(1990, 1, 1), a.getBgDateOfBirth());
         assertTrue(WebAgreementRules.collectMissingConsultantFields(a).contains("bgFullSsn"),
-                "while submit still reports it missing");
+                "still required: never dropped");
+
+        JsonNode m = meta(eventsOf(a, WebAgreementEvent.EventType.ADVANCED_TO_PHASE_2).get(0));
+        assertTrue(m.path("appendix3ReopenedForSsn").asBoolean());
+        assertEquals(List.of("appendix1", "appendix2", "appendix4", "appendix5", "ssn"),
+                mapper.convertValue(m.path("promoted"), List.class), "only what the ERM ticked");
+
+        // Once entered (letters and digits), the SSN no longer holds anything back.
+        a.setBgFullSsn("123456789");
+        assertFalse(WebAgreementRules.collectMissingConsultantFields(a).contains("bgFullSsn"));
+    }
+
+    @Test
+    void appendix3ReopensOnlyWhenTheSsnWouldBeAskedFor() throws Exception {
+        // Only the SSN ticked, nothing else reopened.
+        WebAgreement onlySsn = executedWithAppendix3AndNoSsn();
+        service.advanceToPhase2(onlySsn.getApplicationId(), promotion(false, false, false, false, false, true),
+                ERM, request);
+        assertEquals("[{\"key\":\"appendix3\"}]", onlySsn.getPhase2ReopenedSections());
+
+        // An SSN on file that isn't letters and digits fails the gate too.
+        WebAgreement malformed = executedWithAppendix3AndNoSsn();
+        malformed.setBgFullSsn("123-45-6789");
+        service.advanceToPhase2(malformed.getApplicationId(), promotion(false, false, false, false, false, true),
+                ERM, request);
+        assertEquals("[{\"key\":\"appendix3\"}]", malformed.getPhase2ReopenedSections());
+
+        // Appendix 3 optional but filled in Phase 1, and the ERM unticks it.
+        WebAgreement touched = executedWithAppendix3AndNoSsn();
+        touched.setRequireAppendix3(false);
+        service.advanceToPhase2(touched.getApplicationId(), promotion(false, false, false, false, false, true),
+                ERM, request);
+        assertEquals("[{\"key\":\"appendix3\"}]", touched.getPhase2ReopenedSections());
+        assertFalse(touched.getRequireAppendix3(), "its requirement flag is left as it is");
+
+        // The SSN on file: nothing extra reopens, every affirmation stays.
+        WebAgreement given = executedWithAppendix3AndNoSsn();
+        given.setBgFullSsn("123456789");
+        service.advanceToPhase2(given.getApplicationId(), promotion(false, false, false, false, false, true),
+                ERM, request);
+        assertEquals("[]", given.getPhase2ReopenedSections());
+        assertTrue(affirmed(given, 3));
+
+        // The SSN not required: nothing extra reopens.
+        WebAgreement notRequired = executedWithAppendix3AndNoSsn();
+        service.advanceToPhase2(notRequired.getApplicationId(), promotion(false, false, false, false, false, false),
+                ERM, request);
+        assertEquals("[]", notRequired.getPhase2ReopenedSections());
+        assertFalse(meta(eventsOf(notRequired, WebAgreementEvent.EventType.ADVANCED_TO_PHASE_2).get(0))
+                .path("appendix3ReopenedForSsn").asBoolean(true));
+
+        // Appendix 3 doesn't apply (not required, nothing in it): the SSN isn't
+        // asked for at submit, so nothing reopens.
+        WebAgreement untouched = executed();
+        untouched.setBgFullSsn(null);
+        untouched.setAffirmedAppendix3(false);
+        service.advanceToPhase2(untouched.getApplicationId(), promotion(false, false, false, false, false, true),
+                ERM, request);
+        assertEquals("[]", untouched.getPhase2ReopenedSections());
+        assertFalse(WebAgreementRules.collectMissingConsultantFields(untouched).contains("bgFullSsn"));
     }
 
     // ── Transactions and the routes ──────────────────────────────────

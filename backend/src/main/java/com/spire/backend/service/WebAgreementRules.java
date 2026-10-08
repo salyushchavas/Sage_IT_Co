@@ -222,6 +222,15 @@ public final class WebAgreementRules {
     }
 
     /**
+     * True when the participant can edit the fields of {@code sectionId} in
+     * this round: an unrestricted fill, or the section is in the revision or
+     * Phase-2 scope. A {@code doc:*} or "signature" key opens no fields.
+     */
+    public static boolean isSectionWritable(WebAgreement app, String sectionId) {
+        return consultantWriteScope(app).map(scope -> scope.contains(sectionId)).orElse(true);
+    }
+
+    /**
      * Sections the ERM selected in a restricted revision round. They become
      * REQUIRED for that round even if optional/untouched. Empty otherwise.
      */
@@ -414,7 +423,14 @@ public final class WebAgreementRules {
         return out;
     }
 
-    /** The keys of every effectively-required participant field that's blank or malformed. */
+    /**
+     * The keys of every effectively-required participant field that's blank
+     * or malformed. The console's checks apply in every round. The two
+     * website-only rules (phone digits, 18 or older), stricter than the
+     * console, apply only where the participant can edit the field this
+     * round: a value saved before they existed must never block a submit
+     * from a section the participant can't open (Phase 2, change requests).
+     */
     public static List<String> collectMissingConsultantFields(WebAgreement app) {
         List<String> missing = new ArrayList<>();
         Set<String> forced = revisionForcedSections(app);
@@ -425,7 +441,8 @@ public final class WebAgreementRules {
         addIfBlank(missing, "consultantEmail", app.getConsultantEmail());
         addIfBlank(missing, "primaryPhone", app.getPrimaryPhone());
         // The wizard's phone rule: 10 to 15 digits, area code included.
-        if (nonBlank(app.getPrimaryPhone()) && !isValidPhone(app.getPrimaryPhone())) {
+        if (nonBlank(app.getPrimaryPhone()) && isSectionWritable(app, "cover")
+                && !isValidPhone(app.getPrimaryPhone())) {
             missing.add("primaryPhone");
         }
         addIfBlank(missing, "addressLine1", app.getAddressLine1());
@@ -476,8 +493,13 @@ public final class WebAgreementRules {
                 addIfBlank(missing, "bgCurrentAddressState", app.getBgCurrentAddressState());
                 addIfBlank(missing, "bgCurrentAddressZip", app.getBgCurrentAddressZip());
             }
-            // A real past date of birth, 18 or older (the wizard's rule).
-            if (!isAdultDateOfBirth(app.getBgDateOfBirth())) missing.add("bgDateOfBirth");
+            if (app.getBgDateOfBirth() == null) {
+                missing.add("bgDateOfBirth");
+            } else if (isSectionWritable(app, "appendix3")
+                    && !isAdultDateOfBirth(app.getBgDateOfBirth())) {
+                // A real past date of birth, 18 or older (the wizard's rule).
+                missing.add("bgDateOfBirth");
+            }
             // A Driver's License AND/OR a State ID: at least one, and any ID
             // started (number OR document) must be complete (number + doc).
             boolean dlNum = nonBlank(app.getBgDriverLicense());

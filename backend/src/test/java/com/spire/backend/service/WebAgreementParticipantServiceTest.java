@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
 
 import java.nio.charset.StandardCharsets;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -243,6 +244,70 @@ class WebAgreementParticipantServiceTest {
         service.submit(PAT, null, SIG, "Pat Lee", request);
         assertEquals("sig-old", a.getSignatureS3Key());
         verify(files, never()).storeSignature(any(), any(), eq("consultant"));
+    }
+
+    /**
+     * Phase 1 saved before the 7 Oct phone and age rules: a 7-digit phone
+     * and a date of birth under 18, with Appendix 3 required and done.
+     */
+    private WebAgreement savedBeforeTheNewRules(String status) {
+        WebAgreement a = agreement(status);
+        WebAgreement filled = WebAgreementRulesTest.appendix3Complete();
+        a.setRequireAppendix3(true);
+        a.setBgFullLegalName(filled.getBgFullLegalName());
+        a.setBgOtherNamesUsed(filled.getBgOtherNamesUsed());
+        a.setBgCurrentSameAsResidence(true);
+        a.setBgDriverLicense(filled.getBgDriverLicense());
+        a.setDlDocS3Key(filled.getDlDocS3Key());
+        a.setAffirmedAppendix3(true);
+        a.setPrimaryPhone("555-1234");
+        a.setBgDateOfBirth(LocalDate.now().minusYears(16));
+        a.setSignatureS3Key("sig-phase1");
+        return a;
+    }
+
+    @Test
+    void phase2SubmitsWhenTheOldFormatsSitInSectionsThatStayLocked() throws Exception {
+        // The owner's live case: nothing of the cover or Appendix 3 reopened.
+        WebAgreement a = savedBeforeTheNewRules("SUBMITTED");
+        a.setPhase(2);
+        a.setPhase2ReopenedSections("[]");
+        service.submit(PAT, null, SIG, "Pat Lee", request);
+        assertEquals("VERIFIED", a.getStatus());
+        assertEquals("555-1234", a.getPrimaryPhone(), "nothing the participant couldn't see was changed");
+    }
+
+    @Test
+    void phase2StillAsksForTheAgeWhenAppendix3IsReopened() {
+        WebAgreement a = savedBeforeTheNewRules("SUBMITTED");
+        a.setPhase(2);
+        a.setPhase2ReopenedSections("[{\"key\":\"appendix3\"}]");
+        IncompleteSubmissionException e = assertThrows(IncompleteSubmissionException.class,
+                () -> service.submit(PAT, null, SIG, "Pat Lee", request));
+        assertEquals(List.of("bgDateOfBirth"), e.getMissingFields(), "the phone stays locked, so it isn't asked for");
+        assertEquals("SUBMITTED", a.getStatus());
+
+        // The participant fixes it there, and the submit goes through.
+        WebAgreementRules.WebAgreementFillPatch fix = new WebAgreementRules.WebAgreementFillPatch();
+        fix.bgDateOfBirth = LocalDate.of(1990, 1, 1);
+        service.fill(PAT, fix, request);
+        service.submit(PAT, null, SIG, "Pat Lee", request);
+        assertEquals("VERIFIED", a.getStatus());
+    }
+
+    @Test
+    void aRestrictedChangeRequestChecksTheFormatsOnlyInItsSections() throws Exception {
+        WebAgreement a = savedBeforeTheNewRules("REVISION_REQUESTED");
+        a.setRevisionSections("[{\"key\":\"exhibit-a\"}]");
+        service.submit(PAT, null, SIG, "Pat Lee", request);
+        assertEquals("VERIFIED", a.getStatus());
+
+        // A newer round on the cover, where the phone can be fixed.
+        WebAgreement b = savedBeforeTheNewRules("REVISION_REQUESTED");
+        b.setRevisionSections("[{\"key\":\"cover\"}]");
+        IncompleteSubmissionException e = assertThrows(IncompleteSubmissionException.class,
+                () -> service.submit(PAT, null, SIG, "Pat Lee", request));
+        assertEquals(List.of("primaryPhone"), e.getMissingFields());
     }
 
     @Test
