@@ -950,6 +950,8 @@ export interface AgreementRequestStatus {
     stage: string;
     yourTurn: boolean;
     executed: boolean;
+    /** 1, or 2 once the ERM advanced it to Phase 2 (the dashboard's "Phase 2" chip). */
+    phase?: number;
     link: string;
     updatedAt: string | null;
     /** CONSOLE: the /consultant link (email code). WEBSITE: /dashboard/agreement. */
@@ -6249,6 +6251,8 @@ export async function ermApproveConsultantVersion(applicationId: string) {
 /** The roles a System Admin can add in Admin → Users, with plain names. */
 export const STAFF_ROLE_OPTIONS: { value: string; label: string; hint: string }[] = [
   { value: "ERM", label: "ERM (relationship manager)", hint: "Owns participants, reviews weekly reports, verifies employment" },
+  { value: "MANAGER", label: "Manager", hint: "Approval gate — required on Phase 1 and Phase 2." },
+  { value: "ACCOUNTS", label: "Accounts", hint: "Approval gate — required on Phase 2 only." },
   { value: "COACH", label: "Coach", hint: "Career, resume or interview coaching" },
   { value: "TECHNICAL_ADVISOR", label: "Technical advisor", hint: "Technical coaching for a skill track" },
   { value: "FINANCE", label: "Finance", hint: "Payment plans, invoices, check copies" },
@@ -6256,28 +6260,87 @@ export const STAFF_ROLE_OPTIONS: { value: string; label: string; hint: string }[
   { value: "SYSTEM_ADMIN", label: "System admin", hint: "Everything, including adding staff" },
 ];
 
+/** The staff roles whose title is printed on agreements: required when adding them. */
+export const TITLE_REQUIRED_ROLES: readonly string[] = ["ERM", "MANAGER", "ACCOUNTS"];
+
 /**
  * Adds a staff member (System Admin only). The temporary password is
  * emailed to the personal email (or the login email when none is given).
+ * MANAGER and ACCOUNTS get no email: the response carries the temporary
+ * password once (temporaryPassword), to show on screen, as the console's
+ * create does. title is the agreement title, required for ERM, MANAGER and
+ * ACCOUNTS ("Title is required."). Send it even when blank: a body without
+ * it reads as the older form, which added an ERM with no title.
  */
 export async function createStaffUser(body: {
   fullName: string;
   email: string;
   personalEmail?: string;
   role: string;
-}): Promise<{ message: string; emailSent: boolean; sentTo: string }> {
-  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo: string }>>("/api/admin/users", {
-    method: "POST",
-    body: JSON.stringify(body),
-  });
-  return { message: wrapper.message ?? "", emailSent: wrapper.data?.emailSent ?? false, sentTo: wrapper.data?.sentTo ?? "" };
+  title?: string;
+}): Promise<{ message: string; emailSent: boolean; sentTo: string; temporaryPassword: string | null }> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo?: string; temporaryPassword?: string }>>(
+    "/api/admin/users", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  return {
+    message: wrapper.message ?? "",
+    emailSent: wrapper.data?.emailSent ?? false,
+    sentTo: wrapper.data?.sentTo ?? "",
+    temporaryPassword: wrapper.data?.temporaryPassword ?? null,
+  };
 }
 
-/** Emails a staff member a new temporary password (System Admin only). */
-export async function sendNewLoginDetails(userId: number): Promise<{ message: string; emailSent: boolean; sentTo: string }> {
-  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo: string }>>(
+/**
+ * Emails a staff member a new temporary password (System Admin only).
+ * MANAGER and ACCOUNTS: no email; the new temporary password comes back
+ * once in temporaryPassword (the console's "Reset password").
+ */
+export async function sendNewLoginDetails(
+  userId: number,
+): Promise<{ message: string; emailSent: boolean; sentTo: string; temporaryPassword: string | null }> {
+  const wrapper = await apiFetch<ApiResponse<{ emailSent: boolean; sentTo?: string; temporaryPassword?: string }>>(
     `/api/admin/users/${userId}/send-login`, { method: "POST" });
-  return { message: wrapper.message ?? "", emailSent: wrapper.data?.emailSent ?? false, sentTo: wrapper.data?.sentTo ?? "" };
+  return {
+    message: wrapper.message ?? "",
+    emailSent: wrapper.data?.emailSent ?? false,
+    sentTo: wrapper.data?.sentTo ?? "",
+    temporaryPassword: wrapper.data?.temporaryPassword ?? null,
+  };
+}
+
+/** A staff member's name, login email and agreement title (the user page's Details card). */
+export interface StaffDetails {
+  fullName: string;
+  email: string;
+  /** "" when none is set. */
+  title: string;
+}
+
+/**
+ * The Details card's values (System Admin only; ERM, Manager, Accounts,
+ * Operations admin and System admin accounts).
+ */
+export async function fetchStaffDetails(userId: number | string): Promise<StaffDetails> {
+  const wrapper = await apiFetch<ApiResponse<StaffDetails>>(`/api/admin/users/${userId}/details`);
+  return wrapper.data;
+}
+
+/**
+ * Saves the Details card (the console's Edit details). Name and title are
+ * required; a blank or unchanged email leaves the login email as it is. A
+ * System Admin's login email can't be changed.
+ */
+export async function updateStaffDetails(
+  userId: number | string,
+  body: { fullName: string; title: string; email?: string },
+): Promise<StaffDetails> {
+  const wrapper = await apiFetch<ApiResponse<StaffDetails>>(`/api/admin/users/${userId}/details`, {
+    method: "PATCH",
+    body: JSON.stringify(body),
+  });
+  return wrapper.data;
 }
 
 /** Emails someone an invitation to enroll as a participant. */
@@ -6312,15 +6375,29 @@ export async function changeMyPassword(currentPassword: string, newPassword: str
 // console, on separate endpoints and tables, so nothing here touches it:
 //   participant  /api/participants/web-agreement/**
 //   staff        /api/web-agreements/**  (ERM; Operations and System admin see all)
+//   approvers    /api/web-agreement-approvals/**  (Manager, Accounts; System Admin with ?role=)
+//   System Admin /api/web-agreement-admin/**  (approver teams, delete, maintenance)
+//
+// Every export for the approval chain is Web/web-prefixed so it never
+// collides with the console's own approval exports, which call the
+// console's endpoints and are never used by the website.
 
 const WEB_AGREEMENT_ME = "/api/participants/web-agreement";
 const WEB_AGREEMENTS = "/api/web-agreements";
+const WEB_AGREEMENT_APPROVALS = "/api/web-agreement-approvals";
+const WEB_AGREEMENT_ADMIN = "/api/web-agreement-admin";
 
 /**
- * Same names as the console. Live now: SUBMITTED (waiting for the
- * participant), REVISION_REQUESTED, VERIFIED (participant signed;
- * consultantCopyReleased says whether the ERM verified it) and CANCELLED.
- * The approval / countersign states are defined for later and unused.
+ * Same names as the console:
+ *   SUBMITTED                    waiting for the participant
+ *   REVISION_REQUESTED           sent back to the participant
+ *   VERIFIED                     participant signed; consultantCopyReleased
+ *                                says whether the ERM verified it
+ *   AWAITING_APPROVALS           with the Manager (and Accounts in Phase 2)
+ *   APPROVAL_REVISION_REQUESTED  an approver declined; back with the ERM
+ *   READY_TO_SIGN                every approval in; the ERM countersigns
+ *   COMPLETED                    executed for the current phase
+ *   CANCELLED                    final
  */
 export type WebAgreementStatus =
   | "SUBMITTED"
@@ -6443,7 +6520,8 @@ export interface WebAgreement {
   securityCheckHolderName: string | null;
   securityCheckAmount: string | null;
   securityCheckDates: string | null;
-  // ERM countersignature (later; null until then).
+  // ERM countersignature (Approve & sign; null until then). ermName and
+  // ermTitle are what the signer typed (prefilled from the signer profile).
   ermName: string | null;
   ermTitle: string | null;
   ermSignatureS3Key?: string | null;
@@ -6465,7 +6543,8 @@ export interface WebAgreement {
   // The status the row was revised FROM -- where a revoke puts it back.
   revisionPrevStatus?: WebAgreementStatus | null;
   revisionUndoSnapshot?: string | null;
-  // Phase 2 reopened-section scope (later).
+  // Phase 2 reopened-section scope: JSON array of {key:"appendixN"}, set
+  // when the ERM advances an executed agreement to Phase 2.
   phase2ReopenedSections?: string | null;
   // Signing record (real client IP via X-Forwarded-For).
   signingIp?: string | null;
@@ -6496,8 +6575,10 @@ export interface WebAgreement {
   sectionSignatureDates?: string | null;
   // Appendix 3 ID type toggle ("DL" | "STATE_ID").
   idType?: string | null;
-  // 1 = pre-employment (default); 2 = post-offer (later).
+  // 1 = pre-employment (default); 2 = post-offer (after Advance to Phase 2).
   phase?: number | null;
+  // The version (V1, V2, …) the current approval round reviews; null when
+  // none was routed (an agreement verified before versions existed).
   approvalVersionNumber?: number | null;
   // Cheque index-0 mirror of the cheques JSON.
   chequeS3Key?: string | null;
@@ -6509,7 +6590,9 @@ export interface WebAgreement {
   consultantCopyReleasedAt?: string | null;
   consultantCopyReleasedBy?: string | null;
   documentHash?: string | null;
-  // Generated PDFs (later).
+  // Generated PDFs: s3Key is the executed (countersigned) PDF,
+  // consultantPdfS3Key the latest verified version, phase1FinalPdfS3Key the
+  // Phase 1 executed PDF. Storage paths; a non-empty one means "exists".
   s3Key?: string | null;
   consultantPdfS3Key?: string | null;
   phase1FinalPdfS3Key?: string | null;
@@ -6517,7 +6600,7 @@ export interface WebAgreement {
   consentGivenAt?: string | null;
   consentIp?: string | null;
   consentVersion?: string | null;
-  // Multi-cheque entries: JSON string, parse with parseChequeList (the
+  // Multi-cheque entries: JSON string, parse with parseWebChequeList (the
   // entries carry no publicId, so it comes back "").
   cheques?: string | null;
   // DERIVED: the server's resolution of the submit gate, keyed
@@ -6526,6 +6609,13 @@ export interface WebAgreement {
   deleted?: boolean | null;
   deletedAt?: string | null;
   deletedBy?: number | null;
+  // DERIVED approval summary, on list rows only (staff list and the
+  // approver's All agreements): the latest round's decision per gate (null
+  // when that gate was never opened; accountsStatus is null in Phase 1) and
+  // when it was first sent for approval (ISO local date-time, or null).
+  managerStatus?: WebApprovalDecision | null;
+  accountsStatus?: WebApprovalDecision | null;
+  sentForApprovalAt?: string | null;
 }
 
 export interface WebAgreementEvent {
@@ -6545,6 +6635,8 @@ export interface WebAgreementEvent {
 export interface WebAgreementDetail {
   application: WebAgreement;
   events: WebAgreementEvent[];
+  /** Every approval gate row, all rounds, oldest first. */
+  approvals: WebAgreementApproval[];
 }
 
 export interface WebAgreementPage {
@@ -6662,11 +6754,20 @@ export interface WebAgreementCreateBody {
   portalRevocationContact?: string;
 }
 
-/** The watermarked page images of the review step's preview. */
+/**
+ * Page images (base64 PNG) of an agreement: the participant's watermarked
+ * review-step preview, and the approver's clean previews (110 DPI, no
+ * watermark).
+ */
 export interface WebAgreementPreviewImages {
   pages: string[];
   pageCount: number;
   viewerEmail: string;
+  /**
+   * The approver's version preview only: the routed version (V{n}) being
+   * reviewed, or null when none was routed (a live render).
+   */
+  versionNumber?: number | null;
 }
 
 /** The participant's single-file uploads (also their URL path). */
@@ -6676,6 +6777,284 @@ export type WebAgreementDocKind =
   | "dl-doc"
   | "state-id-doc"
   | "ssn-doc";
+
+// ── JSON columns and clauses ────────────────────────────────────
+// The website's copies of the console's cheque, portal-entry and
+// revision-section parsers and of its clause types, with the same shapes,
+// so the copied screens only change names. Kept separate so a change to
+// the console's never reaches the website.
+
+/**
+ * One cheque entry as stored in the cheques JSON column. Website entries
+ * carry no Cloudinary id, so publicId is always "" (kept so the copied
+ * screens' checks read the same).
+ */
+export interface WebChequeEntry {
+  index: number;
+  number: string;
+  date: string;
+  publicId: string;
+  s3Key: string;
+  contentType: string;
+  uploadedAt: string;
+}
+
+/**
+ * Parse the {@code cheques} JSON column into a sorted-by-index list.
+ * Tolerates null / malformed JSON by returning an empty array.
+ */
+export function parseWebChequeList(raw: string | null | undefined): WebChequeEntry[] {
+  if (!raw) return [];
+  try {
+    const arr = JSON.parse(raw) as unknown;
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((n) => {
+        const o = n as Record<string, unknown>;
+        return {
+          index: Number(o.index ?? 0),
+          number: String(o.number ?? ""),
+          date: String(o.date ?? ""),
+          publicId: String(o.publicId ?? ""),
+          s3Key: String(o.s3Key ?? ""),
+          contentType: String(o.contentType ?? ""),
+          uploadedAt: String(o.uploadedAt ?? ""),
+        } satisfies WebChequeEntry;
+      })
+      .sort((a, b) => a.index - b.index);
+  } catch {
+    return [];
+  }
+}
+
+/** One repeatable Portal Access entry (platform + username). */
+export interface WebPortalEntry {
+  platform: string;
+  username: string;
+}
+
+/** Parse the portalEntries JSON column into a typed list (rows with neither value dropped). */
+export function parseWebPortalEntries(json: string | null | undefined): WebPortalEntry[] {
+  if (!json || !json.trim()) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .map((e) => ({
+        platform: typeof e?.platform === "string" ? e.platform : "",
+        username: typeof e?.username === "string" ? e.username : "",
+      }))
+      .filter((e) => e.platform.length > 0 || e.username.length > 0);
+  } catch {
+    return [];
+  }
+}
+
+/** One section the ERM sent back, with its optional note. */
+export interface WebRevisionSectionSelection {
+  key: string;
+  note?: string;
+}
+
+/** Parse the stored revisionSections / phase2ReopenedSections JSON into selections. */
+export function parseWebRevisionSections(
+  json: string | null | undefined,
+): WebRevisionSectionSelection[] {
+  if (!json) return [];
+  try {
+    const arr = JSON.parse(json);
+    if (!Array.isArray(arr)) return [];
+    return arr
+      .filter((r) => r && typeof r.key === "string" && r.key.length > 0)
+      .map((r) => ({ key: r.key as string, note: r.note as string | undefined }));
+  } catch {
+    return [];
+  }
+}
+
+/** A run of clause text, or a ${name} placeholder (kind "ph"). */
+export interface WebAgreementSegment {
+  kind: "text" | "ph";
+  text?: string | null;
+  /** Placeholder name when kind === "ph". */
+  name?: string | null;
+}
+
+export interface WebAgreementBlock {
+  kind: "heading" | "paragraph" | "table";
+  level?: number | null;
+  segments?: WebAgreementSegment[] | null;
+  /** rows -> cells -> segments (kind === "table"). */
+  rows?: WebAgreementSegment[][][] | null;
+}
+
+/** GET /api/participants/web-agreement/content (the backend's WebAgreementContent). */
+export interface WebAgreementContent {
+  /** sectionId -> ordered blocks for that wizard section. */
+  sections: Record<string, WebAgreementBlock[]>;
+  /** Non-editable placeholder values for this agreement (the editable ones
+   *  are filled live by the wizard from form state). */
+  values: Record<string, string>;
+}
+
+// ── Approval chain types ────────────────────────────────────────
+// The website's copies of the console's approval types, with website
+// users.id numbers where the console has string ids.
+
+/** The two approval gates: Manager (Phase 1 and 2) and Accounts (Phase 2 only). */
+export type WebApprovalRole = "MANAGER" | "ACCOUNTS";
+
+/** One gate's decision. Labels and colours: APPROVAL_DECISION_META in web-agreement-status.ts. */
+export type WebApprovalDecision = "PENDING" | "APPROVED" | "REVISION_REQUESTED";
+
+/** One approval gate row (web_agreement_approvals). */
+export interface WebAgreementApproval {
+  id: number;
+  /** web_agreements.id */
+  agreementId: number;
+  role: WebApprovalRole;
+  status: WebApprovalDecision;
+  /** Required on a revision request; optional on approve. */
+  note: string | null;
+  phase: number;
+  /** Counts across the whole agreement, not per phase. */
+  round: number;
+  /** users.id of the approver the gate was routed to; null = any approver in that role. */
+  approverUserId: number | null;
+  approverName: string | null;
+  /** users.id of whoever decided it. */
+  decidedBy: number | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+  decidedIp: string | null;
+  createdAt: string;
+}
+
+/** One verified version (V1, V2, …): an immutable PDF with its Certificate of Completion. */
+export interface WebAgreementVersion {
+  id: number;
+  /** web_agreements.id */
+  agreementId: number;
+  versionNumber: number;
+  /** Kept for records; never shown. */
+  documentHash?: string | null;
+  phase?: number | null;
+  /** When the ERM verified it. */
+  approvedAt?: string | null;
+}
+
+/** One approver the ERM can route to (from the owning ERM's team). */
+export interface WebApproverOption {
+  /** users.id */
+  id: number;
+  name: string;
+  email: string;
+}
+
+/** The Send for approval pickers. accounts is [] in Phase 1. */
+export interface WebEligibleApprovers {
+  phase: number;
+  managers: WebApproverOption[];
+  accounts: WebApproverOption[];
+}
+
+/**
+ * Body of Send for approval (also the re-send). accountsUserId only in
+ * Phase 2; versionNumber null or absent = the latest version.
+ */
+export interface WebSendForApprovalBody {
+  managerUserId: number | null;
+  accountsUserId?: number | null;
+  versionNumber?: number | null;
+}
+
+/** One row of the ERM's approval board. */
+export interface WebApprovalBoardItem {
+  application: WebAgreement;
+  /** Every gate row, all rounds, oldest first. */
+  approvals: WebAgreementApproval[];
+}
+
+/** One agreement waiting on my gate (the approver's Pending tab). */
+export interface WebApproverQueueItem {
+  application: WebAgreement;
+  /** Every gate row, all rounds, oldest first. */
+  approvals: WebAgreementApproval[];
+  myRole: WebApprovalRole;
+}
+
+/** One row of the approver's "Approved agreements" record (my latest approval per agreement). */
+export interface WebApproverApprovedItem {
+  appId: string;
+  consultantName: string | null;
+  consultantEmail: string | null;
+  /** users.id of the owning ERM. */
+  ermId: number | null;
+  /** "(unassigned ERM)" when unknown. */
+  ermName: string;
+  /** The phase of the approval row (not the agreement's current phase). */
+  phase: number | null;
+  decidedAt: string | null;
+  /** The agreement's status now. */
+  status: WebAgreementStatus;
+  /** Manager only: a Phase 1 executed PDF exists to preview and download. */
+  hasPhase1Signed: boolean;
+}
+
+/** Which PDF an approver downloads: the executed one, the Phase 1 one, or the latest version. */
+export type WebApproverDownloadDoc = "final" | "phase1" | "approved";
+
+/** The countersign modal's prefill: the signed-in staff member's name and agreement title ("" when none). */
+export interface WebSignerProfile {
+  fullName: string;
+  title: string;
+}
+
+/** Body of Approve & sign. The signature is a data:image/… URL. */
+export interface WebApproveAndSignBody {
+  ermName: string;
+  ermTitle: string;
+  ermSignatureBase64: string;
+}
+
+/**
+ * Advance to Phase 2: which sections become required. Any field set makes
+ * it an explicit choice (true promotes); an empty body promotes every
+ * appendix not yet required and leaves the SSN alone.
+ */
+export interface WebPhase2Promotion {
+  appendix1?: boolean;
+  appendix2?: boolean;
+  appendix3?: boolean;
+  appendix4?: boolean;
+  appendix5?: boolean;
+  ssn?: boolean;
+}
+
+/**
+ * Result of the System Admin's Regenerate / Revoke tools. In a dry run
+ * processed equals matched and nothing is written; after a real run the
+ * work done is regenerated (Regenerate) or reverted (Revoke).
+ */
+export interface WebAdminBackfillSummary {
+  dryRun: boolean;
+  status: string;
+  matched: number;
+  processed: number;
+  /** Revoke ERM countersignatures. */
+  reverted?: number;
+  /** Regenerate executed agreements. */
+  regenerated?: number;
+  failed: number;
+  /** "{applicationId}: {message}" per failure. */
+  errors: string[];
+}
+
+/** An ERM's approver team: users.id of the Managers and Accounts they can route to. */
+export interface WebErmTeam {
+  managerIds: number[];
+  accountsIds: number[];
+}
 
 /**
  * A failed website-agreement call. Unlike apiFetch's plain Error it keeps the
@@ -6773,12 +7152,53 @@ async function webAgreementFetch<T>(path: string, init: RequestInit = {}): Promi
 }
 
 /**
+ * Shrinks a large photo before upload (the console's downscale, copied):
+ * phone-camera images of several MB time out on mobile data. Only large
+ * raster images change (max 2400 px, JPEG 0.85); PDFs, GIFs and small
+ * images pass through, and any decode failure uploads the original.
+ */
+async function webDownscaleImageFile(file: File): Promise<File> {
+  if (typeof document === "undefined") return file;
+  if (!file.type.startsWith("image/") || file.type === "image/gif") return file;
+  const MAX_DIM = 2400;
+  const SIZE_THRESHOLD = 1_500_000; // ~1.5 MB: leave smaller files alone
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_DIM / Math.max(bitmap.width, bitmap.height));
+    if (scale === 1 && file.size <= SIZE_THRESHOLD) {
+      bitmap.close?.();
+      return file;
+    }
+    const w = Math.max(1, Math.round(bitmap.width * scale));
+    const h = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) {
+      bitmap.close?.();
+      return file;
+    }
+    ctx.drawImage(bitmap, 0, 0, w, h);
+    bitmap.close?.();
+    const blob = await new Promise<Blob | null>((resolve) =>
+      canvas.toBlob((b) => resolve(b), "image/jpeg", 0.85),
+    );
+    if (!blob || blob.size >= file.size) return file; // keep the original if not smaller
+    const base = file.name.replace(/\.[^.]+$/, "") || "upload";
+    return new File([blob], `${base}.jpg`, { type: "image/jpeg" });
+  } catch {
+    return file;
+  }
+}
+
+/**
  * Multipart upload of one file (field "file"). Large photos are shrunk first
  * and the request gives up after 90 s, like the console's uploads.
  */
 async function webAgreementUpload(path: string, file: File): Promise<WebAgreement> {
   const form = new FormData();
-  form.append("file", await downscaleImageFile(file));
+  form.append("file", await webDownscaleImageFile(file));
   const controller = new AbortController();
   const timeout =
     typeof window !== "undefined"
@@ -6826,8 +7246,8 @@ export async function getMyWebAgreement(): Promise<WebAgreement | null> {
 }
 
 /** The real clauses per wizard section plus this agreement's non-editable values. */
-export async function getWebAgreementContent(): Promise<AgreementContent> {
-  return webAgreementFetch<AgreementContent>(`${WEB_AGREEMENT_ME}/content`);
+export async function getWebAgreementContent(): Promise<WebAgreementContent> {
+  return webAgreementFetch<WebAgreementContent>(`${WEB_AGREEMENT_ME}/content`);
 }
 
 /** The blank-form agreement PDF behind the wizard's "View full agreement". */
@@ -6975,7 +7395,7 @@ export async function updateWebAgreementContact(
  */
 export async function webAgreementRequestRevision(
   appId: string,
-  sections: RevisionSectionSelection[],
+  sections: WebRevisionSectionSelection[],
   ach?: { achDebitDates?: string; achDebitAmounts?: string },
   rate?: {
     ratePeriod1?: string;
@@ -7026,7 +7446,12 @@ export async function webAgreementRevokeRevision(appId: string): Promise<WebAgre
   });
 }
 
-/** The ERM verifies the signed agreement (VERIFIED, not yet verified); the participant sees it on their dashboard. */
+/**
+ * The ERM verifies the signed agreement (VERIFIED); the participant sees it
+ * on their dashboard. Each click creates the next numbered version (V1,
+ * V2, …) with its Certificate of Completion, so it can be clicked again
+ * ("Re-verify") after a revision.
+ */
 export async function verifyWebAgreement(appId: string): Promise<WebAgreement> {
   return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/verify`, { method: "POST" });
 }
@@ -7050,4 +7475,242 @@ export async function fetchWebAgreementDocBlob(
     `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}${path}?disposition=${disposition}`,
     "Couldn't open the document",
   );
+}
+
+// ── Staff: versions, send for approval, the board ───────────────
+
+/**
+ * The approval board: agreements in AWAITING_APPROVALS,
+ * APPROVAL_REVISION_REQUESTED or READY_TO_SIGN with all their gate rows.
+ * An ERM gets their own; Operations and System admin get all.
+ */
+export async function webFetchApprovalBoard(): Promise<WebApprovalBoardItem[]> {
+  return (await webAgreementFetch<WebApprovalBoardItem[]>(`${WEB_AGREEMENTS}/approval-board`)) ?? [];
+}
+
+/** The verified versions (V1, V2, …), oldest first. */
+export async function webFetchAgreementVersions(appId: string): Promise<WebAgreementVersion[]> {
+  return (await webAgreementFetch<WebAgreementVersion[]>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/versions`)) ?? [];
+}
+
+/**
+ * One version's stored PDF (V{n}, with its Certificate of Completion). A
+ * missing version or file throws a WebAgreementApiError with status 404.
+ */
+export async function webFetchAgreementVersionPdfBlob(
+  appId: string,
+  versionNumber: number,
+  disposition: "inline" | "attachment" = "inline",
+): Promise<Blob> {
+  return webAgreementBlob(
+    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/versions/${versionNumber}/pdf?disposition=${disposition}`,
+    `Couldn't open version V${versionNumber}`,
+  );
+}
+
+/** The Send for approval pickers, from the owning ERM's approver team. */
+export async function webFetchEligibleApprovers(appId: string): Promise<WebEligibleApprovers> {
+  return webAgreementFetch<WebEligibleApprovers>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/eligible-approvers`);
+}
+
+/**
+ * Sends the agreement to its approvers (from VERIFIED once verified), or
+ * re-sends it after an approver declined: a new round, every required gate
+ * PENDING. The server's refusals come back as the error message as they are.
+ */
+export async function webSendForApproval(appId: string, body: WebSendForApprovalBody): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/send-for-approval`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+// ── Staff: countersign, executed PDF, Phase 2 ───────────────────
+
+/** The countersign prefill: the caller's own name and agreement title. */
+export async function webFetchSignerProfile(): Promise<WebSignerProfile> {
+  return webAgreementFetch<WebSignerProfile>(`${WEB_AGREEMENTS}/signer-profile`);
+}
+
+/**
+ * The ERM countersigns (READY_TO_SIGN → COMPLETED) and the final PDF is
+ * generated. Takes 10–30 seconds.
+ */
+export async function webApproveAndSign(appId: string, body: WebApproveAndSignBody): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/approve-and-sign`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+}
+
+/**
+ * The stored executed PDF. A failure throws a WebAgreementApiError: 404
+ * when none is stored, 502 when the stored file can't be read.
+ */
+export async function webFetchAgreementPdfBlob(
+  appId: string,
+  disposition: "inline" | "attachment" = "inline",
+): Promise<Blob> {
+  return webAgreementBlob(
+    `${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/download-pdf?disposition=${disposition}`,
+    "Couldn't fetch the PDF",
+  );
+}
+
+/**
+ * Reopens an executed Phase 1 agreement for Phase 2 (COMPLETED →
+ * SUBMITTED, phase 2) on the same document.
+ */
+export async function webAdvanceToPhase2(appId: string, promotion?: WebPhase2Promotion): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(`${WEB_AGREEMENTS}/${encodeURIComponent(appId)}/advance-to-phase-2`, {
+    method: "POST",
+    body: JSON.stringify(promotion ?? {}),
+  });
+}
+
+// ── Approvers (/approver-dashboard) ─────────────────────────────
+// A Manager or Accounts user's gate is their role; role is only needed (and
+// only honoured) for a System Admin, who has both gates through the API.
+
+function webApproverRoleQuery(role?: WebApprovalRole): string {
+  return role ? `?role=${role}` : "";
+}
+
+/** Agreements waiting on my gate in the current round (the Pending tab). */
+export async function webApproverFetchQueue(role?: WebApprovalRole): Promise<WebApproverQueueItem[]> {
+  return (await webAgreementFetch<WebApproverQueueItem[]>(
+    `${WEB_AGREEMENT_APPROVALS}/queue${webApproverRoleQuery(role)}`)) ?? [];
+}
+
+/**
+ * Every agreement ever routed to me in my gate, any round and status (the
+ * All agreements tab), with the list's approval summary fields.
+ */
+export async function webApproverFetchApplications(role?: WebApprovalRole): Promise<WebAgreement[]> {
+  return (await webAgreementFetch<WebAgreement[]>(
+    `${WEB_AGREEMENT_APPROVALS}/applications${webApproverRoleQuery(role)}`)) ?? [];
+}
+
+/** My approvals, one per agreement, newest first (the Approved agreements tab). */
+export async function webApproverFetchApproved(role?: WebApprovalRole): Promise<WebApproverApprovedItem[]> {
+  return (await webAgreementFetch<WebApproverApprovedItem[]>(
+    `${WEB_AGREEMENT_APPROVALS}/approved${webApproverRoleQuery(role)}`)) ?? [];
+}
+
+/** The version routed to this round as page images (carries versionNumber). */
+export async function webApproverVersionImages(appId: string, role?: WebApprovalRole): Promise<WebAgreementPreviewImages> {
+  return webAgreementFetch<WebAgreementPreviewImages>(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/version-preview-images${webApproverRoleQuery(role)}`);
+}
+
+/** The latest version as page images (the All agreements preview). */
+export async function webApproverLatestVersionImages(
+  appId: string,
+  role?: WebApprovalRole,
+): Promise<WebAgreementPreviewImages> {
+  return webAgreementFetch<WebAgreementPreviewImages>(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/latest-version-preview-images${webApproverRoleQuery(role)}`);
+}
+
+/** The executed agreement as page images (COMPLETED only). */
+export async function webApproverSignedImages(appId: string, role?: WebApprovalRole): Promise<WebAgreementPreviewImages> {
+  return webAgreementFetch<WebAgreementPreviewImages>(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/signed-preview-images${webApproverRoleQuery(role)}`);
+}
+
+/** The Phase 1 executed agreement as page images (Manager only). */
+export async function webApproverPhase1SignedImages(
+  appId: string,
+  role?: WebApprovalRole,
+): Promise<WebAgreementPreviewImages> {
+  return webAgreementFetch<WebAgreementPreviewImages>(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/phase1-signed-preview-images${webApproverRoleQuery(role)}`);
+}
+
+/**
+ * The PDF of an agreement I approved: doc "final" (executed), "phase1"
+ * (Manager only) or "approved" (the latest version). A refusal throws a
+ * WebAgreementApiError whose message is the server's reason (from
+ * X-Preview-Error); a 5xx keeps that reason in previewError only. Name the
+ * saved file on the page: Content-Disposition isn't readable here.
+ */
+export async function webApproverDownloadPdf(
+  appId: string,
+  doc: WebApproverDownloadDoc = "final",
+  role?: WebApprovalRole,
+): Promise<Blob> {
+  return webAgreementBlob(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/download-pdf?doc=${doc}${role ? `&role=${role}` : ""}`,
+    "Couldn't download the agreement",
+  );
+}
+
+/** Approves my gate (one click; the note is optional). Returns the agreement without SSN, ID or bank numbers. */
+export async function webApproverApprove(
+  appId: string,
+  body: { note?: string; role?: WebApprovalRole } = {},
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/approve`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+/** Declines my gate with a note (required); it goes back to the ERM, not the participant. */
+export async function webApproverRequestRevision(
+  appId: string,
+  body: { note: string; role?: WebApprovalRole },
+): Promise<WebAgreement> {
+  return webAgreementFetch<WebAgreement>(
+    `${WEB_AGREEMENT_APPROVALS}/applications/${encodeURIComponent(appId)}/request-revision`,
+    { method: "POST", body: JSON.stringify(body) },
+  );
+}
+
+// ── System Admin: approver teams, delete, maintenance ───────────
+
+/** An ERM's approver team (active links only). */
+export async function webAdminFetchErmTeam(ermUserId: number | string): Promise<WebErmTeam> {
+  return webAgreementFetch<WebErmTeam>(
+    `${WEB_AGREEMENT_ADMIN}/users/${encodeURIComponent(String(ermUserId))}/assignments`);
+}
+
+/** Replaces both lists of an ERM's approver team in one go; returns the saved team. */
+export async function webAdminSaveErmTeam(ermUserId: number | string, team: WebErmTeam): Promise<WebErmTeam> {
+  return webAgreementFetch<WebErmTeam>(
+    `${WEB_AGREEMENT_ADMIN}/users/${encodeURIComponent(String(ermUserId))}/assignments`,
+    { method: "PUT", body: JSON.stringify(team) },
+  );
+}
+
+/**
+ * Deletes an agreement at any status: it leaves every dashboard (ERM,
+ * approvers, participant). The row is kept for audit; there is no restore.
+ */
+export async function webAdminDeleteAgreement(appId: string): Promise<void> {
+  await webAgreementJson<void>(`${WEB_AGREEMENT_ADMIN}/agreements/${encodeURIComponent(appId)}`, {
+    method: "DELETE",
+  });
+}
+
+/**
+ * Re-renders every executed agreement's PDFs from the current template.
+ * dryRun true only counts them; nothing is written unless dryRun is false.
+ */
+export async function webAdminRegenerateCompletedAgreements(dryRun: boolean): Promise<WebAdminBackfillSummary> {
+  return webAgreementFetch<WebAdminBackfillSummary>(`${WEB_AGREEMENT_ADMIN}/regenerate-completed-agreements`, {
+    method: "POST",
+    body: JSON.stringify({ dryRun }),
+  });
+}
+
+/**
+ * Clears the ERM countersignature on every executed agreement and puts each
+ * back to VERIFIED. dryRun true only counts them.
+ */
+export async function webAdminRevokeErmSignatures(dryRun: boolean): Promise<WebAdminBackfillSummary> {
+  return webAgreementFetch<WebAdminBackfillSummary>(`${WEB_AGREEMENT_ADMIN}/revoke-erm-signatures`, {
+    method: "POST",
+    body: JSON.stringify({ dryRun }),
+  });
 }

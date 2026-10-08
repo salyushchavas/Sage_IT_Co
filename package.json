@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test:pending-appendix": "node scripts/verify-pending-appendix.mts"
+    "test:pending-appendix": "node scripts/verify-pending-appendix.mts",
+    "test:web-agreement-isolation": "node scripts/verify-web-agreement-isolation.mjs"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",

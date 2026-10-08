@@ -8,22 +8,25 @@ import {
   type WebAgreement,
   type WebAgreementPage,
   type WebAgreementStatus,
+  type WebApprovalDecision,
 } from "@/lib/api";
 import { useAuth } from "@/lib/auth-context";
 import AgreementStatusPill from "./AgreementStatusPill";
 import { formatUsDayCt } from "@/lib/datetime";
-import { computePendingAppendices } from "@/lib/pending-appendix";
+import { computePendingAppendices } from "@/lib/web-agreement-pending-appendix";
 import {
+  APPROVAL_DECISION_META,
   describeStatus,
   LIVE_STATUSES,
+  TONE_CLASSES,
 } from "@/lib/web-agreement-status";
 
 /**
  * The website agreement's copy of the console's agreements list
- * (src/components/agreement-erm/ConsultantsListView.tsx), without the
- * approval columns (Manager, Accounts, Sent on) and without the link-expiry
- * resend: the participant signs in to the website, so there is no link to
- * expire. Rows open the detail in place (onOpen) instead of navigating.
+ * (src/components/agreement-erm/ConsultantsListView.tsx), with its approval
+ * columns (Manager, Accounts, Sent on) and without the link-expiry resend:
+ * the participant signs in to the website, so there is no link to expire.
+ * Rows open the detail in place (onOpen) instead of navigating.
  *
  * Chips are generated from the shared vocabulary, never written here, so a
  * chip caption can't drift from the pill on the row it selects. Filtering
@@ -139,9 +142,9 @@ export default function WebAgreementsListView({
     return rows;
   }, [pageData, isAdmin, ownerFilter]);
 
-  // Base 5 cols (Participant, Agreement ID, Status, Pending Appendix,
-  // Created); admins add the Owner column.
-  const colCount = isAdmin ? 6 : 5;
+  // Base 8 cols (Participant, Agreement ID, Status, Pending Appendix,
+  // Manager, Accounts, Sent on, Created); admins add the Owner column.
+  const colCount = isAdmin ? 9 : 8;
 
   return (
     <div className="space-y-4">
@@ -213,6 +216,10 @@ export default function WebAgreementsListView({
               <th className="text-left px-4 py-2">Agreement ID</th>
               <th className="hidden sm:table-cell text-left px-4 py-2">Status</th>
               <th className="text-left px-4 py-2">Pending Appendix</th>
+              {/* The approval columns hide on phones and small tablets. */}
+              <th className="hidden md:table-cell text-left px-4 py-2">Manager</th>
+              <th className="hidden md:table-cell text-left px-4 py-2">Accounts</th>
+              <th className="hidden md:table-cell text-left px-4 py-2">Sent on</th>
               <th className="text-left px-4 py-2">Created</th>
             </tr>
           </thead>
@@ -288,7 +295,23 @@ export default function WebAgreementsListView({
                   <td className="px-4 py-2 align-top">
                     <PendingAppendixCell app={r} />
                   </td>
-                  <td className="px-4 py-2 text-xs text-gray-500">
+                  <td className="hidden md:table-cell px-4 py-2">
+                    <ApprovalBadge status={r.managerStatus} />
+                  </td>
+                  <td className="hidden md:table-cell px-4 py-2">
+                    {/* Phase 1 has no Accounts gate → N/A. */}
+                    {(r.phase ?? 1) >= 2 ? (
+                      <ApprovalBadge status={r.accountsStatus} />
+                    ) : (
+                      <span className="text-[11px] text-gray-400">N/A</span>
+                    )}
+                  </td>
+                  {/* Dates stay on one line; the table scrolls inside its
+                      card when the columns don't fit. */}
+                  <td className="hidden md:table-cell px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
+                    {formatDate(r.sentForApprovalAt)}
+                  </td>
+                  <td className="px-4 py-2 text-xs text-gray-500 whitespace-nowrap">
                     {formatDate(r.createdAt)}
                   </td>
                 </tr>
@@ -331,7 +354,7 @@ export default function WebAgreementsListView({
 
 function formatDate(iso: string | null | undefined) {
   // US MM-DD-YYYY, like the rest of the agreement screens, on the business
-  // (CT) day the agreement was created.
+  // (CT) day it happened; "—" when it hasn't.
   return formatUsDayCt(iso);
 }
 
@@ -381,5 +404,31 @@ function PendingAppendixCell({ app }: { app: WebAgreement }) {
         ))}
       </ul>
     </details>
+  );
+}
+
+// Compact Manager / Accounts gate badge: the latest round's decision for
+// that gate. Null (never sent to that gate) renders a neutral dash. Wording
+// and colour come from APPROVAL_DECISION_META, the same as the approval
+// board above the list.
+function ApprovalBadge({ status }: { status: string | null | undefined }) {
+  if (!status) return <span className="text-[11px] text-gray-400">—</span>;
+  const m = APPROVAL_DECISION_META[status as WebApprovalDecision];
+  if (!m) {
+    return (
+      <span className="inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold bg-gray-100 text-gray-700">
+        {status}
+      </span>
+    );
+  }
+  return (
+    <span
+      className={
+        "inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold " +
+        TONE_CLASSES[m.tone]
+      }
+    >
+      {m.label}
+    </span>
   );
 }

@@ -49,19 +49,19 @@ import {
   getWebAgreementContent,
   getWebAgreementPreviewImages,
   getWebAgreementTemplatePdfBlob,
-  parseChequeList,
-  parseRevisionSections,
+  parseWebChequeList,
+  parseWebRevisionSections,
   recordWebAgreementConsent,
   saveWebAgreementChequeMetadata,
   saveWebAgreementFill,
   submitWebAgreement,
   uploadWebAgreementChequeAt,
   uploadWebAgreementDoc,
-  parsePortalEntries,
+  parseWebPortalEntries,
   WebAgreementApiError,
-  type PortalEntry,
-  type AgreementContent,
-  type ChequeEntry,
+  type WebPortalEntry,
+  type WebAgreementContent,
+  type WebChequeEntry,
   type WebAgreement,
   type WebAgreementFillPayload,
 } from "@/lib/api";
@@ -393,7 +393,7 @@ function isAppendixTouched(section: AgreementSection, form: FormState): boolean 
   if (!section.appendixKey) return false;
   // Build J — portal platform+username entries live outside section.fields.
   if (section.id === "appendix4") {
-    const entries = parsePortalEntries(form.fields["portalEntries"]);
+    const entries = parseWebPortalEntries(form.fields["portalEntries"]);
     if (entries.some((e) => e.platform.trim() || e.username.trim())) return true;
   }
   for (const field of section.fields) {
@@ -457,7 +457,7 @@ function isSectionComplete(
   section: AgreementSection,
   form: FormState,
   reqs: EffectiveRequirements,
-  chequeEntries: ChequeEntry[],
+  chequeEntries: WebChequeEntry[],
   workAuthUploaded: boolean,
   offerLetterUploaded: boolean,
   dlDocUploaded: boolean,
@@ -512,7 +512,7 @@ function isSectionComplete(
   // Build J — Appendix 4 completeness: at least one COMPLETE platform +
   // username entry is required when the section applies.
   if (section.id === "appendix4" && isSectionActive(section, form, reqs)) {
-    const entries = parsePortalEntries(form.fields["portalEntries"]);
+    const entries = parseWebPortalEntries(form.fields["portalEntries"]);
     const hasComplete = entries.some(
       (e) => e.platform.trim().length > 0 && e.username.trim().length > 0,
     );
@@ -581,7 +581,7 @@ type ChequeGap = { index: number; label: string };
  * missing-items re-check, and the panel all read it, so they can't
  * drift apart.
  */
-function chequeGaps(count: number, entries: ChequeEntry[]): ChequeGap[] {
+function chequeGaps(count: number, entries: WebChequeEntry[]): ChequeGap[] {
   if (count <= 0) {
     return [{
       index: -1,
@@ -628,7 +628,7 @@ function firstIncompleteIndex(
   sections: readonly AgreementSection[],
   form: FormState,
   reqs: EffectiveRequirements,
-  chequeEntries: ChequeEntry[],
+  chequeEntries: WebChequeEntry[],
   workAuthUploaded: boolean,
   offerLetterUploaded: boolean,
   dlDocUploaded: boolean,
@@ -715,7 +715,7 @@ function revisionScopeKeys(
   app: WebAgreement | null,
 ): string[] {
   if (!app || app.status !== "REVISION_REQUESTED") return [];
-  return parseRevisionSections(app.revisionSections).map((r) => r.key);
+  return parseWebRevisionSections(app.revisionSections).map((r) => r.key);
 }
 
 /**
@@ -736,7 +736,7 @@ function isPhase2Restricted(app: WebAgreement | null): boolean {
 /** Build P — the reopened Phase-2 section keys (same JSON shape as the revision scope). */
 function phase2ScopeKeys(app: WebAgreement | null): string[] {
   if (!isPhase2Restricted(app)) return [];
-  return parseRevisionSections(app!.phase2ReopenedSections).map((r) => r.key);
+  return parseWebRevisionSections(app!.phase2ReopenedSections).map((r) => r.key);
 }
 
 /**
@@ -797,7 +797,7 @@ export default function WebAgreementWizard() {
   // Build G — Appendix 5 cheque upload state.
   // Build U — extended to per-cheque list. Each entry maps to
   // index i and tracks {number, date, publicId, uploadedAt}.
-  const [chequeEntries, setChequeEntries] = useState<ChequeEntry[]>([]);
+  const [chequeEntries, setChequeEntries] = useState<WebChequeEntry[]>([]);
   const [chequeUploadError, setChequeUploadError] = useState("");
   const [chequeUploadingIndex, setChequeUploadingIndex] = useState<number | null>(null);
   // Build W — Appendix 1 work-authorization document upload state.
@@ -834,7 +834,7 @@ export default function WebAgreementWizard() {
   // F-3 — full clause content (parsed from the master template), fetched
   // once. Non-fatal: the read pane falls back to the plain summary if it
   // can't load.
-  const [content, setContent] = useState<AgreementContent | null>(null);
+  const [content, setContent] = useState<WebAgreementContent | null>(null);
 
   const lastSavedRef = useRef<FormState>(buildInitialState(null));
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -893,7 +893,7 @@ export default function WebAgreementWizard() {
         }
         setForm(initial);
         lastSavedRef.current = { ...initial };
-        const entries = parseChequeList(data.cheques);
+        const entries = parseWebChequeList(data.cheques);
         setChequeEntries(entries);
         // Build W/I/J — uploads already on file? (A stored path means yes.)
         setWorkAuthUploaded(Boolean(data.workAuthDocS3Key));
@@ -1163,7 +1163,7 @@ export default function WebAgreementWizard() {
   // Build U — per-cheque upload. One call per index; the wizard mirrors
   // the row's cheques JSON so it doesn't have to refetch after every
   // upload. The "uploaded" signal per index is a non-empty s3Key on the
-  // matching ChequeEntry (website cheques have no publicId).
+  // matching WebChequeEntry (website cheques have no publicId).
   const handleChequeUploadAt = useCallback(
     async (index: number, file: File) => {
       setChequeUploadError("");
@@ -1174,7 +1174,7 @@ export default function WebAgreementWizard() {
         );
         // The stored path from the reply; only this index is taken from
         // it, so a number typed elsewhere and not yet written stays.
-        const saved = parseChequeList(updated.cheques).find((e) => e.index === index);
+        const saved = parseWebChequeList(updated.cheques).find((e) => e.index === index);
         setChequeEntries((prev) => {
           const next = prev.filter((e) => e.index !== index);
           const existing = prev.find((e) => e.index === index);
@@ -1233,7 +1233,7 @@ export default function WebAgreementWizard() {
         // Pull server truth back so the UI shows what's actually stored.
         try {
           const fresh = await getMyWebAgreement();
-          if (fresh) setChequeEntries(parseChequeList(fresh.cheques));
+          if (fresh) setChequeEntries(parseWebChequeList(fresh.cheques));
         } catch {
           /* the failed-submit resync is the backstop */
         }
@@ -1641,7 +1641,7 @@ export default function WebAgreementWizard() {
         try {
           const fresh = await getMyWebAgreement();
           if (fresh) {
-            setChequeEntries(parseChequeList(fresh.cheques));
+            setChequeEntries(parseWebChequeList(fresh.cheques));
             setWorkAuthUploaded(Boolean(fresh.workAuthDocS3Key));
             setOfferLetterUploaded(Boolean(fresh.offerLetterS3Key));
             setDlDocUploaded(Boolean(fresh.dlDocS3Key));
@@ -1844,7 +1844,7 @@ export default function WebAgreementWizard() {
       }
       // Build J — Appendix 4 needs ≥1 complete platform+username entry.
       if (k === "portalEntries") {
-        const entries = parsePortalEntries(form.fields["portalEntries"]);
+        const entries = parseWebPortalEntries(form.fields["portalEntries"]);
         return !entries.some(
           (e) => e.platform.trim().length > 0 && e.username.trim().length > 0,
         );
@@ -2656,7 +2656,7 @@ function SectionStep({
   lockFields = false,
 }: {
   section: AgreementSection;
-  content: AgreementContent | null;
+  content: WebAgreementContent | null;
   form: FormState;
   reqs: EffectiveRequirements;
   touched: Set<string>;
@@ -2670,7 +2670,7 @@ function SectionStep({
   consultantEmail: string;
   effectiveDateText: string;
   onOpenTemplate: () => void;
-  chequeEntries: ChequeEntry[];
+  chequeEntries: WebChequeEntry[];
   chequeUploadingIndex: number | null;
   chequeUploadError: string;
   onUploadChequeAt: (index: number, file: File) => void;
@@ -4068,7 +4068,7 @@ function MissingItemsPanel({
    *  a row per unfinished cheque ("Cheque 2 — enter the cheque number")
    *  instead of one unhelpful "Security cheques". */
   chequeCount: number;
-  chequeEntries: ChequeEntry[];
+  chequeEntries: WebChequeEntry[];
   /** Build X — the wizard's filtered section list. Jump targets are
    *  indices into this list so they pair with setCurrentStep. A hidden
    *  appendix would never produce a missing token (backend skips
@@ -4613,7 +4613,7 @@ function PortalEntriesBlock({
   onChange: (json: string) => void;
   needsAttention: boolean;
 }) {
-  const rows: PortalEntry[] = (() => {
+  const rows: WebPortalEntry[] = (() => {
     if (!value || !value.trim()) return [{ platform: "", username: "" }];
     try {
       const arr = JSON.parse(value);
@@ -4629,7 +4629,7 @@ function PortalEntriesBlock({
     return [{ platform: "", username: "" }];
   })();
 
-  const commit = (next: PortalEntry[]) =>
+  const commit = (next: WebPortalEntry[]) =>
     onChange(JSON.stringify(next.length > 0 ? next : [{ platform: "", username: "" }]));
   const update = (i: number, field: "platform" | "username", v: string) =>
     commit(rows.map((r, idx) => (idx === i ? { ...r, [field]: v } : r)));
@@ -4731,7 +4731,7 @@ function ChequeListBlock({
   onAdd: () => void;
   /** Removes the last cheque (never the only one). */
   onRemoveLast: () => void;
-  entries: ChequeEntry[];
+  entries: WebChequeEntry[];
   uploadingIndex: number | null;
   error: string;
   onUploadAt: (index: number, file: File) => void;
@@ -5058,7 +5058,7 @@ function ReviewStep({
   onFinalSignature: (dataUrl: string | null) => void;
   onLegalName: (value: string) => void;
   allComplete: boolean;
-  chequeEntries: ChequeEntry[];
+  chequeEntries: WebChequeEntry[];
   /** Build W/I/J — uploads present? (non-form completion signals). */
   workAuthUploaded: boolean;
   offerLetterUploaded: boolean;
@@ -5243,7 +5243,7 @@ function ReviewStep({
 
             {/* The platforms + usernames live outside section.fields. */}
             {section.id === "appendix4" && (() => {
-              const entries = parsePortalEntries(form.fields["portalEntries"])
+              const entries = parseWebPortalEntries(form.fields["portalEntries"])
                 .filter((e) => e.platform.trim() || e.username.trim());
               return (
                 <div className="mt-3">

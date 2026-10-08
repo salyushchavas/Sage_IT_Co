@@ -7,6 +7,7 @@ import {
   AlertTriangle,
   ArrowLeft,
   CheckCircle2,
+  KeyRound,
   Loader2,
   Mail,
   Power,
@@ -16,7 +17,7 @@ import {
 } from "lucide-react";
 
 import { useAuth } from "@/lib/auth-context";
-import { homeForRole } from "@/lib/roles";
+import { APPROVER_ROLES, homeForRole } from "@/lib/roles";
 import {
   getUserProfileAsAdmin,
   reactivateUserAsAdmin,
@@ -26,6 +27,9 @@ import {
   sendNewLoginDetails,
 } from "@/lib/api";
 import { UserRecordsPanel } from "@/components/admin/UserRecordsPanel";
+import { ApproverTeamCard } from "@/components/web-agreement/admin/ApproverTeamCard";
+import { CredentialBanner, type RevealedCredential } from "@/components/web-agreement/admin/CredentialBanner";
+import { StaffDetailsCard } from "@/components/web-agreement/admin/StaffDetailsCard";
 import { formatDateMedium } from "@/lib/datetime";
 
 interface UserProfile {
@@ -44,7 +48,20 @@ interface UserProfile {
 }
 
 /** Staff roles a System Admin can send new login details to. */
-const STAFF_ROLES = ["ERM", "COACH", "TECHNICAL_ADVISOR", "FINANCE", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"];
+const STAFF_ROLES = ["ERM", "MANAGER", "ACCOUNTS", "COACH", "TECHNICAL_ADVISOR", "FINANCE", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"];
+
+/**
+ * The accounts the Details card edits: the website's equivalents of the
+ * console's users (name, login email and the title printed on agreements).
+ */
+const DETAILS_ROLES = ["ERM", "MANAGER", "ACCOUNTS", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"];
+
+/**
+ * Manager and Accounts get no login email: "Reset password" shows the new
+ * temporary password once on screen, as the console does.
+ */
+const passwordShownOnScreen = (role: string) =>
+  (APPROVER_ROLES as readonly string[]).includes(role.toUpperCase());
 
 const ROLE_OPTIONS = [
   "PARTICIPANT",
@@ -52,6 +69,8 @@ const ROLE_OPTIONS = [
   "INSTRUCTOR",
   "TRAINER",
   "ERM",
+  "MANAGER",
+  "ACCOUNTS",
   "COACH",
   "TECHNICAL_ADVISOR",
   "FINANCE",
@@ -74,6 +93,8 @@ export default function AdminUserDetailPage() {
     kind: "success" | "error";
     message: string;
   } | null>(null);
+  // A Manager / Accounts reset's one-time password, until dismissed.
+  const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
 
   const role = me?.role?.toUpperCase();
 
@@ -131,7 +152,10 @@ export default function AdminUserDetailPage() {
   const handleRoleChange = async (newRole: string) => {
     if (!profile || newRole === profile.role) return;
     // The select shows profile.role, so a cancel puts it back.
-    if (!window.confirm(`Change ${profile.fullName ?? profile.email}'s role from ${profile.role} to ${newRole}?`)) return;
+    if (!window.confirm(
+      `Change ${profile.fullName ?? profile.email}'s role from ${profile.role} to ${newRole}?\n\n`
+      + "Changing the role clears this user's team assignments and un-routes any pending approvals routed to them.",
+    )) return;
     setBusy(true);
     try {
       await updateUserRoleAsAdmin(profile.id, newRole);
@@ -147,15 +171,24 @@ export default function AdminUserDetailPage() {
     }
   };
 
-  /** A new temporary password, emailed to them; they choose their own at sign-in. */
+  /**
+   * A new temporary password, emailed to them; they choose their own at
+   * sign-in. Manager and Accounts: no email, the password is shown once in
+   * the credentials banner (the console's "Reset password").
+   */
   const handleSendLogin = async () => {
     if (!profile) return;
-    if (!window.confirm(`Email ${profile.fullName ?? profile.email} a new temporary password? Their current password stops working.`)) return;
+    const name = profile.fullName ?? profile.email;
+    const onScreen = passwordShownOnScreen(profile.role);
+    if (!window.confirm(onScreen
+      ? `Reset ${name}'s password? Their current password stops working.`
+      : `Email ${name} a new temporary password? Their current password stops working.`)) return;
     setBusy(true);
     try {
       const r = await sendNewLoginDetails(profile.id);
       // The password was already replaced: a failed email must be noticed.
-      if (r.emailSent) showToast("success", r.message);
+      if (r.temporaryPassword) setRevealed({ email: profile.email, password: r.temporaryPassword, kind: "reset" });
+      else if (r.emailSent) showToast("success", r.message);
       else showToast("error", `${r.message} Their old password no longer works: check the email log, then send again.`);
       await loadProfile();
     } catch (err) {
@@ -268,6 +301,12 @@ export default function AdminUserDetailPage() {
           <ArrowLeft size={14} /> Back to admin
         </Link>
 
+        {revealed && (
+          <div className="mb-4">
+            <CredentialBanner credential={revealed} onDismiss={() => setRevealed(null)} />
+          </div>
+        )}
+
         {toast && (
           <div
             className={
@@ -374,6 +413,19 @@ export default function AdminUserDetailPage() {
           </div>
         </div>
 
+        {/* Name, email and agreement title, then the ERM's approver team:
+            System Admin only (legacy ADMIN also opens this page). */}
+        {role === "SYSTEM_ADMIN" && DETAILS_ROLES.includes(profile.role.toUpperCase()) && (
+          <StaffDetailsCard
+            userId={profile.id}
+            targetRole={profile.role}
+            onSaved={(d) => setProfile((p) => (p ? { ...p, fullName: d.fullName, email: d.email } : p))}
+          />
+        )}
+        {role === "SYSTEM_ADMIN" && profile.role.toUpperCase() === "ERM" && (
+          <ApproverTeamCard ermUserId={profile.id} />
+        )}
+
         <div className="bg-white border border-zinc-200 rounded-2xl p-6 mb-5">
           <h2 className="text-sm font-bold text-zinc-900 flex items-center gap-2 mb-4">
             <ShieldCheck size={16} className="text-sage-navy" />
@@ -421,7 +473,11 @@ export default function AdminUserDetailPage() {
                 disabled={busy || isMe}
                 className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-60 cursor-pointer"
               >
-                <Mail size={14} /> Send new login details
+                {passwordShownOnScreen(profile.role) ? (
+                  <><KeyRound size={14} /> Reset password</>
+                ) : (
+                  <><Mail size={14} /> Send new login details</>
+                )}
               </button>
             )}
             {profile.isActive ? (

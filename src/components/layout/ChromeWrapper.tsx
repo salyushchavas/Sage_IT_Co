@@ -31,6 +31,7 @@ const FULLSCREEN_PREFIXES = [
   "/welcome",
   "/dashboard",
   "/erm-dashboard",
+  "/approver-dashboard",
   "/coach-dashboard",
   "/finance-dashboard",
   "/operations",

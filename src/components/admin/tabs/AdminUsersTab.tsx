@@ -7,18 +7,23 @@ import { Loader2, Mail, Search, UserPlus, X } from "lucide-react";
 
 import {
   STAFF_ROLE_OPTIONS,
+  TITLE_REQUIRED_ROLES,
   createStaffUser,
   getUsers,
   inviteParticipant,
   type UserDTO,
 } from "@/lib/api";
 import { formatDateMedium } from "@/lib/datetime";
+import { APPROVER_ROLES } from "@/lib/roles";
 import { cn } from "@/lib/utils";
+import { CredentialBanner, type RevealedCredential } from "@/components/web-agreement/admin/CredentialBanner";
 
 /** Plain names for every role in the database (old LMS ones marked). */
 const ROLE_LABEL: Record<string, string> = {
   PARTICIPANT: "Participant",
   ERM: "ERM",
+  MANAGER: "Manager",
+  ACCOUNTS: "Accounts",
   COACH: "Coach",
   TECHNICAL_ADVISOR: "Technical advisor",
   FINANCE: "Finance",
@@ -34,12 +39,14 @@ const ROLE_FILTERS: { value: string; label: string; roles: string[] }[] = [
   { value: "ALL", label: "All roles", roles: [] },
   { value: "PARTICIPANT", label: "Participants", roles: ["PARTICIPANT"] },
   { value: "ERM", label: "ERMs", roles: ["ERM"] },
+  { value: "MANAGER", label: "Managers", roles: ["MANAGER"] },
+  { value: "ACCOUNTS", label: "Accounts", roles: ["ACCOUNTS"] },
   { value: "COACH", label: "Coaches", roles: ["COACH"] },
   { value: "TECHNICAL_ADVISOR", label: "Technical advisors", roles: ["TECHNICAL_ADVISOR"] },
   { value: "FINANCE", label: "Finance", roles: ["FINANCE"] },
   { value: "OPERATIONS_ADMIN", label: "Operations admins", roles: ["OPERATIONS_ADMIN"] },
   { value: "SYSTEM_ADMIN", label: "System admins", roles: ["SYSTEM_ADMIN"] },
-  { value: "STAFF", label: "All staff", roles: ["ERM", "COACH", "TECHNICAL_ADVISOR", "FINANCE", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"] },
+  { value: "STAFF", label: "All staff", roles: ["ERM", "MANAGER", "ACCOUNTS", "COACH", "TECHNICAL_ADVISOR", "FINANCE", "OPERATIONS_ADMIN", "SYSTEM_ADMIN"] },
   { value: "OLD", label: "Old LMS accounts", roles: ["ADMIN", "INSTRUCTOR", "TRAINER", "STUDENT"] },
 ];
 
@@ -55,6 +62,13 @@ const STAGES: { value: string; label: string; statuses: string[] }[] = [
 
 const stageOf = (status: string | null | undefined) =>
   STAGES.find((s) => s.statuses.includes(status ?? ""))?.label ?? "Not started";
+
+/**
+ * Manager and Accounts accounts get no login email: their temporary password
+ * is shown once on screen, as the console does.
+ */
+const passwordShownOnScreen = (role: string) =>
+  (APPROVER_ROLES as readonly string[]).includes(role.toUpperCase());
 
 const FIELD =
   "w-full px-3 py-2 text-sm rounded-lg border border-zinc-200 bg-white text-zinc-900 focus:outline-none focus:border-sage-navy focus:ring-1 focus:ring-sage-navy";
@@ -76,6 +90,8 @@ export function AdminUsersTab({ canAddStaff }: { canAddStaff: boolean }) {
   const [sort, setSort] = useState<"newest" | "name">("newest");
   const [dialog, setDialog] = useState<null | "staff" | "invite">(null);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
+  // A new Manager / Accounts account's one-time password, until dismissed.
+  const [revealed, setRevealed] = useState<RevealedCredential | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -145,6 +161,12 @@ export function AdminUsersTab({ canAddStaff }: { canAddStaff: boolean }) {
           </button>
         )}
       </div>
+
+      {revealed && (
+        <div className="mb-4">
+          <CredentialBanner credential={revealed} onDismiss={() => setRevealed(null)} />
+        </div>
+      )}
 
       {notice && (
         <div
@@ -338,6 +360,12 @@ export function AdminUsersTab({ canAddStaff }: { canAddStaff: boolean }) {
             setNotice({ kind: ok ? "success" : "error", text });
             await load();
           }}
+          onRevealed={async (credential) => {
+            setDialog(null);
+            setNotice(null);
+            setRevealed(credential);
+            await load();
+          }}
         />
       )}
       {dialog === "invite" && (
@@ -385,17 +413,26 @@ function Label({ children, hint }: { children: React.ReactNode; hint?: string })
 }
 
 /**
- * A staff member: company sign-in email, role and their own email. The
+ * A staff member: company sign-in email, role, their own email and the title
+ * printed on agreements (required for ERM, Manager and Accounts). The
  * temporary password goes to their own email; they choose their password
- * at first sign-in.
+ * at first sign-in. Manager and Accounts get no email: the password comes
+ * back once and is shown in the credentials banner (the console's create).
  */
-function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (text: string, ok: boolean) => Promise<void> }) {
+function AddStaffDialog({ onClose, onDone, onRevealed }: {
+  onClose: () => void;
+  onDone: (text: string, ok: boolean) => Promise<void>;
+  onRevealed: (credential: RevealedCredential) => Promise<void>;
+}) {
   const [fullName, setFullName] = useState("");
   const [email, setEmail] = useState("");
   const [personalEmail, setPersonalEmail] = useState("");
   const [role, setRole] = useState("ERM");
+  const [title, setTitle] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const titleRequired = TITLE_REQUIRED_ROLES.includes(role);
+  const onScreen = passwordShownOnScreen(role);
 
   // Suggest a company address from the name.
   const suggestion = fullName.trim()
@@ -406,19 +443,33 @@ function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (tex
     setSaving(true);
     setError("");
     try {
-      const r = await createStaffUser({ fullName: fullName.trim(), email: email.trim(), personalEmail: personalEmail.trim() || undefined, role });
-      await onDone(r.message, r.emailSent);
+      const r = await createStaffUser({
+        fullName: fullName.trim(),
+        email: email.trim(),
+        personalEmail: personalEmail.trim() || undefined,
+        role,
+        // Always sent, blank or not: the server tells this form from the
+        // older one (no title field) by it, and checks a required title.
+        title: title.trim(),
+      });
+      if (r.temporaryPassword) {
+        await onRevealed({ email: email.trim().toLowerCase(), password: r.temporaryPassword, kind: "created" });
+      } else {
+        await onDone(r.message, r.emailSent);
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't add the staff member");
       setSaving(false);
     }
   };
 
-  const ready = fullName.trim().length >= 2 && email.includes("@") && !saving;
+  const ready = fullName.trim().length >= 2 && email.includes("@") && (!titleRequired || title.trim().length > 0) && !saving;
   return (
     <Dialog
       title="Add staff member"
-      subtitle="They sign in with the company email. A temporary password is emailed to their own email, and they choose their own password when they first sign in."
+      subtitle={onScreen
+        ? "They sign in with the company email. The temporary password is shown once after creation — you share it with the user manually. They choose their own password when they first sign in."
+        : "They sign in with the company email. A temporary password is emailed to their own email, and they choose their own password when they first sign in."}
       onClose={onClose}
     >
       <div className="space-y-3">
@@ -436,7 +487,9 @@ function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (tex
           )}
         </div>
         <div>
-          <Label hint="The login details and every email from the portal go here. Leave empty if the company email is a real inbox.">
+          <Label hint={onScreen
+            ? "Every email from the portal goes here. Leave empty if the company email is a real inbox."
+            : "The login details and every email from the portal go here. Leave empty if the company email is a real inbox."}>
             Their own email
           </Label>
           <input value={personalEmail} onChange={(e) => setPersonalEmail(e.target.value)} placeholder="e.g. riya@gmail.com" className={FIELD} />
@@ -460,6 +513,12 @@ function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (tex
             ))}
           </div>
         </div>
+        <div>
+          <Label hint={titleRequired ? undefined : "Optional for this role."}>
+            Title (printed on agreements){titleRequired && <span className="text-red-500"> *</span>}
+          </Label>
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Senior ERM" className={FIELD} />
+        </div>
       </div>
       {error && <p className="mt-3 text-sm text-red-700">{error}</p>}
       <div className="mt-5 flex justify-end gap-2">
@@ -471,7 +530,7 @@ function AddStaffDialog({ onClose, onDone }: { onClose: () => void; onDone: (tex
           disabled={!ready}
           className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 cursor-pointer"
         >
-          {saving && <Loader2 className="w-4 h-4 animate-spin" />} Create and email login details
+          {saving && <Loader2 className="w-4 h-4 animate-spin" />} {onScreen ? "Create user" : "Create and email login details"}
         </button>
       </div>
     </Dialog>

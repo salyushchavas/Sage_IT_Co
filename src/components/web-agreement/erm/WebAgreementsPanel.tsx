@@ -9,14 +9,18 @@ import ParticipantRequestsPanel from "./ParticipantRequestsPanel";
 import WebAgreementsListView from "./WebAgreementsListView";
 import WebAgreementCreateForm from "./WebAgreementCreateForm";
 import WebAgreementDetailView from "./WebAgreementDetailView";
+import WebApprovalStatusBoard from "./WebApprovalStatusBoard";
 
 /**
  * The "Agreements" tab of the ERM dashboard (and of the Operations panel):
  * the website's own copy of the console's agreement screens. A participant
  * who signed their consent and said they're ready appears at the top; "Start
  * agreement" opens the create form, the new agreement then opens in the
- * detail view, and the list below tracks every agreement (an ERM sees their
- * own; Operations / System admins see all).
+ * detail view. Below it, the approval gate (the console's approval board)
+ * shows the agreements with the approvers or waiting on the ERM's next
+ * move, and the list tracks every agreement (an ERM sees their own;
+ * Operations / System admins see all). The console puts its board on top of
+ * its list the same way.
  *
  * Moving between list, create form and detail is component state, so the
  * dashboard around it stays put. The open agreement is also in the URL
@@ -123,6 +127,7 @@ function WebAgreementsPanelInner() {
       <ParticipantRequestsPanel
         onStart={(participantUserId) => go({ kind: "new", participantUserId })}
       />
+      <WebApprovalStatusBoard onOpen={openDetail} />
       <WebAgreementsListView
         onOpen={openDetail}
       />

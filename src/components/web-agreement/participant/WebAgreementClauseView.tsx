@@ -2,8 +2,8 @@
 
 import { AGREEMENT_SECTIONS } from "@/lib/web-agreement-sections";
 import type {
-  AgreementBlock,
-  AgreementSegment,
+  WebAgreementBlock,
+  WebAgreementSegment,
 } from "@/lib/api";
 
 /**
@@ -75,7 +75,7 @@ function usDateIfIso(v: string): string {
 }
 
 interface Props {
-  blocks: AgreementBlock[];
+  blocks: WebAgreementBlock[];
   values: Record<string, string>;
   fields: Record<string, string>;
   signature: string | null;
@@ -118,12 +118,12 @@ function BlockView({
   fields,
   signature,
 }: {
-  block: AgreementBlock;
+  block: WebAgreementBlock;
   values: Record<string, string>;
   fields: Record<string, string>;
   signature: string | null;
 }) {
-  const segs = (s: AgreementSegment[] | null | undefined) =>
+  const segs = (s: WebAgreementSegment[] | null | undefined) =>
     (s ?? []).map((seg, i) => (
       <SegmentView
         key={i}
@@ -211,7 +211,7 @@ function SegmentView({
   fields,
   signature,
 }: {
-  seg: AgreementSegment;
+  seg: WebAgreementSegment;
   values: Record<string, string>;
   fields: Record<string, string>;
   signature: string | null;

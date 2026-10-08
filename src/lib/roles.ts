@@ -6,6 +6,7 @@
  * sign-ins loop.
  *
  *   ERM                        -> /erm-dashboard
+ *   MANAGER / ACCOUNTS         -> /approver-dashboard
  *   COACH / TECHNICAL_ADVISOR  -> /coach-dashboard
  *   FINANCE                    -> /finance-dashboard
  *   OPERATIONS_ADMIN           -> /operations
@@ -16,6 +17,7 @@
 export function homeForRole(role: string | null | undefined): string {
   const r = (role ?? "").toUpperCase();
   if (r === "ERM") return "/erm-dashboard";
+  if (r === "MANAGER" || r === "ACCOUNTS") return "/approver-dashboard";
   if (r === "COACH" || r === "TECHNICAL_ADVISOR") return "/coach-dashboard";
   if (r === "FINANCE") return "/finance-dashboard";
   if (r === "OPERATIONS_ADMIN") return "/operations";
@@ -29,6 +31,33 @@ export const ADMIN_PAGE_ROLES: readonly string[] = ["ADMIN", "SYSTEM_ADMIN"];
 
 export function canOpenAdminPages(role: string | null | undefined): boolean {
   return ADMIN_PAGE_ROLES.includes((role ?? "").toUpperCase());
+}
+
+/**
+ * The website agreement's two approval gates (the console's MANAGER and
+ * ACCOUNTS users): Manager signs off in Phase 1 and Phase 2, Accounts in
+ * Phase 2 only. They are the only roles /approver-dashboard lets in; a
+ * System Admin reaches the approver API with ?role= but has no screen
+ * there, like the console's super-admin.
+ */
+export const APPROVER_ROLES: readonly ("MANAGER" | "ACCOUNTS")[] = ["MANAGER", "ACCOUNTS"];
+
+export function canOpenApproverDashboard(role: string | null | undefined): boolean {
+  return (APPROVER_ROLES as readonly string[]).includes((role ?? "").toUpperCase());
+}
+
+/** The gate's name on screen ("Manager" / "Accounts"), as the console says it. */
+export const APPROVER_ROLE_LABEL: Record<"MANAGER" | "ACCOUNTS", string> = {
+  MANAGER: "Manager",
+  ACCOUNTS: "Accounts",
+};
+
+/**
+ * Role word for an approval gate. Anything that isn't ACCOUNTS reads
+ * "Manager", the same fallback as the console's roleWord.
+ */
+export function approverRoleLabel(role: string | null | undefined): string {
+  return (role ?? "").toUpperCase() === "ACCOUNTS" ? APPROVER_ROLE_LABEL.ACCOUNTS : APPROVER_ROLE_LABEL.MANAGER;
 }
 
 /** The claims inside a sign-in token (JWT payload, base64url), or null. */

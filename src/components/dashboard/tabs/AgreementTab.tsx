@@ -11,6 +11,7 @@ import {
 } from "@/lib/api";
 import { formatDateMedium } from "@/lib/datetime";
 import { agreementPartDone } from "@/lib/profile-progress";
+import { Phase2Chip } from "../MasterAgreementStep";
 
 interface Props {
   participantId: string | null;
@@ -79,7 +80,10 @@ export default function AgreementTab({ participantId }: Props) {
   );
 }
 
-/** Where the real agreement stands, in the words Step 6 on the profile uses. */
+/**
+ * Where the real agreement stands, in the words Step 6 on the profile uses,
+ * with the same "Phase 2" chip once it's at Phase 2.
+ */
 function AgreementLine({ state }: { state: AgreementRequestStatus }) {
   const ag = state.agreement;
   let text: string;
@@ -98,7 +102,10 @@ function AgreementLine({ state }: { state: AgreementRequestStatus }) {
   return (
     <div className="rounded-2xl border border-gray-200 bg-white p-5">
       <p className="text-sm font-semibold text-gray-900">Your agreement</p>
-      <p className="text-xs text-gray-600 mt-1">{text}</p>
+      <div className="mt-1 flex items-center gap-2 flex-wrap">
+        <p className="text-xs text-gray-600">{text}</p>
+        <Phase2Chip phase={ag?.phase} />
+      </div>
       <Link
         href={link.href}
         className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-sage-navy hover:underline"

@@ -8,7 +8,7 @@ import {
   Loader2, LayoutDashboard, Users, BookOpen, UserCheck,
   Eye, EyeOff, Trash2, Check, X, GraduationCap, DollarSign,
   ClipboardList, Calendar, Megaphone, Ticket,
-  MessageSquare,
+  MessageSquare, FileSignature,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth-context";
 import { homeForRole } from "@/lib/roles";
@@ -27,8 +27,9 @@ import { AdminCouponsTab } from "@/components/admin/tabs/AdminCouponsTab";
 import { AdminSalesTab } from "@/components/admin/tabs/AdminSalesTab";
 import { AdminMentorPoolsTab } from "@/components/admin/tabs/AdminMentorPoolsTab";
 import { AdminUsersTab } from "@/components/admin/tabs/AdminUsersTab";
+import { WebAgreementsAdminPanel } from "@/components/web-agreement/admin/WebAgreementsAdminPanel";
 
-type Tab = "overview" | "users" | "courses" | "requests"
+type Tab = "overview" | "users" | "agreements" | "courses" | "requests"
   | "enrollments" | "sessions" | "revenue" | "announcements" | "coupons"
   | "sales" | "mentorPools";
 
@@ -60,6 +61,27 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
 
   const role = user?.role?.toUpperCase();
+
+  // The System Admin's Agreements tab keeps itself in the URL
+  // (?tab=agreements&sub=…&filter=…), so a link, a refresh, or Back from an
+  // agreement opened on /operations lands on it again. The other tabs stay
+  // in local state as before.
+  useEffect(() => {
+    if (role !== "SYSTEM_ADMIN") return;
+    if (new URLSearchParams(window.location.search).get("tab") === "agreements") {
+      setTab("agreements");
+    }
+  }, [role]);
+
+  const selectTab = (next: Tab) => {
+    setTab(next);
+    const onAgreements = new URLSearchParams(window.location.search).get("tab") === "agreements";
+    if (next === "agreements" && !onAgreements) {
+      router.replace("/admin?tab=agreements", { scroll: false });
+    } else if (next !== "agreements" && onAgreements) {
+      router.replace("/admin", { scroll: false });
+    }
+  };
 
   useEffect(() => {
     if (authLoading) return;
@@ -124,6 +146,10 @@ export default function AdminPage() {
   const tabs: { key: Tab; label: string; icon: React.ReactNode }[] = [
     { key: "overview", label: "Overview", icon: <LayoutDashboard className="w-4 h-4" /> },
     { key: "users", label: "Users", icon: <Users className="w-4 h-4" /> },
+    // Website agreements: overview, by ERM, lifecycle, maintenance (System Admin only).
+    ...(role === "SYSTEM_ADMIN"
+      ? [{ key: "agreements" as Tab, label: "Agreements", icon: <FileSignature className="w-4 h-4" /> }]
+      : []),
     { key: "courses", label: "Courses", icon: <BookOpen className="w-4 h-4" /> },
     { key: "enrollments", label: "Enrollments", icon: <ClipboardList className="w-4 h-4" /> },
     { key: "sessions", label: "Sessions", icon: <Calendar className="w-4 h-4" /> },
@@ -146,7 +172,7 @@ export default function AdminPage() {
               {tabs.map((t) => (
                 <button
                   key={t.key}
-                  onClick={() => setTab(t.key)}
+                  onClick={() => selectTab(t.key)}
                   className={cn(
                     "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-all",
                     tab === t.key
@@ -181,7 +207,7 @@ export default function AdminPage() {
         <style>{`@media (max-width: 767px) { body { padding-bottom: 72px; } }`}</style>
         <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t border-zinc-200 px-2 py-2 flex gap-1 overflow-x-auto">
           {tabs.map((t) => (
-            <button key={t.key} onClick={() => setTab(t.key)}
+            <button key={t.key} onClick={() => selectTab(t.key)}
               className={cn("shrink-0 min-w-[4.5rem] flex flex-col items-center gap-1 px-2 py-2 rounded-xl text-xs whitespace-nowrap", tab === t.key ? "text-[#1B2A5C] bg-[#1B2A5C]/10 font-semibold" : "text-zinc-500")}>
               {t.icon}<span>{t.label}</span>
             </button>
@@ -257,6 +283,11 @@ export default function AdminPage() {
 
           {/* USERS: filters, add staff, invite participants */}
           {tab === "users" && <AdminUsersTab canAddStaff={role === "SYSTEM_ADMIN"} />}
+
+          {/* WEBSITE AGREEMENTS (System Admin only) */}
+          {tab === "agreements" && role === "SYSTEM_ADMIN" && (
+            <WebAgreementsAdminPanel onOpenUsers={() => selectTab("users")} />
+          )}
 
           {/* COURSES */}
           {tab === "courses" && (

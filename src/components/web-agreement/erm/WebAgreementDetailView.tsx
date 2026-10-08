@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronRight,
+  ClipboardCheck,
   Clock,
   Eye,
   EyeOff,
@@ -27,18 +28,22 @@ import {
   cancelWebAgreement,
   fetchWebAgreementDocBlob,
   fetchWebAgreementPreviewPdfBlob,
-  parseChequeList,
-  parsePortalEntries,
+  parseWebChequeList,
+  parseWebPortalEntries,
   updateWebAgreementContact,
   verifyWebAgreement,
   webAgreementRequestDocumentRevision,
   webAgreementRequestRevision,
   webAgreementRequestSignatureRevision,
   webAgreementRevokeRevision,
+  webFetchSignerProfile,
+  webSendForApproval,
   WebAgreementApiError,
-  type ChequeEntry,
+  type WebChequeEntry,
   type WebAgreement,
+  type WebAgreementApproval,
   type WebAgreementDetail,
+  type WebSendForApprovalBody,
 } from "@/lib/api";
 import { formatUsDate } from "@/lib/dates";
 import { formatUsDateTimeCt, formatUsDayCt } from "@/lib/datetime";
@@ -46,17 +51,25 @@ import { AGREEMENT_SECTIONS } from "@/lib/web-agreement-sections";
 import { describeStatus, statusLabel, type StatusContext } from "@/lib/web-agreement-status";
 import AgreementStatusPill from "./AgreementStatusPill";
 import AgreementEventTimeline from "./AgreementEventTimeline";
+import AdvanceToPhase2Modal from "./AdvanceToPhase2Modal";
+import ApproveAndSignModal from "./ApproveAndSignModal";
+import ApproverBadges from "./ApproverBadges";
+import CompletedActions from "./CompletedActions";
+import SendForApprovalModal from "./SendForApprovalModal";
+import VersionHistory from "./VersionHistory";
 import { isPositiveMoney } from "./WebAgreementCreateForm";
 
 /**
  * The website agreement's copy of the console's ERM detail view
  * (src/components/agreement-erm/ConsultantDetailView.tsx), shown inside the
- * ERM dashboard's Agreements tab. It keeps the actions the website flow has
- * today: cancel, edit contact, request revision (with the ERM's
- * corrections), signature re-sign, document re-upload, take back a request
- * and Verify, plus the PDF preview, the documents, the signature record and
- * the activity log. Internal approval, the countersignature, Phase 2 and the
- * final PDF come later.
+ * ERM dashboard's Agreements tab. The whole chain after the participant
+ * signs: Verify (each click makes the next version, V1, V2, …), Send for
+ * approval and the re-send after a decline, the approvers' gate badges,
+ * Approve & sign, the executed PDF and the advance to Phase 2. Alongside:
+ * cancel, edit contact, request revision (with the ERM's corrections),
+ * signature re-sign, document re-upload and take back a request, plus the
+ * PDF preview, the documents, the signature record, the verified versions
+ * and the activity log. Nothing here sends an email.
  */
 
 /**
@@ -117,7 +130,7 @@ function displayBgAddress(app: WebAgreement): string | null {
 // Appendix 4's repeatable platform + username entries (the website copy has
 // no single platform / username columns).
 function displayPortalEntries(app: WebAgreement): string | null {
-  const entries = parsePortalEntries(app.portalEntries);
+  const entries = parseWebPortalEntries(app.portalEntries);
   if (entries.length === 0) return null;
   return entries
     .map((e) => [e.platform, e.username].filter((v) => v.length > 0).join(" — "))
@@ -264,7 +277,14 @@ const SECTIONS: readonly SectionDef[] = [
   },
 ];
 
-type ModalKind = null | "revision" | "signatureRevision" | "editContact";
+type ModalKind =
+  | null
+  | "revision"
+  | "signatureRevision"
+  | "editContact"
+  | "sendApproval"
+  | "approve"
+  | "advancePhase2";
 
 export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
   const { application: app, events } = detail;
@@ -276,10 +296,33 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     label: string;
   } | null>(null);
   const [busy, setBusy] = useState<
-    "cancel" | "verify" | "revokeRevision" | null
+    "cancel" | "verify" | "sendApproval" | "revokeRevision" | null
   >(null);
   const [feedback, setFeedback] = useState("");
   const [error, setError] = useState("");
+  // Prefill for Approve & sign: the signed-in staff member's own name and
+  // agreement title, fetched once when the agreement opens (as the console
+  // does with /me). Both stay editable in the modal.
+  const [me, setMe] = useState<{ fullName: string; title: string }>({
+    fullName: "",
+    title: "",
+  });
+
+  useEffect(() => {
+    let cancelled = false;
+    webFetchSignerProfile()
+      .then((profile) => {
+        if (!cancelled) {
+          setMe({ fullName: profile.fullName ?? "", title: profile.title ?? "" });
+        }
+      })
+      .catch(() => {
+        /* non-fatal: the fields just start blank */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const status = app.status;
   const isLocked = ["COMPLETED", "CANCELLED"].includes(status);
@@ -319,12 +362,16 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
   /**
    * The ERM checked the participant-signed agreement. Status stays VERIFIED;
    * consultantCopyReleased turns it into "Verified" on the participant's
-   * dashboard. Revisions stay possible afterwards (a resubmit clears it).
+   * dashboard. Each click stores the next numbered version (V1, V2, …) with
+   * its Certificate of Completion, so it can be clicked again ("Re-verify").
+   * Revisions stay possible afterwards (a resubmit clears it).
    */
   const handleVerify = async () => {
     if (!confirm(
       "Verify this agreement?\n\nThe participant will see it as verified on their "
-      + "dashboard. You can still send it back for changes afterwards.",
+      + "dashboard. This creates the next numbered version (V1, V2, …) with a "
+      + "Certificate of Completion for audit/records; it does not countersign the "
+      + "agreement. You can still send it back for changes afterwards.",
     )) {
       return;
     }
@@ -387,6 +434,28 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
     }
   };
 
+  /**
+   * Routes the verified agreement to the phase's required approvers (Phase 1
+   * = Manager; Phase 2 = Manager + Accounts). Also the re-send after an
+   * approver declined, which opens a new round with every gate pending. The
+   * error is re-thrown so the modal shows it too.
+   */
+  const handleSendForApproval = async (routing: WebSendForApprovalBody) => {
+    setBusy("sendApproval");
+    setError("");
+    try {
+      await webSendForApproval(app.applicationId, routing);
+      setModal(null);
+      setFeedback("Sent for approval.");
+      await onRefresh();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't send for approval");
+      throw e;
+    } finally {
+      setBusy(null);
+    }
+  };
+
   return (
     <div className="space-y-5">
       <HeaderRow app={app} />
@@ -405,13 +474,18 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       <StateActionBar
         status={status}
         app={app}
+        approvals={detail.approvals ?? []}
         onRequestRevision={() => setModal("revision")}
         onRequestSignatureRevision={() => setModal("signatureRevision")}
         onVerify={handleVerify}
+        onSendForApproval={() => setModal("sendApproval")}
+        onApproveAndSign={() => setModal("approve")}
+        onAdvanceToPhase2={() => setModal("advancePhase2")}
         onCancel={handleCancel}
         onRevokeRevision={handleRevokeRevision}
         cancelBusy={busy === "cancel"}
         verifyBusy={busy === "verify"}
+        sendApprovalBusy={busy === "sendApproval"}
         revokeRevisionBusy={busy === "revokeRevision"}
         isLocked={isLocked}
       />
@@ -440,6 +514,8 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
       />
 
       <SignaturesPreview app={app} />
+
+      <VersionHistory app={app} />
 
       <AccessRecord app={app} />
 
@@ -498,6 +574,38 @@ export default function WebAgreementDetailView({ detail, onRefresh }: Props) {
           onDone={async (msg) => {
             setModal(null);
             setFeedback(msg);
+            await onRefresh();
+          }}
+        />
+      )}
+      {modal === "sendApproval" && (
+        <SendForApprovalModal
+          app={app}
+          busy={busy === "sendApproval"}
+          onClose={() => setModal(null)}
+          onSend={handleSendForApproval}
+        />
+      )}
+      {modal === "approve" && (
+        <ApproveAndSignModal
+          appId={app.applicationId}
+          defaultName={me.fullName}
+          defaultTitle={me.title}
+          onClose={() => setModal(null)}
+          onDone={async () => {
+            setModal(null);
+            setFeedback("Agreement signed. Now downloadable.");
+            await onRefresh();
+          }}
+        />
+      )}
+      {modal === "advancePhase2" && (
+        <AdvanceToPhase2Modal
+          app={app}
+          onClose={() => setModal(null)}
+          onDone={async () => {
+            setModal(null);
+            setFeedback("Advanced to Phase 2.");
             await onRefresh();
           }}
         />
@@ -805,25 +913,35 @@ function SignatureReSignButton({ onClick }: { onClick: () => void }) {
 function StateActionBar({
   status,
   app,
+  approvals,
   onRequestRevision,
   onRequestSignatureRevision,
   onVerify,
+  onSendForApproval,
+  onApproveAndSign,
+  onAdvanceToPhase2,
   onCancel,
   onRevokeRevision,
   cancelBusy,
   verifyBusy,
+  sendApprovalBusy,
   revokeRevisionBusy,
   isLocked,
 }: {
   status: WebAgreement["status"];
   app: WebAgreement;
+  approvals: WebAgreementApproval[];
   onRequestRevision: () => void;
   onRequestSignatureRevision: () => void;
   onVerify: () => void;
+  onSendForApproval: () => void;
+  onApproveAndSign: () => void;
+  onAdvanceToPhase2: () => void;
   onCancel: () => void;
   onRevokeRevision: () => void;
   cancelBusy: boolean;
   verifyBusy: boolean;
+  sendApprovalBusy: boolean;
   revokeRevisionBusy: boolean;
   isLocked: boolean;
 }) {
@@ -832,6 +950,9 @@ function StateActionBar({
   // instructions.
   const meta = describeStatus(status, statusContextFor(app));
   const badge = meta.label;
+  const phase = app.phase ?? 1;
+  // Phase 1 needs the Manager's gate; Phase 2 adds Accounts.
+  const signOff = phase >= 2 ? "Manager + Accounts" : "Manager";
 
   if (status === "SUBMITTED") {
     return (
@@ -878,6 +999,8 @@ function StateActionBar({
   if (status === "VERIFIED") {
     // consultantCopyReleased = the ERM verified it. Revisions stay open
     // either way; a resubmit clears the flag so it needs verifying again.
+    // Verify can be clicked again ("Re-verify"): each click is the next
+    // version. Send for approval waits for the first one.
     const verified = Boolean(app.consultantCopyReleased);
     return (
       <BarShell badge={badge} tone={verified ? "emerald" : "navy"}>
@@ -887,8 +1010,8 @@ function StateActionBar({
                 app.consultantCopyReleasedAt
                   ? ` on ${fmtDateTime(app.consultantCopyReleasedAt)}`
                   : ""
-              }. Internal approval comes next. You can still send it back to the participant with revision remarks.`
-            : "The participant signed. Review the agreement below, then verify it, or send it back to the participant with revision remarks."}
+              }. Internal approval comes next — Phase ${phase} requires ${signOff} sign-off before you can countersign. You can still send it back to the participant with revision remarks.`
+            : `The participant signed. Review the agreement below and verify it, then send the agreement for approval — Phase ${phase} requires ${signOff} sign-off before you can countersign. You can also send it back to the participant with revision remarks.`}
         </p>
         <div className="flex items-center gap-2 flex-wrap">
           <button
@@ -899,18 +1022,147 @@ function StateActionBar({
             <MessageSquare size={12} /> Request revision
           </button>
           <SignatureReSignButton onClick={onRequestSignatureRevision} />
-          {!verified && (
-            <button
-              type="button"
-              onClick={onVerify}
-              disabled={verifyBusy}
-              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm"
-            >
-              {verifyBusy ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
-              {verifyBusy ? "Verifying…" : "Verify"}
-            </button>
-          )}
+          <button
+            type="button"
+            onClick={onVerify}
+            disabled={verifyBusy}
+            title={
+              verified
+                ? "Release the participant's current content as a new version (V2, V3, …)"
+                : undefined
+            }
+            className={
+              "inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer "
+              + (verified
+                // Once verified, Send for approval is the next step; the
+                // console's release button is outlined beside it.
+                ? "border border-sage-navy/30 text-sage-navy hover:bg-sage-navy/5"
+                : "bg-sage-navy text-white hover:bg-sage-navy-deep shadow-sm")
+            }
+          >
+            {verifyBusy ? <Loader2 size={12} className="animate-spin" /> : <ShieldCheck size={12} />}
+            {verifyBusy ? "Verifying…" : verified ? "Re-verify" : "Verify"}
+          </button>
+          <button
+            type="button"
+            onClick={onSendForApproval}
+            disabled={!verified || sendApprovalBusy}
+            title={verified ? undefined : "Verify the agreement first"}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+          >
+            {sendApprovalBusy ? <Loader2 size={12} className="animate-spin" /> : <ClipboardCheck size={12} />}
+            {sendApprovalBusy ? "Sending…" : "Send for approval"}
+          </button>
         </div>
+        {verified && (
+          <p className="text-[11px] text-gray-500">
+            A version is already released. If the participant revised after
+            that, <strong>re-verify</strong> to release the updated content as
+            a new version, then send the latest for approval.
+          </p>
+        )}
+      </BarShell>
+    );
+  }
+
+  if (status === "AWAITING_APPROVALS") {
+    return (
+      <BarShell badge={badge} tone="navy">
+        <p className="text-xs text-gray-600 max-w-md">
+          Sent to the Phase {phase} approvers. You can countersign once every
+          required approver has approved.
+        </p>
+        <ApproverBadges approvals={approvals} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onRequestRevision}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
+          >
+            <MessageSquare size={12} /> Send to participant for revision
+          </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
+        </div>
+      </BarShell>
+    );
+  }
+
+  if (status === "APPROVAL_REVISION_REQUESTED") {
+    // An approver declined: it is back with the ERM, not the participant.
+    // The quote is the approver's note, "[ROLE] note".
+    return (
+      <BarShell badge={badge} tone="copper">
+        {app.currentRevisionRemarks && (
+          <blockquote className="text-sm text-gray-700 italic border-l-4 border-sage-copper-deep pl-3 mt-1 break-words">
+            {app.currentRevisionRemarks}
+          </blockquote>
+        )}
+        <ApproverBadges approvals={approvals} />
+        <p className="text-[11px] text-gray-500 max-w-md">
+          Address the note (edit ERM-side details, or send to the participant),
+          then re-send for approval — this resets every required approver to
+          pending for a fresh review.
+        </p>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onSendForApproval}
+            disabled={sendApprovalBusy}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer shadow-sm"
+          >
+            {sendApprovalBusy ? <Loader2 size={12} className="animate-spin" /> : <ClipboardCheck size={12} />}
+            {sendApprovalBusy ? "Re-sending…" : "Re-send for approval"}
+          </button>
+          <button
+            type="button"
+            onClick={onRequestRevision}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
+          >
+            <MessageSquare size={12} /> Send to participant
+          </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
+        </div>
+      </BarShell>
+    );
+  }
+
+  if (status === "READY_TO_SIGN") {
+    return (
+      <BarShell badge={badge} tone="navy">
+        <p className="text-xs text-gray-600 max-w-md">
+          All required approvers have approved. Apply your signature to
+          generate the final PDF and complete the agreement.
+        </p>
+        <ApproverBadges approvals={approvals} />
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onRequestRevision}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold border border-sage-copper-deep/40 text-sage-copper-deep hover:bg-sage-copper/5 cursor-pointer"
+          >
+            <MessageSquare size={12} /> Request revision
+          </button>
+          <SignatureReSignButton onClick={onRequestSignatureRevision} />
+          <button
+            type="button"
+            onClick={onApproveAndSign}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-md text-xs font-bold bg-sage-navy text-white hover:bg-sage-navy-deep cursor-pointer shadow-sm"
+          >
+            <PenLine size={12} /> Approve &amp; sign
+          </button>
+        </div>
+      </BarShell>
+    );
+  }
+
+  if (status === "COMPLETED") {
+    // The phase qualifier is real information the pill has no room for.
+    return (
+      <BarShell
+        badge={`${badge}${phase === 2 ? " (Phase 2)" : ""}`}
+        tone="emerald"
+      >
+        <CompletedActions app={app} onAdvanceToPhase2={onAdvanceToPhase2} />
       </BarShell>
     );
   }
@@ -921,21 +1173,6 @@ function StateActionBar({
         <p className="text-xs text-gray-600 max-w-md">
           This agreement was cancelled and is locked.
         </p>
-      </BarShell>
-    );
-  }
-
-  // Internal approval, the countersignature and the final PDF come later, so
-  // nothing produces these states yet; say what the state means and stop.
-  if (
-    status === "AWAITING_APPROVALS"
-    || status === "APPROVAL_REVISION_REQUESTED"
-    || status === "READY_TO_SIGN"
-    || status === "COMPLETED"
-  ) {
-    return (
-      <BarShell badge={badge} tone={status === "COMPLETED" ? "emerald" : "navy"}>
-        <p className="text-xs text-gray-600 max-w-md">{meta.meaning}</p>
       </BarShell>
     );
   }
@@ -1441,8 +1678,8 @@ function SecurityChequeCard({
     return Number.isFinite(n) && n > 0 ? Math.min(n, 50) : 0;
   }, [app.securityCheckCount]);
 
-  const entries = useMemo<ChequeEntry[]>(() => {
-    const parsed = parseChequeList(app.cheques ?? null);
+  const entries = useMemo<WebChequeEntry[]>(() => {
+    const parsed = parseWebChequeList(app.cheques ?? null);
     // Cap to the declared count so stale over-clicked entries the
     // participant left behind (after reducing the count) don't render here.
     const capped = chequeCount > 0 ? parsed.filter((e) => e.index < chequeCount) : parsed;
@@ -1464,7 +1701,7 @@ function SecurityChequeCard({
 
   const uploadedCount = entries.filter((e) => e.publicId || e.s3Key).length;
 
-  const handleAction = async (entry: ChequeEntry, mode: "view" | "download") => {
+  const handleAction = async (entry: WebChequeEntry, mode: "view" | "download") => {
     const key = `${entry.index}-${mode}`;
     setBusy(key);
     setError("");
@@ -1694,8 +1931,8 @@ function maskValue(value: string) {
 // The website copy keeps the participant's signature images in document
 // storage and does not send them with the agreement, so this shows the
 // signing record (who, when, which signature) rather than the images; the
-// images themselves are on the PDF preview. The ERM countersignature comes
-// later.
+// images themselves are on the PDF preview. The ERM countersignature is not
+// listed here (as in the console); it is on the executed PDF.
 
 function SignaturesPreview({ app }: { app: WebAgreement }) {
   const hasPrimary = Boolean(app.signatureS3Key);

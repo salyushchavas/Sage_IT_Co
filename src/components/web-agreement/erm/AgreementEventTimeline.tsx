@@ -3,6 +3,7 @@
 import { Clock } from "lucide-react";
 import { formatUsDateTimeCt } from "@/lib/datetime";
 import type { WebAgreementEvent } from "@/lib/api";
+import { approverRoleLabel } from "@/lib/roles";
 import { AGREEMENT_SECTIONS } from "@/lib/web-agreement-sections";
 import { statusLabel } from "@/lib/web-agreement-status";
 
@@ -32,13 +33,25 @@ const EVENT_LABELS: Record<string, string> = {
   STATE_ID_DOC_UPLOADED: "State ID uploaded",
   SSN_DOC_UPLOADED: "SSN document uploaded",
   CONSENT_GIVEN: "E-sign consent given",
-  // The ERM checked the signed agreement (the console's "Consultant version
-  // released", without the PDF).
+  // The ERM checked the signed agreement and released it as a new version
+  // (the console's "Consultant version released").
   VERIFIED: "Verified by ERM",
   INVITE_RESENT: "Invitation re-sent",
   // The ERM took a change request back; metadata carries the status it was
   // restored to and the round number that was rolled back.
   REVISION_REVOKED: "Change request withdrawn",
+  // The approval chain, worded as the console's timeline words them.
+  SENT_FOR_APPROVAL: "Sent for approval",
+  APPROVAL_APPROVED: "Approved by approver",
+  // The approver bounced their gate back to the ERM; the participant is not
+  // involved.
+  APPROVAL_REVISION_REQUESTED: "Declined by approver",
+  APPROVED_AND_SIGNED: "ERM approved and signed",
+  PDF_GENERATED: "Final PDF generated",
+  ADVANCED_TO_PHASE_2: "Advanced to Phase 2",
+  // System Admin tools.
+  ERM_SIGNATURE_REVOKED: "ERM signature revoked",
+  APPLICATION_ARCHIVED: "Agreement archived",
 };
 
 const ACTOR_LABELS: Record<string, string> = {
@@ -118,7 +131,7 @@ export default function AgreementEventTimeline({
 // ── Event details ─────────────────────────────────────────────────
 //
 // The event's metadata as short readable facts. Only known keys are shown;
-// storage keys, internal ids and raw field names never are.
+// storage keys, hashes, internal ids and raw field names never are.
 
 const SECTION_TITLES: Record<string, string> = Object.fromEntries(
   AGREEMENT_SECTIONS.map((s) => [s.id, s.title]),
@@ -137,6 +150,20 @@ const REVOKED_KINDS: Record<string, string> = {
   sections: "Section revision",
   signature: "Signature re-sign",
   documents: "Document re-upload",
+};
+
+/**
+ * Phase 2 promotes appendices and, separately, the SSN requirement; the
+ * SSN's name is the one on the console's Advance to Phase 2 checklist.
+ */
+const PROMOTED_LABELS: Record<string, string> = {
+  ...SECTION_TITLES,
+  ssn: "Require SSN (within Appendix 3)",
+};
+
+const PDF_KINDS: Record<string, string> = {
+  final: "Final PDF",
+  regenerated: "Regenerated",
 };
 
 function text(v: unknown): string {
@@ -208,7 +235,11 @@ function describeMetadata(eventType: string, m: Record<string, unknown>): string
         + text(m.documents).split(",").map((k) => DOC_LABELS[k.trim()] ?? "Other document").join(", "),
     );
   }
-  if (text(m.kind)) out.push(REVOKED_KINDS[text(m.kind)] ?? "Change request");
+  // "kind" means a change-request kind only on a take-back (PDF_GENERATED
+  // has its own kind, below).
+  if (eventType === "REVISION_REVOKED" && text(m.kind)) {
+    out.push(REVOKED_KINDS[text(m.kind)] ?? "Change request");
+  }
   if (text(m.restoredTo)) out.push(`Back to ${statusLabel(text(m.restoredTo))}`);
   if (text(m.revertedErmCorrections)) out.push(`Reverted: ${text(m.revertedErmCorrections)}`);
   if (typeof m.rolledBackRound === "number") {
@@ -221,8 +252,93 @@ function describeMetadata(eventType: string, m: Record<string, unknown>): string
     );
   }
 
-  // The e-sign consent's version.
-  if (text(m.version)) out.push(`Consent version ${text(m.version)}`);
+  // The e-sign consent's version ("version" on VERIFIED and
+  // SENT_FOR_APPROVAL is the agreement version, below).
+  if (eventType === "CONSENT_GIVEN" && text(m.version)) {
+    out.push(`Consent version ${text(m.version)}`);
+  }
 
+  out.push(...describeApprovalChain(eventType, m));
+  return out;
+}
+
+/** The agreement version a VERIFIED or SENT_FOR_APPROVAL event names, or "". */
+function versionText(m: Record<string, unknown>): string {
+  const v = text(m.version);
+  // A send for an agreement verified before versions existed records "null".
+  return v && v !== "null" ? `Version V${v}` : "";
+}
+
+/**
+ * The approval chain's events: the facts the console's timeline shows as raw
+ * metadata, as short lines.
+ */
+function describeApprovalChain(eventType: string, m: Record<string, unknown>): string[] {
+  const out: string[] = [];
+  const phase = text(m.phase);
+  const round = text(m.round);
+
+  switch (eventType) {
+    case "VERIFIED": {
+      const version = versionText(m);
+      if (version) out.push(version);
+      break;
+    }
+    case "SENT_FOR_APPROVAL": {
+      if (phase && round) out.push(`Phase ${phase} · Round ${round}`);
+      else if (round) out.push(`Round ${round}`);
+      else if (phase) out.push(`Phase ${phase}`);
+      const routedTo = Array.isArray(m.routedTo) ? m.routedTo.map(text).filter(Boolean) : [];
+      if (routedTo.length > 0) out.push(`Routed to ${routedTo.join(", ")}`);
+      const version = versionText(m);
+      if (version) out.push(version);
+      if (m.resend === true) out.push("Re-send");
+      break;
+    }
+    case "APPROVAL_APPROVED":
+    case "APPROVAL_REVISION_REQUESTED": {
+      if (text(m.role)) {
+        const role = approverRoleLabel(text(m.role));
+        out.push(round ? `${role} · Round ${round}` : role);
+      }
+      if (text(m.approver)) out.push(`By ${text(m.approver)}`);
+      if (eventType === "APPROVAL_REVISION_REQUESTED" && text(m.note)) {
+        out.push(`Note: ${text(m.note)}`);
+      }
+      break;
+    }
+    case "APPROVED_AND_SIGNED": {
+      const name = text(m.ermName);
+      const title = text(m.ermTitle);
+      if (name) out.push(title ? `Signed as ${name}, ${title}` : `Signed as ${name}`);
+      break;
+    }
+    case "PDF_GENERATED": {
+      const kind = PDF_KINDS[text(m.kind)];
+      if (kind) out.push(kind);
+      break;
+    }
+    case "ADVANCED_TO_PHASE_2": {
+      if (Array.isArray(m.promoted)) {
+        const promoted = m.promoted.map(text).filter(Boolean);
+        out.push(
+          promoted.length > 0
+            ? "Reopened: " + promoted.map((k) => PROMOTED_LABELS[k] ?? "Other section").join(", ")
+            : "Nothing reopened",
+        );
+      }
+      break;
+    }
+    case "ERM_SIGNATURE_REVOKED": {
+      if (text(m.fromStatus) && text(m.toStatus)) {
+        out.push(`${statusLabel(text(m.fromStatus))} → ${statusLabel(text(m.toStatus))}`);
+      }
+      break;
+    }
+    case "APPLICATION_ARCHIVED": {
+      if (text(m.previousStatus)) out.push(`Was ${statusLabel(text(m.previousStatus))}`);
+      break;
+    }
+  }
   return out;
 }

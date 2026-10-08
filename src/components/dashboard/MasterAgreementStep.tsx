@@ -12,7 +12,8 @@ import { agreementPartDone } from "@/lib/profile-progress";
  * ready to sign the agreement", their ERM starts it and fills their side,
  * and the participant opens it from here to fill theirs at
  * /dashboard/agreement (the website's own copy; it never touches the
- * office's agreements console). Shows where it is in the five steps.
+ * office's agreements console). Shows where it is in the five steps, with
+ * a "Phase 2" chip once their ERM advanced it to Phase 2.
  */
 export default function MasterAgreementStep({ number, state, onChange }: {
   number: number;
@@ -96,7 +97,10 @@ export default function MasterAgreementStep({ number, state, onChange }: {
             // Like the other finished steps: "Completed", plus where it stands now.
             <div className="mt-1.5 space-y-0.5">
               <p className="text-[11px] text-emerald-700 font-semibold">Completed</p>
-              <p className="text-[11px] text-gray-500">{ag.stage}</p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className="text-[11px] text-gray-500">{ag.stage}</p>
+                <Phase2Chip phase={ag.phase} />
+              </div>
             </div>
           )}
 
@@ -107,9 +111,12 @@ export default function MasterAgreementStep({ number, state, onChange }: {
                   <span key={i} className={"h-1.5 flex-1 rounded-full " + (i < ag.step ? (executed ? "bg-emerald-600" : "bg-sage-navy") : "bg-gray-200")} />
                 ))}
               </div>
-              <p className={"text-xs font-semibold " + (executed ? "text-emerald-700" : "text-gray-800")}>
-                Step {ag.step} of {ag.totalSteps}: {ag.stage}
-              </p>
+              <div className="flex items-center gap-2 flex-wrap">
+                <p className={"text-xs font-semibold " + (executed ? "text-emerald-700" : "text-gray-800")}>
+                  Step {ag.step} of {ag.totalSteps}: {ag.stage}
+                </p>
+                <Phase2Chip phase={ag.phase} />
+              </div>
               {ag.yourTurn && (
                 <Link
                   href="/dashboard/agreement"
@@ -125,5 +132,19 @@ export default function MasterAgreementStep({ number, state, onChange }: {
         </div>
       </div>
     </li>
+  );
+}
+
+/**
+ * The copper "Phase 2" chip the office's consultant dashboard shows next
+ * to the status once the agreement is at Phase 2; nothing in Phase 1.
+ * Also used by the Agreement tab.
+ */
+export function Phase2Chip({ phase }: { phase?: number | null }) {
+  if ((phase ?? 1) !== 2) return null;
+  return (
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-sage-copper/15 text-sage-copper-deep">
+      Phase 2
+    </span>
   );
 }
