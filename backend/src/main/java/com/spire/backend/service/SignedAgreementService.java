@@ -97,8 +97,37 @@ public class SignedAgreementService {
             recordService.logAction(participantUserId, RecordService.Category.DOCUMENT,
                     "Signed agreement PDF re-created",
                     "The kept copy was missing; re-rendered from the signed record", null);
+        } else if (onSpireLetterhead(bytes)) {
+            String earlier = row.getPdfStoragePath() != null ? row.getPdfStoragePath() : stored;
+            bytes = keep(row);
+            recordService.logAction(participantUserId, RecordService.Category.DOCUMENT,
+                    "Signed agreement re-issued on the Sage IT Co letterhead",
+                    "The kept copy was on the old Spire Info Tech letterhead; re-rendered from the signed record"
+                            + " (same text, signature and date). The earlier file is kept.",
+                    Map.of("earlierCopy", earlier == null ? "" : earlier));
         }
         return new SignedPdf(null, bytes, fileName);
+    }
+
+    /**
+     * Whether a kept PDF still carries the old Spire Info Tech letterhead
+     * (consents signed before the Sage IT Co letterhead went live on 6 Oct
+     * 2026). Looks only for the old letterhead's own footer addresses on
+     * the first page (its name and street address are part of the image),
+     * which neither the Sage letterhead nor any version of the agreement
+     * text contains. A file that can't be read is left as it is.
+     */
+    static boolean onSpireLetterhead(byte[] pdf) {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = org.apache.pdfbox.Loader.loadPDF(pdf)) {
+            if (doc.getNumberOfPages() == 0) return false;
+            org.apache.pdfbox.text.PDFTextStripper stripper = new org.apache.pdfbox.text.PDFTextStripper();
+            stripper.setStartPage(1);
+            stripper.setEndPage(1);
+            String first = stripper.getText(doc).toLowerCase(java.util.Locale.ROOT);
+            return first.contains("www.spireitco.com") || first.contains("info@spireitco.com");
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**

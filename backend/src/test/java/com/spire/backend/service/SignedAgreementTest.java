@@ -180,4 +180,69 @@ class SignedAgreementTest {
         assertEquals("s3:participant-documents/10/signed-agreement.pdf", row.getSignedAgreementPdfUrl(), "not re-created");
         assertEquals("original-hash", row.getPdfSha256(), "the as-signed fingerprint stays");
     }
+
+    @Test
+    void aCopyOnTheOldSpireLetterheadIsReissuedOnTheSageOne() throws Exception {
+        Kit k = kit(pat, true);
+        AgreementAcceptance row = k.agreements().findByUserId(10L).orElseThrow();
+        row.setSignedAgreementPdfUrl("s3:participant-documents/10/signed-agreement-old.pdf");
+        row.setPdfStoragePath("participant-documents/10/signed-agreement-old.pdf");
+        row.setPdfSha256("original-hash");
+        byte[] old = pdfWithText("www.spireitco.com info@spireitco.com");
+        when(k.storage().retrieve(anyString())).thenReturn(
+                new DocumentStorageService.Retrieval(null, old, "application/pdf"));
+
+        SignedAgreementService.SignedPdf out = k.service().forDownload(10L, 10L);
+
+        assertFalse(SignedAgreementService.onSpireLetterhead(out.bytes()), "served on the Sage letterhead");
+        verify(k.storage()).upload(eq(10L), eq("signed-agreement.pdf"), any(), eq("application/pdf"));
+        verify(k.records()).logAction(eq(10L), eq(RecordService.Category.DOCUMENT),
+                eq("Signed agreement re-issued on the Sage IT Co letterhead"), anyString(),
+                eq(java.util.Map.of("earlierCopy", "participant-documents/10/signed-agreement-old.pdf")));
+        assertEquals("original-hash", row.getPdfSha256(), "the as-signed fingerprint stays");
+    }
+
+    @Test
+    void aCopyOnTheSageLetterheadIsServedAsKept() throws Exception {
+        Kit k = kit(pat, true);
+        AgreementAcceptance row = k.agreements().findByUserId(10L).orElseThrow();
+        row.setSignedAgreementPdfUrl("s3:participant-documents/10/signed-agreement.pdf");
+        byte[] kept = pdfService().renderSignedBytes(signedRow());
+        when(k.storage().retrieve(anyString())).thenReturn(
+                new DocumentStorageService.Retrieval(null, kept, "application/pdf"));
+
+        SignedAgreementService.SignedPdf out = k.service().forDownload(10L, 10L);
+
+        assertArrayEquals(kept, out.bytes());
+        verify(k.storage(), never()).upload(anyLong(), anyString(), any(), anyString());
+    }
+
+    @Test
+    void onlyTheOldLetterheadsOwnTextCounts() throws Exception {
+        assertTrue(SignedAgreementService.onSpireLetterhead(pdfWithText("www.spireitco.cominfo@spireitco.com")));
+        assertTrue(SignedAgreementService.onSpireLetterhead(pdfWithText("Questions: info@spireitco.com")));
+        assertFalse(SignedAgreementService.onSpireLetterhead(pdfWithText("Welcome to Sage IT Co. Aspire to grow.")));
+        assertFalse(SignedAgreementService.onSpireLetterhead(pdfWithText("Spire Info Tech, noreply@spireitco.com")));
+        assertFalse(SignedAgreementService.onSpireLetterhead(pdfService().renderSignedBytes(signedRow())));
+        assertFalse(SignedAgreementService.onSpireLetterhead("%PDF-1.4 not really".getBytes()));
+    }
+
+    private static byte[] pdfWithText(String text) throws Exception {
+        try (org.apache.pdfbox.pdmodel.PDDocument doc = new org.apache.pdfbox.pdmodel.PDDocument()) {
+            org.apache.pdfbox.pdmodel.PDPage page = new org.apache.pdfbox.pdmodel.PDPage();
+            doc.addPage(page);
+            try (org.apache.pdfbox.pdmodel.PDPageContentStream cs =
+                         new org.apache.pdfbox.pdmodel.PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new org.apache.pdfbox.pdmodel.font.PDType1Font(
+                        org.apache.pdfbox.pdmodel.font.Standard14Fonts.FontName.HELVETICA), 10);
+                cs.newLineAtOffset(40, 40);
+                cs.showText(text);
+                cs.endText();
+            }
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
+    }
 }
