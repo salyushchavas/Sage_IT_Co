@@ -249,6 +249,53 @@ class WebAgreementCertificateServiceTest {
         assertTrue(text.contains("Document integrity"), "the integrity block still prints");
     }
 
+    @Test
+    void noTwoLinesOverlapAndTheTitleSitsBelowTheBar() throws Exception {
+        fullHistory();
+        for (int i = 0; i < 80; i++) {   // a full page of rows, the footer still clear
+            event(WebAgreementEvent.EventType.APPROVAL_APPROVED, T0.plusMinutes(i), "10.0.1." + i,
+                    "{\"role\":\"MANAGER\"}");
+        }
+        byte[] out = service.appendCertificateAndStamp(twoPagePdf(), agreement());
+        // Every glyph on the certificate page: x0, x1, baseline (top-down), size.
+        List<float[]> glyphs = new ArrayList<>();
+        List<String> chars = new ArrayList<>();
+        try (PDDocument doc = Loader.loadPDF(out)) {
+            PDFTextStripper collector = new PDFTextStripper() {
+                @Override
+                protected void writeString(String text, List<org.apache.pdfbox.text.TextPosition> positions) {
+                    for (org.apache.pdfbox.text.TextPosition g : positions) {
+                        if (g.getUnicode() == null || g.getUnicode().isBlank()) continue;
+                        glyphs.add(new float[]{g.getXDirAdj(), g.getXDirAdj() + g.getWidthDirAdj(),
+                                g.getYDirAdj(), g.getFontSizeInPt()});
+                        chars.add(g.getUnicode());
+                    }
+                }
+            };
+            collector.setSortByPosition(true);
+            collector.setStartPage(3);
+            collector.setEndPage(3);
+            collector.getText(doc);
+        }
+        assertTrue(glyphs.size() > 200, "the certificate page has its text");
+        // Two glyphs on different lines that share any horizontal space must
+        // be at least a small line (8pt) apart.
+        for (int i = 0; i < glyphs.size(); i++) {
+            for (int j = i + 1; j < glyphs.size(); j++) {
+                float[] a = glyphs.get(i), b = glyphs.get(j);
+                float dy = Math.abs(a[2] - b[2]);
+                if (dy < 0.5f || dy >= 8f) continue;
+                boolean across = a[0] < b[1] - 0.2f && b[0] < a[1] - 0.2f;
+                assertFalse(across, "lines " + dy + " apart overlap at '" + chars.get(i) + "'/'" + chars.get(j)
+                        + "' (baselines " + a[2] + ", " + b[2] + ")");
+            }
+        }
+        // The title's capitals (0.72 of the font size) clear the navy bar,
+        // which ends 60 units from the top of the page.
+        float[] title = glyphs.stream().filter(g -> g[3] >= 17f).findFirst().orElseThrow();
+        assertTrue(title[2] - 0.72f * title[3] > 60f, "title baseline " + title[2] + " sits below the bar");
+    }
+
     // ── Helpers ──────────────────────────────────────────────────────
 
     private static byte[] twoPagePdf() throws IOException {

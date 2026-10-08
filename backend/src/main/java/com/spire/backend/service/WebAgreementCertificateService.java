@@ -106,7 +106,9 @@ public class WebAgreementCertificateService {
                 cs.fill();
                 cs.setNonStrokingColor(0, 0, 0);
 
-                cursorY -= 18;
+                // Below the bar (the console's 18pt left the title's top
+                // inside it).
+                cursorY -= 30;
                 cursorY = drawText(cs, "Certificate of Completion",
                         marginX, cursorY, HELVETICA_BOLD, 18, lineH * 1.4f);
                 cursorY = drawText(cs,
@@ -154,7 +156,7 @@ public class WebAgreementCertificateService {
 
                 for (CertificateEvent ev : collectCertificateEvents(a)) {
                     cursorY = drawEventRow(cs, ev, marginX, cursorY, lineH);
-                    if (cursorY < bottomY + 90) {
+                    if (cursorY < bottomY + 130) {
                         // Defensive cut-off; the certificate is meant to be one page.
                         break;
                     }
@@ -176,10 +178,13 @@ public class WebAgreementCertificateService {
                                 + "lets a recipient verify the file off-line. A future hardening step "
                                 + "(PKI/PAdES) will additionally produce a cryptographically self-"
                                 + "verifying seal.",
-                        marginX, bottomY + 26, HELVETICA_OBLIQUE, 8, 10);
+                        marginX, bottomY + 50, HELVETICA_OBLIQUE, 8, 10);
+                // Footer rows, bottom up: the hash (stampHashFooter, y = 54),
+                // its label (y = 65), this line, then the note above. The
+                // console printed them at overlapping heights.
                 drawText(cs,
                         "Issued by Sage IT Co  •  Generated " + fmtUtc(LocalDateTime.now()),
-                        marginX, bottomY + 8, HELVETICA, 8, 10);
+                        marginX, bottomY + 24, HELVETICA, 8, 10);
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
@@ -189,8 +194,8 @@ public class WebAgreementCertificateService {
     }
 
     /**
-     * Pass two: stamps "SHA-256 (body + certificate, pre-seal):" and the hash
-     * of {@code bytes} at y=64 on the last page, then saves again.
+     * Pass two: stamps "SHA-256 (body + certificate, pre-seal):" (y = 65) and
+     * the hash of {@code bytes} (y = 54) on the last page, then saves again.
      */
     byte[] stampHashFooter(byte[] bytes) throws IOException {
         String preStampHash = sha256Hex(bytes);
@@ -201,7 +206,7 @@ public class WebAgreementCertificateService {
                     doc, certPage, PDPageContentStream.AppendMode.APPEND, true, true)) {
                 // Above the issued-by line.
                 float marginX = 54f;
-                float y = 64f;
+                float y = 65f;
                 cs.beginText();
                 cs.setFont(HELVETICA_BOLD, 8);
                 cs.newLineAtOffset(marginX, y);
@@ -209,7 +214,7 @@ public class WebAgreementCertificateService {
                 cs.endText();
                 cs.beginText();
                 cs.setFont(COURIER, 8);
-                cs.newLineAtOffset(marginX, y - 10);
+                cs.newLineAtOffset(marginX, y - 11);
                 cs.showText(preStampHash);
                 cs.endText();
             }
