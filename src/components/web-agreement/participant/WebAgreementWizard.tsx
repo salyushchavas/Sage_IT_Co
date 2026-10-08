@@ -308,19 +308,26 @@ function chequeCountInput(raw: string): string {
   return String(Math.min(50, parseInt(digits, 10)));
 }
 
-function isFieldValueValid(field: SectionField, value: string): boolean {
+/**
+ * `websiteRules`: also apply the website's own formats (phone digits, real
+ * dates and 18 or older, name characters), which the console's wizard
+ * doesn't have. Only where the participant can edit the field this round
+ * (see writableScope): a value saved before those rules must never block a
+ * section they can't change. The console's own formats always apply.
+ */
+function isFieldValueValid(field: SectionField, value: string, websiteRules: boolean): boolean {
   const trimmed = value.trim();
   if (trimmed.length === 0) return false;
   if (field.type === "email") {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
   }
-  if (field.type === "tel") {
+  if (websiteRules && field.type === "tel") {
     return isValidPhone(trimmed);
   }
-  if (field.type === "date") {
+  if (websiteRules && field.type === "date") {
     return isDateOfBirthField(field) ? isAdultDateOfBirth(trimmed) : isRealIsoDate(trimmed);
   }
-  if (NAME_FIELD_KEYS.has(field.key)) {
+  if (websiteRules && NAME_FIELD_KEYS.has(field.key)) {
     return isValidPersonName(trimmed);
   }
   // Build G strict formats. Matched against the digit-only form for
@@ -463,7 +470,9 @@ function isSectionComplete(
   dlDocUploaded: boolean,
   stateIdDocUploaded: boolean,
   ssnDocUploaded: boolean,
+  writable: WritableScope,
 ): boolean {
+  const websiteRules = isSectionWritable(section.id, writable);
   for (const field of section.fields) {
     // Build G — chequeUpload has a non-form completion signal.
     // Build U — never rendered after the multi-cheque refactor, but
@@ -474,12 +483,13 @@ function isSectionComplete(
     if (!isFieldRequired(field, section, form, reqs)) {
       // An optional name part (the middle name) may stay blank, but what's
       // typed must still be a valid name: it never saves otherwise.
-      if (NAME_FIELD_KEYS.has(field.key) && value.trim() && !isValidPersonName(value)) {
+      if (websiteRules && NAME_FIELD_KEYS.has(field.key) && value.trim()
+          && !isValidPersonName(value)) {
         return false;
       }
       continue;
     }
-    if (!isFieldValueValid(field, value)) {
+    if (!isFieldValueValid(field, value, websiteRules)) {
       return false;
     }
   }
@@ -634,10 +644,12 @@ function firstIncompleteIndex(
   dlDocUploaded: boolean,
   stateIdDocUploaded: boolean,
   ssnDocUploaded: boolean,
+  writable: WritableScope,
 ): number {
   for (let i = 0; i < sections.length - 1; i++) {
     if (!isSectionComplete(sections[i], form, reqs, chequeEntries,
-        workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded)) return i;
+        workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded,
+        writable)) return i;
   }
   return sections.length - 1;
 }
@@ -737,6 +749,26 @@ function isPhase2Restricted(app: WebAgreement | null): boolean {
 function phase2ScopeKeys(app: WebAgreement | null): string[] {
   if (!isPhase2Restricted(app)) return [];
   return parseWebRevisionSections(app!.phase2ReopenedSections).map((r) => r.key);
+}
+
+/** The scope keys whose sections the participant may edit, or null when every section is open. */
+type WritableScope = ReadonlySet<string> | null;
+
+/**
+ * The server's write scope (WebAgreementRules.consultantWriteScope): a
+ * revision round's keys, else a Phase-2 fill's reopened appendices, else
+ * null (unrestricted). A "doc:*" or "signature" key opens no section's
+ * fields, so a host section shown for its upload stays read-only.
+ */
+function writableScope(app: WebAgreement | null): WritableScope {
+  const revision = revisionScopeKeys(app);
+  if (revision.length > 0) return new Set(revision);
+  if (isPhase2Restricted(app)) return new Set(phase2ScopeKeys(app));
+  return null;
+}
+
+function isSectionWritable(sectionId: string, writable: WritableScope): boolean {
+  return writable === null || writable.has(sectionId);
 }
 
 /**
@@ -925,7 +957,7 @@ export default function WebAgreementWizard() {
         const loadedSsn = Boolean(data.ssnDocS3Key);
         const resumeAt = firstIncompleteIndex(
             loadedVisible, initial, loadedReqs, entries, loadedWorkAuth, loadedOffer,
-            loadedDl, loadedStateId, loadedSsn);
+            loadedDl, loadedStateId, loadedSsn, writableScope(data));
         // The step they were on, unless it's past what they may open yet.
         setCurrentStep(draft ? Math.max(0, Math.min(draft.step, resumeAt)) : resumeAt);
       })
@@ -970,6 +1002,10 @@ export default function WebAgreementWizard() {
     const keys = revisionScopeKeys(app);
     return keys.length > 0 && keys.every((k) => k.startsWith("doc:"));
   }, [app]);
+
+  // The sections whose fields can be edited this round (null: all of them).
+  // The website's own formats are checked only there, like the server.
+  const writable = useMemo(() => writableScope(app), [app]);
 
   // Auto-save (reuses Phase 5 internals) ───────────────────────
   const computeDelta = useCallback(
@@ -1719,14 +1755,14 @@ export default function WebAgreementWizard() {
         const complete =
           i === visibleSections.length - 1
             ? visibleSections.slice(0, -1).every((sec) =>
-                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded),
+                isSectionComplete(sec, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable),
               ) && Boolean(form.finalSignature)
-            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded);
+            : isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable);
         return { id: s.id, title: s.title, step: s.step, complete };
       }),
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable],
   );
-  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded);
+  const canAdvance = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable);
   const isReviewStep = currentStep === visibleSections.length - 1;
   // Build G — submit is gated on EVERY non-review section being
   // complete, the final signature being drawn, the consultant having
@@ -1736,12 +1772,12 @@ export default function WebAgreementWizard() {
   const allComplete = useMemo(
     () =>
       visibleSections.slice(0, -1).every((s) =>
-        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded),
+        isSectionComplete(s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable),
       )
       && Boolean(form.finalSignature)
       && attestation
       && previewSeen,
-    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, attestation, previewSeen],
+    [visibleSections, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable, attestation, previewSeen],
   );
 
   // Website only — the wizard's way back to the dashboard. Pending edits
@@ -1779,7 +1815,8 @@ export default function WebAgreementWizard() {
     // blocks advancing past one — but handle it): jump back to fix it.
     const firstIncomplete = visibleSections.slice(0, -1).findIndex(
       (s) => !isSectionComplete(
-        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded),
+        s, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded,
+        writable),
     );
     if (firstIncomplete >= 0) {
       setSubmitError("Some sections still need attention before you can submit.");
@@ -1803,7 +1840,8 @@ export default function WebAgreementWizard() {
     }
     setSubmitError("Some items are still needed before you can submit.");
   }, [allComplete, handleSubmit, visibleSections, form, reqs, chequeEntries,
-      workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, previewSeen, attestation]);
+      workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable,
+      previewSeen, attestation]);
 
   // Build AB — clear the submit error once everything is satisfied.
   useEffect(() => {
@@ -1852,10 +1890,12 @@ export default function WebAgreementWizard() {
       const value = form.fields[k] ?? "";
       const section = findSectionForFieldKey(k);
       const field = section?.fields.find((f) => f.key === k);
-      if (!field) return Boolean(!value?.trim());
+      if (!section || !field) return Boolean(!value?.trim());
       // Use the existing per-field validator so format checks
-      // (routing/account/SSN/email) match the backend rules.
-      return !isFieldValueValid(field, value);
+      // (routing/account/SSN/email) match the backend rules; the website's
+      // own formats only where the field can be edited this round, as on
+      // the server.
+      return !isFieldValueValid(field, value, isSectionWritable(section.id, writable));
     });
     const affs = submitMissing.missingAffirmations.filter((flag) => {
       return !form.affirmations[flag as AffirmationFlag];
@@ -1877,7 +1917,7 @@ export default function WebAgreementWizard() {
       missingSignature: missingSig,
       missingFinalSignature: missingFinalSig,
     };
-  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded]);
+  }, [submitMissing, form, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable]);
 
   // Build W — auto-dismiss the panel the moment the list empties.
   useEffect(() => {
@@ -2163,6 +2203,7 @@ export default function WebAgreementWizard() {
             dlDocUploaded={dlDocUploaded}
             stateIdDocUploaded={stateIdDocUploaded}
             ssnDocUploaded={ssnDocUploaded}
+            writable={writable}
             attestation={attestation}
             onAttestation={setAttestation}
             previewSeen={previewSeen}
@@ -2196,6 +2237,7 @@ export default function WebAgreementWizard() {
             onLegalName={setLegalName}
             revision={!visibleSections.some((s) => s.id === "main-agreement")}
             lockFields={docOnlyRevision}
+            fieldsWritable={isSectionWritable(section.id, writable)}
             consultantEmail={app.consultantEmail}
             effectiveDateText={formatUsDate(app.effectiveDate)}
             onOpenTemplate={() => setTemplateOpen(true)}
@@ -2654,6 +2696,7 @@ function SectionStep({
   missingCheques,
   revision,
   lockFields = false,
+  fieldsWritable,
 }: {
   section: AgreementSection;
   content: WebAgreementContent | null;
@@ -2724,6 +2767,9 @@ function SectionStep({
   /** Build AK — a doc-only re-upload round: lock this section's form fields so
    *  the consultant can only interact with the upload tile(s). */
   lockFields?: boolean;
+  /** The section's fields can be edited this round, so the website's own
+   *  formats apply to them (see isFieldValueValid). */
+  fieldsWritable: boolean;
   submitting: boolean;
   isFirstStep: boolean;
   onReadProgress: (pct: number) => void;
@@ -3058,6 +3104,7 @@ function SectionStep({
                     revealed={revealed.has(field.key)}
                     onRevealToggle={(on) => onRevealed(field.key, on)}
                     needsAttention={missingFieldKeys.has(field.key)}
+                    websiteRules={fieldsWritable}
                     locked={
                       lockFields
                       || (sameAsResidence && CURRENT_ADDRESS_KEYS.has(field.key))
@@ -3305,6 +3352,7 @@ function FieldInput({
   revealed,
   onRevealToggle,
   needsAttention = false,
+  websiteRules,
   locked = false,
 }: {
   field: SectionField;
@@ -3318,6 +3366,8 @@ function FieldInput({
   onRevealToggle: (on: boolean) => void;
   /** Build W — flagged by a failed submit; render the copper "needs attention" border. */
   needsAttention?: boolean;
+  /** The field can be edited this round: the website's own formats apply. */
+  websiteRules: boolean;
   /** Build J — dynamically disabled (e.g. "Same as residence" lock). */
   locked?: boolean;
 }) {
@@ -3333,7 +3383,7 @@ function FieldInput({
   // A typed date that isn't complete or real (the mask emits "" for it).
   const [dateUnfinished, setDateUnfinished] = useState(false);
   const hasValue = value.trim().length > 0;
-  const valueValid = isFieldValueValid(field, value);
+  const valueValid = isFieldValueValid(field, value, websiteRules);
   // Shown even on an optional field: a name with symbols, or a date that
   // can't be read.
   const formatInvalid = !ro && (
@@ -5039,6 +5089,7 @@ function ReviewStep({
   dlDocUploaded,
   stateIdDocUploaded,
   ssnDocUploaded,
+  writable,
   attestation,
   onAttestation,
   previewSeen,
@@ -5065,6 +5116,8 @@ function ReviewStep({
   dlDocUploaded: boolean;
   stateIdDocUploaded: boolean;
   ssnDocUploaded: boolean;
+  /** The sections whose fields can be edited this round (null: all). */
+  writable: WritableScope;
   attestation: boolean;
   onAttestation: (value: boolean) => void;
   previewSeen: boolean;
@@ -5151,7 +5204,7 @@ function ReviewStep({
       </div>
 
       {visibleSections.slice(0, -1).map((section, idx) => {
-        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded);
+        const complete = isSectionComplete(section, form, reqs, chequeEntries, workAuthUploaded, offerLetterUploaded, dlDocUploaded, stateIdDocUploaded, ssnDocUploaded, writable);
         const isAppendix = Boolean(section.appendixKey);
         const optionalAndSkipped =
           isAppendix

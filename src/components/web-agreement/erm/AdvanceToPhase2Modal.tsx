@@ -7,6 +7,22 @@ import { webAdvanceToPhase2, type WebAgreement, type WebPhase2Promotion } from "
 import { ModalShell } from "@/components/web-agreement/ui/ModalShell";
 
 /**
+ * WebAgreementRules.isAppendix3Touched: any Appendix 3 answer or its
+ * affirmation on file, which makes the optional appendix apply.
+ */
+function isAppendix3Touched(app: WebAgreement): boolean {
+  return [
+    app.bgFullLegalName, app.bgOtherNamesUsed, app.bgCurrentAddress,
+    app.bgCurrentAddressLine1, app.bgCurrentAddressLine2, app.bgCurrentAddressCity,
+    app.bgCurrentAddressState, app.bgCurrentAddressZip, app.bgFullSsn,
+    app.bgDriverLicense, app.bgStateId,
+  ].some((v) => Boolean(v && v.trim()))
+    || app.bgCurrentSameAsResidence === true
+    || Boolean(app.bgDateOfBirth)
+    || app.affirmedAppendix3 === true;
+}
+
+/**
  * Reopens an executed Phase 1 agreement for Phase 2 (COMPLETED → SUBMITTED,
  * phase 2) on the same document. The website's copy of the console's
  * AdvanceToPhase2Modal (ConsultantDetailView.tsx).
@@ -38,6 +54,13 @@ export default function AdvanceToPhase2Modal({
   const [promote, setPromote] = useState<Required<WebPhase2Promotion>>(initial);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Website only (owner, 8 Oct 2026): a required SSN not on file yet reopens
+  // Appendix 3, where it is entered, when Appendix 3 applies (required, or
+  // filled in Phase 1) and isn't ticked here anyway (the server decides).
+  const ssnReopensAppendix3 = (Boolean(app.requireAppendix3) || isAppendix3Touched(app))
+    && !promote.appendix3
+    && (Boolean(app.requireSsn) || promote.ssn)
+    && !/^[A-Za-z0-9]+$/.test((app.bgFullSsn ?? "").trim());
 
   const rows: Array<{
     key: keyof WebPhase2Promotion;
@@ -127,6 +150,12 @@ export default function AdvanceToPhase2Modal({
               {row.alreadyRequired && (
                 <span className="block text-[10px] text-gray-500 mt-0.5">
                   Already required in Phase 1 — stays required.
+                </span>
+              )}
+              {row.key === "appendix3" && ssnReopensAppendix3 && (
+                <span className="block text-[10px] text-gray-500 mt-0.5">
+                  No SSN on file yet: Appendix 3 reopens so the participant can
+                  enter it. Their other answers stay.
                 </span>
               )}
             </label>

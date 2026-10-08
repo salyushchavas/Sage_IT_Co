@@ -327,6 +327,9 @@ function describeApprovalChain(eventType: string, m: Record<string, unknown>): s
             : "Nothing reopened",
         );
       }
+      if (m.appendix3ReopenedForSsn === true) {
+        out.push("Appendix 3 reopened so the participant can enter the SSN");
+      }
       break;
     }
     case "ERM_SIGNATURE_REVOKED": {
